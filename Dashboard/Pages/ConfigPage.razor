@@ -1,0 +1,105 @@
+@page "/dashboard/config"
+@using AdoAutopilot.Models
+@using Microsoft.Extensions.Options
+@inject IOptions<AutopilotConfig> Config
+
+<div class="page-header">
+    <h2>Configuration</h2>
+    <p>Current service settings from appsettings.json</p>
+</div>
+
+<!-- Connection -->
+<div class="card">
+    <div class="card-header">
+        <h3>🔗 Azure DevOps Connection</h3>
+    </div>
+    <div class="card-body">
+        <table class="config-table">
+            <tbody>
+                <tr><td>Organization</td><td>@_config.AdoOrganization</td></tr>
+                <tr><td>Project</td><td>@_config.AdoProject</td></tr>
+                <tr><td>Trigger Tag</td><td>@_config.TriggerTag</td></tr>
+                <tr><td>Processed Tag</td><td>@_config.ProcessedTag</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Execution -->
+<div class="card">
+    <div class="card-header">
+        <h3>⚙️ Execution</h3>
+    </div>
+    <div class="card-body">
+        <table class="config-table">
+            <tbody>
+                <tr><td>Poll Interval</td><td>@_config.PollIntervalSeconds s</td></tr>
+                <tr><td>Max Concurrent</td><td>@_config.MaxConcurrent</td></tr>
+                <tr><td>Task Timeout</td><td>@_config.TaskTimeoutMinutes min</td></tr>
+                <tr><td>Max Retries</td><td>@_config.MaxRetries</td></tr>
+                <tr><td>Base Branch</td><td>@_config.BaseBranch</td></tr>
+                <tr><td>Dry Run</td><td><span class="@(_config.DryRun ? "config-bool-true" : "config-bool-false")">@_config.DryRun</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Automation -->
+<div class="card">
+    <div class="card-header">
+        <h3>🤖 Automation</h3>
+    </div>
+    <div class="card-body">
+        <table class="config-table">
+            <tbody>
+                <tr><td>Require Approval</td><td><span class="@(_config.RequireApproval ? "config-bool-true" : "config-bool-false")">@_config.RequireApproval</span></td></tr>
+                <tr><td>Auto Review</td><td><span class="@(_config.AutoReviewEnabled ? "config-bool-true" : "config-bool-false")">@_config.AutoReviewEnabled</span></td></tr>
+                <tr><td>Auto Decompose</td><td><span class="@(_config.AutoDecompose ? "config-bool-true" : "config-bool-false")">@_config.AutoDecompose</span></td></tr>
+                <tr><td>Feedback Loop</td><td><span class="@(_config.FeedbackLoopEnabled ? "config-bool-true" : "config-bool-false")">@_config.FeedbackLoopEnabled</span> (max @_config.MaxRevisions revisions)</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Schedule & Budget -->
+<div class="card">
+    <div class="card-header">
+        <h3>📅 Schedule & Budget</h3>
+    </div>
+    <div class="card-body">
+        <table class="config-table">
+            <tbody>
+                <tr><td>Schedule</td><td>@(_config.ScheduleStart)–@(_config.ScheduleEnd) (@_config.ScheduleDays)</td></tr>
+                <tr><td>Daily Budget</td><td>@(_config.DailyBudgetTokens > 0 ? $"{_config.DailyBudgetTokens:N0} tokens" : "Unlimited")</td></tr>
+                <tr><td>Health Port</td><td>@_config.HealthPort</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Multi-Repo & Tenants -->
+@if (_config.Repos.Count > 0 || _config.Tenants.Count > 0)
+{
+    <div class="card">
+        <div class="card-header">
+            <h3>🏢 Multi-Repo & Tenants</h3>
+        </div>
+        <div class="card-body">
+            <table class="config-table">
+                <tbody>
+                    <tr><td>Repos</td><td>@(_config.Repos.Count > 0 ? string.Join(", ", _config.Repos.Select(r => r.Name)) : "Single repo")</td></tr>
+                    <tr><td>Tenants</td><td>@(_config.Tenants.Count > 0 ? string.Join(", ", _config.Tenants.Select(t => t.Name)) : "Single tenant")</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private AutopilotConfig _config = new();
+
+    protected override void OnInitialized()
+    {
+        _config = Config.Value;
+    }
+}

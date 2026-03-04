@@ -1,0 +1,62 @@
+@using Microsoft.AspNetCore.Components.Routing
+
+<!-- Sidebar -->
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        <div class="sidebar-brand-icon">⚡</div>
+        <div>
+            <div class="sidebar-brand-text">ADO Autopilot</div>
+            <div class="sidebar-brand-sub">Work Item Automation</div>
+        </div>
+    </div>
+
+    <div class="sidebar-section">Dashboard</div>
+    <a href="/dashboard" class="nav-link @(_currentPath == "/dashboard" ? "active" : "")">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Overview
+    </a>
+    <a href="/dashboard/history" class="nav-link @(_currentPath == "/dashboard/history" ? "active" : "")">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        History
+    </a>
+
+    <div class="sidebar-section" style="margin-top: 24px;">System</div>
+    <a href="/dashboard/config" class="nav-link @(_currentPath == "/dashboard/config" ? "active" : "")">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Configuration
+    </a>
+
+    <div class="sidebar-footer">
+        <div class="sidebar-status">
+            <span class="status-dot"></span>
+            Service Running
+        </div>
+    </div>
+</aside>
+
+<!-- Main Content -->
+<main class="main-content">
+    <Router AppAssembly="@typeof(App).Assembly">
+        <Found Context="routeData">
+            <RouteView RouteData="@routeData" />
+        </Found>
+        <NotFound>
+            <OverviewPage />
+        </NotFound>
+    </Router>
+</main>
+
+@code {
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+    private string _currentPath = "/dashboard";
+
+    protected override void OnInitialized()
+    {
+        _currentPath = new Uri(Navigation.Uri).AbsolutePath;
+        Navigation.LocationChanged += (_, e) =>
+        {
+            _currentPath = new Uri(e.Location).AbsolutePath;
+            InvokeAsync(StateHasChanged);
+        };
+    }
+}

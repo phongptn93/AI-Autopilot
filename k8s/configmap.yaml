@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autopilot-config
+data:
+  Autopilot__AdoOrganization: "https://dev.azure.com/newoceanis"
+  Autopilot__AdoProject: "Khatoco"
+  Autopilot__TriggerTag: "autopilot"
+  Autopilot__ProcessedTag: "autopilot-done"
+  Autopilot__PollIntervalSeconds: "30"
+  Autopilot__MaxConcurrent: "1"
+  Autopilot__TaskTimeoutMinutes: "30"
+  Autopilot__DryRun: "false"
+  Autopilot__BaseBranch: "development"
+  Autopilot__HealthPort: "5080"
+  Autopilot__RequireApproval: "true"
+  Autopilot__AutoReviewEnabled: "true"

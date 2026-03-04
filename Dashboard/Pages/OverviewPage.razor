@@ -1,0 +1,154 @@
+@page "/dashboard"
+@using AdoAutopilot.Data
+@inject ExecutionRepository Repo
+
+<div class="page-header">
+    <h2>Overview</h2>
+    <p>Real-time execution metrics and recent activity</p>
+</div>
+
+<!-- Stats Grid -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Total Executions</span>
+            <div class="stat-card-icon total">📊</div>
+        </div>
+        <div class="stat-card-value total-val">@_total</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Succeeded</span>
+            <div class="stat-card-icon success">✅</div>
+        </div>
+        <div class="stat-card-value success-val">@_success</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Failed</span>
+            <div class="stat-card-icon failed">❌</div>
+        </div>
+        <div class="stat-card-value failed-val">@_failed</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Avg Duration</span>
+            <div class="stat-card-icon duration">⏱️</div>
+        </div>
+        <div class="stat-card-value duration-val">@FormatDuration(_avgDuration)</div>
+    </div>
+</div>
+
+<!-- Recent Executions -->
+<div class="card">
+    <div class="card-header">
+        <h3>Recent Executions</h3>
+        <span style="font-size: 13px; color: var(--text-muted);">Last @_recent.Count items</span>
+    </div>
+    <div class="card-body">
+        @if (_recent.Count > 0)
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Title</th>
+                        <th>Category</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Started</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in _recent)
+                    {
+                        <tr>
+                            <td class="id-col">#@e.WorkItemId</td>
+                            <td class="title-col">@e.Title</td>
+                            <td>@CategoryBadge(e.Category)</td>
+                            <td>@StatusBadge(e.Status)</td>
+                            <td class="mono">@TimeSpan.FromSeconds(e.DurationSeconds).ToString(@"mm\:ss")</td>
+                            <td>@e.StartedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <div class="empty-state">
+                <p>No executions yet. Tag a work item with <strong>autopilot</strong> to get started.</p>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private int _total, _success, _failed;
+    private double _avgDuration;
+    private List<AdoAutopilot.Data.Entities.ExecutionRecord> _recent = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var stats = await Repo.GetStatsAsync();
+        _total = stats.total;
+        _success = stats.success;
+        _failed = stats.failed;
+        _avgDuration = stats.avgDuration;
+        _recent = await Repo.GetRecentAsync(20);
+    }
+
+    private static string FormatDuration(double seconds)
+    {
+        if (seconds < 60) return $"{seconds:F0}s";
+        if (seconds < 3600) return $"{seconds / 60:F1}m";
+        return $"{seconds / 3600:F1}h";
+    }
+
+    private static RenderFragment StatusBadge(AdoAutopilot.Data.Entities.ExecutionStatus status) => builder =>
+    {
+        var css = status switch
+        {
+            AdoAutopilot.Data.Entities.ExecutionStatus.Success => "badge-success",
+            AdoAutopilot.Data.Entities.ExecutionStatus.Failed => "badge-failed",
+            AdoAutopilot.Data.Entities.ExecutionStatus.Running => "badge-running",
+            _ => "badge-retrying"
+        };
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.OpenElement(2, "span");
+        builder.AddAttribute(3, "class", "badge-dot");
+        builder.CloseElement();
+        builder.AddContent(4, status.ToString());
+        builder.CloseElement();
+    };
+
+    private static RenderFragment CategoryBadge(string category) => builder =>
+    {
+        var cat = (category ?? "").ToLower();
+        var css = cat switch
+        {
+            "backendtask" => "cat-be",
+            "frontendtask" => "cat-fe",
+            "bug" => "cat-bug",
+            "databasetask" => "cat-db",
+            "testtask" => "cat-qc",
+            "requirement" => "cat-req",
+            _ => "cat-default"
+        };
+        var label = cat switch
+        {
+            "backendtask" => "BE",
+            "frontendtask" => "FE",
+            "bug" => "Bug",
+            "databasetask" => "DB",
+            "testtask" => "QC",
+            "requirement" => "Req",
+            _ => category ?? "—"
+        };
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"cat-badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+}

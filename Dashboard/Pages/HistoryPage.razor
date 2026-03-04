@@ -1,0 +1,126 @@
+@page "/dashboard/history"
+@using AdoAutopilot.Data
+@inject ExecutionRepository Repo
+
+<div class="page-header">
+    <h2>Execution History</h2>
+    <p>Detailed log of all automated work item executions</p>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>All Executions</h3>
+        <span style="font-size: 13px; color: var(--text-muted);">@_records.Count records</span>
+    </div>
+    <div class="card-body">
+        @if (_records.Count > 0)
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Title</th>
+                        <th>Category</th>
+                        <th>Skill</th>
+                        <th>Status</th>
+                        <th>Branch</th>
+                        <th>PR</th>
+                        <th>Duration</th>
+                        <th>Retries</th>
+                        <th>Tokens</th>
+                        <th>Started</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in _records)
+                    {
+                        <tr>
+                            <td class="id-col">#@e.WorkItemId</td>
+                            <td class="title-col">@e.Title</td>
+                            <td>@CategoryBadge(e.Category)</td>
+                            <td class="mono">@(e.SkillUsed ?? "—")</td>
+                            <td>@StatusBadge(e.Status)</td>
+                            <td class="mono">@(e.BranchName ?? "—")</td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(e.PrUrl))
+                                {
+                                    <a href="@e.PrUrl" target="_blank" class="table-link">View PR</a>
+                                }
+                                else
+                                {
+                                    <span style="color: var(--text-dim);">—</span>
+                                }
+                            </td>
+                            <td class="mono">@TimeSpan.FromSeconds(e.DurationSeconds).ToString(@"mm\:ss")</td>
+                            <td style="text-align: center;">@e.RetryCount</td>
+                            <td class="mono">@e.CostTokens.ToString("N0")</td>
+                            <td>@e.StartedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <div class="empty-state">
+                <p>No execution history yet.</p>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<AdoAutopilot.Data.Entities.ExecutionRecord> _records = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _records = await Repo.GetRecentAsync(100);
+    }
+
+    private static RenderFragment StatusBadge(AdoAutopilot.Data.Entities.ExecutionStatus status) => builder =>
+    {
+        var css = status switch
+        {
+            AdoAutopilot.Data.Entities.ExecutionStatus.Success => "badge-success",
+            AdoAutopilot.Data.Entities.ExecutionStatus.Failed => "badge-failed",
+            AdoAutopilot.Data.Entities.ExecutionStatus.Running => "badge-running",
+            _ => "badge-retrying"
+        };
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"badge {css}");
+        builder.OpenElement(2, "span");
+        builder.AddAttribute(3, "class", "badge-dot");
+        builder.CloseElement();
+        builder.AddContent(4, status.ToString());
+        builder.CloseElement();
+    };
+
+    private static RenderFragment CategoryBadge(string category) => builder =>
+    {
+        var cat = (category ?? "").ToLower();
+        var css = cat switch
+        {
+            "backendtask" => "cat-be",
+            "frontendtask" => "cat-fe",
+            "bug" => "cat-bug",
+            "databasetask" => "cat-db",
+            "testtask" => "cat-qc",
+            "requirement" => "cat-req",
+            _ => "cat-default"
+        };
+        var label = cat switch
+        {
+            "backendtask" => "BE",
+            "frontendtask" => "FE",
+            "bug" => "Bug",
+            "databasetask" => "DB",
+            "testtask" => "QC",
+            "requirement" => "Req",
+            _ => category ?? "—"
+        };
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", $"cat-badge {css}");
+        builder.AddContent(2, label);
+        builder.CloseElement();
+    };
+}

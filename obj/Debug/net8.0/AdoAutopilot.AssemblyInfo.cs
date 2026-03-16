@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AdoAutopilot")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c54e5a176da4741fe5a98a4b313f6a0d34a79cf2")]
 [assembly: System.Reflection.AssemblyProductAttribute("AdoAutopilot")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AdoAutopilot")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

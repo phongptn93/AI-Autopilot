@@ -1,0 +1,295 @@
+@page "/dashboard/capabilities"
+
+<div class="page-header">
+    <h2>Capabilities</h2>
+    <p>What ADO Autopilot can do for you</p>
+</div>
+
+<!-- How It Works -->
+<div class="card">
+    <div class="card-header">
+        <h3>🔄 How It Works</h3>
+    </div>
+    <div class="card-body" style="padding: 24px;">
+        <div class="flow-steps">
+            <div class="flow-step">
+                <div class="flow-step-icon" style="background: var(--blue-bg); color: var(--blue);">1</div>
+                <div class="flow-step-content">
+                    <div class="flow-step-title">Poll</div>
+                    <div class="flow-step-desc">Continuously queries Azure DevOps for work items tagged <code>autopilot</code> in New / To Do / Proposed state.</div>
+                </div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step">
+                <div class="flow-step-icon" style="background: rgba(168,85,247,0.12); color: #c084fc;">2</div>
+                <div class="flow-step-content">
+                    <div class="flow-step-title">Classify</div>
+                    <div class="flow-step-desc">Determines the category (Backend, Frontend, Bug, Database, QC, or Requirement) from title prefix, work item type, and keywords.</div>
+                </div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step">
+                <div class="flow-step-icon" style="background: var(--amber-bg); color: var(--amber);">3</div>
+                <div class="flow-step-content">
+                    <div class="flow-step-title">Route &amp; Execute</div>
+                    <div class="flow-step-desc">Runs the matching Claude CLI skill on a dedicated git branch, then commits and pushes the result.</div>
+                </div>
+            </div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step">
+                <div class="flow-step-icon" style="background: var(--green-bg); color: var(--green);">4</div>
+                <div class="flow-step-content">
+                    <div class="flow-step-title">Notify</div>
+                    <div class="flow-step-desc">Posts the result as a comment on the ADO work item and broadcasts to MS Teams, Zalo OA, and Email.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Skill Routing -->
+<div class="card">
+    <div class="card-header">
+        <h3>🎯 Skill Routing</h3>
+        <span style="font-size: 13px; color: var(--text-muted);">How work items map to Claude CLI skills</span>
+    </div>
+    <div class="card-body">
+        <table>
+            <thead>
+                <tr>
+                    <th>Condition</th>
+                    <th>Category</th>
+                    <th>Claude Skill</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Title starts with <code>[BE]</code></td>
+                    <td><span class="cat-badge cat-be">BE</span></td>
+                    <td class="mono">/implement-task-be {id}</td>
+                </tr>
+                <tr>
+                    <td>Title starts with <code>[FE]</code></td>
+                    <td><span class="cat-badge cat-fe">FE</span></td>
+                    <td class="mono">/implement-task-fe {id}</td>
+                </tr>
+                <tr>
+                    <td>Title starts with <code>[DB]</code></td>
+                    <td><span class="cat-badge cat-db">DB</span></td>
+                    <td class="mono">/sql-migration {id}</td>
+                </tr>
+                <tr>
+                    <td>Title starts with <code>[QC]</code></td>
+                    <td><span class="cat-badge cat-qc">QC</span></td>
+                    <td class="mono">/qc-test-management {id}</td>
+                </tr>
+                <tr>
+                    <td>Work item type = <code>Bug</code></td>
+                    <td><span class="cat-badge cat-bug">Bug</span></td>
+                    <td class="mono">/bugfix-workflow {id}</td>
+                </tr>
+                <tr>
+                    <td>Work item type = <code>Requirement</code></td>
+                    <td><span class="cat-badge cat-req">Req</span></td>
+                    <td class="mono">/analyze-requirement {id}</td>
+                </tr>
+                <tr>
+                    <td>Keywords: <em>api, endpoint, controller&#8230;</em></td>
+                    <td><span class="cat-badge cat-be">BE</span></td>
+                    <td class="mono">/implement-task-be {id}</td>
+                </tr>
+                <tr>
+                    <td>Keywords: <em>component, angular, page&#8230;</em></td>
+                    <td><span class="cat-badge cat-fe">FE</span></td>
+                    <td class="mono">/implement-task-fe {id}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Feature Grid -->
+<div class="cap-grid">
+    <div class="cap-card">
+        <div class="cap-card-icon">🔁</div>
+        <div class="cap-card-title">Retry &amp; Recovery</div>
+        <div class="cap-card-desc">Automatic retry with configurable back-off on transient failures. Tracks retry count per execution.</div>
+    </div>
+    <div class="cap-card">
+        <div class="cap-card-icon">✅</div>
+        <div class="cap-card-title">Approval Gates</div>
+        <div class="cap-card-desc">Requires a draft PR and an explicit approver sign-off before merging code changes (configurable timeout).</div>
+    </div>
+    <div class="cap-card">
+        <div class="cap-card-icon">🔒</div>
+        <div class="cap-card-title">RBAC</div>
+        <div class="cap-card-desc">Role-based access control limits which users can trigger which skills and who can approve executions.</div>
+    </div>
+    <div class="cap-card">
+        <div class="cap-card-icon">🏢</div>
+        <div class="cap-card-title">Multi-Tenancy</div>
+        <div class="cap-card-desc">Run multiple isolated tenant configurations from a single deployment, each with its own ADO project and settings.</div>
+    </div>
+    <div class="cap-card">
+        <div class="cap-card-icon">🔌</div>
+        <div class="cap-card-title">Plugin System</div>
+        <div class="cap-card-desc">Dynamically load external .NET assemblies as plugins to extend routing logic, notifications, or execution hooks.</div>
+    </div>
+    <div class="cap-card">
+        <div class="cap-card-icon">💰</div>
+        <div class="cap-card-title">Cost Tracking</div>
+        <div class="cap-card-desc">Monitors Claude token usage per execution and enforces a configurable daily budget to control spend.</div>
+    </div>
+    <div class="cap-card">
+        <div class="cap-card-icon">🕐</div>
+        <div class="cap-card-title">Schedule Guard</div>
+        <div class="cap-card-desc">Restricts execution to configured time windows (e.g. business hours) and allowed days of the week.</div>
+    </div>
+    <div class="cap-card">
+        <div class="cap-card-icon">🧪</div>
+        <div class="cap-card-title">Dry-Run Mode</div>
+        <div class="cap-card-desc">Test the full pipeline without touching ADO or running Claude. All actions are logged only.</div>
+    </div>
+    <div class="cap-card">
+        <div class="cap-card-icon">📊</div>
+        <div class="cap-card-title">Metrics &amp; Health</div>
+        <div class="cap-card-desc">Prometheus metrics at <code>/metrics</code>, health checks for ADO, Claude CLI, and disk space at <code>/health</code>.</div>
+    </div>
+</div>
+
+<!-- Notifications -->
+<div class="card">
+    <div class="card-header">
+        <h3>🔔 Notification Channels</h3>
+    </div>
+    <div class="card-body">
+        <table>
+            <thead>
+                <tr>
+                    <th>Channel</th>
+                    <th>Events</th>
+                    <th>Config Key</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Azure DevOps</strong> (comment + state)</td>
+                    <td>All events</td>
+                    <td class="mono">AdoPat</td>
+                </tr>
+                <tr>
+                    <td><strong>MS Teams</strong> (Incoming Webhook)</td>
+                    <td>Started · Completed · Failed</td>
+                    <td class="mono">TeamsWebhookUrl</td>
+                </tr>
+                <tr>
+                    <td><strong>Zalo OA</strong></td>
+                    <td>Started · Completed · Failed</td>
+                    <td class="mono">ZaloOaAccessToken</td>
+                </tr>
+                <tr>
+                    <td><strong>Email</strong> (SMTP)</td>
+                    <td>Started · Completed · Failed</td>
+                    <td class="mono">SmtpHost / SmtpTo</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    /* Flow steps */
+    .flow-steps {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .flow-step {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        flex: 1;
+        min-width: 160px;
+    }
+    .flow-step-icon {
+        width: 32px; height: 32px;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 14px;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+    .flow-step-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 4px;
+    }
+    .flow-step-desc {
+        font-size: 13px;
+        color: var(--text-muted);
+        line-height: 1.5;
+    }
+    .flow-arrow {
+        font-size: 20px;
+        color: var(--text-dim);
+        align-self: center;
+        flex-shrink: 0;
+        padding-top: 4px;
+    }
+    @@media (max-width: 900px) {
+        .flow-steps { flex-direction: column; }
+        .flow-arrow { display: none; }
+    }
+
+    /* Capability grid */
+    .cap-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    .cap-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+        transition: all var(--transition);
+    }
+    .cap-card:hover {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent), var(--shadow);
+        transform: translateY(-1px);
+    }
+    .cap-card-icon {
+        font-size: 24px;
+        margin-bottom: 10px;
+    }
+    .cap-card-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 6px;
+    }
+    .cap-card-desc {
+        font-size: 13px;
+        color: var(--text-muted);
+        line-height: 1.5;
+    }
+    @@media (max-width: 1100px) {
+        .cap-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @@media (max-width: 640px) {
+        .cap-grid { grid-template-columns: 1fr; }
+    }
+
+    code {
+        background: rgba(255,255,255,0.06);
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+        font-size: 12px;
+        color: var(--accent-hover);
+    }
+</style>

@@ -15,9 +15,13 @@ COPY pyproject.toml README.md ./
 COPY ai_autopilot ./ai_autopilot
 RUN pip install --no-cache-dir .
 
-# Runtime data directories.
-RUN mkdir -p /data /app/logs
+# Run as a non-root user. The Claude CLI refuses --dangerously-skip-permissions
+# (permission_mode "bypassPermissions") under root, and non-root is good practice.
+RUN useradd --create-home --uid 10001 autopilot && \
+    mkdir -p /data /app/logs && chown -R autopilot:autopilot /data /app
 VOLUME ["/data", "/app/logs"]
+USER autopilot
+ENV HOME=/home/autopilot
 
 ENV AUTOPILOT_DATABASE_URL=sqlite+aiosqlite:////data/autopilot.db \
     AUTOPILOT_HEALTH_PORT=5080

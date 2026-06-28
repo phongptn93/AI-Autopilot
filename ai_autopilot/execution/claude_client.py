@@ -60,16 +60,23 @@ async def run_claude(
     timeout_seconds: float,
     model: str | None = None,
     max_turns: int | None = None,
-    permission_mode: PermissionMode = "bypassPermissions",
+    permission_mode: PermissionMode = "acceptEdits",
+    allowed_tools: list[str] | None = None,
 ) -> ClaudeRun:
     """Run Claude Code once in ``work_dir`` and return a structured result.
 
     Raises ``asyncio.TimeoutError`` if the run exceeds ``timeout_seconds``.
+
+    Note: ``permission_mode="bypassPermissions"`` maps to
+    ``--dangerously-skip-permissions``, which the Claude CLI refuses to run under
+    root. Use ``"acceptEdits"`` (the default) for containerised/root deployments.
     """
     options = ClaudeAgentOptions(
         cwd=work_dir,
         permission_mode=permission_mode,
     )
+    if allowed_tools:
+        options.allowed_tools = allowed_tools
     if model:
         options.model = model
     if max_turns and max_turns > 0:

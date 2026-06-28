@@ -40,6 +40,12 @@ repos: []
 # ── Claude execution ──
 claude_model: ""             # empty → SDK default
 claude_max_turns: 0          # 0 → unbounded
+# Permission mode for autonomous runs:
+#   "acceptEdits"       – autonomous, works when running as root (default)
+#   "bypassPermissions" – fully autonomous, but the CLI refuses it under root;
+#                          only use when the service runs as a non-root user
+claude_permission_mode: "acceptEdits"
+claude_allowed_tools: []     # empty = all tools available
 
 # ── Retry & recovery ──
 max_retries: 3

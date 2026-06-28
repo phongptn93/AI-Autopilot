@@ -111,6 +111,8 @@ class ClaudeExecutor:
             timeout_seconds=self._config.task_timeout_minutes * 60,
             model=self._config.claude_model or None,
             max_turns=self._config.claude_max_turns or None,
+            permission_mode=self._config.claude_permission_mode,  # type: ignore[arg-type]
+            allowed_tools=self._config.claude_allowed_tools or None,
         )
 
     # ── git helpers ─────────────────────────────────────────────────────────

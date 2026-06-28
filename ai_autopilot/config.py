@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # ── Claude execution ──
     claude_model: str = ""  # empty → SDK default
     claude_max_turns: int = 0  # 0 → unbounded
+    # Permission mode for autonomous runs. "acceptEdits" works when the process
+    # runs as root (e.g. containers); "bypassPermissions" is fully autonomous but
+    # the underlying CLI refuses to run it as root for safety — use it only when
+    # the service runs as a non-root user.
+    claude_permission_mode: str = "acceptEdits"
+    claude_allowed_tools: list[str] = Field(default_factory=list)  # empty → all tools
 
     # ── Retry & recovery ──
     max_retries: int = 3

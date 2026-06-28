@@ -1,0 +1,123 @@
+"""Update ADO work items and broadcast results to notification channels.
+
+Ported from ``AdoNotifier``.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from ai_autopilot.ado.client import AdoClient
+from ai_autopilot.config import Settings
+from ai_autopilot.logging_config import get_logger
+from ai_autopilot.models import ExecutionResult, WorkItemInfo
+from ai_autopilot.notifications.base import (
+    NotificationChannel,
+    NotificationMessage,
+    NotificationType,
+)
+
+
+def _mmss(seconds: float) -> str:
+    total = int(seconds)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+class AdoNotifier:
+    def __init__(
+        self, ado: AdoClient, config: Settings, channels: list[NotificationChannel]
+    ) -> None:
+        self._ado = ado
+        self._config = config
+        self._channels = channels
+        self._log = get_logger("ado.notifier")
+
+    async def notify_started(self, item: WorkItemInfo, skill: str) -> None:
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        comment = (
+            "<div><b>🤖 ADO Autopilot — Processing</b><br/><ul>"
+            f"<li><b>Skill:</b> <code>{skill}</code></li>"
+            f"<li><b>Category:</b> {item.category}</li>"
+            f"<li><b>Started:</b> {now} UTC</li>"
+            "</ul></div>"
+        )
+        if self._config.dry_run:
+            self._log.info("[DRY-RUN] would comment: started", id=item.id)
+            return
+        await self._ado.add_comment(item.id, comment)
+        await self._ado.update_state(item.id, "Active")
+        await self._broadcast(
+            NotificationMessage(work_item=item, type=NotificationType.STARTED, skill=skill)
+        )
+
+    async def notify_completed(
+        self, item: WorkItemInfo, result: ExecutionResult, mark_processed: bool = True
+    ) -> None:
+        if result.success:
+            files_html = ""
+            if result.files_changed:
+                shown = "".join(
+                    f"<li><code>{f}</code></li>" for f in result.files_changed[:20]
+                )
+                more = (
+                    f"<li>...and {len(result.files_changed) - 20} more</li>"
+                    if len(result.files_changed) > 20
+                    else ""
+                )
+                files_html = f"<li><b>Files changed:</b><ul>{shown}{more}</ul></li>"
+            pr_html = (
+                f'<li><b>PR:</b> <a href="{result.pr_url}">{result.pr_url}</a></li>'
+                if result.pr_url
+                else ""
+            )
+            comment = (
+                "<div><b>✅ ADO Autopilot — Completed</b><br/><ul>"
+                f"<li><b>Skill:</b> <code>{result.skill_used}</code></li>"
+                f"<li><b>Duration:</b> {_mmss(result.duration_seconds)}</li>"
+                f"<li><b>Branch:</b> <code>{result.branch_name}</code></li>"
+                f"{files_html}{pr_html}</ul></div>"
+            )
+        else:
+            comment = (
+                "<div><b>❌ ADO Autopilot — Failed</b><br/><ul>"
+                f"<li><b>Skill:</b> <code>{result.skill_used}</code></li>"
+                f"<li><b>Duration:</b> {_mmss(result.duration_seconds)}</li>"
+                f"<li><b>Error:</b> {result.error}</li>"
+                "</ul></div>"
+            )
+
+        if self._config.dry_run:
+            status = "Completed" if result.success else "Failed"
+            self._log.info("[DRY-RUN] would comment", id=item.id, status=status)
+            return
+
+        await self._ado.add_comment(item.id, comment)
+        if mark_processed:
+            await self._ado.add_tag(item.id, self._config.processed_tag)
+            if result.success and result.pr_url:
+                await self._ado.update_state(item.id, "Resolved")
+
+        await self._broadcast(
+            NotificationMessage(
+                work_item=item, type=NotificationType.COMPLETED, result=result
+            )
+        )
+
+    async def notify_error(self, item: WorkItemInfo, error: str) -> None:
+        comment = f"<div><b>⚠️ ADO Autopilot — Error</b><br/><p>{error}</p></div>"
+        if self._config.dry_run:
+            self._log.info("[DRY-RUN] would comment: error", id=item.id, error=error)
+            return
+        await self._ado.add_comment(item.id, comment)
+        await self._broadcast(
+            NotificationMessage(work_item=item, type=NotificationType.ERROR, error=error)
+        )
+
+    async def _broadcast(self, message: NotificationMessage) -> None:
+        for channel in self._channels:
+            if not channel.is_enabled:
+                continue
+            try:
+                await channel.send(message)
+            except Exception as exc:  # noqa: BLE001
+                self._log.warning("notification failed", channel=channel.name, error=str(exc))

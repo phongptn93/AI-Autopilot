@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: ai-autopilot
+    static_configs:
+      - targets: ["autopilot:5080"]

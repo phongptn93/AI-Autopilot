@@ -1,16 +1,18 @@
+version: "3.8"
+
 services:
   autopilot:
     build: .
-    container_name: ai-autopilot
+    container_name: ado-autopilot
     ports:
       - "5080:5080"
     volumes:
       - autopilot-data:/data
-      - autopilot-logs:/app/logs
-      - ./config.yaml:/app/config.yaml:ro
+      - autopilot-logs:/logs
+      - ./appsettings.json:/app/appsettings.json:ro
     environment:
+      - ASPNETCORE_ENVIRONMENT=Production
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - AUTOPILOT_ADO_PAT=${AUTOPILOT_ADO_PAT}
     restart: unless-stopped
 
   prometheus:

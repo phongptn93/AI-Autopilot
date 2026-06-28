@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: ai-autopilot
+  name: ado-autopilot
   labels:
-    app: ai-autopilot
+    app: ado-autopilot
 spec:
   type: ClusterIP
   ports:
@@ -12,4 +12,4 @@ spec:
       targetPort: 5080
       protocol: TCP
   selector:
-    app: ai-autopilot
+    app: ado-autopilot

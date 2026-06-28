@@ -1,30 +1,30 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-WORKDIR /src
-COPY AdoAutopilot.csproj .
-RUN dotnet restore
-COPY . .
-RUN dotnet publish -c Release -o /app --no-restore
+FROM python:3.11-slim AS runtime
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
-# Install Claude CLI (Node.js required)
-RUN apt-get update && apt-get install -y curl git && \
+# git is required by the executor; Node.js backs the Claude Code CLI used by the SDK.
+RUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
+    apt-get install -y --no-install-recommends nodejs && \
     npm install -g @anthropic-ai/claude-code && \
+    apt-get purge -y curl && apt-get autoremove -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /app .
+# Install Python dependencies first for better layer caching.
+COPY pyproject.toml README.md ./
+COPY ai_autopilot ./ai_autopilot
+RUN pip install --no-cache-dir .
 
-# Create data directory for SQLite
-RUN mkdir -p /data /logs
-VOLUME ["/data", "/logs"]
+# Runtime data directories.
+RUN mkdir -p /data /app/logs
+VOLUME ["/data", "/app/logs"]
 
-ENV ASPNETCORE_URLS=http://+:5080
+ENV AUTOPILOT_DATABASE_URL=sqlite+aiosqlite:////data/autopilot.db \
+    AUTOPILOT_HEALTH_PORT=5080
+
 EXPOSE 5080
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:5080/health || exit 1
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5080/health').status==200 else 1)" || exit 1
 
-ENTRYPOINT ["dotnet", "AdoAutopilot.dll"]
+ENTRYPOINT ["python", "-m", "ai_autopilot"]

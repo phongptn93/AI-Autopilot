@@ -1,195 +1,163 @@
-# ADO Autopilot
+# AI Autopilot
 
-.NET Worker Service tu dong xu ly Azure DevOps work items bang Claude Code CLI.
+Autonomously process Azure DevOps work items with the **Claude Agent SDK**.
 
-## How it works
+AI Autopilot polls an ADO board, classifies each work item tagged `autopilot`,
+routes it to the matching Claude Code skill, runs Claude to implement it
+(branch → code → commit → push), auto-reviews the change, opens a pull request,
+and reports back on ADO, Microsoft Teams, Zalo and email.
+
+> **v2.0 — Python rewrite.** This is a from-scratch Python port of the original
+> .NET 8 worker service (preserved under [`legacy-dotnet/`](legacy-dotnet/)).
+> The key upgrade: Claude is now driven through the official
+> [`claude-agent-sdk`](https://pypi.org/project/claude-agent-sdk/) instead of
+> shelling out to the CLI and scraping stdout — so token usage, cost and results
+> come back as **structured data**.
 
 ```
-ADO Board                    ADO Autopilot                     Claude CLI
+ADO Board                    AI Autopilot                      Claude Agent SDK
   |                               |                                |
   |  tag "autopilot" + New/ToDo   |                                |
-  |------------------------------>|                                |
-  |                               |  classify (BE/FE/Bug/Req...)   |
+  |------------------------------>|  classify (BE/FE/Bug/Req...)   |
   |                               |  git checkout -b feature/xxx   |
   |                               |------------------------------->|
-  |                               |     /skill-command {id}        |
+  |                               |       /skill-command {id}      |
   |                               |<-------------------------------|
-  |                               |  git commit + push             |
+  |                               |  review → commit → push → PR   |
   |    comment + tag "done"       |                                |
   |<------------------------------|                                |
 ```
 
-**Poll** ADO board -> **Classify** work item -> **Route** to skill -> **Execute** Claude CLI -> **Notify** result on ADO + Teams + Zalo.
+## Architecture
 
-## Setup
+```
+ai_autopilot/
+├── app.py                 # FastAPI app factory + lifespan (replaces Program.cs)
+├── __main__.py            # uvicorn entry point
+├── config.py              # pydantic-settings config (YAML + env)
+├── container.py           # composition root / dependency injection
+├── logging_config.py      # structlog setup
+├── metrics.py             # Prometheus metrics
+├── health.py              # readiness checks (ado / claude / disk)
+├── security.py            # RBAC policy
+├── scheduling.py          # schedule-window guard
+├── tracking.py            # token cost tracking + budget alerts
+├── multitenant.py         # tenant manager
+├── webhook.py             # ADO Service Hook queue
+├── models/                # WorkItemInfo, ExecutionResult, TaskCategory
+├── ado/                   # auth (PAT/OAuth), REST client, notifier
+├── execution/             # Claude Agent SDK wrapper, executor, reviewer, retry, feedback
+├── routing/               # classify → prioritise → route → decompose
+├── notifications/         # Teams, Zalo, Email channels
+├── data/                  # SQLAlchemy async engine, entities, repository
+├── plugins/               # Python plugin loader (pre/post/skill hooks)
+├── services/              # background poller + PR monitor
+└── dashboard/             # Jinja2 server-rendered dashboard
 
-### 1. Config
-
-Edit `appsettings.json`:
-
-```json
-{
-  "Autopilot": {
-    "AdoOrganization": "https://dev.azure.com/<your-org>",
-    "AdoProject": "<project-name>",
-    "AdoPat": "<personal-access-token>",
-    "RepoWorkingDirectory": "C:\\path\\to\\your\\git\\repo",
-    "ClaudeCliPath": "claude",
-    "TriggerTag": "autopilot",
-    "ProcessedTag": "autopilot-done",
-    "BaseBranch": "development",
-    "PollIntervalSeconds": 30,
-    "MaxConcurrent": 1,
-    "TaskTimeoutMinutes": 30,
-    "DryRun": false
-  }
-}
+tests/                     # pytest unit tests
+legacy-dotnet/             # original .NET 8 implementation (reference)
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `AdoOrganization` | Yes | Azure DevOps org URL |
-| `AdoProject` | Yes | Project name for work item tracking |
-| `AdoPat` | Yes | Personal Access Token (scope: Work Items R/W, Code R/W) |
-| `RepoWorkingDirectory` | Yes | Path to git repo with source code (must have `.git` and `BaseBranch`) |
-| `ClaudeCliPath` | No | Path to `claude` CLI. Default: `claude` (assumes in PATH) |
-| `TriggerTag` | No | Tag that triggers processing. Default: `autopilot` |
-| `ProcessedTag` | No | Tag added after processing. Default: `autopilot-done` |
-| `BaseBranch` | No | Base branch for new feature branches. Default: `development` |
-| `PollIntervalSeconds` | No | Poll interval. Default: `30` |
-| `MaxConcurrent` | No | Max concurrent executions. Default: `1` |
-| `TaskTimeoutMinutes` | No | Timeout per task. Default: `30` |
-| `DryRun` | No | Log only, no execution. Default: `false` |
-| `TeamsWebhookUrl` | No | MS Teams Incoming Webhook URL. Leave empty to disable |
-| `ZaloOaAccessToken` | No | Zalo OA access token. Leave empty to disable |
-| `ZaloRecipientUserId` | No | Zalo user ID to receive notifications |
-
-### 2. Create PAT
-
-1. Go to `https://dev.azure.com/<your-org>`
-2. Click **User Settings** (gear icon, top right) -> **Personal Access Tokens**
-3. Click **+ New Token**
-4. Scopes: **Work Items (Read & Write)**, **Code (Read & Write)**
-5. Copy token -> paste into `AdoPat`
-
-### 3. Prepare git repo
+## Quick start
 
 ```bash
-cd <RepoWorkingDirectory>
-git checkout development
-git pull origin development
+# 1. Install (Python 3.11+)
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 2. Configure (see config.example.yaml + .env.example)
+cp config.example.yaml config.yaml
+export ANTHROPIC_API_KEY=sk-ant-...
+export AUTOPILOT_ADO_PAT=...           # keep secrets in env, not YAML
+
+# 3. Run
+python -m ai_autopilot
 ```
 
-### 4. Run
+The service listens on `:5080` by default:
 
-```bash
-cd src/AdoAutopilot
-dotnet run
-```
+| Endpoint            | Purpose                                  |
+|---------------------|------------------------------------------|
+| `/health`           | Readiness checks (JSON)                  |
+| `/metrics`          | Prometheus metrics                       |
+| `/api/webhook/ado`  | ADO Service Hook → instant pickup        |
+| `/dashboard`        | Overview / History / Config / Capabilities |
 
-## Usage
+## Configuration
 
-### Create work item on ADO Board
+Settings are loaded from `config.yaml` and overridden by `AUTOPILOT_*`
+environment variables (nested keys use `__`). **Secrets should always come from
+the environment.**
 
-1. Create a work item (Task, Bug, Requirement, User Story)
-2. Add tag **`autopilot`**
-3. Set state: **New**, **To Do**, or **Proposed**
-4. Autopilot picks it up on next poll cycle
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `ado_organization` | `AUTOPILOT_ADO_ORGANIZATION` | — | ADO org URL |
+| `ado_project` | `AUTOPILOT_ADO_PROJECT` | — | Project name |
+| `ado_pat` | `AUTOPILOT_ADO_PAT` | — | Personal Access Token (Work Items R/W, Code R/W) |
+| `repo_working_directory` | `AUTOPILOT_REPO_WORKING_DIRECTORY` | — | Local git repo path |
+| `trigger_tag` | `AUTOPILOT_TRIGGER_TAG` | `autopilot` | Tag that triggers processing |
+| `base_branch` | `AUTOPILOT_BASE_BRANCH` | `development` | Base for feature branches |
+| `poll_interval_seconds` | `AUTOPILOT_POLL_INTERVAL_SECONDS` | `30` | Poll cadence |
+| `max_concurrent` | `AUTOPILOT_MAX_CONCURRENT` | `1` | Concurrent executions |
+| `task_timeout_minutes` | `AUTOPILOT_TASK_TIMEOUT_MINUTES` | `30` | Per-task timeout |
+| `require_approval` | `AUTOPILOT_REQUIRE_APPROVAL` | `true` | Open PRs as drafts for human review |
+| `dry_run` | `AUTOPILOT_DRY_RUN` | `false` | Log only, never execute |
+| `claude_model` | `AUTOPILOT_CLAUDE_MODEL` | SDK default | Model override |
 
-### Skill routing
+See [`config.example.yaml`](config.example.yaml) for the full set (retry, RBAC,
+scheduling, multi-repo, multi-tenant, notifications, budget).
 
-Work items are classified by title prefix, type, and keywords:
+## Skill routing
 
 | Condition | Category | Skill |
 |-----------|----------|-------|
 | Title starts with `[BE]` | BackendTask | `/implement-task-be {id}` |
 | Title starts with `[FE]` | FrontendTask | `/implement-task-fe {id}` |
-| Title starts with `[DB]` | DatabaseTask | `/sql-migration {id}` |
 | Title starts with `[QC]` | TestTask | `/qc-test-management {id}` |
 | WorkItemType = `Bug` | Bug | `/bugfix-workflow {id}` |
-| WorkItemType = `Requirement` | Requirement | `/analyze-requirement {id}` |
-| Keywords: api, endpoint, controller... | BackendTask | `/implement-task-be {id}` |
-| Keywords: component, angular, page... | FrontendTask | `/implement-task-fe {id}` |
+| WorkItemType = `Requirement`/`User Story` | Requirement | `/analyze-requirement {id}` |
+| Keywords (api, controller, service…) | BackendTask | `/implement-task-be {id}` |
+| Keywords (component, page, angular…) | FrontendTask | `/implement-task-fe {id}` |
 
-### Execution flow
+## Plugins
 
-1. **Poll** - Query ADO for items tagged `autopilot` in New/To Do/Proposed state
-2. **Classify** - Determine category (BE, FE, Bug, DB, QC, Requirement)
-3. **Route** - Map category to Claude CLI skill command
-4. **Notify Started** - Comment on ADO + set state to Active
-5. **Execute** - `git checkout -b feature/{id}` -> `claude /skill {id}` -> `git commit` -> `git push`
-6. **Notify Completed** - Comment result on ADO + add `autopilot-done` tag
-7. On success with PR -> set state to Resolved
+Drop a `*.py` file in the `plugins/` directory that subclasses `PreProcessor`,
+`PostProcessor` or `SkillProvider`:
 
-### DryRun mode
+```python
+from ai_autopilot.plugins import PreProcessor
+from ai_autopilot.models import WorkItemInfo
 
-Set `"DryRun": true` to test without executing Claude or modifying ADO:
+class TitleNormalizer(PreProcessor):
+    name = "title-normalizer"
+    version = "1.0.0"
 
-```
-[DRY-RUN] Would execute: claude /analyze-requirement 2152 for #2152
-[DRY-RUN] Would comment on #2152: Completed
-```
-
-## Notifications
-
-ADO Autopilot sends notifications qua multiple channels (cau hinh trong `appsettings.json`):
-
-### MS Teams (Workflows Webhook)
-
-1. Mo **MS Teams** -> vao **Channel** muon nhan thong bao
-2. Click **...** (More options) ben canh ten channel -> **Workflows**
-3. Tim template: **"Post to a channel when a webhook request is received"**
-4. Dat ten: `ADO Autopilot` -> chon channel -> **Add workflow**
-5. **Copy URL** webhook (dang `https://prod-xx.westus.logic.azure.com/workflows/...`)
-6. Dan vao `TeamsWebhookUrl` trong config
-
-### Zalo OA
-
-1. Tao Official Account tai https://oa.zalo.me
-2. Vao **Quan ly** -> **API** -> lay **Access Token**
-3. Lay `user_id` cua nguoi nhan (user phai follow OA truoc)
-4. Dan vao `ZaloOaAccessToken` va `ZaloRecipientUserId`
-
-### Notification events
-
-| Event | Message |
-|-------|---------|
-| Work item picked up | 🤖 Processing #ID - skill, category |
-| Execution completed | ✅ Completed #ID - duration, branch, PR link, files |
-| Execution failed | ❌ Failed #ID - skill, error |
-| Unexpected error | ⚠️ Error #ID - error message |
-
-## Architecture
-
-```
-src/AdoAutopilot/
-├── Ado/
-│   ├── AdoAuthService.cs      # Auth (PAT + OAuth fallback)
-│   ├── AdoClient.cs           # ADO REST API client
-│   ├── AdoNotifier.cs         # Comment/tag/state updates + broadcast to channels
-│   └── AdoPollerService.cs    # Background polling service
-├── Execution/
-│   └── ClaudeExecutor.cs      # Shell out to Claude CLI
-├── Models/
-│   ├── AutopilotConfig.cs     # Configuration model
-│   ├── ExecutionResult.cs     # Execution outcome
-│   └── WorkItemInfo.cs        # Work item model + TaskCategory enum
-├── Notifications/
-│   ├── INotificationChannel.cs # Channel interface + message model
-│   ├── TeamsNotifier.cs       # MS Teams Incoming Webhook
-│   └── ZaloNotifier.cs        # Zalo OA API
-├── Routing/
-│   └── TaskRouter.cs          # Classify + route work items to skills
-├── Program.cs                 # DI setup + hosted service
-└── appsettings.json           # Configuration
-
-tests/AdoAutopilot.Tests/
-└── TaskRouterTests.cs         # 19 unit tests for classification/routing
+    async def pre_process(self, item: WorkItemInfo) -> WorkItemInfo:
+        item.title = item.title.strip()
+        return item
 ```
 
-## Tech Stack
+## Development
 
-- .NET 8 Worker Service
-- Azure DevOps REST API 7.1
-- Claude Code CLI
-- xUnit (tests)
+```bash
+pytest            # run unit tests
+ruff check .      # lint
+mypy ai_autopilot # type-check
+```
+
+## Deployment
+
+```bash
+docker compose up --build          # app on :5080
+docker compose --profile monitoring up   # + Prometheus + Grafana
+```
+
+Kubernetes manifests live in [`k8s/`](k8s/).
+
+## Tech stack
+
+- Python 3.11 · FastAPI · uvicorn
+- Claude Agent SDK (`claude-agent-sdk`)
+- httpx · SQLAlchemy (async) + aiosqlite · pydantic-settings
+- prometheus-client · structlog · Jinja2 · APScheduler
+- pytest (tests)

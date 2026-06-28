@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% macro boolean(value) %}<span class="{{ 'config-bool-true' if value else 'config-bool-false' }}">{{ value }}</span>{% endmacro %}
+{% block content %}
+<div class="page-header">
+    <h2>Configuration</h2>
+    <p>Current service settings (secrets are never displayed)</p>
+</div>
+
+<div class="card">
+    <div class="card-header"><h3>🔗 Azure DevOps Connection</h3></div>
+    <div class="card-body"><table class="config-table"><tbody>
+        <tr><td>Organization</td><td>{{ cfg.ado_organization }}</td></tr>
+        <tr><td>Project</td><td>{{ cfg.ado_project }}</td></tr>
+        <tr><td>Trigger Tag</td><td>{{ cfg.trigger_tag }}</td></tr>
+        <tr><td>Processed Tag</td><td>{{ cfg.processed_tag }}</td></tr>
+    </tbody></table></div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h3>⚙️ Execution</h3></div>
+    <div class="card-body"><table class="config-table"><tbody>
+        <tr><td>Poll Interval</td><td>{{ cfg.poll_interval_seconds }} s</td></tr>
+        <tr><td>Max Concurrent</td><td>{{ cfg.max_concurrent }}</td></tr>
+        <tr><td>Task Timeout</td><td>{{ cfg.task_timeout_minutes }} min</td></tr>
+        <tr><td>Max Retries</td><td>{{ cfg.max_retries }}</td></tr>
+        <tr><td>Base Branch</td><td>{{ cfg.base_branch }}</td></tr>
+        <tr><td>Dry Run</td><td>{{ boolean(cfg.dry_run) }}</td></tr>
+    </tbody></table></div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h3>🤖 Automation</h3></div>
+    <div class="card-body"><table class="config-table"><tbody>
+        <tr><td>Require Approval</td><td>{{ boolean(cfg.require_approval) }}</td></tr>
+        <tr><td>Auto Review</td><td>{{ boolean(cfg.auto_review_enabled) }}</td></tr>
+        <tr><td>Auto Decompose</td><td>{{ boolean(cfg.auto_decompose) }}</td></tr>
+        <tr><td>Feedback Loop</td><td>{{ boolean(cfg.feedback_loop_enabled) }} (max {{ cfg.max_revisions }} revisions)</td></tr>
+    </tbody></table></div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h3>📅 Schedule &amp; Budget</h3></div>
+    <div class="card-body"><table class="config-table"><tbody>
+        <tr><td>Schedule</td><td>{{ cfg.schedule_start }}–{{ cfg.schedule_end }} ({{ cfg.schedule_days }})</td></tr>
+        <tr><td>Daily Budget</td><td>{{ '{:,} tokens'.format(cfg.daily_budget_tokens) if cfg.daily_budget_tokens > 0 else 'Unlimited' }}</td></tr>
+        <tr><td>Health Port</td><td>{{ cfg.health_port }}</td></tr>
+        <tr><td>Claude Model</td><td>{{ cfg.claude_model or 'SDK default' }}</td></tr>
+    </tbody></table></div>
+</div>
+
+{% if cfg.repos or cfg.tenants %}
+<div class="card">
+    <div class="card-header"><h3>🏢 Multi-Repo &amp; Tenants</h3></div>
+    <div class="card-body"><table class="config-table"><tbody>
+        <tr><td>Repos</td><td>{{ cfg.repos | map(attribute='name') | join(', ') if cfg.repos else 'Single repo' }}</td></tr>
+        <tr><td>Tenants</td><td>{{ cfg.tenants | map(attribute='name') | join(', ') if cfg.tenants else 'Single tenant' }}</td></tr>
+    </tbody></table></div>
+</div>
+{% endif %}
+{% endblock %}

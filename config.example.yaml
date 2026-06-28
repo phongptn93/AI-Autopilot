@@ -1,0 +1,95 @@
+# AI Autopilot configuration example.
+#
+# Copy to config.yaml and edit. Any value can be overridden by an environment
+# variable named AUTOPILOT_<KEY> (nested keys use "__"), e.g. AUTOPILOT_ADO_PAT.
+#
+# SECRETS (ado_pat, oauth_app_secret, smtp_password, zalo_oa_access_token) should
+# be provided via environment variables, NOT committed here.
+
+# ── Azure DevOps connection ──
+ado_organization: "https://dev.azure.com/your-org"
+ado_project: "YourProject"
+# ado_pat: ""                # prefer env: AUTOPILOT_ADO_PAT
+# oauth_app_id: ""           # alternative to PAT
+# oauth_app_secret: ""       # prefer env: AUTOPILOT_OAUTH_APP_SECRET
+
+# ── Triggering ──
+trigger_tag: "autopilot"
+processed_tag: "autopilot-done"
+review_tag: "autopilot-review"
+poll_interval_seconds: 30
+
+# ── Repository / execution ──
+repo_working_directory: "/path/to/your/git/repo"
+base_branch: "development"
+max_concurrent: 1
+task_timeout_minutes: 30
+dry_run: false
+
+# Multi-repo: route categories to different repos (overrides repo_working_directory)
+repos: []
+#   - name: backend
+#     path: /repos/backend
+#     base_branch: develop
+#     categories: [BackendTask, DatabaseTask]
+#   - name: frontend
+#     path: /repos/frontend
+#     base_branch: main
+#     categories: [FrontendTask]
+
+# ── Claude execution ──
+claude_model: ""             # empty → SDK default
+claude_max_turns: 0          # 0 → unbounded
+
+# ── Retry & recovery ──
+max_retries: 3
+retry_backoff_seconds: 60
+
+# ── Approval gate ──
+require_approval: true
+approval_timeout_minutes: 120
+
+# ── RBAC (empty list = no restriction) ──
+allowed_users: []
+approver_users: []
+allowed_skills: []
+
+# ── Decomposition / feedback / review ──
+auto_decompose: true
+feedback_loop_enabled: false
+max_revisions: 3
+auto_review_enabled: true
+block_on_severity: "Critical,High"
+
+# ── Scheduling (empty start/end = always on) ──
+schedule_start: ""           # "08:00"
+schedule_end: ""             # "18:00"
+schedule_days: "Mon,Tue,Wed,Thu,Fri"
+
+# ── Web / health ──
+health_host: "0.0.0.0"
+health_port: 5080
+
+# ── Persistence ──
+database_url: "sqlite+aiosqlite:///autopilot.db"
+
+# ── Cost tracking ──
+daily_budget_tokens: 0       # 0 = unlimited
+cost_alert_enabled: false
+
+# ── Multi-tenant (empty = single tenant from the config above) ──
+tenants: []
+
+# ── Plugins ──
+plugins_directory: "plugins"
+
+# ── Notifications ──
+teams_webhook_url: ""        # MS Teams Workflows webhook URL
+# zalo_oa_access_token: ""   # prefer env
+zalo_recipient_user_id: ""
+smtp_host: ""
+smtp_port: 587
+smtp_user: ""
+# smtp_password: ""          # prefer env
+email_to: ""
+email_from: ""

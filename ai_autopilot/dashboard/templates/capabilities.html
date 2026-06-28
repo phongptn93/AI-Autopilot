@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+    <h2>What can AI Autopilot do?</h2>
+    <p>An autonomous engineer that turns Azure DevOps work items into reviewed pull requests</p>
+</div>
+
+<div class="card">
+    <div class="card-header"><h3>🔄 End-to-end pipeline</h3></div>
+    <div class="card-body" style="padding:18px 22px">
+        <p style="color:var(--text-muted);font-size:14px">
+            <strong>Poll</strong> the ADO board → <strong>Classify</strong> each tagged item
+            (BE / FE / Bug / DB / QC / Requirement) → <strong>Route</strong> it to the matching
+            Claude Code skill → <strong>Execute</strong> via the Claude Agent SDK
+            (branch → implement → commit → push) → <strong>Auto-review</strong> for security →
+            <strong>Open a PR</strong> → <strong>Notify</strong> on ADO, Teams, Zalo and email.
+        </p>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Routing</span><div class="stat-card-icon">🧭</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Title prefixes, work-item type and keywords map each item to a skill command.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Safety</span><div class="stat-card-icon">🛡️</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Approval gate (draft PRs), RBAC, schedule windows and an automated security review.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Resilience</span><div class="stat-card-icon">🔁</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Exponential-backoff retries, dry-run mode and full execution history in SQLite.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Observability</span><div class="stat-card-icon">📈</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Prometheus metrics, structured logs, health checks and token/cost tracking.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Scale</span><div class="stat-card-icon">🏢</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Multi-repo, multi-tenant, and a Python plugin system for custom pre/post hooks.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Triggers</span><div class="stat-card-icon">⚡</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Scheduled polling plus an ADO Service Hook webhook for instant pickup.</p></div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h3>🧭 Skill routing</h3></div>
+    <div class="card-body">
+        <table>
+            <thead><tr><th>Condition</th><th>Category</th><th>Skill</th></tr></thead>
+            <tbody>
+                <tr><td>Title starts with <span class="mono">[BE]</span></td><td><span class="cat-badge cat-be">BE</span></td><td class="mono">/implement-task-be {id}</td></tr>
+                <tr><td>Title starts with <span class="mono">[FE]</span></td><td><span class="cat-badge cat-fe">FE</span></td><td class="mono">/implement-task-fe {id}</td></tr>
+                <tr><td>Title starts with <span class="mono">[QC]</span></td><td><span class="cat-badge cat-qc">QC</span></td><td class="mono">/qc-test-management {id}</td></tr>
+                <tr><td>Work item type = Bug</td><td><span class="cat-badge cat-bug">Bug</span></td><td class="mono">/bugfix-workflow {id}</td></tr>
+                <tr><td>Type = Requirement / User Story</td><td><span class="cat-badge cat-req">Req</span></td><td class="mono">/analyze-requirement {id}</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

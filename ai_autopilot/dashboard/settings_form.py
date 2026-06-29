@@ -6,6 +6,7 @@ are kept here so they can be unit-tested without a running server.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,10 +95,8 @@ def parse_form(form: Mapping[str, Any]) -> dict[str, Any]:
         elif f.kind == "int":
             value = str(form.get(f.key, "")).strip()
             if value:
-                try:
+                with contextlib.suppress(ValueError):
                     updates[f.key] = int(value)
-                except ValueError:
-                    pass
         else:  # text, select
             updates[f.key] = str(form.get(f.key, "")).strip()
     return updates

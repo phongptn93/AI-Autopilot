@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     processed_tag: str = "autopilot-done"
     review_tag: str = "autopilot-review"
     poll_interval_seconds: int = 30
+    # ADO work-item states that are eligible for processing. The default suits the
+    # Agile/Scrum/Basic templates; adjust to match your board (e.g. add "Doing",
+    # "Committed", "Approved", or localized state names).
+    trigger_states: list[str] = Field(
+        default_factory=lambda: ["New", "To Do", "Proposed", "Active"]
+    )
 
     # ── Repository / execution ──
     repo_working_directory: str = ""

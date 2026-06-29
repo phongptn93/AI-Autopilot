@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 
@@ -33,7 +33,7 @@ class ExecutionRepository:
                 category=str(item.category),
                 skill_used=skill,
                 status=ExecutionStatus.RUNNING,
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             )
             session.add(record)
             await session.commit()
@@ -53,7 +53,7 @@ class ExecutionRepository:
             record.error = (result.error or "")[:2000] or None
             record.output = (result.output or "")[:5000]
             record.duration_seconds = result.duration_seconds
-            record.completed_at = datetime.now(timezone.utc)
+            record.completed_at = datetime.now(UTC)
             if result.cost_tokens:
                 record.cost_tokens = result.cost_tokens
             await session.commit()

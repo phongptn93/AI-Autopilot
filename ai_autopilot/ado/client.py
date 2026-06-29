@@ -50,10 +50,11 @@ class AdoClient:
 
     async def get_pending_work_items(self) -> list[WorkItemInfo]:
         """Query work items tagged with the trigger tag in pending states."""
+        states = ", ".join(f"'{s}'" for s in self._config.trigger_states) or "'New'"
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
             f"WHERE [System.Tags] CONTAINS '{self._config.trigger_tag}' "
-            "AND [System.State] IN ('New', 'To Do', 'Proposed') "
+            f"AND [System.State] IN ({states}) "
             f"AND [System.TeamProject] = '{self._config.ado_project}' "
             "ORDER BY [System.ChangedDate] DESC"
         )
@@ -70,12 +71,21 @@ class AdoClient:
         text = resp.text.lstrip()
         if resp.status_code >= 400 or not text.startswith("{"):
             self._log.warning(
-                "WIQL query failed (response is not JSON — check PAT)", status=resp.status_code
+                "WIQL query failed — check PAT / organization / project",
+                status=resp.status_code,
+                body=resp.text[:300],
             )
             return []
 
         refs = resp.json().get("workItems") or []
         ids = [r["id"] for r in refs]
+        self._log.info(
+            "ADO poll",
+            tag=self._config.trigger_tag,
+            states=self._config.trigger_states,
+            project=self._config.ado_project,
+            matched=len(ids),
+        )
         if not ids:
             return []
         return await self.get_work_items_by_ids(ids)

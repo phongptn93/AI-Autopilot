@@ -18,6 +18,9 @@ trigger_tag: "autopilot"
 processed_tag: "autopilot-done"
 review_tag: "autopilot-review"
 poll_interval_seconds: 30
+# Work-item states eligible for processing. MUST match your ADO board's states,
+# otherwise tagged items are never picked up. Check your board column names.
+trigger_states: ["New", "To Do", "Proposed", "Active"]
 
 # ── Repository / execution ──
 repo_working_directory: "/path/to/your/git/repo"

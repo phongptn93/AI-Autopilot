@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     max_concurrent: int = 1
     task_timeout_minutes: int = 30
     dry_run: bool = False
+    # Run each execution in its own git worktree so concurrent items never share
+    # a checkout (required for safe max_concurrent > 1). Disable to fall back to
+    # in-place checkout in the repo directory.
+    use_worktrees: bool = True
+    worktrees_dir: str = ""  # empty → <system temp>/ai-autopilot-worktrees
 
     # ── Claude execution ──
     claude_model: str = ""  # empty → SDK default

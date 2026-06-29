@@ -25,6 +25,10 @@ base_branch: "development"
 max_concurrent: 1
 task_timeout_minutes: 30
 dry_run: false
+# Run each execution in its own git worktree (safe parallel execution).
+# Required if you raise max_concurrent above 1 on a shared repo.
+use_worktrees: true
+worktrees_dir: ""            # empty → <system temp>/ai-autopilot-worktrees
 
 # Multi-repo: route categories to different repos (overrides repo_working_directory)
 repos: []

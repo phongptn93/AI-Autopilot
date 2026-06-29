@@ -99,6 +99,7 @@ the environment.**
 | `base_branch` | `AUTOPILOT_BASE_BRANCH` | `development` | Base for feature branches |
 | `poll_interval_seconds` | `AUTOPILOT_POLL_INTERVAL_SECONDS` | `30` | Poll cadence |
 | `max_concurrent` | `AUTOPILOT_MAX_CONCURRENT` | `1` | Concurrent executions |
+| `use_worktrees` | `AUTOPILOT_USE_WORKTREES` | `true` | Run each execution in its own git worktree (safe parallelism) |
 | `task_timeout_minutes` | `AUTOPILOT_TASK_TIMEOUT_MINUTES` | `30` | Per-task timeout |
 | `require_approval` | `AUTOPILOT_REQUIRE_APPROVAL` | `true` | Open PRs as drafts for human review |
 | `dry_run` | `AUTOPILOT_DRY_RUN` | `false` | Log only, never execute |

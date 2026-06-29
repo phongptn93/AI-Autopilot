@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import re
+import shutil
+import tempfile
 import time
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
 
 from ai_autopilot.config import Settings
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
@@ -29,6 +34,17 @@ class GitError(RuntimeError):
     """Raised when a git command exits non-zero."""
 
 
+@dataclass
+class _Workspace:
+    """An isolated checkout (git worktree or in-place branch) for one execution."""
+
+    repo: str  # the main repository
+    path: str  # directory Claude/git operate in
+    branch: str
+    base_branch: str
+    is_worktree: bool
+
+
 class ClaudeExecutor:
     def __init__(self, config: Settings, reviewer: AutoReviewer) -> None:
         self._config = config
@@ -40,18 +56,18 @@ class ClaudeExecutor:
     ) -> ExecutionResult:
         started = time.monotonic()
         branch = _branch_name(item)
-        work_dir, base_branch = self._resolve_repo(item)
+        repo, base_branch = self._resolve_repo(item)
+        workspace: _Workspace | None = None
 
         try:
-            self._log.info("creating branch", id=item.id, branch=branch, repo=work_dir)
-            await self._git(f"checkout -b {branch} origin/{base_branch}", work_dir)
+            workspace = await self._acquire_workspace(repo, branch, base_branch, item.id)
+            work_dir = workspace.path
 
             self._log.info("executing skill", id=item.id, skill=skill_command)
             claude_run = await self._run_claude(skill_command, work_dir)
 
             if not await self._has_changes(work_dir):
                 self._log.warning("no file changes after execution", id=item.id)
-                await self._git(f"checkout {base_branch}", work_dir, check=False)
                 return ExecutionResult.fail(item.id, skill_command, "No file changes produced")
 
             changed_files = await self._changed_files(work_dir)
@@ -99,10 +115,50 @@ class ClaudeExecutor:
             return result
         except Exception as exc:  # noqa: BLE001
             self._log.error("execution failed", id=item.id, error=str(exc))
-            await self._git(f"checkout {base_branch}", work_dir, check=False)
             result = ExecutionResult.fail(item.id, skill_command, str(exc))
             result.duration_seconds = time.monotonic() - started
             return result
+        finally:
+            if workspace is not None:
+                await self._release_workspace(workspace)
+
+    # ── workspace lifecycle ─────────────────────────────────────────────────
+
+    async def _acquire_workspace(
+        self, repo: str, branch: str, base_branch: str, item_id: int
+    ) -> _Workspace:
+        """Create an isolated checkout for one execution.
+
+        With ``use_worktrees`` (default) each execution gets its own ``git
+        worktree`` so concurrent items never collide on a shared checkout. When
+        disabled, falls back to an in-place ``checkout -b`` in the repo.
+        """
+        if self._config.use_worktrees:
+            base_dir = self._config.worktrees_dir or str(
+                Path(tempfile.gettempdir()) / "ai-autopilot-worktrees"
+            )
+            Path(base_dir).mkdir(parents=True, exist_ok=True)
+            safe = branch.replace("/", "-")
+            path = str(Path(base_dir) / f"{safe}-{uuid.uuid4().hex[:8]}")
+            self._log.info("creating worktree", id=item_id, branch=branch, path=path)
+            await self._git(["worktree", "add", "-b", branch, path, f"origin/{base_branch}"], repo)
+            return _Workspace(repo, path, branch, base_branch, is_worktree=True)
+
+        self._log.info("creating branch in-place", id=item_id, branch=branch, repo=repo)
+        await self._git(f"checkout -b {branch} origin/{base_branch}", repo)
+        return _Workspace(repo, repo, branch, base_branch, is_worktree=False)
+
+    async def _release_workspace(self, ws: _Workspace) -> None:
+        """Tear down a workspace (best-effort; never raises)."""
+        if ws.is_worktree:
+            await self._git(["worktree", "remove", "--force", ws.path], ws.repo, check=False)
+            shutil.rmtree(ws.path, ignore_errors=True)
+            # The pushed branch lives on origin for the PR; drop the local copy.
+            await self._git(["branch", "-D", ws.branch], ws.repo, check=False)
+            await self._git(["worktree", "prune"], ws.repo, check=False)
+        else:
+            # Restore the repo to its base branch for the next run.
+            await self._git(f"checkout {ws.base_branch}", ws.repo, check=False)
 
     async def _run_claude(self, prompt: str, work_dir: str) -> ClaudeRun:
         return await run_claude(

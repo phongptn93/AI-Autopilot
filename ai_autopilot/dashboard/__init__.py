@@ -6,10 +6,15 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
+from ai_autopilot.dashboard import settings_form
+from ai_autopilot.logging_config import get_logger
+
+_log = get_logger("dashboard")
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -94,6 +99,43 @@ def create_dashboard_router() -> APIRouter:
         return _TEMPLATES.TemplateResponse(
             request, "capabilities.html", _ctx(request, "capabilities")
         )
+
+    @router.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request, saved: int = 0):
+        c: Container = request.app.state.container
+        current = {
+            f.key: getattr(c.config, f.key, "")
+            for f in settings_form.FIELDS
+            if f.key not in settings_form.SECRET_KEYS
+        }
+        has_pat = bool(getattr(c.config, "ado_pat", ""))
+        return _TEMPLATES.TemplateResponse(
+            request,
+            "settings.html",
+            _ctx(
+                request,
+                "settings",
+                sections=settings_form.sections(),
+                current=current,
+                has_pat=has_pat,
+                restart_keys=settings_form.RESTART_REQUIRED,
+                saved=bool(saved),
+                config_path=str(config_file_path()),
+            ),
+        )
+
+    @router.post("/settings")
+    async def save_settings(request: Request):
+        c: Container = request.app.state.container
+        form = await request.form()
+        updates = settings_form.parse_form(form)
+
+        settings_form.save_to_yaml(config_file_path(), updates)
+        settings_form.apply_to_config(c.config, updates)
+        c.ado.refresh()  # re-read org URL if it changed
+        _log.info("settings updated via dashboard", keys=sorted(updates.keys()))
+
+        return RedirectResponse(url="/dashboard/settings?saved=1", status_code=303)
 
     return router
 

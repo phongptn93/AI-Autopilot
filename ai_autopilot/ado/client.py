@@ -36,6 +36,10 @@ class AdoClient:
         self._log = get_logger("ado.client")
         self._base = config.ado_organization.rstrip("/")
 
+    def refresh(self) -> None:
+        """Re-read the organization URL after a live config change."""
+        self._base = self._config.ado_organization.rstrip("/")
+
     async def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         headers = await self._auth.get_auth_header()
         headers["Content-Type"] = content_type

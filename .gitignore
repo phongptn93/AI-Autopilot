@@ -16,11 +16,11 @@ venv/
 .coverage
 htmlcov/
 
-# Runtime data
+# Runtime data (anchored to repo root so the ai_autopilot/data package is NOT ignored)
 *.db
 *.db-journal
-logs/
-data/
+/logs/
+/data/
 .ado-autopilot-token.json
 
 # Legacy .NET build output

@@ -76,6 +76,11 @@ def _yaml_path() -> Path:
     return Path(os.getenv("AUTOPILOT_CONFIG_FILE", "config.yaml"))
 
 
+def config_file_path() -> Path:
+    """Path of the YAML config file the dashboard reads from / writes to."""
+    return _yaml_path()
+
+
 class Settings(BaseSettings):
     """Root configuration for the autopilot service."""
 

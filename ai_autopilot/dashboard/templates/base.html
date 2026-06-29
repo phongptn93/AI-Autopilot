@@ -69,6 +69,23 @@
         .config-table td:first-child { color: var(--text-muted); width: 240px; }
         .config-bool-true { color: var(--green); font-weight: 600; }
         .config-bool-false { color: var(--text-dim); }
+        /* ── Settings form ── */
+        .form-row { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start;
+            padding: 14px 0; border-bottom: 1px solid var(--border); }
+        .form-row:last-child { border-bottom: none; }
+        .form-row label { color: var(--text-muted); font-size: 13px; font-weight: 500; padding-top: 8px; }
+        .form-input input[type=text], .form-input input[type=password], .form-input input[type=number],
+        .form-input select { width: 100%; max-width: 460px; background: var(--bg); color: var(--text);
+            border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 12px; font-size: 14px;
+            font-family: inherit; }
+        .form-input input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin-top: 8px; }
+        .form-input input:focus, .form-input select:focus { outline: none; border-color: var(--accent); }
+        .form-help { color: var(--text-dim); font-size: 12px; margin-top: 6px; }
+        .restart-badge { display: inline-block; background: var(--amber-bg); color: var(--amber);
+            font-size: 10px; padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: middle; }
+        .btn-save { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
+            padding: 11px 22px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+        .btn-save:hover { background: var(--accent-hover); }
     </style>
 </head>
 <body>
@@ -79,6 +96,7 @@
             <a class="nav-link {{ 'active' if active == 'overview' else '' }}" href="/dashboard">📊 Overview</a>
             <a class="nav-link {{ 'active' if active == 'history' else '' }}" href="/dashboard/history">📜 History</a>
             <a class="nav-link {{ 'active' if active == 'config' else '' }}" href="/dashboard/config">⚙️ Configuration</a>
+            <a class="nav-link {{ 'active' if active == 'settings' else '' }}" href="/dashboard/settings">🛠️ Settings</a>
             <a class="nav-link {{ 'active' if active == 'capabilities' else '' }}" href="/dashboard/capabilities">✨ Capabilities</a>
         </nav>
     </aside>

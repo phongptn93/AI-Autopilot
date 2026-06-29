@@ -31,12 +31,39 @@ def test_metrics_endpoint(client: TestClient):
 
 @pytest.mark.parametrize(
     "path",
-    ["/dashboard", "/dashboard/history", "/dashboard/config", "/dashboard/capabilities"],
+    [
+        "/dashboard",
+        "/dashboard/history",
+        "/dashboard/config",
+        "/dashboard/capabilities",
+        "/dashboard/settings",
+    ],
 )
 def test_dashboard_pages_render(client: TestClient, path: str):
     resp = client.get(path)
     assert resp.status_code == 200
     assert "AI Autopilot" in resp.text
+
+
+def test_settings_post_persists_and_applies(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        resp = client.post(
+            "/dashboard/settings",
+            data={"trigger_tag": "deploy-me", "repo_working_directory": "/tmp/repo"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        # Applied live on the running container.
+        assert client.app.state.container.config.trigger_tag == "deploy-me"
+    # Persisted to the YAML file.
+    import yaml
+
+    saved = yaml.safe_load(cfg_file.read_text())
+    assert saved["trigger_tag"] == "deploy-me"
+    assert saved["repo_working_directory"] == "/tmp/repo"
 
 
 def test_health_reports_checks(client: TestClient):

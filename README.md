@@ -74,6 +74,10 @@ export AUTOPILOT_ADO_PAT=...           # keep secrets in env, not YAML
 python -m ai_autopilot
 ```
 
+**Windows:** just run `run.bat` — it creates the venv, installs dependencies on
+first run, copies `config.yaml` from the example, and starts the service. Use
+`run.bat install` to (re)install dependencies only.
+
 The service listens on `:5080` by default:
 
 | Endpoint            | Purpose                                  |

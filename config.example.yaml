@@ -55,8 +55,12 @@ claude_allowed_tools: []     # empty = all tools available
 max_retries: 3
 retry_backoff_seconds: 60
 
-# ── Approval gate ──
-require_approval: true
+# ── Autonomy (loop-engineering L1/L2/L3) ──
+#   report     – classify + comment what it would do, no code changes
+#   assisted   – execute and open a DRAFT PR for human review (default)
+#   unattended – execute and open a normal PR, auto-resolving the item
+autonomy_level: "assisted"
+require_approval: true        # legacy flag, superseded by autonomy_level
 approval_timeout_minutes: 120
 
 # ── RBAC (empty list = no restriction) ──
@@ -89,6 +93,21 @@ cost_alert_enabled: false
 
 # ── Multi-tenant (empty = single tenant from the config above) ──
 tenants: []
+
+# ── Scheduled loops (loop-engineering production patterns) ──
+# Each runs a skill on a cadence (cron OR interval_minutes) and opens a PR.
+scheduled_loops: []
+#   - name: dependency-sweeper
+#     prompt: "/update-deps"
+#     cron: "0 6 * * 1"          # Mondays 06:00
+#     draft_pr: true
+#   - name: changelog-drafter
+#     prompt: "/draft-changelog"
+#     interval_minutes: 1440      # daily
+#   - name: ci-sweeper
+#     prompt: "Find and fix the most recent failing CI check on the base branch."
+#     interval_minutes: 360       # every 6h
+#     base_branch: development
 
 # ── Plugins ──
 plugins_directory: "plugins"

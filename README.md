@@ -101,7 +101,8 @@ the environment.**
 | `max_concurrent` | `AUTOPILOT_MAX_CONCURRENT` | `1` | Concurrent executions |
 | `use_worktrees` | `AUTOPILOT_USE_WORKTREES` | `true` | Run each execution in its own git worktree (safe parallelism) |
 | `task_timeout_minutes` | `AUTOPILOT_TASK_TIMEOUT_MINUTES` | `30` | Per-task timeout |
-| `require_approval` | `AUTOPILOT_REQUIRE_APPROVAL` | `true` | Open PRs as drafts for human review |
+| `autonomy_level` | `AUTOPILOT_AUTONOMY_LEVEL` | `assisted` | `report` / `assisted` / `unattended` (L1/L2/L3) |
+| `feedback_loop_enabled` | `AUTOPILOT_FEEDBACK_LOOP_ENABLED` | `false` | Enable the PR babysitter |
 | `dry_run` | `AUTOPILOT_DRY_RUN` | `false` | Log only, never execute |
 | `claude_model` | `AUTOPILOT_CLAUDE_MODEL` | SDK default | Model override |
 
@@ -119,6 +120,40 @@ scheduling, multi-repo, multi-tenant, notifications, budget).
 | WorkItemType = `Requirement`/`User Story` | Requirement | `/analyze-requirement {id}` |
 | Keywords (api, controller, service…) | BackendTask | `/implement-task-be {id}` |
 | Keywords (component, page, angular…) | FrontendTask | `/implement-task-fe {id}` |
+
+## Autonomy & loops (loop-engineering)
+
+Beyond reactive work-item processing, the service implements the
+[loop-engineering](https://github.com/cobusgreyling/loop-engineering) patterns:
+
+**Autonomy levels** (`autonomy_level`) — phased rollout from observation to full automation:
+
+| Level | Value | Behaviour |
+|-------|-------|-----------|
+| L1 | `report` | Classify and comment what it *would* do; no code changes |
+| L2 | `assisted` | Execute and open a **draft** PR for human review (default) |
+| L3 | `unattended` | Execute and open a normal PR, auto-resolving the item |
+
+**Isolated worktrees** — each execution runs in its own `git worktree`, so
+`max_concurrent > 1` is safe (no shared-checkout collisions).
+
+**PR babysitter** (`feedback_loop_enabled: true`) — watches open autopilot PRs for
+unresolved human review comments and feeds them back to Claude to revise the
+branch (bounded by `max_revisions`).
+
+**Scheduled loops** (`scheduled_loops`) — run skills on a cadence (cron or
+interval), each opening a PR. Use for dependency sweeps, changelog drafting,
+CI sweeping, etc.:
+
+```yaml
+scheduled_loops:
+  - name: dependency-sweeper
+    prompt: "/update-deps"
+    cron: "0 6 * * 1"        # Mondays 06:00
+  - name: changelog-drafter
+    prompt: "/draft-changelog"
+    interval_minutes: 1440    # daily
+```
 
 ## Plugins
 

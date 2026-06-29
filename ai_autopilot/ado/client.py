@@ -158,6 +158,35 @@ class AdoClient:
             headers=await self._headers("application/json-patch+json"),
         )
 
+    # ── Git / Pull Request API (PR babysitter) ──────────────────────────────
+
+    async def get_repositories(self) -> list[dict[str, Any]]:
+        resp = await self._http.get(
+            self._url(f"git/repositories?{_API}"), headers=await self._auth.get_auth_header()
+        )
+        if resp.status_code >= 400:
+            self._log.warning("get_repositories failed", status=resp.status_code)
+            return []
+        return resp.json().get("value") or []
+
+    async def get_active_pull_requests(self, repo_id: str) -> list[dict[str, Any]]:
+        url = self._url(
+            f"git/repositories/{repo_id}/pullrequests?searchCriteria.status=active&{_API}"
+        )
+        resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        if resp.status_code >= 400:
+            self._log.warning("get_active_pull_requests failed", status=resp.status_code)
+            return []
+        return resp.json().get("value") or []
+
+    async def get_pull_request_threads(self, repo_id: str, pr_id: int) -> list[dict[str, Any]]:
+        url = self._url(f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads?{_API}")
+        resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        if resp.status_code >= 400:
+            self._log.warning("get_pull_request_threads failed", status=resp.status_code)
+            return []
+        return resp.json().get("value") or []
+
     # ── Field mapping ───────────────────────────────────────────────────────
 
     @staticmethod

@@ -138,6 +138,18 @@ class AdoPollerService:
                     self._log.info("decomposed into child tasks", id=item.id)
                     return
 
+                # L1 (report): triage only — comment the plan, don't change code.
+                if cfg.report_only:
+                    self._log.info("report-only triage", id=item.id, skill=skill)
+                    await c.ado.add_comment(
+                        item.id,
+                        "<b>🧭 ADO Autopilot — Triage (report mode)</b><br/>"
+                        f"Would route to <code>{skill}</code> "
+                        f"(category: {classified.category}).",
+                    )
+                    await c.ado.add_tag(item.id, cfg.processed_tag)
+                    return
+
                 await c.notifier.notify_started(item, skill)
                 record_id = await c.execution_repo.start_execution(item, skill)
 
@@ -172,7 +184,7 @@ class AdoPollerService:
             result = ExecutionResult.ok(item.id, skill, "[DRY-RUN] Skipped execution")
             result.duration_seconds = 0.1
             return result
-        return await self._c.executor.execute(item, skill, draft_pr=cfg.require_approval)
+        return await self._c.executor.execute(item, skill, draft_pr=cfg.pr_is_draft)
 
     async def _handle_result(
         self, item: WorkItemInfo, skill: str, result: ExecutionResult, classified: WorkItemInfo
@@ -180,7 +192,7 @@ class AdoPollerService:
         c, cfg = self._c, self._config
         if result.success:
             c.retry_policy.record_success(item.id)
-            if cfg.require_approval and result.pr_url:
+            if cfg.pr_is_draft and result.pr_url:
                 await c.ado.add_tag(item.id, cfg.review_tag)
                 await c.ado.add_comment(
                     item.id,

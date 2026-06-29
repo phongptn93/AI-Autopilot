@@ -53,6 +53,25 @@ class TenantConfig(BaseModel):
     allowed_skills: list[str] = Field(default_factory=list)
 
 
+class ScheduledLoop(BaseModel):
+    """A recurring autonomous loop (loop-engineering pattern).
+
+    Runs ``prompt`` (a skill command) against a repo on a cadence — e.g. a
+    dependency sweeper, changelog drafter, or CI sweeper — opening a PR with any
+    resulting changes. Either ``interval_minutes`` or ``cron`` sets the cadence.
+    """
+
+    name: str
+    prompt: str  # e.g. "/update-deps" or a free-form instruction
+    interval_minutes: int = 0  # used when cron is empty
+    cron: str = ""  # standard 5-field cron expression (overrides interval)
+    repo_path: str = ""  # empty → repo_working_directory
+    base_branch: str = ""  # empty → base_branch
+    branch_prefix: str = "autopilot/loop"
+    draft_pr: bool = True
+    enabled: bool = True
+
+
 def _yaml_path() -> Path:
     return Path(os.getenv("AUTOPILOT_CONFIG_FILE", "config.yaml"))
 
@@ -108,8 +127,13 @@ class Settings(BaseSettings):
     max_retries: int = 3
     retry_backoff_seconds: int = 60
 
-    # ── Approval gate ──
-    require_approval: bool = True
+    # ── Approval gate / autonomy ──
+    # autonomy_level is the primary autonomy knob (loop-engineering L1/L2/L3):
+    #   "report"     – classify + comment what it *would* do, no code changes
+    #   "assisted"   – execute and open a DRAFT PR for human review (default)
+    #   "unattended" – execute and open a normal PR, auto-resolving the item
+    autonomy_level: str = "assisted"
+    require_approval: bool = True  # legacy flag; superseded by autonomy_level
     approval_timeout_minutes: int = 120
 
     # ── RBAC ──
@@ -130,9 +154,12 @@ class Settings(BaseSettings):
     # ── Decomposition ──
     auto_decompose: bool = True
 
-    # ── Feedback loop ──
+    # ── Feedback loop / PR babysitter ──
     feedback_loop_enabled: bool = False
     max_revisions: int = 3
+
+    # ── Scheduled loops (dependency sweeper, changelog drafter, …) ──
+    scheduled_loops: list[ScheduledLoop] = Field(default_factory=list)
 
     # ── Auto-review ──
     auto_review_enabled: bool = True
@@ -168,6 +195,16 @@ class Settings(BaseSettings):
     @property
     def has_auth(self) -> bool:
         return bool(self.ado_pat or self.oauth_app_id)
+
+    @property
+    def report_only(self) -> bool:
+        """L1: only classify and comment, never change code."""
+        return self.autonomy_level == "report"
+
+    @property
+    def pr_is_draft(self) -> bool:
+        """L2 opens draft PRs; L3 (unattended) opens normal PRs."""
+        return self.autonomy_level != "unattended"
 
     @classmethod
     def settings_customise_sources(

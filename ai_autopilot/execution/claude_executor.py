@@ -54,25 +54,89 @@ class ClaudeExecutor:
     async def execute(
         self, item: WorkItemInfo, skill_command: str, draft_pr: bool = False
     ) -> ExecutionResult:
-        started = time.monotonic()
-        branch = _branch_name(item)
+        """Implement a work item on a fresh branch and open a PR."""
         repo, base_branch = self._resolve_repo(item)
-        workspace: _Workspace | None = None
+        return await self._run_in_workspace(
+            item_id=item.id,
+            repo=repo,
+            branch=_branch_name(item),
+            base_branch=base_branch,
+            prompt=skill_command,
+            commit_msg=f"feat(autopilot): {item.title} (#{item.id})",
+            draft_pr=draft_pr,
+            existing_branch=False,
+            create_pr=True,
+        )
 
+    async def revise(
+        self, item: WorkItemInfo, branch: str, prompt: str, draft_pr: bool = False
+    ) -> ExecutionResult:
+        """Address PR feedback on an EXISTING branch (push updates the open PR)."""
+        repo, base_branch = self._resolve_repo(item)
+        return await self._run_in_workspace(
+            item_id=item.id,
+            repo=repo,
+            branch=branch,
+            base_branch=base_branch,
+            prompt=prompt,
+            commit_msg=f"fix(autopilot): address PR feedback (#{item.id})",
+            draft_pr=draft_pr,
+            existing_branch=True,
+            create_pr=False,
+        )
+
+    async def run_loop(
+        self, name: str, prompt: str, repo: str, base_branch: str, branch: str, draft_pr: bool
+    ) -> ExecutionResult:
+        """Run a scheduled loop's prompt on a fresh branch and open a PR."""
+        return await self._run_in_workspace(
+            item_id=0,
+            repo=repo,
+            branch=branch,
+            base_branch=base_branch,
+            prompt=prompt,
+            commit_msg=f"chore(autopilot): {name}",
+            draft_pr=draft_pr,
+            existing_branch=False,
+            create_pr=True,
+        )
+
+    # ── shared core ─────────────────────────────────────────────────────────
+
+    async def _run_in_workspace(
+        self,
+        *,
+        item_id: int,
+        repo: str,
+        branch: str,
+        base_branch: str,
+        prompt: str,
+        commit_msg: str,
+        draft_pr: bool,
+        existing_branch: bool,
+        create_pr: bool,
+    ) -> ExecutionResult:
+        started = time.monotonic()
+        workspace: _Workspace | None = None
         try:
-            workspace = await self._acquire_workspace(repo, branch, base_branch, item.id)
+            workspace = await self._acquire_workspace(
+                repo, branch, base_branch, item_id, existing_branch
+            )
             work_dir = workspace.path
 
-            self._log.info("executing skill", id=item.id, skill=skill_command)
-            claude_run = await self._run_claude(skill_command, work_dir)
+            self._log.info("running claude", id=item_id, branch=branch)
+            claude_run = await self._run_claude(prompt, work_dir)
 
             if not await self._has_changes(work_dir):
-                self._log.warning("no file changes after execution", id=item.id)
-                return ExecutionResult.fail(item.id, skill_command, "No file changes produced")
+                self._log.warning("no file changes after run", id=item_id, branch=branch)
+                result = ExecutionResult.fail(item_id, prompt, "No file changes produced")
+                result.branch_name = branch
+                result.duration_seconds = time.monotonic() - started
+                result.cost_tokens = claude_run.total_tokens
+                result.cost_usd = claude_run.cost_usd
+                return result
 
             changed_files = await self._changed_files(work_dir)
-
-            commit_msg = f"feat(autopilot): {item.title} (#{item.id})"
             await self._git("add -A", work_dir)
             await self._git(["commit", "-m", commit_msg], work_dir)
             await self._git(f"push -u origin {branch}", work_dir)
@@ -80,42 +144,44 @@ class ClaudeExecutor:
             review = await self._reviewer.review(work_dir)
             if not review.passed:
                 self._log.warning(
-                    "auto-review blocked PR", id=item.id, issues=len(review.critical_issues)
+                    "auto-review blocked PR", id=item_id, issues=len(review.critical_issues)
                 )
                 result = ExecutionResult.fail(
-                    item.id,
-                    skill_command,
+                    item_id,
+                    prompt,
                     "Auto-review blocked: " + "; ".join(review.critical_issues[:3]),
                 )
                 result.branch_name = branch
                 result.files_changed = changed_files
                 result.duration_seconds = time.monotonic() - started
+                result.cost_tokens = claude_run.total_tokens
                 return result
 
-            self._log.info("creating PR", id=item.id, draft=draft_pr)
-            pr_flag = " --draft" if draft_pr else ""
-            pr_run = await self._run_claude(f"/pr-create{pr_flag}", work_dir)
+            pr_run = None
+            if create_pr:
+                self._log.info("creating PR", id=item_id, draft=draft_pr)
+                pr_flag = " --draft" if draft_pr else ""
+                pr_run = await self._run_claude(f"/pr-create{pr_flag}", work_dir)
 
-            result = ExecutionResult.ok(item.id, skill_command, claude_run.text)
+            runs = [claude_run] + ([pr_run] if pr_run else [])
+            result = ExecutionResult.ok(item_id, prompt, claude_run.text)
             result.branch_name = branch
             result.files_changed = changed_files
             result.duration_seconds = time.monotonic() - started
-            result.cost_tokens = claude_run.total_tokens + pr_run.total_tokens
-            result.cost_usd = _sum_cost(claude_run, pr_run)
-            result.pr_url = _extract_pr_url(pr_run.text)
+            result.cost_tokens = sum(r.total_tokens for r in runs)
+            result.cost_usd = _sum_cost(*runs)
+            result.pr_url = _extract_pr_url(pr_run.text) if pr_run else None
             return result
 
         except TimeoutError:
             minutes = self._config.task_timeout_minutes
-            self._log.error("execution timed out", id=item.id, minutes=minutes)
-            result = ExecutionResult.fail(
-                item.id, skill_command, f"Timed out after {minutes} minutes"
-            )
+            self._log.error("execution timed out", id=item_id, minutes=minutes)
+            result = ExecutionResult.fail(item_id, prompt, f"Timed out after {minutes} minutes")
             result.duration_seconds = time.monotonic() - started
             return result
         except Exception as exc:  # noqa: BLE001
-            self._log.error("execution failed", id=item.id, error=str(exc))
-            result = ExecutionResult.fail(item.id, skill_command, str(exc))
+            self._log.error("execution failed", id=item_id, error=str(exc))
+            result = ExecutionResult.fail(item_id, prompt, str(exc))
             result.duration_seconds = time.monotonic() - started
             return result
         finally:
@@ -125,27 +191,34 @@ class ClaudeExecutor:
     # ── workspace lifecycle ─────────────────────────────────────────────────
 
     async def _acquire_workspace(
-        self, repo: str, branch: str, base_branch: str, item_id: int
+        self, repo: str, branch: str, base_branch: str, item_id: int, existing_branch: bool = False
     ) -> _Workspace:
         """Create an isolated checkout for one execution.
 
         With ``use_worktrees`` (default) each execution gets its own ``git
         worktree`` so concurrent items never collide on a shared checkout. When
-        disabled, falls back to an in-place ``checkout -b`` in the repo.
+        disabled, falls back to an in-place ``checkout`` in the repo.
+
+        ``existing_branch=True`` checks out an already-pushed branch (used to
+        revise an open PR) instead of branching from ``base_branch``.
         """
+        if existing_branch:
+            await self._git(["fetch", "origin", branch], repo, check=False)
+        from_ref = f"origin/{branch}" if existing_branch else f"origin/{base_branch}"
+
         if self._config.use_worktrees:
             base_dir = self._config.worktrees_dir or str(
                 Path(tempfile.gettempdir()) / "ai-autopilot-worktrees"
             )
-            Path(base_dir).mkdir(parents=True, exist_ok=True)
+            Path(base_dir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 - fast local mkdir
             safe = branch.replace("/", "-")
             path = str(Path(base_dir) / f"{safe}-{uuid.uuid4().hex[:8]}")
             self._log.info("creating worktree", id=item_id, branch=branch, path=path)
-            await self._git(["worktree", "add", "-b", branch, path, f"origin/{base_branch}"], repo)
+            await self._git(["worktree", "add", "-B", branch, path, from_ref], repo)
             return _Workspace(repo, path, branch, base_branch, is_worktree=True)
 
         self._log.info("creating branch in-place", id=item_id, branch=branch, repo=repo)
-        await self._git(f"checkout -b {branch} origin/{base_branch}", repo)
+        await self._git(["checkout", "-B", branch, from_ref], repo)
         return _Workspace(repo, repo, branch, base_branch, is_worktree=False)
 
     async def _release_workspace(self, ws: _Workspace) -> None:

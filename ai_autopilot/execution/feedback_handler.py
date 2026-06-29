@@ -21,8 +21,8 @@ class FeedbackHandler:
             "handling feedback", id=item.id, revision=revision, feedback=feedback[:200]
         )
         prompt = f"/bugfix-workflow {item.id} — PR feedback to address: {feedback}"
-        result = await self._executor.execute(
-            item, prompt, draft_pr=self._config.require_approval
+        result = await self._executor.revise(
+            item, branch_name, prompt, draft_pr=self._config.pr_is_draft
         )
         if result.success:
             self._log.info("feedback addressed", id=item.id, revision=revision)

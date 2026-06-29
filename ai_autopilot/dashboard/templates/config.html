@@ -31,7 +31,7 @@
 <div class="card">
     <div class="card-header"><h3>🤖 Automation</h3></div>
     <div class="card-body"><table class="config-table"><tbody>
-        <tr><td>Require Approval</td><td>{{ boolean(cfg.require_approval) }}</td></tr>
+        <tr><td>Autonomy Level</td><td><span class="config-bool-true">{{ cfg.autonomy_level }}</span></td></tr>
         <tr><td>Auto Review</td><td>{{ boolean(cfg.auto_review_enabled) }}</td></tr>
         <tr><td>Auto Decompose</td><td>{{ boolean(cfg.auto_decompose) }}</td></tr>
         <tr><td>Feedback Loop</td><td>{{ boolean(cfg.feedback_loop_enabled) }} (max {{ cfg.max_revisions }} revisions)</td></tr>

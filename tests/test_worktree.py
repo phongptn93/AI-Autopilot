@@ -182,6 +182,28 @@ async def test_agent_scratch_isolates_main_checkout(agent_workspace: Path):
     assert (agent_workspace / ".claude" / "skills.md").exists()  # real .claude intact
 
 
+async def test_concurrent_scratch_same_repo_no_collision(agent_workspace: Path):
+    import asyncio
+
+    ex = _executor(
+        workspace_directory=str(agent_workspace), use_worktrees=True,
+        worktrees_dir=str(agent_workspace.parent / "wts"),
+    )
+    # Two tasks acquiring worktrees of the SAME repo at once must both succeed —
+    # the per-repo lock serialises the git bookkeeping so they don't collide.
+    a, b = await asyncio.gather(
+        ex._acquire_agent_scratch(1, ["repo-a"]),
+        ex._acquire_agent_scratch(2, ["repo-a"]),
+    )
+    try:
+        assert a is not None and b is not None and a != b
+        assert (Path(a) / "repo-a" / "README.md").exists()
+        assert (Path(b) / "repo-a" / "README.md").exists()
+    finally:
+        await ex.release_scratch(a)
+        await ex.release_scratch(b)
+
+
 async def test_agent_scratch_disabled_returns_none(agent_workspace: Path):
     ex = _executor(workspace_directory=str(agent_workspace), use_worktrees=False)
     assert await ex._acquire_agent_scratch(1, ["repo-a"]) is None
@@ -194,16 +216,24 @@ async def test_release_scratch_noop_on_workspace(agent_workspace: Path):
     assert (agent_workspace / "repo-a").exists()
 
 
-async def test_prune_orphans_removes_stale_scratch(agent_workspace: Path):
+async def test_prune_orphans_removes_finished_keeps_live(agent_workspace: Path):
     wts = agent_workspace.parent / "wts"
     ex = _executor(
         workspace_directory=str(agent_workspace), use_worktrees=True, worktrees_dir=str(wts)
     )
-    stale = wts / "agent-5-deadbeef"
-    stale.mkdir(parents=True)
-    (stale / "junk.txt").write_text("x")
+    # A finished session wrote its result → safe to remove.
+    finished = wts / "agent-5-deadbeef"
+    (finished / ".autopilot" / "runs").mkdir(parents=True)
+    (finished / ".autopilot" / "runs" / "5.json").write_text('{"status":"completed"}')
+    # A recent session with no result → assume a live interactive session → keep.
+    live = wts / "agent-6-feedface"
+    live.mkdir(parents=True)
+    (live / "working.txt").write_text("in progress")
+
     await ex.prune_orphans()
-    assert not stale.exists()
+
+    assert not finished.exists()   # done → cleaned up
+    assert live.exists()           # recent + no result → preserved (don't kill a live session)
 
 
 def test_build_prompt_legacy_is_skill_only(repo: Path):

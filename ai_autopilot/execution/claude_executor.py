@@ -58,6 +58,22 @@ class ClaudeExecutor:
         self._config = config
         self._reviewer = reviewer
         self._log = get_logger("execution.claude_executor")
+        # Serialise git worktree bookkeeping per source repo: two concurrent tasks
+        # touching the SAME repo must not run `worktree add`/`prune` at once (they
+        # write the same .git and would collide on locks). Keyed by repo path.
+        self._repo_locks: dict[str, asyncio.Lock] = {}
+
+    def _repo_lock(self, repo_path: str) -> asyncio.Lock:
+        """Get-or-create the lock guarding git bookkeeping for one source repo.
+
+        Safe without its own lock: there is no ``await`` here, so concurrent
+        coroutines never interleave inside this method (cooperative scheduling).
+        """
+        lock = self._repo_locks.get(repo_path)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._repo_locks[repo_path] = lock
+        return lock
 
     async def execute(
         self, item: WorkItemInfo, skill_command: str, draft_pr: bool = False
@@ -195,10 +211,13 @@ class ClaudeExecutor:
             for repo in repos:
                 src_repo = str(Path(workspace) / repo)
                 worktree = str(Path(scratch) / repo)
-                await self._git(["fetch", "origin", base_branch], src_repo, check=False)
-                await self._git(
-                    ["worktree", "add", "--detach", worktree, f"origin/{base_branch}"], src_repo
-                )
+                # Serialise per-repo so a concurrent task on the same repo doesn't
+                # collide on .git locks during fetch / worktree add.
+                async with self._repo_lock(src_repo):
+                    await self._git(["fetch", "origin", base_branch], src_repo, check=False)
+                    await self._git(
+                        ["worktree", "add", "--detach", worktree, f"origin/{base_branch}"], src_repo
+                    )
             self._log.info("created agent scratch", id=item_id, path=scratch, repos=repos)
             return scratch
         except Exception as exc:  # noqa: BLE001 — never block the run on isolation failure
@@ -221,8 +240,11 @@ class ClaudeExecutor:
         for sub in Path(run_dir).iterdir():
             if sub.is_dir() and not sub.name.startswith("."):
                 src_repo = str(Path(workspace) / sub.name)
-                await self._git(["worktree", "remove", "--force", str(sub)], src_repo, check=False)
-                await self._git(["worktree", "prune"], src_repo, check=False)
+                async with self._repo_lock(src_repo):  # don't race a concurrent worktree add
+                    await self._git(
+                        ["worktree", "remove", "--force", str(sub)], src_repo, check=False
+                    )
+                    await self._git(["worktree", "prune"], src_repo, check=False)
         shutil.rmtree(run_dir, ignore_errors=True)  # noqa: ASYNC240
 
     # ── Interactive mode: a real Remote-Control session per task ──────────────
@@ -296,11 +318,17 @@ class ClaudeExecutor:
             return None
         return self._result_from_agent(item, agent, self._config.autonomy_level)
 
+    # A scratch with no result file and younger than this is assumed to belong to a
+    # live interactive session (its own process survives an autopilot restart), so
+    # startup pruning leaves it alone rather than yanking files out from under it.
+    _ORPHAN_AGE_LIMIT_SECONDS = 24 * 3600
+
     async def prune_orphans(self) -> None:
         """Best-effort cleanup of scratch dirs + worktree registrations left by a crash.
 
-        Called once on poller startup. Removes stale ``agent-*`` scratch dirs, then
-        prunes each repo's worktree registrations so removed worktrees don't linger.
+        Called once on poller startup. Only removes a scratch we are confident is
+        NOT a live interactive session — it already wrote its result, or it is very
+        old — then prunes each repo's worktree registrations.
         """
         workspace = self._config.workspace_directory
         if not (workspace and self._config.use_worktrees):
@@ -309,12 +337,25 @@ class ClaudeExecutor:
             Path(tempfile.gettempdir()) / "ai-autopilot-worktrees"
         )
         base = Path(base_dir)
+        now = time.time()
         if base.is_dir():
             for sub in base.iterdir():
-                if sub.name.startswith("agent-"):
-                    shutil.rmtree(sub, ignore_errors=True)  # noqa: ASYNC240
+                if not sub.name.startswith("agent-"):
+                    continue
+                runs = sub / ".autopilot" / "runs"
+                finished = runs.is_dir() and any(runs.glob("*.json"))
+                try:
+                    old = (now - sub.stat().st_mtime) > self._ORPHAN_AGE_LIMIT_SECONDS
+                except OSError:
+                    old = False
+                if finished or old:
+                    await self.release_scratch(str(sub))  # remove worktrees + dir safely
+                else:
+                    self._log.info("prune_orphans: keeping live/recent scratch", path=str(sub))
         for repo in discover_repos(workspace):
-            await self._git(["worktree", "prune"], str(Path(workspace) / repo), check=False)
+            src_repo = str(Path(workspace) / repo)
+            async with self._repo_lock(src_repo):
+                await self._git(["worktree", "prune"], src_repo, check=False)
 
     def _result_from_agent(self, item, agent, autonomy: str) -> ExecutionResult:
         if agent is None:

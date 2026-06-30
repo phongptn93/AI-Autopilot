@@ -28,6 +28,7 @@ class AdoPollerService:
         self._processed: dict[int, datetime] = {}
         # Interactive mode: live Remote-Control sessions awaiting their result.json.
         self._live: dict[int, int] = {}  # work_item_id → execution record id
+        self._live_dirs: dict[int, str] = {}  # work_item_id → run dir (worktree scratch)
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
 
@@ -63,6 +64,9 @@ class AdoPollerService:
         orphaned = await self._c.execution_repo.fail_running()
         if requeued or orphaned:
             self._log.info("resumed interrupted runs", requeued=requeued, orphaned=orphaned)
+        # Best-effort: clean worktree scratch dirs orphaned by a crash.
+        with contextlib.suppress(Exception):
+            await self._c.executor.prune_orphans()
 
         while True:
             try:
@@ -120,6 +124,35 @@ class AdoPollerService:
 
         await asyncio.gather(*(self._process(item) for item in new_items))
 
+    def _matched_tag(self, item: WorkItemInfo) -> str | None:
+        """The first effective trigger tag this item carries (for dashboard filtering)."""
+        item_tags = {t.lower() for t in item.tags}
+        for tag in self._config.effective_trigger_tags:
+            if tag.lower() in item_tags:
+                return tag
+        return None
+
+    def _ado_state_for(self, stage: PipelineState) -> str:
+        """Configured ADO ``System.State`` for a pipeline stage ("" = leave as-is)."""
+        cfg = self._config
+        return {
+            PipelineState.IN_PROGRESS: cfg.state_in_progress,
+            PipelineState.IN_REVIEW: cfg.state_in_review,
+            PipelineState.NEEDS_HUMAN: cfg.state_needs_human,
+            PipelineState.DONE: cfg.resolved_state,
+        }.get(stage, "")
+
+    async def _apply_ado_state(self, item_id: int, stage: PipelineState) -> None:
+        """Move the ADO work item to the state configured for this pipeline stage.
+
+        Applies in every execution mode. Blank config for the stage or ``dry_run``
+        → no-op (tags/board still move). Best-effort: failures are logged by the
+        ADO client and never block the pipeline.
+        """
+        name = self._ado_state_for(stage)
+        if name and not self._config.dry_run:
+            await self._c.ado.update_state(item_id, name)
+
     async def _process(self, item: WorkItemInfo) -> None:
         c, cfg = self._c, self._config
         async with self._gate:
@@ -157,8 +190,11 @@ class AdoPollerService:
             return
 
         await c.state_repo.set(item.id, PipelineState.IN_PROGRESS, title=item.title)
+        await self._apply_ado_state(item.id, PipelineState.IN_PROGRESS)
         await c.notifier.notify_started(item, "agent")
-        record_id = await c.execution_repo.start_execution(item, "agent")
+        record_id = await c.execution_repo.start_execution(
+            item, "agent", trigger_tag=self._matched_tag(item)
+        )
 
         result = await c.executor.run_agent(
             item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft
@@ -184,7 +220,7 @@ class AdoPollerService:
     async def _dispatch_interactive(self, item: WorkItemInfo) -> None:
         """Launch a Remote-Control session for the item; finalise later from its result."""
         c, cfg = self._c, self._config
-        launched, session = await c.executor.dispatch_interactive(
+        launched, session, run_dir = await c.executor.dispatch_interactive(
             item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft
         )
         if not launched:
@@ -192,10 +228,14 @@ class AdoPollerService:
                 item, ExecutionResult.fail(item.id, "interactive", "failed to launch session")
             )
             return
+        self._live_dirs[item.id] = run_dir
         await c.state_repo.set(
             item.id, PipelineState.IN_PROGRESS, title=item.title, detail=f"live session: {session}"
         )
-        record_id = await c.execution_repo.start_execution(item, f"interactive:{session}")
+        await self._apply_ado_state(item.id, PipelineState.IN_PROGRESS)
+        record_id = await c.execution_repo.start_execution(
+            item, f"interactive:{session}", trigger_tag=self._matched_tag(item)
+        )
         self._live[item.id] = record_id
         await c.ado.add_comment(
             item.id,
@@ -208,11 +248,13 @@ class AdoPollerService:
         """Finalise interactive sessions whose result.json has appeared."""
         c, cfg = self._c, self._config
         for item_id, record_id in list(self._live.items()):
+            run_dir = self._live_dirs.get(item_id, cfg.workspace_directory)
             item = await c.ado.get_work_item(item_id)
             if item is None:
                 self._live.pop(item_id, None)
+                await c.executor.release_scratch(self._live_dirs.pop(item_id, None))
                 continue
-            result = c.executor.finalize_interactive(item)
+            result = c.executor.finalize_interactive(item, run_dir)
             if result is None:
                 continue  # session still running
             await c.execution_repo.complete_execution(record_id, result)
@@ -222,6 +264,7 @@ class AdoPollerService:
             await self._handle_agent_result(item, result)
             self._processed[item_id] = datetime.now(UTC)
             self._live.pop(item_id, None)
+            await c.executor.release_scratch(self._live_dirs.pop(item_id, None))
             self._log.info(
                 "interactive session finalized",
                 id=item_id,
@@ -233,6 +276,7 @@ class AdoPollerService:
         if result.needs_human:
             c.retry_policy.record_success(item.id)  # escalated — not a retryable failure
             await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=result.error or "")
+            await self._apply_ado_state(item.id, PipelineState.NEEDS_HUMAN)
             await c.ado.add_comment(
                 item.id,
                 "<div><b>🙋 ADO Autopilot — Needs human input</b><br/>"
@@ -247,6 +291,7 @@ class AdoPollerService:
             c.retry_policy.record_success(item.id)
             if result.pr_url and cfg.pr_is_draft:
                 await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
+                await self._apply_ado_state(item.id, PipelineState.IN_REVIEW)
                 await c.ado.add_tag(item.id, cfg.review_tag)
                 await c.ado.add_comment(
                     item.id,
@@ -256,9 +301,11 @@ class AdoPollerService:
                 await c.notifier.notify_completed(item, result, mark_processed=False)
             elif result.pr_url:
                 await c.state_repo.set(item.id, PipelineState.DONE, pr_url=result.pr_url)
+                await self._apply_ado_state(item.id, PipelineState.DONE)
                 await c.notifier.notify_completed(item, result, mark_processed=True)
             else:
-                # report mode: the agent commented a plan, no PR to resolve.
+                # report mode: the agent commented a plan, no PR — leave the ADO
+                # state as-is (the item isn't actually resolved), only tag it.
                 await c.state_repo.set(item.id, PipelineState.DONE)
                 await c.ado.add_tag(item.id, cfg.processed_tag)
                 await c.notifier.notify_completed(item, result, mark_processed=False)
@@ -311,7 +358,10 @@ class AdoPollerService:
             return
 
         await c.notifier.notify_started(item, skill)
-        record_id = await c.execution_repo.start_execution(item, skill)
+        await self._apply_ado_state(item.id, PipelineState.IN_PROGRESS)
+        record_id = await c.execution_repo.start_execution(
+            item, skill, trigger_tag=self._matched_tag(item)
+        )
 
         result = await self._execute(item, skill)
 
@@ -350,6 +400,7 @@ class AdoPollerService:
         if result.success:
             c.retry_policy.record_success(item.id)
             if cfg.pr_is_draft and result.pr_url:
+                await self._apply_ado_state(item.id, PipelineState.IN_REVIEW)
                 await c.ado.add_tag(item.id, cfg.review_tag)
                 await c.ado.add_comment(
                     item.id,
@@ -358,6 +409,8 @@ class AdoPollerService:
                 )
                 await c.notifier.notify_completed(item, result, mark_processed=False)
             else:
+                if result.pr_url:
+                    await self._apply_ado_state(item.id, PipelineState.DONE)
                 await c.notifier.notify_completed(item, result, mark_processed=True)
         else:
             c.retry_policy.record_failure(item.id, result.error or "Unknown error")

@@ -3,12 +3,29 @@
 <div class="page-header">
     <h2>Settings</h2>
     <p>Edit the workspace, connection, and trigger tags. Saved to <code>{{ config_path }}</code> and applied live.</p>
-    <form method="post" action="/dashboard/settings/reload" style="margin-top: 8px;">
-        <button type="submit" class="btn-save" style="background: transparent; border: 1px solid var(--text-muted);">
-            ↻ Reload config from file
-        </button>
-        <span class="form-help">Re-reads <code>{{ config_path }}</code> into the running app — applies fields edited directly in the file (e.g. <code>trigger_states</code>, <code>repos</code>) without a restart. Code changes still need a restart.</span>
-    </form>
+    <div style="margin-top: 8px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
+        <form method="post" action="/dashboard/settings/reload" style="margin:0;">
+            <button type="submit" class="btn-save" style="background: transparent; border: 1px solid var(--text-muted);">
+                ↻ Reload config from file
+            </button>
+        </form>
+        <a href="/dashboard/settings/export" class="btn-save"
+           style="background: transparent; border: 1px solid var(--text-muted); text-decoration:none;">
+            ⬇ Export config
+        </a>
+        <form method="post" action="/dashboard/settings/import" enctype="multipart/form-data"
+              style="margin:0; display:flex; align-items:center; gap:6px;">
+            <input type="file" name="file" accept=".yaml,.yml" required
+                   style="font-size:12px; color:var(--text-muted); max-width:200px;">
+            <button type="submit" class="btn-save" style="background: transparent; border: 1px solid var(--text-muted);">
+                ⬆ Import config
+            </button>
+        </form>
+    </div>
+    <span class="form-help" style="display:block; margin-top:6px;">
+        <b>Export</b> shares your setup (org, tags, states, pipeline mapping…) as a YAML file —
+        <b>never the PAT</b> or this host's trigger tag. Teammates <b>Import</b> it, then set their own PAT.
+    </span>
 </div>
 
 {% if saved %}
@@ -23,6 +40,22 @@
 <div class="card" style="border-color: var(--green);">
     <div class="card-body" style="padding: 14px 22px; color: var(--green);">
         ↻ Config reloaded from <code>{{ config_path }}</code> into the running app.
+    </div>
+</div>
+{% endif %}
+
+{% if imported %}
+<div class="card" style="border-color: var(--green);">
+    <div class="card-body" style="padding: 14px 22px; color: var(--green);">
+        ⬆ Config imported and applied. <span style="color: var(--text-muted);">(PAT and host trigger tag were not changed — set your PAT if needed)</span>
+    </div>
+</div>
+{% endif %}
+
+{% if import_error %}
+<div class="card" style="border-color: var(--red,#e5484d);">
+    <div class="card-body" style="padding: 14px 22px; color: var(--red,#e5484d);">
+        ⚠️ Import failed: {{ import_error }}
     </div>
 </div>
 {% endif %}
@@ -52,7 +85,12 @@
     </div>
     {% for section, fields in sections %}
     <div class="card">
-        <div class="card-header"><h3>{{ section }}</h3></div>
+        <div class="card-header">
+            <h3>{{ section }}</h3>
+            {% if section == 'Pipeline → ADO state' %}
+            <span class="form-help" style="margin:0">Map each autopilot stage to a state on your ADO board. Blank = leave the item's state unchanged for that stage.</span>
+            {% endif %}
+        </div>
         <div class="card-body" style="padding: 8px 22px 18px;">
             {% for f in fields %}
             <div class="form-row">
@@ -76,6 +114,39 @@
                         <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
                     {% elif f.kind == 'list' %}
                         <textarea id="{{ f.key }}" name="{{ f.key }}" rows="2">{{ current.get(f.key)|join(', ') }}</textarea>
+                    {% elif f.kind == 'stateset' %}
+                        {% set selected = current.get(f.key) or [] %}
+                        {% set candidates = (ado_states or []) + selected %}
+                        {% set seen = [] %}
+                        <input type="hidden" name="_all_states__{{ f.key }}" value="{{ candidates|join(',') }}">
+                        {% if candidates %}
+                        <div class="chips">
+                            {% for s in candidates %}
+                            {% if s not in seen %}{% set _ = seen.append(s) %}
+                            <label class="chip {{ 'chip-accent' if s in selected else '' }}">
+                                <input type="checkbox" name="{{ f.key }}__{{ s }}" {% if s in selected %}checked{% endif %}
+                                       style="width:15px;height:15px;accent-color:var(--accent)"> {{ s }}
+                            </label>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        <textarea name="{{ f.key }}__manual" rows="1" placeholder="Add custom states (comma or newline)"
+                                  style="margin-top:8px"></textarea>
+                    {% elif f.kind == 'stateone' %}
+                        {% set cur = current.get(f.key) %}
+                        {% set opts = (ado_states or []) + ([cur] if cur and cur not in (ado_states or []) else []) %}
+                        {% if opts %}
+                        <select id="{{ f.key }}" name="{{ f.key }}">
+                            <option value="" {% if not cur %}selected{% endif %}>(leave unchanged)</option>
+                            {% for opt in opts %}
+                            <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ cur }}"
+                               placeholder="No ADO states loaded — type the state name (blank = unchanged)" />
+                        {% endif %}
                     {% else %}
                         <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
                     {% endif %}

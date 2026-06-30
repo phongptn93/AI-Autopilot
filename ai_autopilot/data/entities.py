@@ -59,6 +59,9 @@ class ExecutionRecord(Base):
     work_item_id: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(500), default="")
     category: Mapped[str] = mapped_column(String(50), default="")
+    # Which trigger tag matched this item (for dashboard filtering). NULL on rows
+    # created before this column existed → only shown under the "All" filter.
+    trigger_tag: Mapped[str | None] = mapped_column(String(100), nullable=True)
     skill_used: Mapped[str] = mapped_column(String(200), default="")
     status: Mapped[ExecutionStatus] = mapped_column(
         Enum(ExecutionStatus, native_enum=False, length=20)

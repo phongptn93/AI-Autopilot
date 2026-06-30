@@ -45,7 +45,9 @@ class AdoNotifier:
             self._log.info("[DRY-RUN] would comment: started", id=item.id)
             return
         await self._ado.add_comment(item.id, comment)
-        await self._ado.update_state(item.id, "Active")
+        # NOTE: ADO ``System.State`` transitions are driven by the poller's pipeline
+        # stages (see AdoPollerService._apply_ado_state), so they apply uniformly
+        # across interactive / assisted / unattended — not just here.
         await self._broadcast(
             NotificationMessage(work_item=item, type=NotificationType.STARTED, skill=skill)
         )
@@ -94,8 +96,8 @@ class AdoNotifier:
         await self._ado.add_comment(item.id, comment)
         if mark_processed:
             await self._ado.add_tag(item.id, self._config.processed_tag)
-            if result.success and result.pr_url:
-                await self._ado.update_state(item.id, self._config.resolved_state)
+        # ADO ``System.State`` is set by the poller at each pipeline stage
+        # (_apply_ado_state) — including resolved_state on Done — not here.
 
         await self._broadcast(
             NotificationMessage(

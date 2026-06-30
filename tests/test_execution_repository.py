@@ -1,0 +1,47 @@
+"""Tests for ExecutionRepository — trigger-tag filtering (dashboard Overview)."""
+
+from __future__ import annotations
+
+import pytest
+
+from ai_autopilot.data import Database
+from ai_autopilot.data.repository import ExecutionRepository
+from ai_autopilot.models import ExecutionResult, WorkItemInfo
+
+
+@pytest.fixture
+async def repo(tmp_path):
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'exec.db'}")
+    await db.create_all()
+    yield ExecutionRepository(db)
+    await db.dispose()
+
+
+async def _record(repo, work_item_id: int, tag: str | None, *, success: bool) -> None:
+    item = WorkItemInfo(id=work_item_id, title=f"t{work_item_id}")
+    rid = await repo.start_execution(item, "agent", trigger_tag=tag)
+    result = (
+        ExecutionResult.ok(work_item_id, "agent", "done")
+        if success
+        else ExecutionResult.fail(work_item_id, "agent", "boom")
+    )
+    await repo.complete_execution(rid, result)
+
+
+async def test_stats_and_recent_filter_by_trigger_tag(repo):
+    await _record(repo, 1, "squad-a", success=True)
+    await _record(repo, 2, "squad-a", success=False)
+    await _record(repo, 3, "squad-b", success=True)
+    await _record(repo, 4, None, success=True)  # legacy row (no tag)
+
+    all_stats = await repo.get_stats()
+    assert all_stats.total == 4
+
+    a = await repo.get_stats(trigger_tag="squad-a")
+    assert (a.total, a.success, a.failed) == (2, 1, 1)
+
+    b_recent = await repo.get_recent(trigger_tag="squad-b")
+    assert [r.work_item_id for r in b_recent] == [3]
+
+    # None / "all" → everything, including the untagged legacy row.
+    assert len(await repo.get_recent()) == 4

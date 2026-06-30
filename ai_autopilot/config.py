@@ -15,6 +15,7 @@ YAML file is strongly recommended — see ``config.example.yaml``.
 from __future__ import annotations
 
 import os
+import socket
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -100,14 +101,28 @@ class Settings(BaseSettings):
     oauth_app_secret: str = ""
 
     # ── Triggering ──
-    trigger_tag: str = "autopilot"
+    # Default is host-specific (``<hostname>-autopilot``) so each machine claims a
+    # distinct stream out of the box — handy with the Board/Overview tag filter and
+    # avoids two laptops fighting over the same work items. Override in config.yaml
+    # to share a stream across machines.
+    trigger_tag: str = Field(default_factory=lambda: f"{socket.gethostname()}-autopilot")
+    # Additional trigger tags (beyond ``trigger_tag``). Items carrying ANY of the
+    # effective trigger tags are processed; the dashboard can filter Board/Overview
+    # by tag. Useful to run several streams (e.g. per squad) on one autopilot.
+    trigger_tags: list[str] = Field(default_factory=list)
     processed_tag: str = "autopilot-done"
     review_tag: str = "autopilot-review"
     # Applied when the agent escalates (needs_human); these items are held — the
     # poller skips them until a human removes the tag.
     escalation_tag: str = "autopilot-hold"
-    # ADO work-item state to set when an item is successfully resolved. Match your
-    # board's template (e.g. "Resolved", "Closed", "Done").
+    # ADO ``System.State`` set at each pipeline stage. Blank = leave the work
+    # item's ADO state unchanged for that stage (only tags/board move). These apply
+    # in every execution mode (interactive / assisted / unattended). Match your
+    # board's template (e.g. Agile: Active / Resolved / Closed).
+    state_in_progress: str = "Active"   # when the autopilot starts working an item
+    state_in_review: str = ""           # when a draft PR opens (awaiting review)
+    state_needs_human: str = ""         # when escalated to a human (held)
+    # ADO state set when an item is successfully resolved (Done with a PR).
     resolved_state: str = "Resolved"
     poll_interval_seconds: int = 30
     # ADO work-item states that are eligible for processing. The default suits the
@@ -133,9 +148,10 @@ class Settings(BaseSettings):
     max_concurrent: int = 1
     task_timeout_minutes: int = 30
     dry_run: bool = False
-    # Run each execution in its own git worktree so concurrent items never share
-    # a checkout (required for safe max_concurrent > 1). Disable to fall back to
-    # in-place checkout in the repo directory.
+    # Run each task in its own git worktree so concurrent tasks never share a
+    # checkout — and, in AI-native (workspace) mode, so the agent never touches
+    # your MAIN checkout (it works in an isolated scratch copy). Required for safe
+    # max_concurrent > 1. Disable to run in-place in the repo / shared workspace.
     use_worktrees: bool = True
     worktrees_dir: str = ""  # empty → <system temp>/ai-autopilot-worktrees
 
@@ -226,6 +242,16 @@ class Settings(BaseSettings):
     @property
     def has_auth(self) -> bool:
         return bool(self.ado_pat or self.oauth_app_id)
+
+    @property
+    def effective_trigger_tags(self) -> list[str]:
+        """All trigger tags (primary + extras), de-duplicated, blanks dropped."""
+        out: list[str] = []
+        for tag in [self.trigger_tag, *self.trigger_tags]:
+            t = (tag or "").strip()
+            if t and t not in out:
+                out.append(t)
+        return out
 
     @property
     def report_only(self) -> bool:

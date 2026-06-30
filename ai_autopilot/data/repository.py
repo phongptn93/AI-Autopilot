@@ -30,13 +30,16 @@ class ExecutionRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    async def start_execution(self, item: WorkItemInfo, skill: str) -> int:
+    async def start_execution(
+        self, item: WorkItemInfo, skill: str, trigger_tag: str | None = None
+    ) -> int:
         async with self._db.session() as session:
             record = ExecutionRecord(
                 work_item_id=item.id,
                 title=item.title,
                 category=str(item.category),
                 skill_used=skill,
+                trigger_tag=trigger_tag,
                 status=ExecutionStatus.RUNNING,
                 started_at=datetime.now(UTC),
             )
@@ -97,12 +100,15 @@ class ExecutionRepository:
             await session.commit()
             return len(rows)
 
-    async def get_recent(self, count: int = 50) -> list[ExecutionRecord]:
+    async def get_recent(
+        self, count: int = 50, trigger_tag: str | None = None
+    ) -> list[ExecutionRecord]:
         async with self._db.session() as session:
+            query = select(ExecutionRecord)
+            if trigger_tag:
+                query = query.where(ExecutionRecord.trigger_tag == trigger_tag)
             rows = await session.execute(
-                select(ExecutionRecord)
-                .order_by(ExecutionRecord.started_at.desc())
-                .limit(count)
+                query.order_by(ExecutionRecord.started_at.desc()).limit(count)
             )
             return list(rows.scalars().all())
 
@@ -132,11 +138,15 @@ class ExecutionRepository:
             )
             return list(rows.scalars().all())
 
-    async def get_stats(self, since: datetime | None = None) -> ExecutionStats:
+    async def get_stats(
+        self, since: datetime | None = None, trigger_tag: str | None = None
+    ) -> ExecutionStats:
         async with self._db.session() as session:
             base = select(func.count()).select_from(ExecutionRecord)
             if since is not None:
                 base = base.where(ExecutionRecord.started_at >= since)
+            if trigger_tag:
+                base = base.where(ExecutionRecord.trigger_tag == trigger_tag)
 
             total = (await session.execute(base)).scalar_one()
             success = (
@@ -153,6 +163,8 @@ class ExecutionRepository:
             avg_query = select(func.avg(ExecutionRecord.duration_seconds))
             if since is not None:
                 avg_query = avg_query.where(ExecutionRecord.started_at >= since)
+            if trigger_tag:
+                avg_query = avg_query.where(ExecutionRecord.trigger_tag == trigger_tag)
             avg = (await session.execute(avg_query)).scalar() or 0.0
 
             return ExecutionStats(

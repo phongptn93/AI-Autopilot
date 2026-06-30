@@ -14,12 +14,16 @@ class _FakeAdo:
     def __init__(self):
         self.tags: list[tuple[int, str]] = []
         self.comments: list[tuple[int, str]] = []
+        self.states: list[tuple[int, str]] = []
 
     async def add_tag(self, work_item_id, tag):
         self.tags.append((work_item_id, tag))
 
     async def add_comment(self, work_item_id, text):
         self.comments.append((work_item_id, text))
+
+    async def update_state(self, work_item_id, new_state):
+        self.states.append((work_item_id, new_state))
 
     async def get_work_item(self, work_item_id):
         return WorkItemInfo(id=work_item_id, title="t", work_item_type="Task")
@@ -28,19 +32,27 @@ class _FakeAdo:
 class _FakeExec:
     def __init__(self, dispatch=(True, "autopilot-7"), final=None):
         self._dispatch, self._final = dispatch, final
+        self.released: list[str | None] = []
 
     async def dispatch_interactive(self, item, *, autonomy, draft_pr):
-        return self._dispatch
+        launched, session = self._dispatch
+        return launched, session, "/ws/scratch"
 
-    def finalize_interactive(self, item):
+    def finalize_interactive(self, item, run_dir):
         return self._final
+
+    async def release_scratch(self, run_dir):
+        self.released.append(run_dir)
+
+    async def prune_orphans(self):
+        pass
 
 
 class _FakeExecRepo:
     def __init__(self):
         self.completed: list[tuple[int, bool]] = []
 
-    async def start_execution(self, item, skill):
+    async def start_execution(self, item, skill, trigger_tag=None):
         return 99
 
     async def complete_execution(self, record_id, result):
@@ -137,6 +149,41 @@ async def test_report_mode_marks_processed_without_pr():
     assert (7, c.config.processed_tag) in c.ado.tags
 
 
+async def test_ado_state_resolved_on_done_with_pr():
+    p, c = _poller(autonomy="unattended")            # non-draft → Done
+    res = ExecutionResult.ok(7, "agent", "done")
+    res.pr_url = "https://pr"
+    await p._handle_agent_result(_item(), res)
+    assert (7, "Resolved") in c.ado.states           # resolved_state (default)
+
+
+async def test_ado_state_in_review_when_configured():
+    p, c = _poller(autonomy="assisted")              # draft → In review
+    c.config.state_in_review = "In Review"
+    res = ExecutionResult.ok(7, "agent", "done")
+    res.pr_url = "https://pr"
+    await p._handle_agent_result(_item(), res)
+    assert (7, "In Review") in c.ado.states
+
+
+async def test_ado_state_unchanged_when_blank():
+    p, c = _poller()
+    c.config.state_needs_human = ""                  # blank (default) → no ADO write
+    res = ExecutionResult.fail(7, "agent", "x")
+    res.needs_human = True
+    await p._handle_agent_result(_item(), res)
+    assert c.ado.states == []
+
+
+async def test_ado_state_skipped_in_dry_run():
+    p, c = _poller(autonomy="unattended")
+    c.config.dry_run = True
+    res = ExecutionResult.ok(7, "agent", "done")
+    res.pr_url = "https://pr"
+    await p._handle_agent_result(_item(), res)
+    assert c.ado.states == []                         # dry_run → no ADO state write
+
+
 async def test_failure_retries_when_not_exhausted():
     p, c = _poller(exhausted=False)
     res = ExecutionResult.fail(7, "agent", "boom")
@@ -157,6 +204,7 @@ async def test_dispatch_interactive_tracks_live_session():
     c.executor = _FakeExec(dispatch=(True, "autopilot-7"))
     await p._dispatch_interactive(_item())
     assert p._live == {7: 99}                                 # tracked for finalisation
+    assert p._live_dirs == {7: "/ws/scratch"}                 # run dir tracked for cleanup
     assert (7, PipelineState.IN_PROGRESS) in c.state_repo.calls
     assert any("Live session started" in t for _, t in c.ado.comments)
 
@@ -167,8 +215,11 @@ async def test_finalize_live_session_when_result_ready():
     done.pr_url = "https://pr"
     c.executor = _FakeExec(final=done)
     p._live = {7: 99}
+    p._live_dirs = {7: "/ws/scratch"}
     await p._finalize_live_sessions()
     assert p._live == {}                                       # cleared after finalise
+    assert p._live_dirs == {}                                  # run dir cleared
+    assert c.executor.released == ["/ws/scratch"]              # scratch torn down
     assert c.execution_repo.completed == [(99, True)]
     assert (7, c.config.review_tag) in c.ado.tags              # went to In review
 

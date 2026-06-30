@@ -5,7 +5,16 @@
         <h2>Board</h2>
         <p>Live view of every work item tagged for the autopilot in <span class="mono">{{ project }}</span> — {{ total }} item(s)</p>
     </div>
-    <div class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto-refresh 15s</span></div>
+    <div style="display:flex;align-items:center;gap:16px">
+        {% if tags %}
+        <select onchange="location.href='/dashboard/board' + (this.value==='all' ? '' : '?tag=' + encodeURIComponent(this.value))"
+                style="background:var(--bg-card);color:var(--text);border:1px solid var(--border,#23232b);border-radius:8px;padding:6px 10px;font-size:13px">
+            <option value="all" {% if selected_tag == 'all' %}selected{% endif %}>All tags</option>
+            {% for t in tags %}<option value="{{ t }}" {% if selected_tag == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        <div class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto-refresh 15s</span></div>
+    </div>
 </div>
 
 {% if error %}
@@ -64,12 +73,14 @@
   (function () {
     const mount = document.getElementById('board-mount');
     const stamp = document.getElementById('board-updated');
+    const tag = {{ selected_tag|tojson }};
+    const partialUrl = '/dashboard/board/partial' + (tag && tag !== 'all' ? '?tag=' + encodeURIComponent(tag) : '');
     let busy = false;
     async function refresh() {
       if (busy || document.hidden) return;
       busy = true;
       try {
-        const r = await fetch('/dashboard/board/partial', { headers: { 'X-Requested-With': 'fetch' } });
+        const r = await fetch(partialUrl, { headers: { 'X-Requested-With': 'fetch' } });
         if (r.ok) { mount.innerHTML = await r.text(); stamp.textContent = 'updated just now'; }
       } catch (e) { /* keep last view */ }
       finally { busy = false; }

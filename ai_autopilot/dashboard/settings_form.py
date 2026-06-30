@@ -20,7 +20,7 @@ import yaml
 class Field:
     key: str
     label: str
-    kind: str  # text | password | int | bool | select
+    kind: str  # text | password | int | bool | select | list | stateset | stateone
     section: str
     help: str = ""
     options: tuple[str, ...] = field(default_factory=tuple)
@@ -43,17 +43,28 @@ FIELDS: tuple[Field, ...] = (
     # ── Tags & trigger ──
     Field("trigger_tag", "Trigger tag", "text", "Tags & Trigger",
           "Work items with this tag get processed."),
-    Field("trigger_states", "Trigger states", "list", "Tags & Trigger",
-          "ADO states eligible for processing (comma or newline separated) — match your board."),
+    Field("trigger_tags", "Additional trigger tags", "list", "Tags & Trigger",
+          "Extra tags to also process (comma or newline separated). Board/Overview can filter by tag."),
+    Field("trigger_states", "Trigger states", "stateset", "Tags & Trigger",
+          "ADO states eligible for processing — tick from your board, or add custom ones below."),
     Field("processed_tag", "Processed tag", "text", "Tags & Trigger",
           "Added after a work item is handled (Done)."),
     Field("review_tag", "Review tag", "text", "Tags & Trigger",
           "Marks items whose draft PR awaits review (In review)."),
     Field("escalation_tag", "Escalation tag", "text", "Tags & Trigger",
           "Added when the agent needs a human (Needs human); held items are skipped."),
-    Field("resolved_state", "Resolved state", "text", "Tags & Trigger",
-          "ADO state set when an item is resolved — match your board (Resolved / Closed / Done)."),
     Field("poll_interval_seconds", "Poll interval (seconds)", "int", "Tags & Trigger"),
+    # ── Pipeline → ADO state ──
+    # Each autopilot pipeline stage maps to a state on your ADO board. Blank =
+    # leave the work item's ADO state unchanged for that stage (only tags/board move).
+    Field("state_in_progress", "▶ In progress", "stateone", "Pipeline → ADO state",
+          "Set when the autopilot starts working an item."),
+    Field("state_in_review", "🔍 In review", "stateone", "Pipeline → ADO state",
+          "Set when a draft PR opens (awaiting human review)."),
+    Field("state_needs_human", "🙋 Needs human", "stateone", "Pipeline → ADO state",
+          "Set when the agent escalates and holds the item for a human."),
+    Field("resolved_state", "✅ Resolved (done)", "stateone", "Pipeline → ADO state",
+          "Set when an item is resolved with a PR (Resolved / Closed / Done)."),
     # ── Execution & autonomy ──
     Field("execution_mode", "Execution mode", "select", "Execution & Autonomy",
           "interactive = launch a Remote-Control Claude session per task you can /rc into and steer; "
@@ -62,6 +73,9 @@ FIELDS: tuple[Field, ...] = (
     Field("autonomy_level", "Autonomy level", "select", "Execution & Autonomy",
           "report = comment only, assisted = draft PR, unattended = auto PR.",
           ("report", "assisted", "unattended")),
+    Field("use_worktrees", "Isolate tasks (git worktree)", "bool", "Execution & Autonomy",
+          "Run each task in its own git worktree so concurrent tasks never touch your main "
+          "checkout. Turn off to run in-place in the shared workspace."),
     Field("max_concurrent", "Max concurrent", "int", "Execution & Autonomy",
           "Restart required to take effect."),
     Field("task_timeout_minutes", "Task timeout (minutes)", "int", "Execution & Autonomy"),
@@ -75,6 +89,41 @@ RESTART_REQUIRED = frozenset({"max_concurrent"})
 
 # Never echo these values back into the form.
 SECRET_KEYS = frozenset({"ado_pat"})
+
+# Keys excluded from an exported/shared config: secrets + machine-specific values.
+# Sharing these would leak credentials or pin a teammate to this host's paths/tag.
+EXPORT_EXCLUDE = frozenset(
+    {"ado_pat", "oauth_app_id", "oauth_app_secret", "workspace_directory", "trigger_tag"}
+)
+
+
+def export_settings(config: Any) -> dict[str, Any]:
+    """Shareable settings dict: the editable fields minus secrets and machine-
+    specific values (PAT, OAuth app, workspace path, the per-host trigger tag)."""
+    return {
+        f.key: getattr(config, f.key, None)
+        for f in FIELDS
+        if f.key not in EXPORT_EXCLUDE
+    }
+
+
+def export_yaml(config: Any) -> str:
+    """Serialise :func:`export_settings` to a YAML document for download."""
+    return yaml.safe_dump(export_settings(config), sort_keys=False, allow_unicode=True)
+
+
+def import_settings(raw: str, valid_keys: set[str]) -> dict[str, Any]:
+    """Parse an uploaded YAML config into an updates dict.
+
+    Keeps only known Settings keys, and defensively drops secrets / machine-
+    specific keys (``EXPORT_EXCLUDE``) even if the file contains them.
+    """
+    data = yaml.safe_load(raw) or {}
+    if not isinstance(data, dict):
+        raise ValueError("Config file must be a YAML mapping")
+    return {
+        k: v for k, v in data.items() if k in valid_keys and k not in EXPORT_EXCLUDE
+    }
 
 
 def sections() -> list[tuple[str, list[Field]]]:
@@ -108,9 +157,28 @@ def parse_form(form: Mapping[str, Any]) -> dict[str, Any]:
         elif f.kind == "list":
             raw = str(form.get(f.key, ""))
             updates[f.key] = [x.strip() for x in re.split(r"[,\n]", raw) if x.strip()]
+        elif f.kind == "stateset":
+            updates[f.key] = parse_states(form, f.key)
         else:  # text, select
             updates[f.key] = str(form.get(f.key, "")).strip()
     return updates
+
+
+def parse_states(form: Mapping[str, Any], key: str) -> list[str]:
+    """Collect a state set: ticked ``<key>__<state>`` checkboxes plus any custom
+    states typed into the ``<key>__manual`` textarea, de-duplicated in order.
+
+    The full candidate set is carried in ``_all_states__<key>`` (comma-joined), so
+    a state is selected when its checkbox is present in the form.
+    """
+    candidates = [s for s in str(form.get(f"_all_states__{key}", "")).split(",") if s]
+    picked = [s for s in candidates if f"{key}__{s}" in form]
+    manual = [x.strip() for x in re.split(r"[,\n]", str(form.get(f"{key}__manual", ""))) if x.strip()]
+    out: list[str] = []
+    for s in [*picked, *manual]:
+        if s not in out:
+            out.append(s)
+    return out
 
 
 def parse_repos(form: Mapping[str, Any]) -> list[str]:

@@ -121,18 +121,25 @@ class ClaudeExecutor:
         workspace = self._config.workspace_directory
         started = time.monotonic()
 
+        repos = self._allowed_repos(workspace)
+        # Isolate this task in its own worktree scratch so it never touches the
+        # user's main checkout; None → run in the shared workspace (disabled / no repos).
+        scratch = await self._acquire_agent_scratch(item.id, repos)
+        run_dir = scratch or workspace
         try:
-            repos = self._allowed_repos(workspace)
-            clear_result(workspace, item.id)
-            activity.clear(workspace, item.id)
-            activity.append(workspace, item.id, f"🚀 agent started — repos: {', '.join(repos) or '-'}")
+            clear_result(run_dir, item.id)
+            activity.clear(workspace, item.id)  # activity stays in the real workspace (dashboard reads it)
+            isolated = " (isolated worktree)" if scratch else ""
+            activity.append(
+                workspace, item.id, f"🚀 agent started{isolated} — repos: {', '.join(repos) or '-'}"
+            )
             brief = self._build_brief(item, repos, autonomy=autonomy, draft_pr=draft_pr)
-            self._log.info("running agent", id=item.id, cwd=workspace, repos=repos)
+            self._log.info("running agent", id=item.id, cwd=run_dir, repos=repos, isolated=bool(scratch))
             claude_run = await self._run_claude(
-                brief, workspace, on_event=lambda line: activity.append(workspace, item.id, line)
+                brief, run_dir, on_event=lambda line: activity.append(workspace, item.id, line)
             )
             activity.append(workspace, item.id, "✅ agent run finished")
-            result = self._result_from_agent(item, read_result(workspace, item.id), autonomy)
+            result = self._result_from_agent(item, read_result(run_dir, item.id), autonomy)
             result.cost_tokens = claude_run.total_tokens
             result.cost_usd = claude_run.cost_usd
         except TimeoutError:
@@ -142,6 +149,8 @@ class ClaudeExecutor:
         except Exception as exc:  # noqa: BLE001 — never leave the item stuck IN_PROGRESS
             self._log.error("agent crashed", id=item.id, error=str(exc))
             result = ExecutionResult.fail(item.id, "agent", str(exc))
+        finally:
+            await self.release_scratch(scratch)
         result.duration_seconds = time.monotonic() - started
         return result
 
@@ -153,28 +162,95 @@ class ClaudeExecutor:
         wanted = {a.lower() for a in self._config.allowed_repos}
         return [r for r in discovered if r.lower() in wanted]
 
+    # ── Per-task isolation: scratch workspace of git worktrees ────────────────
+
+    async def _acquire_agent_scratch(self, item_id: int, repos: list[str]) -> str | None:
+        """Build an isolated scratch workspace for one AI-native task.
+
+        ``<base>/agent-<id>-<uuid>`` holds a *copy* of the shared ``.claude`` plus a
+        ``git worktree`` of each allowed repo, so Claude (cwd = scratch) edits and
+        commits in the worktrees — never touching the user's main checkout — and
+        concurrent tasks never collide. Returns the scratch path, or ``None`` to
+        fall back to running in the shared workspace (disabled / no repos / error).
+        """
+        workspace = self._config.workspace_directory
+        if not (workspace and self._config.use_worktrees and repos):
+            return None
+        base_dir = self._config.worktrees_dir or str(
+            Path(tempfile.gettempdir()) / "ai-autopilot-worktrees"
+        )
+        Path(base_dir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 - fast local mkdir
+        scratch = str(Path(base_dir) / f"agent-{item_id}-{uuid.uuid4().hex[:8]}")
+        base_branch = self._config.base_branch
+        try:
+            Path(scratch).mkdir(parents=True, exist_ok=False)  # noqa: ASYNC240
+            # Copy (not link) the shared config so teardown can never delete the
+            # real .claude. Exclude its own .git to keep the copy small.
+            src_claude = Path(workspace) / ".claude"
+            if src_claude.is_dir():
+                shutil.copytree(  # noqa: ASYNC240 - small local copy
+                    src_claude, Path(scratch) / ".claude",
+                    ignore=shutil.ignore_patterns(".git"),
+                )
+            for repo in repos:
+                src_repo = str(Path(workspace) / repo)
+                worktree = str(Path(scratch) / repo)
+                await self._git(["fetch", "origin", base_branch], src_repo, check=False)
+                await self._git(
+                    ["worktree", "add", "--detach", worktree, f"origin/{base_branch}"], src_repo
+                )
+            self._log.info("created agent scratch", id=item_id, path=scratch, repos=repos)
+            return scratch
+        except Exception as exc:  # noqa: BLE001 — never block the run on isolation failure
+            self._log.warning(
+                "agent scratch failed — falling back to shared workspace",
+                id=item_id, error=str(exc),
+            )
+            await self.release_scratch(scratch)
+            return None
+
+    async def release_scratch(self, run_dir: str | None) -> None:
+        """Tear down a scratch workspace (worktrees + dir). Best-effort, never raises.
+
+        No-op when ``run_dir`` is the shared workspace or missing. Worktree source
+        repos are derived from the scratch's subfolders (``<workspace>/<name>``).
+        """
+        workspace = self._config.workspace_directory
+        if not run_dir or run_dir == workspace or not Path(run_dir).exists():
+            return
+        for sub in Path(run_dir).iterdir():
+            if sub.is_dir() and not sub.name.startswith("."):
+                src_repo = str(Path(workspace) / sub.name)
+                await self._git(["worktree", "remove", "--force", str(sub)], src_repo, check=False)
+                await self._git(["worktree", "prune"], src_repo, check=False)
+        shutil.rmtree(run_dir, ignore_errors=True)  # noqa: ASYNC240
+
     # ── Interactive mode: a real Remote-Control session per task ──────────────
 
     async def dispatch_interactive(
         self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, str]:
         """Launch a real, Remote-Control-enabled Claude Code session for this item.
 
         The session is interactive — the human can attach via Remote Control from
         claude.ai and steer it — and writes the same ``result.json`` contract when
         done, which the poller picks up to finalise. Fire-and-forget: returns
-        ``(launched, session_name)`` immediately without awaiting the session.
+        ``(launched, session_name, run_dir)`` immediately. ``run_dir`` is the
+        isolated worktree scratch (or the shared workspace) — the poller reads the
+        result from it and releases it on finalise.
         """
         workspace = self._config.workspace_directory
         repos = self._allowed_repos(workspace)
-        clear_result(workspace, item.id)
+        scratch = await self._acquire_agent_scratch(item.id, repos)
+        run_dir = scratch or workspace
+        clear_result(run_dir, item.id)
         activity.clear(workspace, item.id)
 
         # Write the full brief to a file and seed the session with a short prompt
         # (avoids passing a long, multi-line prompt through the shell).
         brief = self._build_brief(item, repos, autonomy=autonomy, draft_pr=draft_pr)
         brief_rel = f".autopilot/runs/{item.id}.brief.md"
-        brief_path = Path(workspace) / brief_rel
+        brief_path = Path(run_dir) / brief_rel
         brief_path.parent.mkdir(parents=True, exist_ok=True)
         brief_path.write_text(brief, encoding="utf-8")
 
@@ -197,24 +273,48 @@ class ClaudeExecutor:
                 # visible instead of vanishing) and lets cmd resolve claude.cmd via
                 # PATHEXT — passing the bare `claude` shim to Popen does not work.
                 subprocess.Popen(  # noqa: ASYNC220 — fire-and-forget launch
-                    ["cmd", "/k", "claude", *cli_args], cwd=workspace,
+                    ["cmd", "/k", "claude", *cli_args], cwd=run_dir,
                     creationflags=subprocess.CREATE_NEW_CONSOLE,
                 )
             else:
                 claude = shutil.which("claude") or "claude"
-                subprocess.Popen([claude, *cli_args], cwd=workspace, start_new_session=True)  # noqa: ASYNC220
-            self._log.info("launched interactive session", id=item.id, session=session)
-            return True, session
+                subprocess.Popen([claude, *cli_args], cwd=run_dir, start_new_session=True)  # noqa: ASYNC220
+            self._log.info(
+                "launched interactive session", id=item.id, session=session,
+                cwd=run_dir, isolated=bool(scratch),
+            )
+            return True, session, run_dir
         except Exception as exc:  # noqa: BLE001
             self._log.error("failed to launch interactive session", id=item.id, error=str(exc))
-            return False, session
+            await self.release_scratch(scratch)
+            return False, session, workspace
 
-    def finalize_interactive(self, item: WorkItemInfo) -> ExecutionResult | None:
+    def finalize_interactive(self, item: WorkItemInfo, run_dir: str) -> ExecutionResult | None:
         """Map a live session's result if it has finished; ``None`` while running."""
-        agent = read_result(self._config.workspace_directory, item.id)
+        agent = read_result(run_dir, item.id)
         if agent is None:
             return None
         return self._result_from_agent(item, agent, self._config.autonomy_level)
+
+    async def prune_orphans(self) -> None:
+        """Best-effort cleanup of scratch dirs + worktree registrations left by a crash.
+
+        Called once on poller startup. Removes stale ``agent-*`` scratch dirs, then
+        prunes each repo's worktree registrations so removed worktrees don't linger.
+        """
+        workspace = self._config.workspace_directory
+        if not (workspace and self._config.use_worktrees):
+            return
+        base_dir = self._config.worktrees_dir or str(
+            Path(tempfile.gettempdir()) / "ai-autopilot-worktrees"
+        )
+        base = Path(base_dir)
+        if base.is_dir():
+            for sub in base.iterdir():
+                if sub.name.startswith("agent-"):
+                    shutil.rmtree(sub, ignore_errors=True)  # noqa: ASYNC240
+        for repo in discover_repos(workspace):
+            await self._git(["worktree", "prune"], str(Path(workspace) / repo), check=False)
 
     def _result_from_agent(self, item, agent, autonomy: str) -> ExecutionResult:
         if agent is None:

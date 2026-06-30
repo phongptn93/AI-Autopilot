@@ -1,8 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-header">
-    <h2>Overview</h2>
-    <p>Real-time execution metrics and recent activity</p>
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+    <div>
+        <h2>Overview</h2>
+        <p>Real-time execution metrics and recent activity</p>
+    </div>
+    {% if tags %}
+    <select onchange="location.href='/dashboard/' + (this.value==='all' ? '' : '?tag=' + encodeURIComponent(this.value))"
+            style="background:var(--bg-card);color:var(--text);border:1px solid var(--border,#23232b);border-radius:8px;padding:6px 10px;font-size:13px">
+        <option value="all" {% if selected_tag == 'all' %}selected{% endif %}>All tags</option>
+        {% for t in tags %}<option value="{{ t }}" {% if selected_tag == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+    {% endif %}
 </div>
 
 <div class="stats-grid">

@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from ai_autopilot import activity
@@ -77,10 +78,21 @@ def create_dashboard_router() -> APIRouter:
     @router.get("/", response_class=HTMLResponse)
     async def overview(request: Request):
         c: Container = request.app.state.container
-        stats = await c.execution_repo.get_stats()
-        recent = await c.execution_repo.get_recent(20)
+        selected_tag = request.query_params.get("tag") or "all"
+        tag_filter = None if selected_tag == "all" else selected_tag
+        stats = await c.execution_repo.get_stats(trigger_tag=tag_filter)
+        recent = await c.execution_repo.get_recent(20, trigger_tag=tag_filter)
         return _TEMPLATES.TemplateResponse(
-            request, "overview.html", _ctx(request, "overview", stats=stats, recent=recent)
+            request,
+            "overview.html",
+            _ctx(
+                request,
+                "overview",
+                stats=stats,
+                recent=recent,
+                tags=c.config.effective_trigger_tags,
+                selected_tag=selected_tag,
+            ),
         )
 
     async def _board_ctx(request: Request) -> dict:
@@ -90,6 +102,11 @@ def create_dashboard_router() -> APIRouter:
             error = None
         except Exception as exc:  # noqa: BLE001
             items, error = [], str(exc)
+        tags = c.config.effective_trigger_tags
+        selected_tag = request.query_params.get("tag") or "all"
+        if selected_tag != "all":
+            sel = selected_tag.lower()
+            items = [i for i in items if any(t.lower() == sel for t in i.tags)]
         records = await c.execution_repo.get_recent(200)
         states = {s.work_item_id: s.state.value for s in await c.state_repo.all()}
         cols = build_board(items, latest_records(records), c.config, states)
@@ -102,6 +119,8 @@ def create_dashboard_router() -> APIRouter:
             error=error,
             project=c.config.ado_project,
             interactive=c.config.execution_mode == "interactive",
+            tags=tags,
+            selected_tag=selected_tag,
         )
 
     @router.get("/board", response_class=HTMLResponse)
@@ -174,7 +193,13 @@ def create_dashboard_router() -> APIRouter:
         )
 
     @router.get("/settings", response_class=HTMLResponse)
-    async def settings_page(request: Request, saved: int = 0, reloaded: int = 0):
+    async def settings_page(
+        request: Request,
+        saved: int = 0,
+        reloaded: int = 0,
+        imported: int = 0,
+        import_error: str = "",
+    ):
         c: Container = request.app.state.container
         current = {
             f.key: getattr(c.config, f.key, "")
@@ -184,6 +209,10 @@ def create_dashboard_router() -> APIRouter:
         has_pat = bool(getattr(c.config, "ado_pat", ""))
         discovered = discover_repos(c.config.workspace_directory)
         allowed = {r.lower() for r in c.config.allowed_repos}
+        try:
+            ado_states = await c.ado.get_states()
+        except Exception:  # noqa: BLE001 — Settings must render even if ADO is down
+            ado_states = []
         return _TEMPLATES.TemplateResponse(
             request,
             "settings.html",
@@ -196,9 +225,12 @@ def create_dashboard_router() -> APIRouter:
                 restart_keys=settings_form.RESTART_REQUIRED,
                 saved=bool(saved),
                 reloaded=bool(reloaded),
+                imported=bool(imported),
+                import_error=import_error,
                 config_path=str(config_file_path()),
                 repos=discovered,
                 allowed_repos=allowed,
+                ado_states=ado_states,
             ),
         )
 
@@ -224,6 +256,40 @@ def create_dashboard_router() -> APIRouter:
         c.ado.refresh()  # re-read org URL if it changed
         _log.info("config reloaded from file via dashboard", changed=changed)
         return RedirectResponse(url="/dashboard/settings?reloaded=1", status_code=303)
+
+    @router.get("/settings/export")
+    async def export_config(request: Request):
+        """Download the current config as YAML, minus secrets + machine-specific keys."""
+        c: Container = request.app.state.container
+        body = settings_form.export_yaml(c.config)
+        _log.info("config exported via dashboard")
+        return Response(
+            content=body,
+            media_type="application/x-yaml",
+            headers={"Content-Disposition": 'attachment; filename="autopilot-config.yaml"'},
+        )
+
+    @router.post("/settings/import")
+    async def import_config(request: Request):
+        """Apply an uploaded YAML config (shared by a teammate). PAT is never imported."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            return RedirectResponse("/dashboard/settings?import_error=No+file", status_code=303)
+        raw = (await upload.read()).decode("utf-8", errors="replace")
+        try:
+            updates = settings_form.import_settings(raw, set(type(c.config).model_fields))
+        except (ValueError, yaml.YAMLError) as exc:
+            _log.warning("config import failed", error=str(exc))
+            return RedirectResponse("/dashboard/settings?import_error=Invalid+file", status_code=303)
+        if not updates:
+            return RedirectResponse("/dashboard/settings?import_error=Nothing+to+import", status_code=303)
+        settings_form.save_to_yaml(config_file_path(), updates)
+        settings_form.apply_to_config(c.config, updates)
+        c.ado.refresh()
+        _log.info("config imported via dashboard", keys=sorted(updates.keys()))
+        return RedirectResponse("/dashboard/settings?imported=1", status_code=303)
 
     return router
 

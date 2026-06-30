@@ -33,6 +33,7 @@ def test_metrics_endpoint(client: TestClient):
     "path",
     [
         "/dashboard",
+        "/dashboard/board",
         "/dashboard/history",
         "/dashboard/config",
         "/dashboard/capabilities",
@@ -64,6 +65,42 @@ def test_settings_post_persists_and_applies(tmp_path, monkeypatch):
     saved = yaml.safe_load(cfg_file.read_text())
     assert saved["trigger_tag"] == "deploy-me"
     assert saved["workspace_directory"] == "/ws"
+
+
+def test_export_config_omits_pat(tmp_path):
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        ado_pat="top-secret", ado_project="ExportProj",
+    )
+    with TestClient(create_app(settings)) as client:
+        resp = client.get("/dashboard/settings/export")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers["content-disposition"]
+    assert "ExportProj" in resp.text
+    assert "top-secret" not in resp.text          # PAT never exported
+    assert "ado_pat" not in resp.text
+
+
+def test_import_config_applies_without_pat(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    shared = "ado_project: TeamProj\nresolved_state: Closed\nado_pat: should-be-ignored\n"
+    with TestClient(create_app(settings)) as client:
+        resp = client.post(
+            "/dashboard/settings/import",
+            files={"file": ("autopilot-config.yaml", shared, "application/x-yaml")},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        cfg = client.app.state.container.config
+        assert cfg.ado_project == "TeamProj"        # applied live
+        assert cfg.resolved_state == "Closed"
+        assert cfg.ado_pat == ""                     # PAT not imported
+    import yaml
+
+    saved = yaml.safe_load(cfg_file.read_text())
+    assert "ado_pat" not in saved                    # PAT never written
 
 
 def test_health_reports_checks(client: TestClient):

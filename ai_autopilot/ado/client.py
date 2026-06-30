@@ -48,12 +48,19 @@ class AdoClient:
     def _url(self, path: str) -> str:
         return f"{self._base}/{self._config.ado_project}/_apis/{path}"
 
+    def _tag_clause(self) -> str:
+        """WIQL predicate matching ANY configured trigger tag, e.g.
+        ``([System.Tags] CONTAINS 'a' OR [System.Tags] CONTAINS 'b')``."""
+        tags = self._config.effective_trigger_tags or ["autopilot"]
+        ors = " OR ".join(f"[System.Tags] CONTAINS '{t}'" for t in tags)
+        return f"({ors})"
+
     async def get_pending_work_items(self) -> list[WorkItemInfo]:
-        """Query work items tagged with the trigger tag in pending states."""
+        """Query work items tagged with any trigger tag in pending states."""
         states = ", ".join(f"'{s}'" for s in self._config.trigger_states) or "'New'"
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
-            f"WHERE [System.Tags] CONTAINS '{self._config.trigger_tag}' "
+            f"WHERE {self._tag_clause()} "
             f"AND [System.State] IN ({states}) "
             f"AND [System.TeamProject] = '{self._config.ado_project}' "
             "ORDER BY [System.ChangedDate] DESC"
@@ -81,7 +88,7 @@ class AdoClient:
         ids = [r["id"] for r in refs]
         self._log.info(
             "ADO poll",
-            tag=self._config.trigger_tag,
+            tags=self._config.effective_trigger_tags,
             states=self._config.trigger_states,
             project=self._config.ado_project,
             matched=len(ids),
@@ -98,7 +105,7 @@ class AdoClient:
         """
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
-            f"WHERE [System.Tags] CONTAINS '{self._config.trigger_tag}' "
+            f"WHERE {self._tag_clause()} "
             f"AND [System.TeamProject] = '{self._config.ado_project}' "
             "ORDER BY [System.ChangedDate] DESC"
         )
@@ -228,6 +235,52 @@ class AdoClient:
             self._log.warning("get_pull_request_threads failed", status=resp.status_code)
             return []
         return resp.json().get("value") or []
+
+    # ── Work-item states (for the Settings picker) ──────────────────────────
+
+    async def get_states(self) -> list[str]:
+        """Distinct work-item states configured in the project, board-ordered.
+
+        Best-effort: returns ``[]`` on any error (offline / bad PAT) so the
+        Settings page can always render with a manual-entry fallback. Fetches the
+        project's work-item types then each type's states, aggregating distinct
+        names ordered by state category (Proposed → InProgress → Resolved →
+        Completed → Removed) then the type-defined order.
+        """
+        # Lower rank = shown first.
+        cat_rank = {"Proposed": 0, "InProgress": 1, "Resolved": 2, "Completed": 3, "Removed": 4}
+        # name → (category_rank, order) — keep the strongest (lowest) seen.
+        seen: dict[str, tuple[int, int]] = {}
+        try:
+            resp = await self._http.get(
+                self._url(f"wit/workitemtypes?{_API}"), headers=await self._auth.get_auth_header()
+            )
+            if resp.status_code >= 400:
+                self._log.warning("get_states: list types failed", status=resp.status_code)
+                return []
+            types = [
+                t["name"]
+                for t in (resp.json().get("value") or [])
+                if t.get("name") and not t.get("isDisabled")
+            ]
+            for type_name in types:
+                sresp = await self._http.get(
+                    self._url(f"wit/workitemtypes/{quote(type_name, safe='')}/states?{_API}"),
+                    headers=await self._auth.get_auth_header(),
+                )
+                if sresp.status_code >= 400:
+                    continue
+                for s in sresp.json().get("value") or []:
+                    name = s.get("name")
+                    if not name:
+                        continue
+                    key = (cat_rank.get(s.get("stateCategory", ""), 9), int(s.get("order", 0)))
+                    if name not in seen or key < seen[name]:
+                        seen[name] = key
+        except httpx.HTTPError as exc:
+            self._log.warning("get_states request error", error=str(exc))
+            return []
+        return [name for name, _ in sorted(seen.items(), key=lambda kv: (kv[1], kv[0]))]
 
     # ── Field mapping ───────────────────────────────────────────────────────
 

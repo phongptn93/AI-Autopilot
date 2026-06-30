@@ -16,7 +16,7 @@ def test_parse_form_coerces_types():
         "poll_interval_seconds": "45",
         "max_concurrent": "3",
         "autonomy_level": "unattended",
-        "trigger_states": "New, To Do\nActive",
+        "trigger_tags": "squad-a, squad-b\nsquad-c",  # list kind: comma + newline split
         # checkboxes present → True; absent keys → False
         "auto_review_enabled": "on",
     }
@@ -25,9 +25,31 @@ def test_parse_form_coerces_types():
     assert updates["poll_interval_seconds"] == 45
     assert updates["max_concurrent"] == 3
     assert updates["autonomy_level"] == "unattended"
-    assert updates["trigger_states"] == ["New", "To Do", "Active"]  # comma + newline split
+    assert updates["trigger_tags"] == ["squad-a", "squad-b", "squad-c"]
     assert updates["auto_review_enabled"] is True
     assert updates["dry_run"] is False  # checkbox not in form
+
+
+def test_parse_states_combines_checkboxes_and_manual():
+    form = {
+        "_all_states__trigger_states": "New,Active,Done",
+        "trigger_states__New": "on",
+        "trigger_states__Active": "on",
+        # "Done" not ticked → excluded
+        "trigger_states__manual": "Doing\nĐang làm, Active",  # "Active" dup dropped
+    }
+    assert settings_form.parse_states(form, "trigger_states") == [
+        "New", "Active", "Doing", "Đang làm"
+    ]
+
+
+def test_parse_states_empty():
+    assert settings_form.parse_states({}, "trigger_states") == []
+
+
+def test_parse_form_trigger_states_is_stateset():
+    # No checkboxes/manual → empty list (stateset, not the old free-text field).
+    assert settings_form.parse_form({})["trigger_states"] == []
 
 
 def test_parse_repos_whitelist():
@@ -73,3 +95,36 @@ def test_apply_to_config_mutates_live_settings():
     settings_form.apply_to_config(config, {"trigger_tag": "deploy", "max_concurrent": 4})
     assert config.trigger_tag == "deploy"
     assert config.max_concurrent == 4
+
+
+def test_export_settings_excludes_secrets_and_machine_specific():
+    config = Settings(
+        ado_pat="super-secret", ado_project="MyProj", workspace_directory="/local/ws",
+        trigger_tag="myhost-autopilot", resolved_state="Closed",
+    )
+    exported = settings_form.export_settings(config)
+    # secrets + machine-specific keys are dropped
+    assert "ado_pat" not in exported
+    assert "workspace_directory" not in exported
+    assert "trigger_tag" not in exported
+    # shareable config is kept
+    assert exported["ado_project"] == "MyProj"
+    assert exported["resolved_state"] == "Closed"
+
+
+def test_import_settings_keeps_known_drops_secrets_and_unknown():
+    valid = set(Settings.model_fields)
+    raw = (
+        "ado_project: Imported\nresolved_state: Done\n"
+        "ado_pat: leaked\nworkspace_directory: /their/ws\n"
+        "trigger_tag: theirhost-autopilot\nbogus_key: 1\n"
+    )
+    updates = settings_form.import_settings(raw, valid)
+    assert updates == {"ado_project": "Imported", "resolved_state": "Done"}
+
+
+def test_import_settings_rejects_non_mapping():
+    import pytest
+
+    with pytest.raises(ValueError):
+        settings_form.import_settings("- just\n- a\n- list", set(Settings.model_fields))

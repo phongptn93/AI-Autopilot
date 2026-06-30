@@ -12,7 +12,11 @@
             <div class="board-card {{ css }}">
                 <div class="board-card-head">
                     {% if card.category %}<span class="cat-badge {{ css }}">{{ label }}</span>{% endif %}
+                    {% if ado_item_base %}
+                    <a class="board-card-id" href="{{ ado_item_base }}/{{ card.id }}" target="_blank" rel="noopener" title="Open #{{ card.id }} in Azure DevOps">#{{ card.id }} ↗</a>
+                    {% else %}
                     <span class="board-card-id">#{{ card.id }}</span>
+                    {% endif %}
                     <span class="board-card-state">{{ card.ado_state }}</span>
                 </div>
                 <div class="board-card-title">{{ card.title }}</div>

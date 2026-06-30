@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import yaml
 from fastapi import APIRouter, Request
@@ -110,6 +111,9 @@ def create_dashboard_router() -> APIRouter:
         records = await c.execution_repo.get_recent(200)
         states = {s.work_item_id: s.state.value for s in await c.state_repo.all()}
         cols = build_board(items, latest_records(records), c.config, states)
+        org = c.config.ado_organization.rstrip("/")
+        proj = c.config.ado_project
+        ado_item_base = f"{org}/{quote(proj)}/_workitems/edit" if org and proj else ""
         return _ctx(
             request,
             "board",
@@ -121,6 +125,7 @@ def create_dashboard_router() -> APIRouter:
             interactive=c.config.execution_mode == "interactive",
             tags=tags,
             selected_tag=selected_tag,
+            ado_item_base=ado_item_base,
         )
 
     @router.get("/board", response_class=HTMLResponse)

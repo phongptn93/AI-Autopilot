@@ -180,6 +180,20 @@ class ClaudeExecutor:
 
     # ── Per-task isolation: scratch workspace of git worktrees ────────────────
 
+    def _scratch_base(self) -> str:
+        """Base dir for per-task scratch worktrees.
+
+        Defaults to a short sibling of the workspace (``<parent>/.aiwt``) rather
+        than the deep system-temp path, so worktree file paths stay well under the
+        Windows 260-char MAX_PATH limit. Override with ``worktrees_dir``.
+        """
+        if self._config.worktrees_dir:
+            return self._config.worktrees_dir
+        ws = self._config.workspace_directory
+        if ws:
+            return str(Path(ws).parent / ".aiwt")
+        return str(Path(tempfile.gettempdir()) / "ai-autopilot-worktrees")
+
     async def _acquire_agent_scratch(self, item_id: int, repos: list[str]) -> str | None:
         """Build an isolated scratch workspace for one AI-native task.
 
@@ -192,9 +206,7 @@ class ClaudeExecutor:
         workspace = self._config.workspace_directory
         if not (workspace and self._config.use_worktrees and repos):
             return None
-        base_dir = self._config.worktrees_dir or str(
-            Path(tempfile.gettempdir()) / "ai-autopilot-worktrees"
-        )
+        base_dir = self._scratch_base()
         Path(base_dir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 - fast local mkdir
         scratch = str(Path(base_dir) / f"agent-{item_id}-{uuid.uuid4().hex[:8]}")
         base_branch = self._config.base_branch
@@ -333,10 +345,7 @@ class ClaudeExecutor:
         workspace = self._config.workspace_directory
         if not (workspace and self._config.use_worktrees):
             return
-        base_dir = self._config.worktrees_dir or str(
-            Path(tempfile.gettempdir()) / "ai-autopilot-worktrees"
-        )
-        base = Path(base_dir)
+        base = Path(self._scratch_base())
         now = time.time()
         if base.is_dir():
             for sub in base.iterdir():

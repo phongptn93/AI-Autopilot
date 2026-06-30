@@ -38,7 +38,7 @@
     <div class="card-body">
         {% if recent %}
         <table>
-            <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Status</th><th>Duration</th><th>Started</th></tr></thead>
+            <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Status</th><th>Duration</th><th>Started</th><th>Finished</th></tr></thead>
             <tbody>
                 {% for e in recent %}
                 {% set label, css = category_badge(e.category) %}
@@ -47,8 +47,9 @@
                     <td class="title-col">{{ e.title }}</td>
                     <td><span class="cat-badge {{ css }}">{{ label }}</span></td>
                     <td><span class="badge {{ status_class(e.status.value) }}"><span class="badge-dot"></span>{{ e.status.value }}</span></td>
-                    <td class="mono">{{ mmss(e.duration_seconds) }}</td>
+                    <td class="mono">{% if e.completed_at %}{{ fmt_duration(e.duration_seconds) }}{% else %}<span style="color:var(--text-muted)">running…</span>{% endif %}</td>
                     <td>{{ e.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{% if e.completed_at %}{{ e.completed_at.strftime('%Y-%m-%d %H:%M') }}{% else %}<span style="color:var(--text-muted)">—</span>{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>

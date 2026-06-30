@@ -204,6 +204,19 @@ async def test_concurrent_scratch_same_repo_no_collision(agent_workspace: Path):
         await ex.release_scratch(b)
 
 
+def test_scratch_base_defaults_beside_workspace(tmp_path: Path):
+    ex = _executor(workspace_directory=str(tmp_path / "workspace"))
+    # Short sibling of the workspace, not the deep system-temp path (MAX_PATH).
+    assert ex._scratch_base() == str(tmp_path / ".aiwt")
+
+
+def test_scratch_base_honours_override(tmp_path: Path):
+    ex = _executor(
+        workspace_directory=str(tmp_path / "ws"), worktrees_dir=str(tmp_path / "custom")
+    )
+    assert ex._scratch_base() == str(tmp_path / "custom")
+
+
 async def test_agent_scratch_disabled_returns_none(agent_workspace: Path):
     ex = _executor(workspace_directory=str(agent_workspace), use_worktrees=False)
     assert await ex._acquire_agent_scratch(1, ["repo-a"]) is None

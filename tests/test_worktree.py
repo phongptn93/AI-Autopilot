@@ -83,3 +83,40 @@ async def test_in_place_fallback(repo: Path):
     assert ws.is_worktree is False
     assert ws.path == str(repo)
     await ex._release_workspace(ws)  # restores base branch; must not raise
+
+
+async def test_workspace_mode_runs_from_workspace(repo: Path, tmp_path: Path):
+    # When workspace_directory is set, Claude runs from the workspace (so it sees
+    # the shared .claude) while git operates on the repo subfolder in place.
+    workspace = repo.parent
+    ex = _executor(use_worktrees=True, workspace_directory=str(workspace))
+
+    ws = await ex._acquire_workspace(str(repo), "feature/be/7-w", "development", 7)
+    try:
+        assert ws.is_worktree is False           # not a separate worktree
+        assert ws.path == str(repo)              # git operates in the repo
+        assert ws.claude_cwd == str(workspace)   # Claude runs from the workspace
+    finally:
+        await ex._release_workspace(ws)
+
+
+def test_build_prompt_names_target_repo(repo: Path):
+    from ai_autopilot.models import TaskCategory, WorkItemInfo
+
+    ex = _executor(workspace_directory=str(repo.parent))
+    item = WorkItemInfo(id=42, title="Add orders endpoint", work_item_type="Task",
+                        description="Build it", acceptance_criteria="Works")
+    item.category = TaskCategory.BACKEND_TASK
+    prompt = ex._build_prompt(item, "/api-controller 42", str(repo))
+    assert repo.name in prompt          # tells Claude which subfolder to edit
+    assert "/api-controller 42" in prompt
+    assert "Add orders endpoint" in prompt
+
+
+def test_build_prompt_legacy_is_skill_only(repo: Path):
+    from ai_autopilot.models import TaskCategory, WorkItemInfo
+
+    ex = _executor()  # no workspace_directory → legacy behaviour
+    item = WorkItemInfo(id=42, title="x", work_item_type="Task")
+    item.category = TaskCategory.BACKEND_TASK
+    assert ex._build_prompt(item, "/api-controller 42", str(repo)) == "/api-controller 42"

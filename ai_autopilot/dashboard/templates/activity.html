@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+    <div>
+        <h2>Live activity — #{{ item_id }}</h2>
+        <p>What the agent is doing right now. <a class="table-link" href="/dashboard/board">← back to Board</a></p>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-muted)">
+        <span class="live-dot"></span><span id="act-updated">auto-refresh 3s</span>
+    </div>
+</div>
+
+<style>
+  .term { background:#07080c; border:1px solid var(--border); border-radius:12px; padding:16px 18px;
+    font-family:var(--mono); font-size:12.5px; line-height:1.7; color:#cdd0d6; white-space:pre-wrap;
+    word-break:break-word; max-height:74vh; overflow-y:auto; }
+</style>
+
+<div class="term" id="term">{{ feed or "(no activity yet — waiting for the agent…)" }}</div>
+
+<script>
+  (function () {
+    const term = document.getElementById('term');
+    const stamp = document.getElementById('act-updated');
+    let pinned = true;
+    term.addEventListener('scroll', () => {
+      pinned = term.scrollHeight - term.scrollTop - term.clientHeight < 40;
+    });
+    async function refresh() {
+      if (document.hidden) return;
+      try {
+        const r = await fetch('/dashboard/activity/{{ item_id }}/partial');
+        if (r.ok) {
+          term.textContent = await r.text();
+          stamp.textContent = 'updated just now';
+          if (pinned) term.scrollTop = term.scrollHeight;
+        }
+      } catch (e) { /* keep last view */ }
+    }
+    term.scrollTop = term.scrollHeight;
+    setInterval(refresh, 3000);
+  })();
+</script>
+{% endblock %}

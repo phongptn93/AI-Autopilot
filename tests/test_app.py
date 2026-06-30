@@ -52,7 +52,7 @@ def test_settings_post_persists_and_applies(tmp_path, monkeypatch):
     with TestClient(create_app(settings)) as client:
         resp = client.post(
             "/dashboard/settings",
-            data={"trigger_tag": "deploy-me", "repo_working_directory": "/tmp/repo"},
+            data={"trigger_tag": "deploy-me", "workspace_directory": "/ws"},
             follow_redirects=False,
         )
         assert resp.status_code == 303
@@ -63,7 +63,7 @@ def test_settings_post_persists_and_applies(tmp_path, monkeypatch):
 
     saved = yaml.safe_load(cfg_file.read_text())
     assert saved["trigger_tag"] == "deploy-me"
-    assert saved["repo_working_directory"] == "/tmp/repo"
+    assert saved["workspace_directory"] == "/ws"
 
 
 def test_health_reports_checks(client: TestClient):

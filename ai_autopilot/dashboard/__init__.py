@@ -6,13 +6,17 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from ai_autopilot import activity
+from ai_autopilot.board import COLUMNS, build_board, latest_records
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
 from ai_autopilot.logging_config import get_logger
+from ai_autopilot.skills_catalog import discover_skills
+from ai_autopilot.workspace import discover_repos
 
 _log = get_logger("dashboard")
 
@@ -79,6 +83,51 @@ def create_dashboard_router() -> APIRouter:
             request, "overview.html", _ctx(request, "overview", stats=stats, recent=recent)
         )
 
+    async def _board_ctx(request: Request) -> dict:
+        c: Container = request.app.state.container
+        try:
+            items = await c.ado.get_all_tagged_work_items()
+            error = None
+        except Exception as exc:  # noqa: BLE001
+            items, error = [], str(exc)
+        records = await c.execution_repo.get_recent(200)
+        states = {s.work_item_id: s.state.value for s in await c.state_repo.all()}
+        cols = build_board(items, latest_records(records), c.config, states)
+        return _ctx(
+            request,
+            "board",
+            board=cols,
+            columns=COLUMNS,
+            total=len(items),
+            error=error,
+            project=c.config.ado_project,
+            interactive=c.config.execution_mode == "interactive",
+        )
+
+    @router.get("/board", response_class=HTMLResponse)
+    async def board(request: Request):
+        return _TEMPLATES.TemplateResponse(request, "board.html", await _board_ctx(request))
+
+    @router.get("/board/partial", response_class=HTMLResponse)
+    async def board_partial(request: Request):
+        """Just the columns — fetched by the page's auto-refresh, no full reload."""
+        return _TEMPLATES.TemplateResponse(request, "_board_cols.html", await _board_ctx(request))
+
+    @router.get("/activity/{item_id}", response_class=HTMLResponse)
+    async def activity_view(request: Request, item_id: int):
+        c: Container = request.app.state.container
+        feed = activity.read(c.config.workspace_directory, item_id)
+        return _TEMPLATES.TemplateResponse(
+            request, "activity.html", _ctx(request, "board", item_id=item_id, feed=feed)
+        )
+
+    @router.get("/activity/{item_id}/partial", response_class=PlainTextResponse)
+    async def activity_partial(request: Request, item_id: int):
+        c: Container = request.app.state.container
+        return PlainTextResponse(
+            activity.read(c.config.workspace_directory, item_id) or "(no activity yet — waiting for the agent…)"
+        )
+
     @router.get("/history", response_class=HTMLResponse)
     async def history(request: Request):
         c: Container = request.app.state.container
@@ -86,6 +135,20 @@ def create_dashboard_router() -> APIRouter:
         return _TEMPLATES.TemplateResponse(
             request, "history.html", _ctx(request, "history", records=records)
         )
+
+    @router.post("/history/{record_id}/delete")
+    async def delete_history(request: Request, record_id: int):
+        c: Container = request.app.state.container
+        await c.execution_repo.delete(record_id)
+        _log.info("execution record deleted via dashboard", record_id=record_id)
+        return RedirectResponse(url="/dashboard/history", status_code=303)
+
+    @router.post("/history/clear")
+    async def clear_history(request: Request):
+        c: Container = request.app.state.container
+        removed = await c.execution_repo.clear_all()
+        _log.info("execution history cleared via dashboard", removed=removed)
+        return RedirectResponse(url="/dashboard/history", status_code=303)
 
     @router.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request):
@@ -96,12 +159,22 @@ def create_dashboard_router() -> APIRouter:
 
     @router.get("/capabilities", response_class=HTMLResponse)
     async def capabilities(request: Request):
+        c: Container = request.app.state.container
+        skills = discover_skills(c.config.workspace_directory)
         return _TEMPLATES.TemplateResponse(
-            request, "capabilities.html", _ctx(request, "capabilities")
+            request,
+            "capabilities.html",
+            _ctx(
+                request,
+                "capabilities",
+                skills=skills,
+                workspace=c.config.workspace_directory,
+                ai_native=bool(c.config.workspace_directory),
+            ),
         )
 
     @router.get("/settings", response_class=HTMLResponse)
-    async def settings_page(request: Request, saved: int = 0):
+    async def settings_page(request: Request, saved: int = 0, reloaded: int = 0):
         c: Container = request.app.state.container
         current = {
             f.key: getattr(c.config, f.key, "")
@@ -109,6 +182,8 @@ def create_dashboard_router() -> APIRouter:
             if f.key not in settings_form.SECRET_KEYS
         }
         has_pat = bool(getattr(c.config, "ado_pat", ""))
+        discovered = discover_repos(c.config.workspace_directory)
+        allowed = {r.lower() for r in c.config.allowed_repos}
         return _TEMPLATES.TemplateResponse(
             request,
             "settings.html",
@@ -120,7 +195,10 @@ def create_dashboard_router() -> APIRouter:
                 has_pat=has_pat,
                 restart_keys=settings_form.RESTART_REQUIRED,
                 saved=bool(saved),
+                reloaded=bool(reloaded),
                 config_path=str(config_file_path()),
+                repos=discovered,
+                allowed_repos=allowed,
             ),
         )
 
@@ -129,6 +207,7 @@ def create_dashboard_router() -> APIRouter:
         c: Container = request.app.state.container
         form = await request.form()
         updates = settings_form.parse_form(form)
+        updates["allowed_repos"] = settings_form.parse_repos(form)
 
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
@@ -136,6 +215,15 @@ def create_dashboard_router() -> APIRouter:
         _log.info("settings updated via dashboard", keys=sorted(updates.keys()))
 
         return RedirectResponse(url="/dashboard/settings?saved=1", status_code=303)
+
+    @router.post("/settings/reload")
+    async def reload_settings(request: Request):
+        """Re-read config.yaml from disk into the running app (no restart)."""
+        c: Container = request.app.state.container
+        changed = settings_form.reload_from_file(c.config)
+        c.ado.refresh()  # re-read org URL if it changed
+        _log.info("config reloaded from file via dashboard", changed=changed)
+        return RedirectResponse(url="/dashboard/settings?reloaded=1", status_code=303)
 
     return router
 

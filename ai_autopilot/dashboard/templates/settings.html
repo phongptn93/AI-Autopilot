@@ -3,6 +3,12 @@
 <div class="page-header">
     <h2>Settings</h2>
     <p>Edit the workspace, connection, and trigger tags. Saved to <code>{{ config_path }}</code> and applied live.</p>
+    <form method="post" action="/dashboard/settings/reload" style="margin-top: 8px;">
+        <button type="submit" class="btn-save" style="background: transparent; border: 1px solid var(--text-muted);">
+            ↻ Reload config from file
+        </button>
+        <span class="form-help">Re-reads <code>{{ config_path }}</code> into the running app — applies fields edited directly in the file (e.g. <code>trigger_states</code>, <code>repos</code>) without a restart. Code changes still need a restart.</span>
+    </form>
 </div>
 
 {% if saved %}
@@ -13,7 +19,37 @@
 </div>
 {% endif %}
 
+{% if reloaded %}
+<div class="card" style="border-color: var(--green);">
+    <div class="card-body" style="padding: 14px 22px; color: var(--green);">
+        ↻ Config reloaded from <code>{{ config_path }}</code> into the running app.
+    </div>
+</div>
+{% endif %}
+
 <form method="post" action="/dashboard/settings">
+    <div class="card">
+        <div class="card-header">
+            <h3>Allowed repositories</h3>
+            <span class="form-help" style="margin:0">Repos the agent may edit (auto-discovered in the workspace). None ticked = all allowed.</span>
+        </div>
+        <div class="card-body" style="padding:16px 22px;">
+            <input type="hidden" name="_all_repos" value="{{ repos|join(',') }}">
+            {% if repos %}
+            <div class="chips">
+                {% for r in repos %}
+                {% set on = (not allowed_repos) or (r|lower in allowed_repos) %}
+                <label class="chip {{ 'chip-accent' if on else '' }}">
+                    <input type="checkbox" name="repo__{{ r }}" {% if on %}checked{% endif %}
+                           style="width:15px;height:15px;accent-color:var(--accent)"> {{ r }}
+                </label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="form-help" style="margin:0">No git repos found in the workspace. Set the Workspace directory first.</div>
+            {% endif %}
+        </div>
+    </div>
     {% for section, fields in sections %}
     <div class="card">
         <div class="card-header"><h3>{{ section }}</h3></div>
@@ -38,6 +74,8 @@
                                placeholder="{{ '•••••• set — leave blank to keep' if has_pat else 'not set' }}" autocomplete="off" />
                     {% elif f.kind == 'int' %}
                         <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
+                    {% elif f.kind == 'list' %}
+                        <textarea id="{{ f.key }}" name="{{ f.key }}" rows="2">{{ current.get(f.key)|join(', ') }}</textarea>
                     {% else %}
                         <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
                     {% endif %}

@@ -9,8 +9,9 @@ from ai_autopilot.models import TaskCategory, WorkItemInfo
 
 # Skill command templates — these invoke skills already in .claude/skills/.
 _SKILL_MAP: dict[TaskCategory, str] = {
-    TaskCategory.BACKEND_TASK: "/implement-task-be {id}",
-    TaskCategory.FRONTEND_TASK: "/implement-task-fe {id}",
+    TaskCategory.BACKEND_TASK: "/crud-full-stack {id}",
+    TaskCategory.FRONTEND_TASK: "/fe-module {id}",
+    TaskCategory.DATABASE_TASK: "/sql-migration {id}",
     TaskCategory.BUG: "/bugfix-workflow {id}",
     TaskCategory.TEST_TASK: "/qc-test-management {id}",
     TaskCategory.REQUIREMENT: "/analyze-requirement {id}",
@@ -30,7 +31,7 @@ class TaskRouter:
 
     def route(self, item: WorkItemInfo) -> str | None:
         """Map a classified item to a skill command, or None if unroutable."""
-        if item.category in (TaskCategory.UNKNOWN, TaskCategory.DATABASE_TASK):
+        if item.category is TaskCategory.UNKNOWN:
             self._log.warning("cannot route", id=item.id, category=str(item.category))
             return None
         template = _SKILL_MAP.get(item.category)

@@ -8,23 +8,34 @@
 <div class="card">
     <div class="card-header"><h3>🔄 End-to-end pipeline</h3></div>
     <div class="card-body" style="padding:18px 22px">
+        {% if ai_native %}
         <p style="color:var(--text-muted);font-size:14px">
-            <strong>Poll</strong> the ADO board → <strong>Classify</strong> each tagged item
-            (BE / FE / Bug / DB / QC / Requirement) → <strong>Route</strong> it to the matching
-            Claude Code skill → <strong>Execute</strong> via the Claude Agent SDK
-            (branch → implement → commit → push) → <strong>Auto-review</strong> for security →
-            <strong>Open a PR</strong> → <strong>Notify</strong> on ADO, Teams, Zalo and email.
+            <strong>Poll</strong> the ADO board for tagged items →
+            <strong>hand each to the agent</strong> (Claude runs from the workspace with all the
+            skills below) → the agent <strong>reasons, plans, picks the right skill(s),
+            implements, self-reviews and opens a PR</strong> → it reports back a structured result →
+            the control plane <strong>tracks, tags and notifies</strong>, or escalates to a human.
         </p>
+        <p style="color:var(--text-dim);font-size:13px;margin-top:8px">
+            The platform decides <em>whether / when / how safely</em>; the agent decides <em>how</em>.
+            Skill selection is no longer hardcoded — it is chosen by the agent from the catalogue below.
+        </p>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:14px">
+            Legacy mode: items are classified by title/type and routed to a fixed skill.
+            Set <span class="mono">workspace_directory</span> to enable the AI-native flow.
+        </p>
+        {% endif %}
     </div>
 </div>
 
 <div class="stats-grid">
-    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Routing</span><div class="stat-card-icon">🧭</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">Title prefixes, work-item type and keywords map each item to a skill command.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Reasoning</span><div class="stat-card-icon">🧠</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">The agent chooses skills and plans per task — no hardcoded routing.</p></div>
     <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Safety</span><div class="stat-card-icon">🛡️</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">Approval gate (draft PRs), RBAC, schedule windows and an automated security review.</p></div>
+        <p style="font-size:13px;color:var(--text-muted)">Autonomy levels (report / draft PR / auto PR), RBAC, schedule windows, human escalation.</p></div>
     <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Resilience</span><div class="stat-card-icon">🔁</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">Exponential-backoff retries, dry-run mode and full execution history in SQLite.</p></div>
+        <p style="font-size:13px;color:var(--text-muted)">Structured result contract, backoff retries, dry-run, full history in SQLite.</p></div>
     <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Observability</span><div class="stat-card-icon">📈</div></div>
         <p style="font-size:13px;color:var(--text-muted)">Prometheus metrics, structured logs, health checks and token/cost tracking.</p></div>
     <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Scale</span><div class="stat-card-icon">🏢</div></div>
@@ -34,18 +45,29 @@
 </div>
 
 <div class="card">
-    <div class="card-header"><h3>🧭 Skill routing</h3></div>
+    <div class="card-header">
+        <h3>🧰 Available skills</h3>
+        <span style="font-size:13px;color:var(--text-muted)">{{ skills|length }} discovered{% if workspace %} in <span class="mono">{{ workspace }}\.claude\skills</span>{% endif %}</span>
+    </div>
     <div class="card-body">
+        {% if skills %}
         <table>
-            <thead><tr><th>Condition</th><th>Category</th><th>Skill</th></tr></thead>
+            <thead><tr><th style="width:220px">Skill</th><th>What it does</th></tr></thead>
             <tbody>
-                <tr><td>Title starts with <span class="mono">[BE]</span></td><td><span class="cat-badge cat-be">BE</span></td><td class="mono">/implement-task-be {id}</td></tr>
-                <tr><td>Title starts with <span class="mono">[FE]</span></td><td><span class="cat-badge cat-fe">FE</span></td><td class="mono">/implement-task-fe {id}</td></tr>
-                <tr><td>Title starts with <span class="mono">[QC]</span></td><td><span class="cat-badge cat-qc">QC</span></td><td class="mono">/qc-test-management {id}</td></tr>
-                <tr><td>Work item type = Bug</td><td><span class="cat-badge cat-bug">Bug</span></td><td class="mono">/bugfix-workflow {id}</td></tr>
-                <tr><td>Type = Requirement / User Story</td><td><span class="cat-badge cat-req">Req</span></td><td class="mono">/analyze-requirement {id}</td></tr>
+                {% for s in skills %}
+                <tr>
+                    <td class="mono">{{ s.name }}</td>
+                    <td style="color:var(--text-muted);font-size:13px">{{ s.description or '—' }}</td>
+                </tr>
+                {% endfor %}
             </tbody>
         </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No skills discovered. Set <span class="mono">workspace_directory</span> to a folder
+            whose <span class="mono">.claude/skills</span> holds the agent's skills.</p>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

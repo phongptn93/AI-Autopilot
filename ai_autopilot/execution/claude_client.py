@@ -12,14 +12,19 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Literal
 
+from collections.abc import Callable
+
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
+    ToolUseBlock,
     query,
 )
 
+from ai_autopilot import activity
 from ai_autopilot.logging_config import get_logger
 
 _log = get_logger("execution.claude_client")
@@ -62,6 +67,10 @@ async def run_claude(
     max_turns: int | None = None,
     permission_mode: PermissionMode = "acceptEdits",
     allowed_tools: list[str] | None = None,
+    setting_sources: list[str] | None = None,
+    mcp_servers: dict | None = None,
+    add_dirs: list[str] | None = None,
+    on_event: Callable[[str], None] | None = None,
 ) -> ClaudeRun:
     """Run Claude Code once in ``work_dir`` and return a structured result.
 
@@ -70,6 +79,12 @@ async def run_claude(
     Note: ``permission_mode="bypassPermissions"`` maps to
     ``--dangerously-skip-permissions``, which the Claude CLI refuses to run under
     root. Use ``"acceptEdits"`` (the default) for containerised/root deployments.
+
+    ``setting_sources`` opts into loading filesystem configuration (project
+    ``.claude/`` skills, rules, settings, CLAUDE.md) — the SDK loads *none* by
+    default, so without it ``/skill`` commands are inert. ``mcp_servers`` and
+    ``add_dirs`` let the run reach the workspace's MCP servers and extra repo
+    directories.
     """
     options = ClaudeAgentOptions(
         cwd=work_dir,
@@ -81,8 +96,21 @@ async def run_claude(
         options.model = model
     if max_turns and max_turns > 0:
         options.max_turns = max_turns
+    if setting_sources is not None:
+        options.setting_sources = setting_sources
+    if mcp_servers:
+        options.mcp_servers = mcp_servers
+    if add_dirs:
+        options.add_dirs = add_dirs
 
     run = ClaudeRun()
+
+    def _emit(line: str) -> None:
+        if on_event and line.strip():
+            try:
+                on_event(line.strip())
+            except Exception:  # noqa: BLE001 — activity must never break the run
+                pass
 
     async def _drive() -> None:
         async for message in query(prompt=prompt, options=options):
@@ -90,6 +118,11 @@ async def run_claude(
                 for block in message.content:
                     if isinstance(block, TextBlock) and block.text:
                         run.transcript.append(block.text)
+                        _emit("💬 " + block.text[:400])
+                    elif isinstance(block, ThinkingBlock):
+                        _emit("🤔 " + (getattr(block, "thinking", "") or "")[:200])
+                    elif isinstance(block, ToolUseBlock):
+                        _emit("🔧 " + activity.tool_summary(block.name, block.input))
             elif isinstance(message, ResultMessage):
                 run.is_error = bool(message.is_error)
                 run.num_turns = message.num_turns

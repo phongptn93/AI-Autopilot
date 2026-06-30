@@ -6,10 +6,15 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from ai_autopilot.data.database import Database
-from ai_autopilot.data.entities import ExecutionRecord, ExecutionStatus
+from ai_autopilot.data.entities import (
+    ExecutionRecord,
+    ExecutionStatus,
+    PipelineState,
+    WorkItemState,
+)
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 
 
@@ -75,6 +80,23 @@ class ExecutionRepository:
             record.cost_tokens = tokens
             await session.commit()
 
+    async def fail_running(self) -> int:
+        """Mark orphaned RUNNING executions (left by a crashed process) as failed."""
+        async with self._db.session() as session:
+            rows = (
+                await session.execute(
+                    select(ExecutionRecord).where(
+                        ExecutionRecord.status == ExecutionStatus.RUNNING
+                    )
+                )
+            ).scalars().all()
+            for row in rows:
+                row.status = ExecutionStatus.FAILED
+                row.error = "Interrupted (process restarted)"
+                row.completed_at = datetime.now(UTC)
+            await session.commit()
+            return len(rows)
+
     async def get_recent(self, count: int = 50) -> list[ExecutionRecord]:
         async with self._db.session() as session:
             rows = await session.execute(
@@ -83,6 +105,23 @@ class ExecutionRepository:
                 .limit(count)
             )
             return list(rows.scalars().all())
+
+    async def delete(self, record_id: int) -> bool:
+        """Delete a single execution record. Returns True if a row was removed."""
+        async with self._db.session() as session:
+            record = await session.get(ExecutionRecord, record_id)
+            if record is None:
+                return False
+            await session.delete(record)
+            await session.commit()
+            return True
+
+    async def clear_all(self) -> int:
+        """Delete all execution records. Returns the number of rows removed."""
+        async with self._db.session() as session:
+            result = await session.execute(delete(ExecutionRecord))
+            await session.commit()
+            return int(result.rowcount or 0)
 
     async def get_by_work_item(self, work_item_id: int) -> list[ExecutionRecord]:
         async with self._db.session() as session:
@@ -119,3 +158,58 @@ class ExecutionRepository:
             return ExecutionStats(
                 total=total, success=success, failed=failed, avg_duration=float(avg)
             )
+
+
+class StateRepository:
+    """Persisted per-work-item pipeline state — the autopilot's resumable memory."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def set(
+        self,
+        work_item_id: int,
+        state: PipelineState,
+        *,
+        title: str = "",
+        detail: str | None = None,
+        pr_url: str | None = None,
+    ) -> None:
+        """Upsert the state for a work item (only overwrites fields provided)."""
+        async with self._db.session() as session:
+            row = await session.get(WorkItemState, work_item_id)
+            if row is None:
+                row = WorkItemState(work_item_id=work_item_id)
+                session.add(row)
+            row.state = state
+            if title:
+                row.title = title
+            if detail is not None:
+                row.detail = detail
+            if pr_url is not None:
+                row.pr_url = pr_url
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def get(self, work_item_id: int) -> WorkItemState | None:
+        async with self._db.session() as session:
+            return await session.get(WorkItemState, work_item_id)
+
+    async def all(self) -> list[WorkItemState]:
+        async with self._db.session() as session:
+            rows = await session.execute(select(WorkItemState))
+            return list(rows.scalars().all())
+
+    async def requeue_in_progress(self) -> int:
+        """On startup, re-queue runs that were interrupted mid-flight (resume)."""
+        async with self._db.session() as session:
+            rows = (
+                await session.execute(
+                    select(WorkItemState).where(WorkItemState.state == PipelineState.IN_PROGRESS)
+                )
+            ).scalars().all()
+            for row in rows:
+                row.state = PipelineState.QUEUED
+                row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return len(rows)

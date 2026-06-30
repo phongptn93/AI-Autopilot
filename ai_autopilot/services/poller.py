@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from ai_autopilot import metrics
 from ai_autopilot.container import Container
+from ai_autopilot.data import PipelineState
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.routing import sort_by_priority
@@ -25,6 +26,8 @@ class AdoPollerService:
         self._config = c.config
         self._log = get_logger("services.poller")
         self._processed: dict[int, datetime] = {}
+        # Interactive mode: live Remote-Control sessions awaiting their result.json.
+        self._live: dict[int, int] = {}  # work_item_id → execution record id
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
 
@@ -55,6 +58,12 @@ class AdoPollerService:
             )
             return
 
+        # Resume: re-queue any runs left mid-flight by a previous (crashed) process.
+        requeued = await self._c.state_repo.requeue_in_progress()
+        orphaned = await self._c.execution_repo.fail_running()
+        if requeued or orphaned:
+            self._log.info("resumed interrupted runs", requeued=requeued, orphaned=orphaned)
+
         while True:
             try:
                 await self._poll_and_process()
@@ -69,6 +78,9 @@ class AdoPollerService:
 
     async def _poll_and_process(self) -> None:
         c, cfg = self._c, self._config
+
+        # Finalise any interactive sessions that have written their result.
+        await self._finalize_live_sessions()
 
         if not c.schedule.is_within_window():
             self._log.debug("outside schedule window — skipping")
@@ -85,12 +97,12 @@ class AdoPollerService:
         self._log.debug("polling ADO for pending work items")
         items = await c.ado.get_pending_work_items()
 
+        skip_tags = {cfg.processed_tag.lower(), cfg.review_tag.lower(), cfg.escalation_tag.lower()}
         new_items = [
             i
             for i in items
             if i.id not in self._processed
-            and not any(t.lower() == cfg.processed_tag.lower() for t in i.tags)
-            and not any(t.lower() == cfg.review_tag.lower() for t in i.tags)
+            and not any(t.lower() in skip_tags for t in i.tags)
             and not c.retry_policy.is_backoff_active(i.id)
             and not c.retry_policy.is_exhausted(i.id)
         ]
@@ -118,64 +130,209 @@ class AdoPollerService:
                 classified = await c.plugins.run_pre_processors(classified)
                 self._log.info("processing", item=str(item), category=str(classified.category))
 
-                skill = c.router.route(classified)
-                if skill is None:
-                    self._log.warning("no skill found", item=str(item))
-                    return
-
                 if not c.rbac.is_user_allowed(item):
                     self._log.warning("rbac denied user", id=item.id, user=item.created_by)
                     return
-                if not c.rbac.is_skill_allowed(skill):
-                    self._log.warning("rbac denied skill", skill=skill, id=item.id)
-                    return
 
-                self._log.info("routing to skill", id=item.id, skill=skill)
-
-                if classified.category == TaskCategory.REQUIREMENT and cfg.auto_decompose:
-                    await c.decomposer.decompose(classified)
-                    await c.ado.add_tag(item.id, cfg.processed_tag)
-                    self._log.info("decomposed into child tasks", id=item.id)
-                    return
-
-                # L1 (report): triage only — comment the plan, don't change code.
-                if cfg.report_only:
-                    self._log.info("report-only triage", id=item.id, skill=skill)
-                    await c.ado.add_comment(
-                        item.id,
-                        "<b>🧭 ADO Autopilot — Triage (report mode)</b><br/>"
-                        f"Would route to <code>{skill}</code> "
-                        f"(category: {classified.category}).",
-                    )
-                    await c.ado.add_tag(item.id, cfg.processed_tag)
-                    return
-
-                await c.notifier.notify_started(item, skill)
-                record_id = await c.execution_repo.start_execution(item, skill)
-
-                result = await self._execute(item, skill)
-
-                await c.execution_repo.complete_execution(record_id, result)
-                if result.cost_tokens:
-                    await c.cost_tracker.track(record_id, result.cost_tokens)
-                    metrics.record_cost(result.cost_tokens)
-
-                await self._handle_result(item, skill, result, classified)
-                await c.plugins.run_post_processors(item, result)
-
-                status = "SUCCESS" if result.success else "FAILED"
-                metrics.record_task(status.lower(), str(classified.category), skill)
-                metrics.record_duration(str(classified.category), result.duration_seconds)
-                self._log.info(
-                    "finished",
-                    id=item.id,
-                    status=status,
-                    duration=round(result.duration_seconds, 1),
-                    skill=skill,
-                )
+                # AI-native: hand the item to the agent and let it reason end-to-end.
+                # Legacy (hardcoded classify→skill→git): only when no workspace is set.
+                if cfg.workspace_directory:
+                    await self._process_agent(item, classified)
+                else:
+                    await self._process_legacy(item, classified)
             except Exception as exc:  # noqa: BLE001
                 self._log.error("error processing", id=item.id, error=str(exc))
                 await c.notifier.notify_error(item, str(exc))
+
+    async def _process_agent(self, item: WorkItemInfo, classified: WorkItemInfo) -> None:
+        """Control plane around the agent: track, run, read structured result, react."""
+        c, cfg = self._c, self._config
+
+        # Interactive mode: launch a Remote-Control session and let the human steer.
+        if cfg.execution_mode == "interactive":
+            if len(self._live) >= cfg.max_concurrent:
+                self._processed.pop(item.id, None)  # at capacity — retry next cycle
+                return
+            await self._dispatch_interactive(item)
+            return
+
+        await c.state_repo.set(item.id, PipelineState.IN_PROGRESS, title=item.title)
+        await c.notifier.notify_started(item, "agent")
+        record_id = await c.execution_repo.start_execution(item, "agent")
+
+        result = await c.executor.run_agent(
+            item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft
+        )
+
+        await c.execution_repo.complete_execution(record_id, result)
+        if result.cost_tokens:
+            await c.cost_tracker.track(record_id, result.cost_tokens)
+            metrics.record_cost(result.cost_tokens)
+
+        await self._handle_agent_result(item, result)
+        await c.plugins.run_post_processors(item, result)
+
+        status = (
+            "NEEDS_HUMAN" if result.needs_human else ("SUCCESS" if result.success else "FAILED")
+        )
+        metrics.record_task(status.lower(), str(classified.category), "agent")
+        metrics.record_duration(str(classified.category), result.duration_seconds)
+        self._log.info(
+            "finished", id=item.id, status=status, duration=round(result.duration_seconds, 1)
+        )
+
+    async def _dispatch_interactive(self, item: WorkItemInfo) -> None:
+        """Launch a Remote-Control session for the item; finalise later from its result."""
+        c, cfg = self._c, self._config
+        launched, session = await c.executor.dispatch_interactive(
+            item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft
+        )
+        if not launched:
+            await self._handle_agent_result(
+                item, ExecutionResult.fail(item.id, "interactive", "failed to launch session")
+            )
+            return
+        await c.state_repo.set(
+            item.id, PipelineState.IN_PROGRESS, title=item.title, detail=f"live session: {session}"
+        )
+        record_id = await c.execution_repo.start_execution(item, f"interactive:{session}")
+        self._live[item.id] = record_id
+        await c.ado.add_comment(
+            item.id,
+            "<div><b>🎮 Live session started</b><br/>Remote Control enabled — open claude.ai "
+            f"and attach to session <code>{session}</code> to watch or steer it.</div>",
+        )
+        self._log.info("interactive session dispatched", id=item.id, session=session)
+
+    async def _finalize_live_sessions(self) -> None:
+        """Finalise interactive sessions whose result.json has appeared."""
+        c, cfg = self._c, self._config
+        for item_id, record_id in list(self._live.items()):
+            item = await c.ado.get_work_item(item_id)
+            if item is None:
+                self._live.pop(item_id, None)
+                continue
+            result = c.executor.finalize_interactive(item)
+            if result is None:
+                continue  # session still running
+            await c.execution_repo.complete_execution(record_id, result)
+            if result.cost_tokens:
+                await c.cost_tracker.track(record_id, result.cost_tokens)
+                metrics.record_cost(result.cost_tokens)
+            await self._handle_agent_result(item, result)
+            self._processed[item_id] = datetime.now(UTC)
+            self._live.pop(item_id, None)
+            self._log.info(
+                "interactive session finalized",
+                id=item_id,
+                status="SUCCESS" if result.success else "FAILED",
+            )
+
+    async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
+        c, cfg = self._c, self._config
+        if result.needs_human:
+            c.retry_policy.record_success(item.id)  # escalated — not a retryable failure
+            await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=result.error or "")
+            await c.ado.add_comment(
+                item.id,
+                "<div><b>🙋 ADO Autopilot — Needs human input</b><br/>"
+                f"<p>{result.error or result.output}</p></div>",
+            )
+            # Hold the item: tag it so the poller skips it until a human steps in.
+            await c.ado.add_tag(item.id, cfg.escalation_tag)
+            self._log.info("escalated to human", id=item.id)
+            return
+
+        if result.success:
+            c.retry_policy.record_success(item.id)
+            if result.pr_url and cfg.pr_is_draft:
+                await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
+                await c.ado.add_tag(item.id, cfg.review_tag)
+                await c.ado.add_comment(
+                    item.id,
+                    "<div><b>🔍 PR created (draft)</b>, awaiting human review.<br/>"
+                    f'PR: <a href="{result.pr_url}">{result.pr_url}</a></div>',
+                )
+                await c.notifier.notify_completed(item, result, mark_processed=False)
+            elif result.pr_url:
+                await c.state_repo.set(item.id, PipelineState.DONE, pr_url=result.pr_url)
+                await c.notifier.notify_completed(item, result, mark_processed=True)
+            else:
+                # report mode: the agent commented a plan, no PR to resolve.
+                await c.state_repo.set(item.id, PipelineState.DONE)
+                await c.ado.add_tag(item.id, cfg.processed_tag)
+                await c.notifier.notify_completed(item, result, mark_processed=False)
+            return
+
+        c.retry_policy.record_failure(item.id, result.error or "Unknown error")
+        await c.state_repo.set(item.id, PipelineState.FAILED, detail=result.error or "")
+        exhausted = c.retry_policy.is_exhausted(item.id)
+        await c.notifier.notify_completed(item, result, mark_processed=exhausted)
+        if exhausted:
+            state = c.retry_policy.get_state(item.id)
+            count = state.retry_count if state else cfg.max_retries
+            self._log.error("gave up after retries", id=item.id, count=count)
+            await c.ado.add_comment(
+                item.id,
+                f"<b>⛔ Autopilot gave up after {count} retries.</b> Last error: {result.error}",
+            )
+        else:
+            self._processed.pop(item.id, None)
+
+    async def _process_legacy(self, item: WorkItemInfo, classified: WorkItemInfo) -> None:
+        """Legacy hardcoded flow (classify → fixed skill → Python git/PR)."""
+        c, cfg = self._c, self._config
+        skill = c.router.route(classified)
+        if skill is None:
+            self._log.warning("no skill found", item=str(item))
+            return
+        if not c.rbac.is_skill_allowed(skill):
+            self._log.warning("rbac denied skill", skill=skill, id=item.id)
+            return
+
+        self._log.info("routing to skill", id=item.id, skill=skill)
+
+        if classified.category == TaskCategory.REQUIREMENT and cfg.auto_decompose:
+            await c.decomposer.decompose(classified)
+            await c.ado.add_tag(item.id, cfg.processed_tag)
+            self._log.info("decomposed into child tasks", id=item.id)
+            return
+
+        # L1 (report): triage only — comment the plan, don't change code.
+        if cfg.report_only:
+            self._log.info("report-only triage", id=item.id, skill=skill)
+            await c.ado.add_comment(
+                item.id,
+                "<b>🧭 ADO Autopilot — Triage (report mode)</b><br/>"
+                f"Would route to <code>{skill}</code> "
+                f"(category: {classified.category}).",
+            )
+            await c.ado.add_tag(item.id, cfg.processed_tag)
+            return
+
+        await c.notifier.notify_started(item, skill)
+        record_id = await c.execution_repo.start_execution(item, skill)
+
+        result = await self._execute(item, skill)
+
+        await c.execution_repo.complete_execution(record_id, result)
+        if result.cost_tokens:
+            await c.cost_tracker.track(record_id, result.cost_tokens)
+            metrics.record_cost(result.cost_tokens)
+
+        await self._handle_result(item, skill, result, classified)
+        await c.plugins.run_post_processors(item, result)
+
+        status = "SUCCESS" if result.success else "FAILED"
+        metrics.record_task(status.lower(), str(classified.category), skill)
+        metrics.record_duration(str(classified.category), result.duration_seconds)
+        self._log.info(
+            "finished",
+            id=item.id,
+            status=status,
+            duration=round(result.duration_seconds, 1),
+            skill=skill,
+        )
 
     async def _execute(self, item: WorkItemInfo, skill: str) -> ExecutionResult:
         cfg = self._config

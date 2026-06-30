@@ -21,6 +21,32 @@ class ExecutionStatus(enum.Enum):
     RETRYING = "Retrying"
 
 
+class PipelineState(enum.Enum):
+    """Per-work-item pipeline stage. Values match the board column names."""
+
+    QUEUED = "Queued"
+    IN_PROGRESS = "In progress"
+    IN_REVIEW = "In review"
+    NEEDS_HUMAN = "Needs human"
+    DONE = "Done"
+    FAILED = "Failed"
+
+
+class WorkItemState(Base):
+    """Authoritative pipeline state per work item (survives restarts → resume)."""
+
+    __tablename__ = "work_item_states"
+
+    work_item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(500), default="")
+    state: Mapped[PipelineState] = mapped_column(
+        Enum(PipelineState, native_enum=False, length=20), default=PipelineState.QUEUED
+    )
+    detail: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    pr_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class ExecutionRecord(Base):
     __tablename__ = "executions"
     __table_args__ = (

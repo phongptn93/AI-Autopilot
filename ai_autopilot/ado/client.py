@@ -90,6 +90,34 @@ class AdoClient:
             return []
         return await self.get_work_items_by_ids(ids)
 
+    async def get_all_tagged_work_items(self) -> list[WorkItemInfo]:
+        """Query every work item carrying the trigger tag, in ANY state.
+
+        Used by the board to show the full picture (queued, in-flight, done,
+        held) — unlike ``get_pending_work_items`` which filters to trigger states.
+        """
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems "
+            f"WHERE [System.Tags] CONTAINS '{self._config.trigger_tag}' "
+            f"AND [System.TeamProject] = '{self._config.ado_project}' "
+            "ORDER BY [System.ChangedDate] DESC"
+        )
+        try:
+            resp = await self._http.post(
+                self._url(f"wit/wiql?{_API}"),
+                json={"query": wiql},
+                headers=await self._headers(),
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("board WIQL request error", error=str(exc))
+            return []
+        text = resp.text.lstrip()
+        if resp.status_code >= 400 or not text.startswith("{"):
+            self._log.warning("board WIQL failed", status=resp.status_code)
+            return []
+        ids = [r["id"] for r in (resp.json().get("workItems") or [])]
+        return await self.get_work_items_by_ids(ids)
+
     async def get_work_items_by_ids(self, ids: list[int]) -> list[WorkItemInfo]:
         if not ids:
             return []

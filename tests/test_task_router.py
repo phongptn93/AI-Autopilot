@@ -68,7 +68,13 @@ def test_unknown_when_nothing_matches(router):
 def test_route_known_categories(router):
     item = router.classify(_item(title="[BE] thing"))
     item.id = 2152
-    assert router.route(item) == "/implement-task-be 2152"
+    assert router.route(item) == "/crud-full-stack 2152"
+
+
+def test_route_frontend(router):
+    item = router.classify(_item(title="[FE] thing"))
+    item.id = 2153
+    assert router.route(item) == "/fe-module 2153"
 
 
 def test_route_bug(router):
@@ -81,7 +87,8 @@ def test_route_unknown_returns_none(router):
     assert router.route(_item(title="random")) is None
 
 
-def test_route_database_returns_none(router):
-    # DatabaseTask has no skill mapping → unroutable (parity with .NET).
+def test_route_database(router):
+    # DatabaseTask routes to the sql-migration skill.
     item = router.classify(_item(title="[DB] migration"))
-    assert router.route(item) is None
+    item.id = 77
+    assert router.route(item) == "/sql-migration 77"

@@ -21,6 +21,9 @@ class ExecutionResult:
     duration_seconds: float = 0.0
     cost_tokens: int = 0
     cost_usd: float | None = None
+    # The agent ran but reports it needs a human (ambiguous AC, missing info).
+    # Not a failure to retry — escalate and stop.
+    needs_human: bool = False
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod

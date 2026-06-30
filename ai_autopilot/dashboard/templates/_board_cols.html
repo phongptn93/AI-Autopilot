@@ -1,0 +1,34 @@
+{# Board columns only — rendered standalone for the auto-refresh fetch. #}
+<div class="board-cols">
+    {% for col in columns %}
+    <div class="board-col col-accent-{{ col|lower|replace(' ', '-') }}">
+        <div class="board-col-head">
+            <span class="board-col-name">{{ col }}</span>
+            <span class="board-col-count">{{ board[col]|length }}</span>
+        </div>
+        <div class="board-col-body">
+            {% for card in board[col] %}
+            {% set label, css = category_badge(card.category) %}
+            <div class="board-card {{ css }}">
+                <div class="board-card-head">
+                    {% if card.category %}<span class="cat-badge {{ css }}">{{ label }}</span>{% endif %}
+                    <span class="board-card-id">#{{ card.id }}</span>
+                    <span class="board-card-state">{{ card.ado_state }}</span>
+                </div>
+                <div class="board-card-title">{{ card.title }}</div>
+                <div class="board-card-foot">
+                    <a class="board-card-act" href="/dashboard/activity/{{ card.id }}">👁 activity</a>
+                    {% if card.pr_url %}<a class="board-card-pr" href="{{ card.pr_url }}" target="_blank">PR ↗</a>{% endif %}
+                </div>
+                {% if interactive and card.column == 'In progress' %}
+                <div class="board-card-rc">🎮 <code>/rc autopilot-{{ card.id }}</code></div>
+                {% endif %}
+                {% if card.assigned_to %}<div class="board-card-who">👤 {{ card.assigned_to }}</div>{% endif %}
+            </div>
+            {% else %}
+            <div class="board-col-empty">No items</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>

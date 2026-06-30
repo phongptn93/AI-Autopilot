@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     trigger_tag: str = "autopilot"
     processed_tag: str = "autopilot-done"
     review_tag: str = "autopilot-review"
+    # Applied when the agent escalates (needs_human); these items are held — the
+    # poller skips them until a human removes the tag.
+    escalation_tag: str = "autopilot-hold"
+    # ADO work-item state to set when an item is successfully resolved. Match your
+    # board's template (e.g. "Resolved", "Closed", "Done").
+    resolved_state: str = "Resolved"
     poll_interval_seconds: int = 30
     # ADO work-item states that are eligible for processing. The default suits the
     # Agile/Scrum/Basic templates; adjust to match your board (e.g. add "Doing",
@@ -113,7 +119,16 @@ class Settings(BaseSettings):
 
     # ── Repository / execution ──
     repo_working_directory: str = ""
+    # Directory Claude Code runs in (its cwd). When set, this should be the
+    # *workspace* root that holds the shared ``.claude/`` (skills, rules, MCP) and
+    # the source repos as subfolders — Claude needs to run from here to see the
+    # project skills/rules, then edits the target repo subfolder. Blank → Claude
+    # runs inside the repo/worktree itself (legacy behaviour).
+    workspace_directory: str = ""
     base_branch: str = "development"
+    # Repos (subfolders of the workspace) the agent is allowed to edit. Empty =
+    # all discovered repos. Acts as a safety whitelist in AI-native mode.
+    allowed_repos: list[str] = Field(default_factory=list)
     repos: list[RepoConfig] = Field(default_factory=list)
     max_concurrent: int = 1
     task_timeout_minutes: int = 30
@@ -125,6 +140,11 @@ class Settings(BaseSettings):
     worktrees_dir: str = ""  # empty → <system temp>/ai-autopilot-worktrees
 
     # ── Claude execution ──
+    # How a work item is executed:
+    #   "headless"    – autonomous Agent SDK run, no human interaction
+    #   "interactive" – launch a real Claude Code session per task (Remote Control
+    #                   enabled) the human can attach to / steer (default)
+    execution_mode: str = "interactive"
     claude_model: str = ""  # empty → SDK default
     claude_max_turns: int = 0  # 0 → unbounded
     # Permission mode for autonomous runs. "acceptEdits" works when the process

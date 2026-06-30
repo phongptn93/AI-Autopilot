@@ -12,20 +12,29 @@ from ai_autopilot.dashboard import settings_form
 
 def test_parse_form_coerces_types():
     form = {
-        "repo_working_directory": "/repos/app",
+        "workspace_directory": "/ws",
         "poll_interval_seconds": "45",
         "max_concurrent": "3",
         "autonomy_level": "unattended",
+        "trigger_states": "New, To Do\nActive",
         # checkboxes present → True; absent keys → False
-        "use_worktrees": "on",
+        "auto_review_enabled": "on",
     }
     updates = settings_form.parse_form(form)
-    assert updates["repo_working_directory"] == "/repos/app"
+    assert updates["workspace_directory"] == "/ws"
     assert updates["poll_interval_seconds"] == 45
     assert updates["max_concurrent"] == 3
     assert updates["autonomy_level"] == "unattended"
-    assert updates["use_worktrees"] is True
+    assert updates["trigger_states"] == ["New", "To Do", "Active"]  # comma + newline split
+    assert updates["auto_review_enabled"] is True
     assert updates["dry_run"] is False  # checkbox not in form
+
+
+def test_parse_repos_whitelist():
+    form = {"_all_repos": "Backend-Fresh,Micro-Frontend,Secret",
+            "repo__Backend-Fresh": "on", "repo__Micro-Frontend": "on"}
+    assert settings_form.parse_repos(form) == ["Backend-Fresh", "Micro-Frontend"]
+    assert settings_form.parse_repos({"_all_repos": ""}) == []
 
 
 def test_parse_form_skips_blank_password_and_int():

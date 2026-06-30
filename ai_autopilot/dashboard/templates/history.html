@@ -6,13 +6,27 @@
 </div>
 
 <div class="card">
-    <div class="card-header"><h3>All Executions</h3><span style="font-size:13px;color:var(--text-muted)">{{ records|length }} records</span></div>
+    <div class="card-header">
+        <h3>All Executions</h3>
+        <div style="display:flex;align-items:center;gap:14px;">
+            <span style="font-size:13px;color:var(--text-muted)">{{ records|length }} records</span>
+            {% if records %}
+            <form method="post" action="/dashboard/history/clear"
+                  onsubmit="return confirm('Xoá TẤT CẢ lịch sử execution? Không thể hoàn tác.');" style="margin:0;">
+                <button type="submit" class="table-link"
+                        style="background:transparent;border:1px solid var(--red,#e5484d);color:var(--red,#e5484d);border-radius:6px;padding:4px 12px;cursor:pointer;">
+                    🗑 Clear all
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
     <div class="card-body">
         {% if records %}
         <table>
             <thead><tr>
                 <th>ID</th><th>Title</th><th>Category</th><th>Skill</th><th>Status</th>
-                <th>Branch</th><th>PR</th><th>Duration</th><th>Retries</th><th>Tokens</th><th>Started</th>
+                <th>Branch</th><th>PR</th><th>Duration</th><th>Retries</th><th>Tokens</th><th>Started</th><th></th>
             </tr></thead>
             <tbody>
                 {% for e in records %}
@@ -29,6 +43,13 @@
                     <td style="text-align:center">{{ e.retry_count }}</td>
                     <td class="mono">{{ '{:,}'.format(e.cost_tokens) }}</td>
                     <td>{{ e.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        <form method="post" action="/dashboard/history/{{ e.id }}/delete"
+                              onsubmit="return confirm('Xoá record #{{ e.work_item_id }}?');" style="margin:0;">
+                            <button type="submit" title="Xoá dòng này"
+                                    style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:15px;">✕</button>
+                        </form>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

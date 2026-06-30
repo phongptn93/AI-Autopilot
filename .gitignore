@@ -29,6 +29,7 @@ legacy-dotnet/obj/
 
 # Local config (may contain secrets)
 config.local.yaml
+config.yaml
 
 # IDE
 .idea/

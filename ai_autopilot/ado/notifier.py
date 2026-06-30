@@ -95,7 +95,7 @@ class AdoNotifier:
         if mark_processed:
             await self._ado.add_tag(item.id, self._config.processed_tag)
             if result.success and result.pr_url:
-                await self._ado.update_state(item.id, "Resolved")
+                await self._ado.update_state(item.id, self._config.resolved_state)
 
         await self._broadcast(
             NotificationMessage(

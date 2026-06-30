@@ -11,7 +11,7 @@ import httpx
 
 from ai_autopilot.ado import AdoAuthService, AdoClient, AdoNotifier
 from ai_autopilot.config import Settings
-from ai_autopilot.data import Database, ExecutionRepository
+from ai_autopilot.data import Database, ExecutionRepository, StateRepository
 from ai_autopilot.execution import AutoReviewer, ClaudeExecutor, FeedbackHandler, RetryPolicy
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.multitenant import TenantManager
@@ -42,6 +42,7 @@ class Container:
         # Persistence.
         self.database = Database(config.database_url)
         self.execution_repo = ExecutionRepository(self.database)
+        self.state_repo = StateRepository(self.database)
 
         # ADO.
         self.auth = AdoAuthService(config)

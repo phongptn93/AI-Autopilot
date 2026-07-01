@@ -6,7 +6,11 @@ from types import SimpleNamespace
 
 from ai_autopilot.config import Settings
 from ai_autopilot.models import WorkItemInfo
-from ai_autopilot.services.state_sync import StateSyncService, all_children_done
+from ai_autopilot.services.state_sync import (
+    StateSyncService,
+    all_children_done,
+    items_awaiting_deploy,
+)
 
 
 def _wi(wid, state="", tags=None, parent_id=None):
@@ -37,6 +41,10 @@ class _FakeAdo:
         self.items: dict[int, WorkItemInfo] = {}
         self.children: dict[int, list[WorkItemInfo]] = {}
         self.tagged: list[WorkItemInfo] = []
+        self.builds: list[dict] = []
+
+    async def get_successful_builds(self, definition_id, branch):
+        return self.builds
 
     async def get_repositories(self):
         return self.repos
@@ -106,6 +114,42 @@ async def test_parent_rollup_skips_when_a_child_not_done():
     c.ado.tagged = [_wi(1, tags=["autopilot"], parent_id=100)]
     c.ado.children[100] = [_wi(1, state="Closed"), _wi(2, state="Active")]
     c.ado.items[100] = _wi(100, state="Active")
+    await svc._scan()
+    assert c.ado.states == []
+
+
+def test_items_awaiting_deploy_filters_by_state():
+    tagged = [_wi(1, state="Ready for Review"), _wi(2, state="Active"), _wi(3, state="ready for review")]
+    assert items_awaiting_deploy(tagged, "Ready for Review") == [1, 3]  # case-insensitive
+    assert items_awaiting_deploy(tagged, "") == []
+
+
+async def test_deploy_marks_awaiting_items_on_new_build():
+    svc, c = _svc_shared(on_merge_state="Ready for Review", on_deploy_state="Deployed", base_branch="main")
+    c.ado.tagged = [
+        _wi(1, state="Ready for Review", tags=["autopilot"]),
+        _wi(2, state="Active", tags=["autopilot"]),  # not awaiting deploy
+    ]
+    c.ado.builds = [{"id": 10}]
+    await svc._scan()                       # first scan → baseline, no transition
+    assert c.ado.states == []
+    c.ado.builds = [{"id": 11}]             # a new successful build
+    await svc._scan()
+    assert (1, "Deployed") in c.ado.states
+    assert all(wid != 2 for wid, _ in c.ado.states)
+    c.ado.states.clear()
+    await svc._scan()                       # same build → idempotent
+    assert c.ado.states == []
+
+
+async def test_deploy_dry_run_writes_nothing():
+    svc, c = _svc_shared(
+        on_merge_state="Ready for Review", on_deploy_state="Deployed", base_branch="main", dry_run=True
+    )
+    c.ado.tagged = [_wi(1, state="Ready for Review", tags=["autopilot"])]
+    c.ado.builds = [{"id": 10}]
+    await svc._scan()
+    c.ado.builds = [{"id": 11}]
     await svc._scan()
     assert c.ado.states == []
 

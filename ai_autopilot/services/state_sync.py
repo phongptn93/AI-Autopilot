@@ -25,6 +25,14 @@ _POLL_INTERVAL_SECONDS = 90
 _BOT_BRANCH_PREFIXES = ("feature/", "fix/", "autopilot/")
 
 
+def items_awaiting_deploy(tagged: list[WorkItemInfo], on_merge_state: str) -> list[int]:
+    """Ids of tagged items sitting in ``on_merge_state`` (merged, awaiting deploy)."""
+    target = (on_merge_state or "").strip().lower()
+    if not target:
+        return []
+    return [i.id for i in tagged if (i.state or "").strip().lower() == target]
+
+
 def all_children_done(
     children: list[WorkItemInfo], done_states: list[str], processed_tag: str
 ) -> bool:
@@ -50,6 +58,7 @@ class StateSyncService:
         self._log = get_logger("services.state_sync")
         self._merged: set[int] = set()   # PR ids already transitioned
         self._rolled: set[int] = set()   # parent ids already rolled up
+        self._last_deploy_build: int | None = None  # newest deploy build id seen
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
@@ -93,6 +102,34 @@ class StateSyncService:
                 tagged = []
             for parent_id in {i.parent_id for i in tagged if i.parent_id}:
                 await self._maybe_roll_up_parent(parent_id)
+        # C. deploy: a fresh successful deploy build → items awaiting deploy are deployed.
+        if cfg.on_deploy_state and cfg.on_merge_state:
+            await self._check_deploys()
+
+    async def _check_deploys(self) -> None:
+        c, cfg = self._c, self._config
+        branch = cfg.deploy_branch or cfg.base_branch
+        builds = await c.ado.get_successful_builds(cfg.deploy_pipeline_id, branch)
+        ids = [b.get("id") for b in builds if isinstance(b.get("id"), int)]
+        if not ids:
+            return
+        newest = max(ids)
+        if self._last_deploy_build is None:
+            self._last_deploy_build = newest  # baseline on first scan — don't transition old builds
+            return
+        if newest <= self._last_deploy_build:
+            return  # no new successful build since last check
+        self._last_deploy_build = newest
+        tagged = await c.ado.get_all_tagged_work_items()
+        for wid in items_awaiting_deploy(tagged, cfg.on_merge_state):
+            if cfg.dry_run:
+                self._log.info("[DRY-RUN] would mark deployed", id=wid)
+                continue
+            await c.ado.update_state(wid, cfg.on_deploy_state)
+            await c.ado.add_comment(
+                wid, "<div><b>🚀 Deployed</b> — deploy pipeline succeeded.</div>"
+            )
+            self._log.info("marked deployed", id=wid, state=cfg.on_deploy_state, build=newest)
 
     def _has_trigger_tag(self, item: WorkItemInfo) -> bool:
         item_tags = {t.lower() for t in item.tags}

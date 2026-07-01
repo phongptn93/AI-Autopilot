@@ -247,6 +247,22 @@ class AdoClient:
             return []
         return resp.json().get("value") or []
 
+    async def get_successful_builds(
+        self, definition_id: int, branch: str
+    ) -> list[dict[str, Any]]:
+        """Recent successful builds on ``branch`` (optionally for one pipeline)."""
+        query = (
+            f"build/builds?statusFilter=completed&resultFilter=succeeded"
+            f"&branchName=refs/heads/{quote(branch, safe='')}&$top=5&{_API}"
+        )
+        if definition_id:
+            query += f"&definitions={definition_id}"
+        resp = await self._http.get(self._url(query), headers=await self._auth.get_auth_header())
+        if resp.status_code >= 400:
+            self._log.warning("get_successful_builds failed", status=resp.status_code)
+            return []
+        return resp.json().get("value") or []
+
     async def get_children(self, parent_id: int) -> list[WorkItemInfo]:
         """Child work items of a parent (via System.Parent)."""
         wiql = (

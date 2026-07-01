@@ -148,6 +148,11 @@ class Settings(BaseSettings):
     auto_transition_enabled: bool = False
     on_merge_state: str = ""
     parent_done_state: str = ""
+    # Deploy monitor: when a deploy pipeline build succeeds, move items sitting in
+    # on_merge_state to on_deploy_state. Blank on_deploy_state = monitor off.
+    on_deploy_state: str = ""
+    deploy_pipeline_id: int = 0     # ADO build definition id (0 = any build on the branch)
+    deploy_branch: str = ""         # branch the deploy builds run on (blank = base_branch)
     poll_interval_seconds: int = 30
     # ADO work-item states that are eligible for processing. The default suits the
     # Agile/Scrum/Basic templates; adjust to match your board (e.g. add "Doing",

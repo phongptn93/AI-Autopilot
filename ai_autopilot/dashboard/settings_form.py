@@ -94,6 +94,13 @@ FIELDS: tuple[Field, ...] = (
     Field("parent_done_state", "All children done → parent state", "stateone", "Auto transitions",
           "State to set on the PARENT when every child is done (state in 'Done states' or tagged "
           "done). Blank = disable parent roll-up."),
+    Field("on_deploy_state", "On deploy success → state", "stateone", "Auto transitions",
+          "When a deploy pipeline build succeeds, move items sitting in 'On PR merged → state' to "
+          "this state. Blank = deploy monitor off."),
+    Field("deploy_pipeline_id", "Deploy pipeline id", "int", "Auto transitions",
+          "ADO build definition id of the deploy pipeline. 0 = watch any successful build on the branch."),
+    Field("deploy_branch", "Deploy branch", "text", "Auto transitions",
+          "Branch the deploy builds run on (blank = base branch)."),
     # ── Execution & autonomy ──
     Field("execution_mode", "Execution mode", "select", "Execution & Autonomy",
           "interactive = launch a Remote-Control Claude session per task you can /rc into and steer; "

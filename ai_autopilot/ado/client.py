@@ -232,14 +232,41 @@ class AdoClient:
         return resp.json().get("value") or []
 
     async def get_active_pull_requests(self, repo_id: str) -> list[dict[str, Any]]:
+        return await self._pull_requests_by_status(repo_id, "active")
+
+    async def get_completed_pull_requests(self, repo_id: str) -> list[dict[str, Any]]:
+        return await self._pull_requests_by_status(repo_id, "completed")
+
+    async def _pull_requests_by_status(self, repo_id: str, status: str) -> list[dict[str, Any]]:
         url = self._url(
-            f"git/repositories/{repo_id}/pullrequests?searchCriteria.status=active&{_API}"
+            f"git/repositories/{repo_id}/pullrequests?searchCriteria.status={status}&{_API}"
         )
         resp = await self._http.get(url, headers=await self._auth.get_auth_header())
         if resp.status_code >= 400:
-            self._log.warning("get_active_pull_requests failed", status=resp.status_code)
+            self._log.warning("get_pull_requests failed", status=resp.status_code, pr_status=status)
             return []
         return resp.json().get("value") or []
+
+    async def get_children(self, parent_id: int) -> list[WorkItemInfo]:
+        """Child work items of a parent (via System.Parent)."""
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems "
+            f"WHERE [System.Parent] = {parent_id} "
+            f"AND [System.TeamProject] = '{self._config.ado_project}'"
+        )
+        try:
+            resp = await self._http.post(
+                self._url(f"wit/wiql?{_API}"), json={"query": wiql}, headers=await self._headers()
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("get_children request error", error=str(exc))
+            return []
+        text = resp.text.lstrip()
+        if resp.status_code >= 400 or not text.startswith("{"):
+            self._log.warning("get_children failed", status=resp.status_code)
+            return []
+        ids = [r["id"] for r in (resp.json().get("workItems") or [])]
+        return await self.get_work_items_by_ids(ids)
 
     async def get_pull_request_threads(self, repo_id: str, pr_id: int) -> list[dict[str, Any]]:
         url = self._url(f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads?{_API}")

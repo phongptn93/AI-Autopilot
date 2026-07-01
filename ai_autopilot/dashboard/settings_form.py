@@ -84,6 +84,16 @@ FIELDS: tuple[Field, ...] = (
     Field("done_states", "Done states (→ Done column)", "stateset", "Board columns",
           "ADO states that count as Done on the board (e.g. Ready to Testing, Closed). "
           "Items a human moved to any of these show in the Done column."),
+    # ── Auto transitions ──
+    Field("auto_transition_enabled", "Enable auto transitions", "bool", "Auto transitions",
+          "Move the work item when its PR is merged, and roll a parent forward when all its "
+          "children are done."),
+    Field("on_merge_state", "On PR merged → state", "stateone", "Auto transitions",
+          "State to set when a PR the autopilot opened is merged (also marks it done). Blank = "
+          "only tag done, don't change state."),
+    Field("parent_done_state", "All children done → parent state", "stateone", "Auto transitions",
+          "State to set on the PARENT when every child is done (state in 'Done states' or tagged "
+          "done). Blank = disable parent roll-up."),
     # ── Execution & autonomy ──
     Field("execution_mode", "Execution mode", "select", "Execution & Autonomy",
           "interactive = launch a Remote-Control Claude session per task you can /rc into and steer; "

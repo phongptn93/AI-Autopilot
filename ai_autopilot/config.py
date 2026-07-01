@@ -142,6 +142,12 @@ class Settings(BaseSettings):
     # never sets), clear its skip tags so it gets reprocessed. Guarded against loops:
     # only reopens on trigger states that are NOT the autopilot's own output states.
     reprocess_on_reopen: bool = True
+    # Auto state transitions (opt-in). When a PR the autopilot opened is merged,
+    # move the work item to on_merge_state + mark it done; when ALL children of a
+    # parent are done, move the parent to parent_done_state. Blank state = skip that.
+    auto_transition_enabled: bool = False
+    on_merge_state: str = ""
+    parent_done_state: str = ""
     poll_interval_seconds: int = 30
     # ADO work-item states that are eligible for processing. The default suits the
     # Agile/Scrum/Basic templates; adjust to match your board (e.g. add "Doing",

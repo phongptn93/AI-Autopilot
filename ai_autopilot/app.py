@@ -12,7 +12,12 @@ from ai_autopilot.config import Settings, load_settings
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import create_dashboard_router
 from ai_autopilot.logging_config import configure_logging, get_logger
-from ai_autopilot.services import AdoPollerService, LoopScheduler, PrMonitorService
+from ai_autopilot.services import (
+    AdoPollerService,
+    LoopScheduler,
+    PrMonitorService,
+    StateSyncService,
+)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -28,9 +33,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         poller = AdoPollerService(container)
         pr_monitor = PrMonitorService(container)
+        state_sync = StateSyncService(container)
         loops = LoopScheduler(container)
         poller.start()
         pr_monitor.start()
+        state_sync.start()
         loops.start()
         log.info("autopilot online", health_port=config.health_port)
         try:
@@ -38,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             await poller.stop()
             await pr_monitor.stop()
+            await state_sync.stop()
             await loops.stop()
             await container.shutdown()
             log.info("autopilot stopped")

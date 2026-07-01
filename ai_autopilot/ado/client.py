@@ -170,6 +170,19 @@ class AdoClient:
         resp = await self._patch(work_item_id, patch)
         return resp.status_code < 400
 
+    async def remove_tag(self, work_item_id: int, tag: str) -> bool:
+        item = await self.get_work_item(work_item_id)
+        if item is None:
+            return False
+        remaining = [t for t in item.tags if t.lower() != tag.lower()]
+        if len(remaining) == len(item.tags):
+            return True  # tag wasn't present — nothing to do
+        patch = [{"op": "replace", "path": "/fields/System.Tags", "value": "; ".join(remaining)}]
+        resp = await self._patch(work_item_id, patch)
+        if resp.status_code >= 400:
+            self._log.warning("remove_tag failed", id=work_item_id, status=resp.status_code)
+        return resp.status_code < 400
+
     async def create_work_item(
         self, title: str, item_type: str, parent_id: int | None, tag: str
     ) -> int:

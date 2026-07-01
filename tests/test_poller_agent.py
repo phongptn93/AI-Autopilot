@@ -15,15 +15,23 @@ class _FakeAdo:
         self.tags: list[tuple[int, str]] = []
         self.comments: list[tuple[int, str]] = []
         self.states: list[tuple[int, str]] = []
+        self.removed: list[tuple[int, str]] = []
+        self.tagged_items: list = []
 
     async def add_tag(self, work_item_id, tag):
         self.tags.append((work_item_id, tag))
+
+    async def remove_tag(self, work_item_id, tag):
+        self.removed.append((work_item_id, tag))
 
     async def add_comment(self, work_item_id, text):
         self.comments.append((work_item_id, text))
 
     async def update_state(self, work_item_id, new_state):
         self.states.append((work_item_id, new_state))
+
+    async def get_all_tagged_work_items(self):
+        return self.tagged_items
 
     async def get_work_item(self, work_item_id):
         return WorkItemInfo(id=work_item_id, title="t", work_item_type="Task")
@@ -111,6 +119,33 @@ def _poller(autonomy="assisted", exhausted=False) -> tuple[AdoPollerService, Sim
 
 def _item() -> WorkItemInfo:
     return WorkItemInfo(id=7, title="t", work_item_type="Task")
+
+
+def _tagged(item_id, state, tags):
+    return WorkItemInfo(id=item_id, title="t", work_item_type="Task", state=state, tags=tags)
+
+
+async def test_reconcile_reopened_clears_skip_tags():
+    p, c = _poller()  # trigger_states include New/To Do/Proposed/Active; state_in_progress=Active, resolved_state=Resolved
+    done = c.config.processed_tag
+    c.ado.tagged_items = [
+        _tagged(7, "New", ["autopilot", done]),        # trigger, not an output state → reopen
+        _tagged(8, "Resolved", ["autopilot", done]),   # output state → keep
+        _tagged(9, "Active", ["autopilot", done]),     # trigger BUT = state_in_progress output → keep
+        _tagged(10, "New", ["autopilot"]),             # no skip tag → nothing to do
+    ]
+    await p._reconcile_reopened()
+    assert (7, done) in c.ado.removed
+    assert (7, PipelineState.QUEUED) in c.state_repo.calls
+    assert [wid for wid, _ in c.ado.removed] == [7]    # only the reopened one
+
+
+async def test_reconcile_reopened_respects_toggle_off():
+    p, c = _poller()
+    c.config.reprocess_on_reopen = False
+    c.ado.tagged_items = [_tagged(7, "New", ["autopilot", c.config.processed_tag])]
+    await p._reconcile_reopened()
+    assert c.ado.removed == []
 
 
 def test_outcome_policy_maps_tag_and_state():

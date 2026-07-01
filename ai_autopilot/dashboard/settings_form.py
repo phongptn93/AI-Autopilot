@@ -47,6 +47,9 @@ FIELDS: tuple[Field, ...] = (
           "Extra tags to also process (comma or newline separated). Board/Overview can filter by tag."),
     Field("trigger_states", "Trigger states", "stateset", "Tags & Trigger",
           "ADO states eligible for processing — tick from your board, or add custom ones below."),
+    Field("reprocess_on_reopen", "Reprocess when reopened", "bool", "Tags & Trigger",
+          "When a handled item is dragged back to a trigger state, clear its autopilot "
+          "tags so it runs again. (Only trigger states the autopilot doesn't set itself.)"),
     Field("poll_interval_seconds", "Poll interval (seconds)", "int", "Tags & Trigger"),
     # ── Outcomes → tag + state ──
     # The policy table: for each outcome, the ADO tag to add and the ADO state to

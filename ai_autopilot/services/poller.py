@@ -122,6 +122,10 @@ class AdoPollerService:
                 if wi.id not in self._processed and not c.retry_policy.is_exhausted(wi.id):
                     asyncio.create_task(self._process(wi))
 
+        # Reopen items a human dragged back to a trigger state (clears skip tags),
+        # so the pending query below picks them up again this cycle.
+        await self._reconcile_reopened()
+
         self._log.debug("polling ADO for pending work items")
         items = await c.ado.get_pending_work_items()
 
@@ -170,6 +174,47 @@ class AdoPollerService:
             await self._c.ado.add_tag(item_id, tag)
         if state:
             await self._c.ado.update_state(item_id, state)
+
+    async def _reconcile_reopened(self) -> None:
+        """Reopen items a human dragged back to a trigger state: clear their skip
+        tags so they re-enter the pipeline.
+
+        Loop-safe: only acts on trigger states the autopilot never sets itself
+        (its output states are excluded), and only on items carrying a skip tag.
+        """
+        c, cfg = self._c, self._config
+        if cfg.dry_run or not cfg.reprocess_on_reopen:
+            return
+        output = {s.lower() for s in (
+            cfg.state_in_progress, cfg.state_in_review, cfg.state_needs_human,
+            cfg.resolved_state, cfg.state_report, cfg.state_failed,
+        ) if s}
+        reopen_states = {s.lower() for s in cfg.trigger_states} - output
+        skip_tags = {t.lower() for t in (
+            cfg.processed_tag, cfg.review_tag, cfg.escalation_tag, cfg.failed_tag,
+        ) if t}
+        if not reopen_states or not skip_tags:
+            return
+        try:
+            tagged = await c.ado.get_all_tagged_work_items()
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("reopen reconcile: fetch failed", error=str(exc))
+            return
+        for item in tagged:
+            held = [t for t in item.tags if t.lower() in skip_tags]
+            if (item.state or "").lower() not in reopen_states or not held:
+                continue
+            for tag in held:
+                await c.ado.remove_tag(item.id, tag)
+            await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
+            c.retry_policy.record_success(item.id)  # fresh retries on reopen
+            self._processed.pop(item.id, None)
+            await c.ado.add_comment(
+                item.id,
+                "<div><b>🔄 Reopened</b> — moved back to a trigger state; cleared "
+                "autopilot tags and will reprocess.</div>",
+            )
+            self._log.info("reopened item", id=item.id, state=item.state, cleared=held)
 
     async def _process(self, item: WorkItemInfo) -> None:
         c, cfg = self._c, self._config

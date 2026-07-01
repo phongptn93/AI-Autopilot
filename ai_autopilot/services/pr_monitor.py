@@ -19,7 +19,6 @@ from ai_autopilot.services.pr_feedback import (
 )
 
 _POLL_INTERVAL_SECONDS = 120
-_BOT_BRANCH_PREFIXES = ("feature/", "fix/", "autopilot/")
 
 
 class PrMonitorService:
@@ -66,7 +65,7 @@ class PrMonitorService:
     async def _inspect_pr(self, repo_id: str, pr: dict) -> None:
         c, cfg = self._c, self._config
         source_ref = pr.get("sourceRefName", "")
-        if not is_bot_branch(source_ref, _BOT_BRANCH_PREFIXES):
+        if not is_bot_branch(source_ref, tuple(self._config.bot_branch_prefixes)):
             return
 
         pr_id = pr.get("pullRequestId")

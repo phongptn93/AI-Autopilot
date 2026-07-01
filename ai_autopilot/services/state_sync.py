@@ -22,7 +22,6 @@ from ai_autopilot.models import WorkItemInfo
 from ai_autopilot.services.pr_feedback import is_bot_branch, parse_work_item_id
 
 _POLL_INTERVAL_SECONDS = 90
-_BOT_BRANCH_PREFIXES = ("feature/", "fix/", "autopilot/")
 
 
 def items_awaiting_deploy(tagged: list[WorkItemInfo], on_merge_state: str) -> list[int]:
@@ -167,7 +166,7 @@ class StateSyncService:
         source = pr.get("sourceRefName", "")
         if pr_id is None or pr_id in self._merged:
             return
-        if not is_bot_branch(source, _BOT_BRANCH_PREFIXES):
+        if not is_bot_branch(source, tuple(cfg.bot_branch_prefixes)):
             return
         work_item_id = parse_work_item_id(source)
         if work_item_id is None:

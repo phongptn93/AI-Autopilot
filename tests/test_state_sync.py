@@ -79,6 +79,15 @@ async def test_merge_transitions_work_item():
     assert c.ado.states == []
 
 
+async def test_merge_detects_bugfix_branch():
+    # 'bugfix/' is a recognised bot-branch prefix (regression: it wasn't before).
+    svc, c = _svc_shared(on_merge_state="Ready to Deploy")
+    c.ado.completed = [{"pullRequestId": 9, "sourceRefName": "refs/heads/bugfix/5209-activity-log"}]
+    c.ado.items[5209] = _wi(5209, state="Ready to Review", tags=["autopilot"])
+    await svc._scan()
+    assert (5209, "Ready to Deploy") in c.ado.states
+
+
 async def test_merge_respects_assignee_filter():
     svc, c = _svc_shared(on_merge_state="Ready for Review", auto_transition_assignee="Phong")
     c.ado.completed = [{"pullRequestId": 5, "sourceRefName": "refs/heads/feature/be/42-thing"}]

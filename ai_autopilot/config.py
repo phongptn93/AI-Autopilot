@@ -146,6 +146,11 @@ class Settings(BaseSettings):
     # move the work item to on_merge_state + mark it done; when ALL children of a
     # parent are done, move the parent to parent_done_state. Blank state = skip that.
     auto_transition_enabled: bool = False
+    # Branch prefixes the autopilot/agent uses — a PR is recognised as "ours" (for
+    # merge detection + PR babysitter) when its source branch starts with one of these.
+    bot_branch_prefixes: list[str] = Field(
+        default_factory=lambda: ["feature/", "fix/", "bugfix/", "autopilot/"]
+    )
     # Extra gate for auto transitions ONLY (not the main poller): restrict them to
     # work items assigned to this person (name/email substring, case-insensitive).
     # Blank = any assignee.

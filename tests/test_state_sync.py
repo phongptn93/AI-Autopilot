@@ -8,7 +8,6 @@ from ai_autopilot.config import Settings
 from ai_autopilot.models import WorkItemInfo
 from ai_autopilot.services.state_sync import (
     StateSyncService,
-    all_children_done,
     items_awaiting_deploy,
     parent_rollup_target,
     parse_rollup_map,
@@ -19,18 +18,6 @@ def _wi(wid, state="", tags=None, parent_id=None):
     return WorkItemInfo(
         id=wid, title="t", work_item_type="Task", state=state, tags=tags or [], parent_id=parent_id
     )
-
-
-def test_all_children_done_by_state_or_tag():
-    assert all_children_done(
-        [_wi(1, state="Closed"), _wi(2, state="Ready to Testing")],
-        ["Closed", "Ready to Testing"], "autopilot-done",
-    )
-    assert not all_children_done(  # one child still active
-        [_wi(1, state="Closed"), _wi(2, state="Active")], ["Closed"], "autopilot-done"
-    )
-    assert all_children_done([_wi(1, tags=["autopilot-done"])], [], "autopilot-done")  # done via tag
-    assert not all_children_done([], ["Closed"], "autopilot-done")  # no children → not a roll-up
 
 
 class _FakeAdo:
@@ -131,27 +118,6 @@ async def test_parent_stage_rollup_maps_child_state_to_parent_state():
     c.ado.children[100] = [_wi(1, state="Ready for Testing"), _wi(2, state="Ready for Testing")]
     await svc._scan()
     assert (100, "Impl Done") in c.ado.states
-
-
-async def test_parent_rollup_when_all_children_done():
-    svc, c = _svc_shared(parent_done_state="Resolved", done_states=["Closed"])
-    c.ado.tagged = [_wi(1, tags=["autopilot"], parent_id=100)]
-    c.ado.children[100] = [_wi(1, state="Closed"), _wi(2, state="Closed")]
-    c.ado.items[100] = _wi(100, state="Active")
-    await svc._scan()
-    assert (100, "Resolved") in c.ado.states
-    c.ado.states.clear()
-    await svc._scan()               # idempotent
-    assert c.ado.states == []
-
-
-async def test_parent_rollup_skips_when_a_child_not_done():
-    svc, c = _svc_shared(parent_done_state="Resolved", done_states=["Closed"])
-    c.ado.tagged = [_wi(1, tags=["autopilot"], parent_id=100)]
-    c.ado.children[100] = [_wi(1, state="Closed"), _wi(2, state="Active")]
-    c.ado.items[100] = _wi(100, state="Active")
-    await svc._scan()
-    assert c.ado.states == []
 
 
 def test_items_awaiting_deploy_filters_by_state():

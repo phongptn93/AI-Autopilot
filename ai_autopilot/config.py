@@ -147,8 +147,7 @@ class Settings(BaseSettings):
     # parent are done, move the parent to parent_done_state. Blank state = skip that.
     auto_transition_enabled: bool = False
     on_merge_state: str = ""
-    parent_done_state: str = ""
-    # Stage-based parent roll-up: an ordered "child state = parent state" map, e.g.
+    # Parent roll-up: an ordered "child state = parent state" map, e.g.
     # ["Active = Active", "Ready for Testing = Impl Done"]. Child and parent are
     # DIFFERENT work-item types with different state names. The parent follows its
     # LEAST-advanced child: parent = the parent-state mapped from the lowest child

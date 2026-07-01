@@ -91,10 +91,7 @@ FIELDS: tuple[Field, ...] = (
     Field("on_merge_state", "On PR merged → state", "stateone", "Auto transitions",
           "State to set when a PR the autopilot opened is merged (also marks it done). Blank = "
           "only tag done, don't change state."),
-    Field("parent_done_state", "All children done → parent state", "stateone", "Auto transitions",
-          "Simple roll-up: state to set on the PARENT when every child is done. Blank = disabled. "
-          "Ignored if 'Parent roll-up stages' below is set."),
-    Field("parent_rollup_map", "Parent roll-up map (child = parent)", "list", "Auto transitions",
+    Field("parent_rollup_map", "Parent roll-up (child = parent)", "list", "Auto transitions",
           "One 'Child state = Parent state' per line, in progression order, e.g. "
           "'Ready for Testing = Impl Done'. The parent follows its least-advanced child; when all "
           "children reach a child-state, the parent moves to the mapped parent-state."),

@@ -68,24 +68,6 @@ def parent_rollup_target(
     return best[1] if best else None
 
 
-def all_children_done(
-    children: list[WorkItemInfo], done_states: list[str], processed_tag: str
-) -> bool:
-    """True if every child is done — its ADO state is in ``done_states`` or it
-    carries ``processed_tag``. Empty list → False (nothing to roll up)."""
-    if not children:
-        return False
-    done = {s.strip().lower() for s in done_states if s.strip()}
-    ptag = (processed_tag or "").lower()
-    for child in children:
-        state = (child.state or "").strip().lower()
-        tags = {t.lower() for t in child.tags}
-        if state in done or (ptag and ptag in tags):
-            continue
-        return False
-    return True
-
-
 class StateSyncService:
     def __init__(self, c: Container) -> None:
         self._c = c
@@ -129,7 +111,7 @@ class StateSyncService:
             for pr in await c.ado.get_completed_pull_requests(repo_id):
                 await self._handle_merged_pr(pr)
         # B. parent roll-up: sweep the parents of every tagged item.
-        if cfg.parent_done_state or cfg.parent_rollup_map:
+        if cfg.parent_rollup_map:
             try:
                 tagged = await c.ado.get_all_tagged_work_items()
             except Exception as exc:  # noqa: BLE001
@@ -201,15 +183,8 @@ class StateSyncService:
         children = await c.ado.get_children(parent_id)
         if not children:
             return
-        # Stage-based (parent = least-advanced child) if configured, else "all done".
-        if cfg.parent_rollup_map:
-            target = parent_rollup_target(children, parse_rollup_map(cfg.parent_rollup_map))
-        elif cfg.parent_done_state and all_children_done(
-            children, cfg.done_states, cfg.processed_tag
-        ):
-            target = cfg.parent_done_state
-        else:
-            target = None
+        # Parent = the parent-state mapped from its least-advanced child.
+        target = parent_rollup_target(children, parse_rollup_map(cfg.parent_rollup_map))
         if not target or self._parent_targets.get(parent_id) == target:
             return  # nothing to do, or we already rolled to this state
         parent = await c.ado.get_work_item(parent_id)

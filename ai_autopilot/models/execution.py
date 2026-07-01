@@ -16,7 +16,8 @@ class ExecutionResult:
     output: str = ""
     error: str | None = None
     branch_name: str | None = None
-    pr_url: str | None = None
+    pr_url: str | None = None                       # primary PR (first) — back-compat
+    pr_urls: list[str] = field(default_factory=list)  # every PR the task opened
     files_changed: list[str] = field(default_factory=list)
     duration_seconds: float = 0.0
     cost_tokens: int = 0

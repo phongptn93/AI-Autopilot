@@ -381,7 +381,8 @@ class ClaudeExecutor:
         # report mode completes without a PR; otherwise a PR URL is required.
         if agent.is_completed and (agent.pr_url or autonomy == "report"):
             result = ExecutionResult.ok(item.id, "agent", agent.summary)
-            result.pr_url = agent.pr_url
+            result.pr_urls = [a.pr_url for a in agent.artifacts if a.pr_url]
+            result.pr_url = result.pr_urls[0] if result.pr_urls else None
             if agent.artifacts:
                 result.branch_name = agent.artifacts[0].branch or None
             return result
@@ -560,6 +561,7 @@ class ClaudeExecutor:
             result.cost_tokens = sum(r.total_tokens for r in runs)
             result.cost_usd = _sum_cost(*runs)
             result.pr_url = _extract_pr_url(pr_run.text) if pr_run else None
+            result.pr_urls = [result.pr_url] if result.pr_url else []
             return result
 
         except TimeoutError:

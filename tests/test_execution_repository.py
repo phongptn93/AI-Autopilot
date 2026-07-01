@@ -28,6 +28,18 @@ async def _record(repo, work_item_id: int, tag: str | None, *, success: bool) ->
     await repo.complete_execution(rid, result)
 
 
+async def test_pr_urls_persisted(repo):
+    import json
+
+    item = WorkItemInfo(id=1, title="t")
+    rid = await repo.start_execution(item, "agent")
+    result = ExecutionResult.ok(1, "agent", "done")
+    result.pr_urls = ["https://pr/1", "https://pr/2"]
+    await repo.complete_execution(rid, result)
+    rec = (await repo.get_recent())[0]
+    assert json.loads(rec.pr_urls) == ["https://pr/1", "https://pr/2"]
+
+
 async def test_stats_and_recent_filter_by_trigger_tag(repo):
     await _record(repo, 1, "squad-a", success=True)
     await _record(repo, 2, "squad-a", success=False)

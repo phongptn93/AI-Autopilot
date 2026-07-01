@@ -54,6 +54,21 @@ def test_pr_url_surfaced_from_record():
     assert board["In progress"][0].pr_url == "https://pr/1"
 
 
+def test_multiple_pr_urls_surfaced():
+    import json
+    items = [_item(1, ["autopilot"])]
+    rec = _rec(1, ExecutionStatus.SUCCESS, "https://pr/1")
+    rec.pr_urls = json.dumps(["https://pr/1", "https://pr/2"])
+    board = build_board(items, {1: rec}, CFG)
+    assert board["Done"][0].pr_urls == ["https://pr/1", "https://pr/2"]
+
+
+def test_pr_urls_falls_back_to_single():
+    items = [_item(1, ["autopilot"])]
+    board = build_board(items, {1: _rec(1, ExecutionStatus.SUCCESS, "https://pr/only")}, CFG)
+    assert board["Done"][0].pr_urls == ["https://pr/only"]
+
+
 def test_latest_records_keeps_newest_first():
     recs = [
         _rec(1, ExecutionStatus.SUCCESS, "pr-new"),

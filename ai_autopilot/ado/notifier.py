@@ -65,11 +65,13 @@ class AdoNotifier:
                     else ""
                 )
                 files_html = f"<li><b>Files changed:</b><ul>{shown}{more}</ul></li>"
-            pr_html = (
-                f'<li><b>PR:</b> <a href="{result.pr_url}">{result.pr_url}</a></li>'
-                if result.pr_url
-                else ""
-            )
+            prs = result.pr_urls or ([result.pr_url] if result.pr_url else [])
+            if prs:
+                label = "PR" if len(prs) == 1 else f"PRs ({len(prs)})"
+                links = "".join(f'<li><a href="{u}">{u}</a></li>' for u in prs)
+                pr_html = f"<li><b>{label}:</b><ul>{links}</ul></li>"
+            else:
+                pr_html = ""
             comment = (
                 "<div><b>✅ ADO Autopilot — Completed</b><br/><ul>"
                 f"<li><b>Skill:</b> <code>{result.skill_used}</code></li>"

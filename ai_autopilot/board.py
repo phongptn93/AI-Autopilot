@@ -8,7 +8,8 @@ names come from config — nothing here is hardcoded to a particular board.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 
 from ai_autopilot.config import Settings
 from ai_autopilot.data.entities import ExecutionRecord, ExecutionStatus
@@ -45,6 +46,22 @@ class BoardCard:
     category: str = ""  # BackendTask / FrontendTask / ... for the colour badge
     assigned_to: str | None = None
     pr_url: str | None = None
+    pr_urls: list[str] = field(default_factory=list)  # every PR the task opened
+
+
+def _record_pr_urls(record: ExecutionRecord | None) -> list[str]:
+    """All PR URLs for a record: the JSON ``pr_urls`` list, else the single pr_url."""
+    if record is None:
+        return []
+    raw = getattr(record, "pr_urls", None)
+    if raw:
+        try:
+            urls = json.loads(raw)
+            if isinstance(urls, list):
+                return [u for u in urls if u]
+        except (ValueError, TypeError):
+            pass
+    return [record.pr_url] if record.pr_url else []
 
 
 def _category(title: str) -> str:
@@ -127,6 +144,7 @@ def build_board(
                 category=_category(item.title),
                 assigned_to=item.assigned_to,
                 pr_url=record.pr_url if record else None,
+                pr_urls=_record_pr_urls(record),
             )
         )
     return board

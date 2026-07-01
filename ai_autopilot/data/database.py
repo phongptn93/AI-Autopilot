@@ -16,6 +16,7 @@ from ai_autopilot.logging_config import get_logger
 # missing COLUMNS, so each is applied via ``ALTER TABLE ... ADD COLUMN`` if absent.
 _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("executions", "trigger_tag", "VARCHAR(100)"),
+    ("executions", "pr_urls", "TEXT"),
 )
 
 

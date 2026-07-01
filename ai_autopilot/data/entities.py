@@ -67,7 +67,8 @@ class ExecutionRecord(Base):
         Enum(ExecutionStatus, native_enum=False, length=20)
     )
     branch_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    pr_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pr_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # primary PR
+    pr_urls: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of every PR
     files_changed: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     output: Mapped[str | None] = mapped_column(String(5000), nullable=True)

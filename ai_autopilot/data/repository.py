@@ -55,6 +55,7 @@ class ExecutionRepository:
             record.status = ExecutionStatus.SUCCESS if result.success else ExecutionStatus.FAILED
             record.branch_name = result.branch_name
             record.pr_url = result.pr_url
+            record.pr_urls = json.dumps(result.pr_urls) if result.pr_urls else None
             record.files_changed = (
                 json.dumps(result.files_changed) if result.files_changed else None
             )

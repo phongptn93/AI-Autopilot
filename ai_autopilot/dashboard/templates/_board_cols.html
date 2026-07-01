@@ -22,7 +22,15 @@
                 <div class="board-card-title">{{ card.title }}</div>
                 <div class="board-card-foot">
                     <a class="board-card-act" href="/dashboard/activity/{{ card.id }}">👁 activity</a>
-                    {% if card.pr_url %}<a class="board-card-pr" href="{{ card.pr_url }}" target="_blank">PR ↗</a>{% endif %}
+                    {% if card.pr_urls %}
+                    <span class="board-card-pr">
+                        {% if card.pr_urls|length == 1 %}
+                        <a href="{{ card.pr_urls[0] }}" target="_blank" rel="noopener">PR ↗</a>
+                        {% else %}
+                        {% for u in card.pr_urls %}<a href="{{ u }}" target="_blank" rel="noopener" title="{{ u }}">PR{{ loop.index }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+                        {% endif %}
+                    </span>
+                    {% endif %}
                 </div>
                 {% if interactive and card.column == 'In progress' %}
                 <div class="board-card-rc">🎮 <code>/rc autopilot-{{ card.id }}</code></div>

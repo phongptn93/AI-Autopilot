@@ -46,7 +46,14 @@ class AdoClient:
         return headers
 
     def _url(self, path: str) -> str:
+        """Work-item API URL (scoped to ado_project — where work items live)."""
         return f"{self._base}/{self._config.ado_project}/_apis/{path}"
+
+    def _git_url(self, path: str) -> str:
+        """Git / PR / build API URL — scoped to code_project when set (repos and
+        PRs may live in a different project than the work items)."""
+        project = self._config.code_project or self._config.ado_project
+        return f"{self._base}/{project}/_apis/{path}"
 
     def _tag_clause(self) -> str:
         """WIQL predicate matching ANY configured trigger tag, e.g.
@@ -224,7 +231,7 @@ class AdoClient:
 
     async def get_repositories(self) -> list[dict[str, Any]]:
         resp = await self._http.get(
-            self._url(f"git/repositories?{_API}"), headers=await self._auth.get_auth_header()
+            self._git_url(f"git/repositories?{_API}"), headers=await self._auth.get_auth_header()
         )
         if resp.status_code >= 400:
             self._log.warning("get_repositories failed", status=resp.status_code)
@@ -238,7 +245,7 @@ class AdoClient:
         return await self._pull_requests_by_status(repo_id, "completed")
 
     async def _pull_requests_by_status(self, repo_id: str, status: str) -> list[dict[str, Any]]:
-        url = self._url(
+        url = self._git_url(
             f"git/repositories/{repo_id}/pullrequests?searchCriteria.status={status}&{_API}"
         )
         resp = await self._http.get(url, headers=await self._auth.get_auth_header())
@@ -257,7 +264,7 @@ class AdoClient:
         )
         if definition_id:
             query += f"&definitions={definition_id}"
-        resp = await self._http.get(self._url(query), headers=await self._auth.get_auth_header())
+        resp = await self._http.get(self._git_url(query), headers=await self._auth.get_auth_header())
         if resp.status_code >= 400:
             self._log.warning("get_successful_builds failed", status=resp.status_code)
             return []
@@ -285,7 +292,7 @@ class AdoClient:
         return await self.get_work_items_by_ids(ids)
 
     async def get_pull_request_threads(self, repo_id: str, pr_id: int) -> list[dict[str, Any]]:
-        url = self._url(f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads?{_API}")
+        url = self._git_url(f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads?{_API}")
         resp = await self._http.get(url, headers=await self._auth.get_auth_header())
         if resp.status_code >= 400:
             self._log.warning("get_pull_request_threads failed", status=resp.status_code)

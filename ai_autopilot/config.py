@@ -95,7 +95,11 @@ class Settings(BaseSettings):
 
     # ── Azure DevOps connection ──
     ado_organization: str = ""
-    ado_project: str = ""
+    ado_project: str = ""              # where the WORK ITEMS live
+    # Project where the git repos / PRs / build pipelines live, if different from
+    # ado_project (cross-project setup: work items in one project, code in another).
+    # Blank = same as ado_project.
+    code_project: str = ""
     ado_pat: str = ""
     oauth_app_id: str = ""
     oauth_app_secret: str = ""

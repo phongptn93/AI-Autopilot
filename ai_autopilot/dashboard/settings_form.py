@@ -37,7 +37,10 @@ FIELDS: tuple[Field, ...] = (
     # ── Azure DevOps connection ──
     Field("ado_organization", "Organization URL", "text", "Azure DevOps Connection",
           "e.g. https://dev.azure.com/your-org"),
-    Field("ado_project", "Project", "text", "Azure DevOps Connection"),
+    Field("ado_project", "Project (work items)", "text", "Azure DevOps Connection"),
+    Field("code_project", "Code project (repos/PRs)", "text", "Azure DevOps Connection",
+          "Project where the git repos, PRs and build pipelines live, if different from the "
+          "work-item project. Blank = same. (Cross-project setup.)"),
     Field("ado_pat", "Personal Access Token", "password", "Azure DevOps Connection",
           "Leave blank to keep the current token."),
     # ── Tags & trigger ──

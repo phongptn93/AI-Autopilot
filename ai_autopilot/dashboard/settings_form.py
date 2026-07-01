@@ -65,6 +65,13 @@ FIELDS: tuple[Field, ...] = (
           "Set when the agent escalates and holds the item for a human."),
     Field("resolved_state", "✅ Resolved (done)", "stateone", "Pipeline → ADO state",
           "Set when an item is resolved with a PR (Resolved / Closed / Done)."),
+    # ── Board columns (extra, read-only by ADO state) ──
+    Field("board_review_state", "Column: Ready for review", "stateone", "Board columns",
+          "Items in this ADO state show in a 'Ready for review' board column. Blank = no column. "
+          "Use a state the autopilot doesn't set."),
+    Field("board_deploy_state", "Column: Ready to deploy", "stateone", "Board columns",
+          "Items in this ADO state show in a 'Ready to deploy' board column. Blank = no column. "
+          "Use a state the autopilot doesn't set."),
     # ── Execution & autonomy ──
     Field("execution_mode", "Execution mode", "select", "Execution & Autonomy",
           "interactive = launch a Remote-Control Claude session per task you can /rc into and steer; "

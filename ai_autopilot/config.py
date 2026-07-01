@@ -124,6 +124,11 @@ class Settings(BaseSettings):
     state_needs_human: str = ""         # when escalated to a human (held)
     # ADO state set when an item is successfully resolved (Done with a PR).
     resolved_state: str = "Resolved"
+    # Extra Board columns driven purely by the item's ADO state (read-only — the
+    # autopilot does not set these; a human moves the item there). Blank = no
+    # column. Use states the autopilot itself doesn't set (e.g. "Ready to Deploy").
+    board_review_state: str = ""   # → "Ready for review" column
+    board_deploy_state: str = ""   # → "Ready to deploy" column
     poll_interval_seconds: int = 30
     # ADO work-item states that are eligible for processing. The default suits the
     # Agile/Scrum/Basic templates; adjust to match your board (e.g. add "Doing",

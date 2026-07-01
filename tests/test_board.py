@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ai_autopilot.board import build_board, latest_records
+from ai_autopilot.board import board_columns, build_board, latest_records
 from ai_autopilot.config import Settings
 from ai_autopilot.data.entities import ExecutionRecord, ExecutionStatus
 from ai_autopilot.models import WorkItemInfo
@@ -79,3 +79,29 @@ def test_unknown_persisted_state_falls_back_to_derived():
 def test_resolved_state_and_escalation_tag_defaults():
     assert CFG.resolved_state == "Resolved"
     assert CFG.escalation_tag == "autopilot-hold"
+
+
+def test_extra_columns_hidden_by_default():
+    # No board_review_state / board_deploy_state configured → base 6 columns.
+    assert board_columns(CFG) == [
+        "Queued", "In progress", "In review", "Needs human", "Done", "Failed"
+    ]
+
+
+def test_extra_columns_appear_and_map_by_ado_state():
+    cfg = Settings(board_review_state="Ready to Review", board_deploy_state="Ready to Deploy")
+    cols = board_columns(cfg)
+    # inserted right after "In review", grouped together
+    assert cols == [
+        "Queued", "In progress", "In review", "Ready for review", "Ready to deploy",
+        "Needs human", "Done", "Failed",
+    ]
+    items = [
+        _item(1, ["autopilot"], state="Ready to Review"),
+        _item(2, ["autopilot", "autopilot-done"], state="Ready to Deploy"),  # ADO state wins over tag
+        _item(3, ["autopilot"], state="Active"),
+    ]
+    board = build_board(items, {}, cfg)
+    assert board["Ready for review"][0].id == 1
+    assert board["Ready to deploy"][0].id == 2   # beats the Done tag
+    assert board["Queued"][0].id == 3

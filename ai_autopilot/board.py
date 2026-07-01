@@ -14,8 +14,26 @@ from ai_autopilot.config import Settings
 from ai_autopilot.data.entities import ExecutionRecord, ExecutionStatus
 from ai_autopilot.models import WorkItemInfo
 
-# Pipeline columns, left → right.
+# Pipeline columns the autopilot manages, left → right.
 COLUMNS: list[str] = ["Queued", "In progress", "In review", "Needs human", "Done", "Failed"]
+
+# Optional hand-off columns driven purely by the item's ADO state (a human moves
+# the item there; the autopilot doesn't). Shown only when configured, grouped
+# right after "In review".
+COL_READY_REVIEW = "Ready for review"
+COL_READY_DEPLOY = "Ready to deploy"
+
+
+def board_columns(cfg: Settings) -> list[str]:
+    """The active board columns for this config: the base pipeline plus any
+    configured ADO-state hand-off columns, inserted right after 'In review'."""
+    cols = ["Queued", "In progress", "In review"]
+    if (cfg.board_review_state or "").strip():
+        cols.append(COL_READY_REVIEW)
+    if (cfg.board_deploy_state or "").strip():
+        cols.append(COL_READY_DEPLOY)
+    cols += ["Needs human", "Done", "Failed"]
+    return cols
 
 
 @dataclass
@@ -45,7 +63,14 @@ def _category(title: str) -> str:
 def _column_for(
     item: WorkItemInfo, record: ExecutionRecord | None, cfg: Settings, persisted: str | None = None
 ) -> str:
-    # The autopilot's own persisted pipeline state wins when present.
+    # ADO-state hand-off columns win: they reflect where a human moved the item
+    # (e.g. "Ready to Deploy"), which the autopilot no longer manages.
+    state = (item.state or "").strip().lower()
+    if (cfg.board_review_state or "").strip() and state == cfg.board_review_state.strip().lower():
+        return COL_READY_REVIEW
+    if (cfg.board_deploy_state or "").strip() and state == cfg.board_deploy_state.strip().lower():
+        return COL_READY_DEPLOY
+    # The autopilot's own persisted pipeline state wins next.
     if persisted in COLUMNS:
         return persisted
     tags = {t.lower() for t in item.tags}
@@ -87,10 +112,12 @@ def build_board(
     when present; otherwise the column is derived from ADO tags + the last record.
     """
     states_by_id = states_by_id or {}
-    board: dict[str, list[BoardCard]] = {col: [] for col in COLUMNS}
+    board: dict[str, list[BoardCard]] = {col: [] for col in board_columns(cfg)}
     for item in items:
         record = records_by_id.get(item.id)
         column = _column_for(item, record, cfg, states_by_id.get(item.id))
+        if column not in board:  # configured column absent → safe fallback
+            column = "Queued"
         board[column].append(
             BoardCard(
                 id=item.id,

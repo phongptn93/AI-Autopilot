@@ -1,5 +1,5 @@
 {# Board columns only — rendered standalone for the auto-refresh fetch. #}
-<div class="board-cols">
+<div class="board-cols" style="grid-template-columns: repeat({{ columns|length }}, minmax(0,1fr))">
     {% for col in columns %}
     <div class="board-col col-accent-{{ col|lower|replace(' ', '-') }}">
         <div class="board-col-head">

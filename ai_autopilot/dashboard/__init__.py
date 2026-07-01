@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.templating import Jinja2Templates
 
 from ai_autopilot import activity
-from ai_autopilot.board import COLUMNS, build_board, latest_records
+from ai_autopilot.board import board_columns, build_board, latest_records
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
@@ -118,7 +118,7 @@ def create_dashboard_router() -> APIRouter:
             request,
             "board",
             board=cols,
-            columns=COLUMNS,
+            columns=board_columns(c.config),
             total=len(items),
             error=error,
             project=c.config.ado_project,

@@ -30,7 +30,8 @@ class WorkItemInfo:
     title: str = ""
     work_item_type: str = ""
     state: str = ""
-    assigned_to: str | None = None
+    assigned_to: str | None = None          # display name
+    assigned_to_email: str | None = None    # uniqueName / email
     description: str | None = None
     acceptance_criteria: str | None = None
     parent_id: int | None = None

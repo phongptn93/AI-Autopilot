@@ -156,9 +156,12 @@ class StateSyncService:
 
     def _assignee_ok(self, item: WorkItemInfo) -> bool:
         """The auto-transition assignee gate: item must be assigned to the
-        configured person (substring match). Blank config → any assignee."""
+        configured person — matched against the display name OR the email/uniqueName
+        (substring, case-insensitive). Blank config → any assignee."""
         who = (self._config.auto_transition_assignee or "").strip().lower()
-        return not who or who in (item.assigned_to or "").lower()
+        if not who:
+            return True
+        return who in (item.assigned_to or "").lower() or who in (item.assigned_to_email or "").lower()
 
     async def _handle_merged_pr(self, pr: dict) -> None:
         c, cfg = self._c, self._config

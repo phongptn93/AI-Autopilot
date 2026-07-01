@@ -14,10 +14,10 @@ from ai_autopilot.services.state_sync import (
 )
 
 
-def _wi(wid, state="", tags=None, parent_id=None, assigned_to=None):
+def _wi(wid, state="", tags=None, parent_id=None, assigned_to=None, assigned_to_email=None):
     return WorkItemInfo(
         id=wid, title="t", work_item_type="Task", state=state, tags=tags or [],
-        parent_id=parent_id, assigned_to=assigned_to,
+        parent_id=parent_id, assigned_to=assigned_to, assigned_to_email=assigned_to_email,
     )
 
 
@@ -99,6 +99,18 @@ async def test_merge_respects_assignee_filter():
     c.ado.items[42] = _wi(42, state="Active", tags=["autopilot"], assigned_to="Phong Pham")
     await svc._scan()
     assert (42, "Ready for Review") in c.ado.states
+
+
+async def test_merge_assignee_matches_email():
+    # assignee configured as an email still matches (display name has no email in it)
+    svc, c = _svc_shared(on_merge_state="Ready to Deploy", auto_transition_assignee="phong.pham@nois.vn")
+    c.ado.completed = [{"pullRequestId": 9, "sourceRefName": "refs/heads/bugfix/5209-x"}]
+    c.ado.items[5209] = _wi(
+        5209, state="Ready to Review", tags=["autopilot"],
+        assigned_to="Phong Pham (Industrial - Head of P&T)", assigned_to_email="phong.pham@nois.vn",
+    )
+    await svc._scan()
+    assert (5209, "Ready to Deploy") in c.ado.states
 
 
 async def test_merge_skips_item_without_trigger_tag():

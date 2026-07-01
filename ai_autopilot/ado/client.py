@@ -357,6 +357,7 @@ class AdoClient:
             work_item_type=str(f.get("System.WorkItemType", "")),
             state=str(f.get("System.State", "")),
             assigned_to=_identity(f.get("System.AssignedTo")),
+            assigned_to_email=_identity_email(f.get("System.AssignedTo")),
             description=f.get("System.Description"),
             acceptance_criteria=f.get("Microsoft.VSTS.Common.AcceptanceCriteria"),
             parent_id=_as_int(f.get("System.Parent")),
@@ -378,6 +379,12 @@ def _identity(value: Any) -> str | None:
     if isinstance(value, dict):
         return value.get("displayName")
     return str(value) if value is not None else None
+
+
+def _identity_email(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return value.get("uniqueName") or value.get("mailAddress")
+    return None
 
 
 def _as_int(value: Any) -> int | None:

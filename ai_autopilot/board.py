@@ -83,6 +83,8 @@ def _column_for(
     # ADO-state hand-off columns win: they reflect where a human moved the item
     # (e.g. "Ready to Deploy"), which the autopilot no longer manages.
     state = (item.state or "").strip().lower()
+    if state and state in {s.strip().lower() for s in cfg.done_states if s.strip()}:
+        return "Done"
     if (cfg.board_review_state or "").strip() and state == cfg.board_review_state.strip().lower():
         return COL_READY_REVIEW
     if (cfg.board_deploy_state or "").strip() and state == cfg.board_deploy_state.strip().lower():

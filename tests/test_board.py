@@ -96,6 +96,19 @@ def test_resolved_state_and_escalation_tag_defaults():
     assert CFG.escalation_tag == "autopilot-hold"
 
 
+def test_done_states_map_to_done_column():
+    cfg = Settings(done_states=["Ready to Testing", "Closed"])
+    items = [
+        _item(1, ["autopilot"], state="Ready to Testing"),                     # human moved → Done
+        _item(2, ["autopilot", "autopilot-review"], state="Ready to Testing"),  # beats the review tag
+        _item(3, ["autopilot"], state="Active"),                               # normal → Queued
+    ]
+    board = build_board(items, {}, cfg)
+    done_ids = {c.id for c in board["Done"]}
+    assert done_ids == {1, 2}
+    assert board["Queued"][0].id == 3
+
+
 def test_extra_columns_hidden_by_default():
     # No board_review_state / board_deploy_state configured → base 6 columns.
     assert board_columns(CFG) == [

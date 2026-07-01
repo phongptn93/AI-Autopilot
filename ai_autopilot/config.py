@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     # column. Use states the autopilot itself doesn't set (e.g. "Ready to Deploy").
     board_review_state: str = ""   # → "Ready for review" column
     board_deploy_state: str = ""   # → "Ready to deploy" column
+    # ADO states that count as Done on the board (e.g. a human moved the item to
+    # "Ready to Testing" / "Closed"). Items in any of these states show in the Done
+    # column regardless of tags. Read-only: does not change the item.
+    done_states: list[str] = Field(default_factory=list)
     # When a human drags a handled item back to a trigger state (one the autopilot
     # never sets), clear its skip tags so it gets reprocessed. Guarded against loops:
     # only reopens on trigger states that are NOT the autopilot's own output states.

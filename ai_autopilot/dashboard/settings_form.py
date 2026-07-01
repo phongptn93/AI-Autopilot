@@ -81,6 +81,9 @@ FIELDS: tuple[Field, ...] = (
     Field("board_deploy_state", "Column: Ready to deploy", "stateone", "Board columns",
           "Items in this ADO state show in a 'Ready to deploy' board column. Blank = no column. "
           "Use a state the autopilot doesn't set."),
+    Field("done_states", "Done states (→ Done column)", "stateset", "Board columns",
+          "ADO states that count as Done on the board (e.g. Ready to Testing, Closed). "
+          "Items a human moved to any of these show in the Done column."),
     # ── Execution & autonomy ──
     Field("execution_mode", "Execution mode", "select", "Execution & Autonomy",
           "interactive = launch a Remote-Control Claude session per task you can /rc into and steer; "

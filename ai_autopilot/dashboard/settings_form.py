@@ -92,8 +92,11 @@ FIELDS: tuple[Field, ...] = (
           "State to set when a PR the autopilot opened is merged (also marks it done). Blank = "
           "only tag done, don't change state."),
     Field("parent_done_state", "All children done → parent state", "stateone", "Auto transitions",
-          "State to set on the PARENT when every child is done (state in 'Done states' or tagged "
-          "done). Blank = disable parent roll-up."),
+          "Simple roll-up: state to set on the PARENT when every child is done. Blank = disabled. "
+          "Ignored if 'Parent roll-up stages' below is set."),
+    Field("parent_rollup_stages", "Parent roll-up stages (ordered)", "list", "Auto transitions",
+          "Ordered progression, e.g. Active, Ready for Review, Deployed. The parent follows its "
+          "LEAST-advanced child through these — parent = lowest stage any child is at."),
     Field("on_deploy_state", "On deploy success → state", "stateone", "Auto transitions",
           "When a deploy pipeline build succeeds, move items sitting in 'On PR merged → state' to "
           "this state. Blank = deploy monitor off."),

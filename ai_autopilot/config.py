@@ -148,6 +148,11 @@ class Settings(BaseSettings):
     auto_transition_enabled: bool = False
     on_merge_state: str = ""
     parent_done_state: str = ""
+    # Stage-based parent roll-up: an ordered progression of states (e.g.
+    # ["Active", "Ready for Review", "Deployed"]). The parent follows its LEAST-
+    # advanced child — parent = the lowest stage any child is at. Empty = fall back
+    # to the simple "all children done → parent_done_state".
+    parent_rollup_stages: list[str] = Field(default_factory=list)
     # Deploy monitor: when a deploy pipeline build succeeds, move items sitting in
     # on_merge_state to on_deploy_state. Blank on_deploy_state = monitor off.
     on_deploy_state: str = ""

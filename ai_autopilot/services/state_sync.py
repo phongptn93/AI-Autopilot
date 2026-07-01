@@ -33,6 +33,26 @@ def items_awaiting_deploy(tagged: list[WorkItemInfo], on_merge_state: str) -> li
     return [i.id for i in tagged if (i.state or "").strip().lower() == target]
 
 
+def parent_rollup_target(children: list[WorkItemInfo], stages: list[str]) -> str | None:
+    """Parent's target state = the least-advanced stage among its children.
+
+    ``stages`` is the ordered progression (e.g. Active → Ready for Review →
+    Deployed). Parent = the lowest stage any child sits at, so it only advances
+    once every child has. Returns None if there are no children/stages, or any
+    child is in a state outside the progression (then we don't touch the parent).
+    """
+    if not children or not stages:
+        return None
+    order = {s.strip().lower(): i for i, s in enumerate(stages)}
+    min_idx: int | None = None
+    for child in children:
+        idx = order.get((child.state or "").strip().lower())
+        if idx is None:
+            return None  # a child outside the tracked stages → leave the parent alone
+        min_idx = idx if min_idx is None else min(min_idx, idx)
+    return stages[min_idx] if min_idx is not None else None
+
+
 def all_children_done(
     children: list[WorkItemInfo], done_states: list[str], processed_tag: str
 ) -> bool:
@@ -57,7 +77,7 @@ class StateSyncService:
         self._config = c.config
         self._log = get_logger("services.state_sync")
         self._merged: set[int] = set()   # PR ids already transitioned
-        self._rolled: set[int] = set()   # parent ids already rolled up
+        self._parent_targets: dict[int, str] = {}  # parent id → last state we rolled it to
         self._last_deploy_build: int | None = None  # newest deploy build id seen
         self._task: asyncio.Task | None = None
 
@@ -94,7 +114,7 @@ class StateSyncService:
             for pr in await c.ado.get_completed_pull_requests(repo_id):
                 await self._handle_merged_pr(pr)
         # B. parent roll-up: sweep the parents of every tagged item.
-        if cfg.parent_done_state:
+        if cfg.parent_done_state or cfg.parent_rollup_stages:
             try:
                 tagged = await c.ado.get_all_tagged_work_items()
             except Exception as exc:  # noqa: BLE001
@@ -163,23 +183,32 @@ class StateSyncService:
 
     async def _maybe_roll_up_parent(self, parent_id: int) -> None:
         c, cfg = self._c, self._config
-        if parent_id in self._rolled:
-            return
         children = await c.ado.get_children(parent_id)
-        if not all_children_done(children, cfg.done_states, cfg.processed_tag):
+        if not children:
             return
+        # Stage-based (parent = least-advanced child) if configured, else "all done".
+        if cfg.parent_rollup_stages:
+            target = parent_rollup_target(children, cfg.parent_rollup_stages)
+        elif cfg.parent_done_state and all_children_done(
+            children, cfg.done_states, cfg.processed_tag
+        ):
+            target = cfg.parent_done_state
+        else:
+            target = None
+        if not target or self._parent_targets.get(parent_id) == target:
+            return  # nothing to do, or we already rolled to this state
         parent = await c.ado.get_work_item(parent_id)
         if parent is None:
             return
-        self._rolled.add(parent_id)
-        if (parent.state or "").strip().lower() == cfg.parent_done_state.strip().lower():
+        self._parent_targets[parent_id] = target
+        if (parent.state or "").strip().lower() == target.strip().lower():
             return  # already there
         if cfg.dry_run:
-            self._log.info("[DRY-RUN] would roll up parent", id=parent_id)
+            self._log.info("[DRY-RUN] would roll up parent", id=parent_id, state=target)
             return
-        await c.ado.update_state(parent_id, cfg.parent_done_state)
+        await c.ado.update_state(parent_id, target)
         await c.ado.add_comment(
             parent_id,
-            "<div><b>✅ All child items done</b> — autopilot moved the parent forward.</div>",
+            f"<div><b>↔ Parent updated</b> — moved to <b>{target}</b> as its children progressed.</div>",
         )
-        self._log.info("rolled up parent", id=parent_id, state=cfg.parent_done_state)
+        self._log.info("rolled up parent", id=parent_id, state=target)

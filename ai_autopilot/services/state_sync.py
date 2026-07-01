@@ -33,24 +33,39 @@ def items_awaiting_deploy(tagged: list[WorkItemInfo], on_merge_state: str) -> li
     return [i.id for i in tagged if (i.state or "").strip().lower() == target]
 
 
-def parent_rollup_target(children: list[WorkItemInfo], stages: list[str]) -> str | None:
-    """Parent's target state = the least-advanced stage among its children.
+def parse_rollup_map(entries: list[str]) -> list[tuple[str, str]]:
+    """Parse ``["Child = Parent", ...]`` into ordered (child_state, parent_state)
+    pairs. An entry without ``=``/``:`` maps a state to itself (same name)."""
+    pairs: list[tuple[str, str]] = []
+    for entry in entries:
+        sep = "=" if "=" in entry else (":" if ":" in entry else "")
+        child, parent = (entry.split(sep, 1) if sep else (entry, entry))
+        child, parent = child.strip(), parent.strip()
+        if child and parent:
+            pairs.append((child, parent))
+    return pairs
 
-    ``stages`` is the ordered progression (e.g. Active → Ready for Review →
-    Deployed). Parent = the lowest stage any child sits at, so it only advances
-    once every child has. Returns None if there are no children/stages, or any
-    child is in a state outside the progression (then we don't touch the parent).
+
+def parent_rollup_target(
+    children: list[WorkItemInfo], pairs: list[tuple[str, str]]
+) -> str | None:
+    """Parent's target state = the parent-state mapped from the LEAST-advanced child.
+
+    ``pairs`` is the ordered child→parent progression (e.g. Active→Active,
+    Ready for Testing→Impl Done). Returns None if there are no children/pairs, or
+    any child is in a child-state outside the map (then we don't touch the parent).
     """
-    if not children or not stages:
+    if not children or not pairs:
         return None
-    order = {s.strip().lower(): i for i, s in enumerate(stages)}
-    min_idx: int | None = None
+    order = {child.strip().lower(): (i, parent) for i, (child, parent) in enumerate(pairs)}
+    best: tuple[int, str] | None = None  # (stage index, parent state) of the slowest child
     for child in children:
-        idx = order.get((child.state or "").strip().lower())
-        if idx is None:
-            return None  # a child outside the tracked stages → leave the parent alone
-        min_idx = idx if min_idx is None else min(min_idx, idx)
-    return stages[min_idx] if min_idx is not None else None
+        entry = order.get((child.state or "").strip().lower())
+        if entry is None:
+            return None  # a child outside the map → leave the parent alone
+        if best is None or entry[0] < best[0]:
+            best = entry
+    return best[1] if best else None
 
 
 def all_children_done(
@@ -114,7 +129,7 @@ class StateSyncService:
             for pr in await c.ado.get_completed_pull_requests(repo_id):
                 await self._handle_merged_pr(pr)
         # B. parent roll-up: sweep the parents of every tagged item.
-        if cfg.parent_done_state or cfg.parent_rollup_stages:
+        if cfg.parent_done_state or cfg.parent_rollup_map:
             try:
                 tagged = await c.ado.get_all_tagged_work_items()
             except Exception as exc:  # noqa: BLE001
@@ -187,8 +202,8 @@ class StateSyncService:
         if not children:
             return
         # Stage-based (parent = least-advanced child) if configured, else "all done".
-        if cfg.parent_rollup_stages:
-            target = parent_rollup_target(children, cfg.parent_rollup_stages)
+        if cfg.parent_rollup_map:
+            target = parent_rollup_target(children, parse_rollup_map(cfg.parent_rollup_map))
         elif cfg.parent_done_state and all_children_done(
             children, cfg.done_states, cfg.processed_tag
         ):

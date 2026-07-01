@@ -94,9 +94,10 @@ FIELDS: tuple[Field, ...] = (
     Field("parent_done_state", "All children done → parent state", "stateone", "Auto transitions",
           "Simple roll-up: state to set on the PARENT when every child is done. Blank = disabled. "
           "Ignored if 'Parent roll-up stages' below is set."),
-    Field("parent_rollup_stages", "Parent roll-up stages (ordered)", "list", "Auto transitions",
-          "Ordered progression, e.g. Active, Ready for Review, Deployed. The parent follows its "
-          "LEAST-advanced child through these — parent = lowest stage any child is at."),
+    Field("parent_rollup_map", "Parent roll-up map (child = parent)", "list", "Auto transitions",
+          "One 'Child state = Parent state' per line, in progression order, e.g. "
+          "'Ready for Testing = Impl Done'. The parent follows its least-advanced child; when all "
+          "children reach a child-state, the parent moves to the mapped parent-state."),
     Field("on_deploy_state", "On deploy success → state", "stateone", "Auto transitions",
           "When a deploy pipeline build succeeds, move items sitting in 'On PR merged → state' to "
           "this state. Blank = deploy monitor off."),

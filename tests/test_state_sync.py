@@ -11,6 +11,7 @@ from ai_autopilot.services.state_sync import (
     all_children_done,
     items_awaiting_deploy,
     parent_rollup_target,
+    parse_rollup_map,
 )
 
 
@@ -98,30 +99,38 @@ async def test_merge_skips_item_without_trigger_tag():
     assert c.ado.states == [] and c.ado.tags == []
 
 
-def test_parent_rollup_target_least_advanced_child():
-    stages = ["Active", "Ready for Review", "Deployed"]
+def test_parse_rollup_map():
+    assert parse_rollup_map(["Ready for Testing = Impl Done", "Active"]) == [
+        ("Ready for Testing", "Impl Done"),
+        ("Active", "Active"),
+    ]
+
+
+def test_parent_rollup_target_maps_least_advanced_child():
+    pairs = parse_rollup_map(["Active = Active", "Ready for Testing = Impl Done"])
+    # all children at Ready for Testing → parent Impl Done (mapped, different name)
     assert parent_rollup_target(
-        [_wi(1, state="Ready for Review"), _wi(2, state="Ready for Review")], stages
-    ) == "Ready for Review"
-    # one child still Active → parent = Active (least advanced)
-    assert parent_rollup_target([_wi(1, state="Active"), _wi(2, state="Deployed")], stages) == "Active"
-    # a child outside the stages → None (leave the parent alone)
-    assert parent_rollup_target([_wi(1, state="Ready for Review"), _wi(2, state="New")], stages) is None
-    assert parent_rollup_target([], stages) is None
+        [_wi(1, state="Ready for Testing"), _wi(2, state="Ready for Testing")], pairs
+    ) == "Impl Done"
+    # one child still Active → parent = Active (mapped from least-advanced child)
+    assert parent_rollup_target([_wi(1, state="Active"), _wi(2, state="Ready for Testing")], pairs) == "Active"
+    # a child outside the map → None (leave the parent alone)
+    assert parent_rollup_target([_wi(1, state="New")], pairs) is None
+    assert parent_rollup_target([], pairs) is None
 
 
-async def test_parent_stage_rollup_follows_least_advanced_child():
-    svc, c = _svc_shared(parent_rollup_stages=["Active", "Ready for Review", "Deployed"])
+async def test_parent_stage_rollup_maps_child_state_to_parent_state():
+    svc, c = _svc_shared(parent_rollup_map=["Active = Active", "Ready for Testing = Impl Done"])
     c.ado.tagged = [_wi(1, tags=["autopilot"], parent_id=100)]
     c.ado.items[100] = _wi(100, state="Active")
-    # one child Active, one further along → parent stays Active (min)
-    c.ado.children[100] = [_wi(1, state="Active"), _wi(2, state="Ready for Review")]
+    # slowest child still Active → parent Active (already) → no change
+    c.ado.children[100] = [_wi(1, state="Active"), _wi(2, state="Ready for Testing")]
     await svc._scan()
     assert c.ado.states == []
-    # every child now Ready for Review → parent advances
-    c.ado.children[100] = [_wi(1, state="Ready for Review"), _wi(2, state="Ready for Review")]
+    # every child now Ready for Testing → parent → Impl Done
+    c.ado.children[100] = [_wi(1, state="Ready for Testing"), _wi(2, state="Ready for Testing")]
     await svc._scan()
-    assert (100, "Ready for Review") in c.ado.states
+    assert (100, "Impl Done") in c.ado.states
 
 
 async def test_parent_rollup_when_all_children_done():

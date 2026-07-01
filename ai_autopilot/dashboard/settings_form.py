@@ -88,6 +88,9 @@ FIELDS: tuple[Field, ...] = (
     Field("auto_transition_enabled", "Enable auto transitions", "bool", "Auto transitions",
           "Move the work item when its PR is merged, and roll a parent forward when all its "
           "children are done."),
+    Field("auto_transition_assignee", "Only for assignee (auto transitions)", "text", "Auto transitions",
+          "Restrict auto transitions to work items assigned to this person (name/email substring). "
+          "Blank = any assignee. Does not affect normal task processing."),
     Field("on_merge_state", "On PR merged → state", "stateone", "Auto transitions",
           "State to set when a PR the autopilot opened is merged (also marks it done). Blank = "
           "only tag done, don't change state."),

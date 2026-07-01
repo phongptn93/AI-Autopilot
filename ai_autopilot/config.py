@@ -146,6 +146,10 @@ class Settings(BaseSettings):
     # move the work item to on_merge_state + mark it done; when ALL children of a
     # parent are done, move the parent to parent_done_state. Blank state = skip that.
     auto_transition_enabled: bool = False
+    # Extra gate for auto transitions ONLY (not the main poller): restrict them to
+    # work items assigned to this person (name/email substring, case-insensitive).
+    # Blank = any assignee.
+    auto_transition_assignee: str = ""
     on_merge_state: str = ""
     # Parent roll-up: an ordered "child state = parent state" map, e.g.
     # ["Active = Active", "Ready for Testing = Impl Done"]. Child and parent are

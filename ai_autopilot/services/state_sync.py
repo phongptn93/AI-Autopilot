@@ -138,19 +138,28 @@ class StateSyncService:
             return  # no new successful build since last check
         self._last_deploy_build = newest
         tagged = await c.ado.get_all_tagged_work_items()
-        for wid in items_awaiting_deploy(tagged, cfg.on_merge_state):
-            if cfg.dry_run:
-                self._log.info("[DRY-RUN] would mark deployed", id=wid)
+        awaiting = set(items_awaiting_deploy(tagged, cfg.on_merge_state))
+        for item in tagged:
+            if item.id not in awaiting or not self._assignee_ok(item):
                 continue
-            await c.ado.update_state(wid, cfg.on_deploy_state)
+            if cfg.dry_run:
+                self._log.info("[DRY-RUN] would mark deployed", id=item.id)
+                continue
+            await c.ado.update_state(item.id, cfg.on_deploy_state)
             await c.ado.add_comment(
-                wid, "<div><b>🚀 Deployed</b> — deploy pipeline succeeded.</div>"
+                item.id, "<div><b>🚀 Deployed</b> — deploy pipeline succeeded.</div>"
             )
-            self._log.info("marked deployed", id=wid, state=cfg.on_deploy_state, build=newest)
+            self._log.info("marked deployed", id=item.id, state=cfg.on_deploy_state, build=newest)
 
     def _has_trigger_tag(self, item: WorkItemInfo) -> bool:
         item_tags = {t.lower() for t in item.tags}
         return any(t.lower() in item_tags for t in self._config.effective_trigger_tags)
+
+    def _assignee_ok(self, item: WorkItemInfo) -> bool:
+        """The auto-transition assignee gate: item must be assigned to the
+        configured person (substring match). Blank config → any assignee."""
+        who = (self._config.auto_transition_assignee or "").strip().lower()
+        return not who or who in (item.assigned_to or "").lower()
 
     async def _handle_merged_pr(self, pr: dict) -> None:
         c, cfg = self._c, self._config
@@ -164,7 +173,7 @@ class StateSyncService:
         if work_item_id is None:
             return
         item = await c.ado.get_work_item(work_item_id)
-        if item is None or not self._has_trigger_tag(item):
+        if item is None or not self._has_trigger_tag(item) or not self._assignee_ok(item):
             return
         self._merged.add(pr_id)
         if cfg.dry_run:
@@ -188,7 +197,7 @@ class StateSyncService:
         if not target or self._parent_targets.get(parent_id) == target:
             return  # nothing to do, or we already rolled to this state
         parent = await c.ado.get_work_item(parent_id)
-        if parent is None:
+        if parent is None or not self._assignee_ok(parent):
             return
         self._parent_targets[parent_id] = target
         if (parent.state or "").strip().lower() == target.strip().lower():

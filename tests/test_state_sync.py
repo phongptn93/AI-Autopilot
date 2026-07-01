@@ -14,9 +14,10 @@ from ai_autopilot.services.state_sync import (
 )
 
 
-def _wi(wid, state="", tags=None, parent_id=None):
+def _wi(wid, state="", tags=None, parent_id=None, assigned_to=None):
     return WorkItemInfo(
-        id=wid, title="t", work_item_type="Task", state=state, tags=tags or [], parent_id=parent_id
+        id=wid, title="t", work_item_type="Task", state=state, tags=tags or [],
+        parent_id=parent_id, assigned_to=assigned_to,
     )
 
 
@@ -76,6 +77,19 @@ async def test_merge_transitions_work_item():
     c.ado.states.clear()
     await svc._scan()               # PR already handled → no repeat
     assert c.ado.states == []
+
+
+async def test_merge_respects_assignee_filter():
+    svc, c = _svc_shared(on_merge_state="Ready for Review", auto_transition_assignee="Phong")
+    c.ado.completed = [{"pullRequestId": 5, "sourceRefName": "refs/heads/feature/be/42-thing"}]
+    # assigned to someone else → skipped
+    c.ado.items[42] = _wi(42, state="Active", tags=["autopilot"], assigned_to="Someone Else")
+    await svc._scan()
+    assert c.ado.states == []
+    # assigned to Phong → transitioned (substring match)
+    c.ado.items[42] = _wi(42, state="Active", tags=["autopilot"], assigned_to="Phong Pham")
+    await svc._scan()
+    assert (42, "Ready for Review") in c.ado.states
 
 
 async def test_merge_skips_item_without_trigger_tag():

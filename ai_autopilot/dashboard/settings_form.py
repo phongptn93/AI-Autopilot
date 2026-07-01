@@ -47,24 +47,30 @@ FIELDS: tuple[Field, ...] = (
           "Extra tags to also process (comma or newline separated). Board/Overview can filter by tag."),
     Field("trigger_states", "Trigger states", "stateset", "Tags & Trigger",
           "ADO states eligible for processing — tick from your board, or add custom ones below."),
-    Field("processed_tag", "Processed tag", "text", "Tags & Trigger",
-          "Added after a work item is handled (Done)."),
-    Field("review_tag", "Review tag", "text", "Tags & Trigger",
-          "Marks items whose draft PR awaits review (In review)."),
-    Field("escalation_tag", "Escalation tag", "text", "Tags & Trigger",
-          "Added when the agent needs a human (Needs human); held items are skipped."),
     Field("poll_interval_seconds", "Poll interval (seconds)", "int", "Tags & Trigger"),
-    # ── Pipeline → ADO state ──
-    # Each autopilot pipeline stage maps to a state on your ADO board. Blank =
-    # leave the work item's ADO state unchanged for that stage (only tags/board move).
-    Field("state_in_progress", "▶ In progress", "stateone", "Pipeline → ADO state",
-          "Set when the autopilot starts working an item."),
-    Field("state_in_review", "🔍 In review", "stateone", "Pipeline → ADO state",
-          "Set when a draft PR opens (awaiting human review)."),
-    Field("state_needs_human", "🙋 Needs human", "stateone", "Pipeline → ADO state",
-          "Set when the agent escalates and holds the item for a human."),
-    Field("resolved_state", "✅ Resolved (done)", "stateone", "Pipeline → ADO state",
-          "Set when an item is resolved with a PR (Resolved / Closed / Done)."),
+    # ── Outcomes → tag + state ──
+    # The policy table: for each outcome, the ADO tag to add and the ADO state to
+    # set. Blank = skip. This is the single source of truth for tagging + state.
+    Field("state_in_progress", "⏳ In progress — ADO state", "stateone", "Outcomes → tag + state",
+          "State when the autopilot starts working an item (no tag)."),
+    Field("review_tag", "🔍 Review — tag", "text", "Outcomes → tag + state",
+          "Tag added when a draft PR opens (awaiting review); item is held."),
+    Field("state_in_review", "🔍 Review — ADO state", "stateone", "Outcomes → tag + state",
+          "State when a draft PR opens (awaiting human review)."),
+    Field("processed_tag", "✅ Done — tag", "text", "Outcomes → tag + state",
+          "Tag added when an item is handled (also used for report / failed unless overridden)."),
+    Field("resolved_state", "✅ Done — ADO state", "stateone", "Outcomes → tag + state",
+          "State when an item is resolved with a PR (Resolved / Closed / Done)."),
+    Field("state_report", "📝 Report — ADO state", "stateone", "Outcomes → tag + state",
+          "State when a plan is commented in report mode (tag = Done tag)."),
+    Field("escalation_tag", "🙋 Needs human — tag", "text", "Outcomes → tag + state",
+          "Tag added when the agent escalates; held items are skipped."),
+    Field("state_needs_human", "🙋 Needs human — ADO state", "stateone", "Outcomes → tag + state",
+          "State when the agent escalates and holds the item for a human."),
+    Field("failed_tag", "⛔ Failed — tag", "text", "Outcomes → tag + state",
+          "Tag added when the autopilot gives up after retries. Blank = use the Done tag."),
+    Field("state_failed", "⛔ Failed — ADO state", "stateone", "Outcomes → tag + state",
+          "State when the autopilot gives up after exhausting retries."),
     # ── Board columns (extra, read-only by ADO state) ──
     Field("board_review_state", "Column: Ready for review", "stateone", "Board columns",
           "Items in this ADO state show in a 'Ready for review' board column. Blank = no column. "

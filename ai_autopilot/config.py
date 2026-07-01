@@ -115,6 +115,9 @@ class Settings(BaseSettings):
     # Applied when the agent escalates (needs_human); these items are held — the
     # poller skips them until a human removes the tag.
     escalation_tag: str = "autopilot-hold"
+    # Tag added when the autopilot gives up after exhausting retries. Blank = reuse
+    # processed_tag (so the item is still marked handled and not re-polled).
+    failed_tag: str = ""
     # ADO ``System.State`` set at each pipeline stage. Blank = leave the work
     # item's ADO state unchanged for that stage (only tags/board move). These apply
     # in every execution mode (interactive / assisted / unattended). Match your
@@ -122,6 +125,8 @@ class Settings(BaseSettings):
     state_in_progress: str = "Active"   # when the autopilot starts working an item
     state_in_review: str = ""           # when a draft PR opens (awaiting review)
     state_needs_human: str = ""         # when escalated to a human (held)
+    state_report: str = ""              # when a plan is commented in report mode
+    state_failed: str = ""              # when the autopilot gives up after retries
     # ADO state set when an item is successfully resolved (Done with a PR).
     resolved_state: str = "Resolved"
     # Extra Board columns driven purely by the item's ADO state (read-only — the

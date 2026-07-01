@@ -52,9 +52,7 @@ class AdoNotifier:
             NotificationMessage(work_item=item, type=NotificationType.STARTED, skill=skill)
         )
 
-    async def notify_completed(
-        self, item: WorkItemInfo, result: ExecutionResult, mark_processed: bool = True
-    ) -> None:
+    async def notify_completed(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         if result.success:
             files_html = ""
             if result.files_changed:
@@ -94,10 +92,8 @@ class AdoNotifier:
             return
 
         await self._ado.add_comment(item.id, comment)
-        if mark_processed:
-            await self._ado.add_tag(item.id, self._config.processed_tag)
-        # ADO ``System.State`` is set by the poller at each pipeline stage
-        # (_apply_ado_state) — including resolved_state on Done — not here.
+        # ADO tags + System.State are owned by the poller's outcome policy
+        # (AdoPollerService._apply_outcome), not here — one source of truth.
 
         await self._broadcast(
             NotificationMessage(

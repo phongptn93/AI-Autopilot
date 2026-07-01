@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from ai_autopilot.config import Settings
 from ai_autopilot.data import PipelineState
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
-from ai_autopilot.services.poller import AdoPollerService
+from ai_autopilot.services.poller import AdoPollerService, outcome_policy
 
 
 class _FakeAdo:
@@ -66,10 +66,10 @@ class _FakeCost:
 
 class _FakeNotifier:
     def __init__(self):
-        self.completed: list[tuple[bool, bool]] = []
+        self.completed: list[bool] = []
 
-    async def notify_completed(self, item, result, mark_processed=True):
-        self.completed.append((result.success, mark_processed))
+    async def notify_completed(self, item, result):
+        self.completed.append(result.success)
 
 
 class _FakeRetry:
@@ -113,6 +113,26 @@ def _item() -> WorkItemInfo:
     return WorkItemInfo(id=7, title="t", work_item_type="Task")
 
 
+def test_outcome_policy_maps_tag_and_state():
+    cfg = Settings(
+        review_tag="rv", processed_tag="done", escalation_tag="hold",
+        state_in_progress="Active", state_in_review="InRev", resolved_state="Resolved",
+        state_needs_human="Blocked", state_report="Reported", state_failed="Rejected",
+        failed_tag="",
+    )
+    assert outcome_policy(cfg, "in_progress") == ("", "Active")     # no tag on start
+    assert outcome_policy(cfg, "review") == ("rv", "InRev")
+    assert outcome_policy(cfg, "done") == ("done", "Resolved")
+    assert outcome_policy(cfg, "report") == ("done", "Reported")    # report reuses Done tag
+    assert outcome_policy(cfg, "needs_human") == ("hold", "Blocked")
+    assert outcome_policy(cfg, "failed") == ("done", "Rejected")    # blank failed_tag → Done tag
+
+
+def test_outcome_policy_failed_tag_override():
+    cfg = Settings(failed_tag="autopilot-failed", processed_tag="done")
+    assert outcome_policy(cfg, "failed")[0] == "autopilot-failed"
+
+
 async def test_needs_human_escalates_and_does_not_retry():
     p, c = _poller()
     res = ExecutionResult.fail(7, "agent", "AC unclear")
@@ -139,7 +159,8 @@ async def test_unattended_completed_marks_processed():
     res = ExecutionResult.ok(7, "agent", "done")
     res.pr_url = "https://pr"
     await p._handle_agent_result(_item(), res)
-    assert c.notifier.completed == [(True, True)]     # notify_completed(mark_processed=True)
+    assert (7, c.config.processed_tag) in c.ado.tags  # Done outcome tags processed_tag
+    assert c.notifier.completed == [True]
 
 
 async def test_report_mode_marks_processed_without_pr():

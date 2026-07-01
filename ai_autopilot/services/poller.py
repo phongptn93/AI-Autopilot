@@ -20,6 +20,30 @@ from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.routing import sort_by_priority
 
 
+def outcome_policy(cfg: object, outcome: str) -> tuple[str, str]:
+    """The single, configurable source of truth for tag + ADO state per outcome.
+
+    Returns ``(tag_to_add, ado_state_to_set)`` — either may be blank (= skip). Edit
+    the underlying fields in Settings ("Outcomes → tag + state").
+
+    Outcomes:
+      in_progress  – the autopilot starts working the item
+      review       – a draft PR opened, awaiting human review
+      done         – completed with a (real) PR
+      report       – a plan was commented, no code change (report mode)
+      needs_human  – the agent escalated and held the item
+      failed       – gave up after exhausting retries
+    """
+    return {
+        "in_progress": ("", cfg.state_in_progress),
+        "review": (cfg.review_tag, cfg.state_in_review),
+        "done": (cfg.processed_tag, cfg.resolved_state),
+        "report": (cfg.processed_tag, cfg.state_report),
+        "needs_human": (cfg.escalation_tag, cfg.state_needs_human),
+        "failed": (cfg.failed_tag or cfg.processed_tag, cfg.state_failed),
+    }.get(outcome, ("", ""))
+
+
 class AdoPollerService:
     def __init__(self, c: Container) -> None:
         self._c = c
@@ -132,26 +156,20 @@ class AdoPollerService:
                 return tag
         return None
 
-    def _ado_state_for(self, stage: PipelineState) -> str:
-        """Configured ADO ``System.State`` for a pipeline stage ("" = leave as-is)."""
-        cfg = self._config
-        return {
-            PipelineState.IN_PROGRESS: cfg.state_in_progress,
-            PipelineState.IN_REVIEW: cfg.state_in_review,
-            PipelineState.NEEDS_HUMAN: cfg.state_needs_human,
-            PipelineState.DONE: cfg.resolved_state,
-        }.get(stage, "")
+    async def _apply_outcome(self, item_id: int, outcome: str) -> None:
+        """Apply the configured ADO tag + state for a pipeline outcome.
 
-    async def _apply_ado_state(self, item_id: int, stage: PipelineState) -> None:
-        """Move the ADO work item to the state configured for this pipeline stage.
-
-        Applies in every execution mode. Blank config for the stage or ``dry_run``
-        → no-op (tags/board still move). Best-effort: failures are logged by the
-        ADO client and never block the pipeline.
+        Single place that mutates ADO tags/state — see ``outcome_policy``. Applies
+        in every execution mode. Blank tag/state or ``dry_run`` → skipped.
+        Best-effort: ADO-client failures are logged and never block the pipeline.
         """
-        name = self._ado_state_for(stage)
-        if name and not self._config.dry_run:
-            await self._c.ado.update_state(item_id, name)
+        tag, state = outcome_policy(self._config, outcome)
+        if self._config.dry_run:
+            return
+        if tag:
+            await self._c.ado.add_tag(item_id, tag)
+        if state:
+            await self._c.ado.update_state(item_id, state)
 
     async def _process(self, item: WorkItemInfo) -> None:
         c, cfg = self._c, self._config
@@ -190,7 +208,7 @@ class AdoPollerService:
             return
 
         await c.state_repo.set(item.id, PipelineState.IN_PROGRESS, title=item.title)
-        await self._apply_ado_state(item.id, PipelineState.IN_PROGRESS)
+        await self._apply_outcome(item.id, "in_progress")
         await c.notifier.notify_started(item, "agent")
         record_id = await c.execution_repo.start_execution(
             item, "agent", trigger_tag=self._matched_tag(item)
@@ -232,7 +250,7 @@ class AdoPollerService:
         await c.state_repo.set(
             item.id, PipelineState.IN_PROGRESS, title=item.title, detail=f"live session: {session}"
         )
-        await self._apply_ado_state(item.id, PipelineState.IN_PROGRESS)
+        await self._apply_outcome(item.id, "in_progress")
         record_id = await c.execution_repo.start_execution(
             item, f"interactive:{session}", trigger_tag=self._matched_tag(item)
         )
@@ -276,14 +294,13 @@ class AdoPollerService:
         if result.needs_human:
             c.retry_policy.record_success(item.id)  # escalated — not a retryable failure
             await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=result.error or "")
-            await self._apply_ado_state(item.id, PipelineState.NEEDS_HUMAN)
+            # Hold the item (tag) + set state so the poller skips it until a human steps in.
+            await self._apply_outcome(item.id, "needs_human")
             await c.ado.add_comment(
                 item.id,
                 "<div><b>🙋 ADO Autopilot — Needs human input</b><br/>"
                 f"<p>{result.error or result.output}</p></div>",
             )
-            # Hold the item: tag it so the poller skips it until a human steps in.
-            await c.ado.add_tag(item.id, cfg.escalation_tag)
             self._log.info("escalated to human", id=item.id)
             return
 
@@ -291,31 +308,30 @@ class AdoPollerService:
             c.retry_policy.record_success(item.id)
             if result.pr_url and cfg.pr_is_draft:
                 await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
-                await self._apply_ado_state(item.id, PipelineState.IN_REVIEW)
-                await c.ado.add_tag(item.id, cfg.review_tag)
+                await self._apply_outcome(item.id, "review")
                 await c.ado.add_comment(
                     item.id,
                     "<div><b>🔍 PR created (draft)</b>, awaiting human review.<br/>"
                     f'PR: <a href="{result.pr_url}">{result.pr_url}</a></div>',
                 )
-                await c.notifier.notify_completed(item, result, mark_processed=False)
+                await c.notifier.notify_completed(item, result)
             elif result.pr_url:
                 await c.state_repo.set(item.id, PipelineState.DONE, pr_url=result.pr_url)
-                await self._apply_ado_state(item.id, PipelineState.DONE)
-                await c.notifier.notify_completed(item, result, mark_processed=True)
+                await self._apply_outcome(item.id, "done")
+                await c.notifier.notify_completed(item, result)
             else:
-                # report mode: the agent commented a plan, no PR — leave the ADO
-                # state as-is (the item isn't actually resolved), only tag it.
+                # report mode: the agent commented a plan, no PR.
                 await c.state_repo.set(item.id, PipelineState.DONE)
-                await c.ado.add_tag(item.id, cfg.processed_tag)
-                await c.notifier.notify_completed(item, result, mark_processed=False)
+                await self._apply_outcome(item.id, "report")
+                await c.notifier.notify_completed(item, result)
             return
 
         c.retry_policy.record_failure(item.id, result.error or "Unknown error")
         await c.state_repo.set(item.id, PipelineState.FAILED, detail=result.error or "")
         exhausted = c.retry_policy.is_exhausted(item.id)
-        await c.notifier.notify_completed(item, result, mark_processed=exhausted)
+        await c.notifier.notify_completed(item, result)
         if exhausted:
+            await self._apply_outcome(item.id, "failed")
             state = c.retry_policy.get_state(item.id)
             count = state.retry_count if state else cfg.max_retries
             self._log.error("gave up after retries", id=item.id, count=count)
@@ -358,7 +374,7 @@ class AdoPollerService:
             return
 
         await c.notifier.notify_started(item, skill)
-        await self._apply_ado_state(item.id, PipelineState.IN_PROGRESS)
+        await self._apply_outcome(item.id, "in_progress")
         record_id = await c.execution_repo.start_execution(
             item, skill, trigger_tag=self._matched_tag(item)
         )
@@ -400,23 +416,22 @@ class AdoPollerService:
         if result.success:
             c.retry_policy.record_success(item.id)
             if cfg.pr_is_draft and result.pr_url:
-                await self._apply_ado_state(item.id, PipelineState.IN_REVIEW)
-                await c.ado.add_tag(item.id, cfg.review_tag)
+                await self._apply_outcome(item.id, "review")
                 await c.ado.add_comment(
                     item.id,
                     f'<b>🔍 PR created (draft)</b>, awaiting human review.<br/>'
                     f'PR: <a href="{result.pr_url}">{result.pr_url}</a>',
                 )
-                await c.notifier.notify_completed(item, result, mark_processed=False)
+                await c.notifier.notify_completed(item, result)
             else:
-                if result.pr_url:
-                    await self._apply_ado_state(item.id, PipelineState.DONE)
-                await c.notifier.notify_completed(item, result, mark_processed=True)
+                await self._apply_outcome(item.id, "done" if result.pr_url else "report")
+                await c.notifier.notify_completed(item, result)
         else:
             c.retry_policy.record_failure(item.id, result.error or "Unknown error")
             exhausted = c.retry_policy.is_exhausted(item.id)
-            await c.notifier.notify_completed(item, result, mark_processed=exhausted)
+            await c.notifier.notify_completed(item, result)
             if exhausted:
+                await self._apply_outcome(item.id, "failed")
                 state = c.retry_policy.get_state(item.id)
                 count = state.retry_count if state else cfg.max_retries
                 self._log.error("gave up after retries", id=item.id, count=count)

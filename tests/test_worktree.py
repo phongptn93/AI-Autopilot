@@ -204,6 +204,15 @@ async def test_concurrent_scratch_same_repo_no_collision(agent_workspace: Path):
         await ex.release_scratch(b)
 
 
+async def test_resolve_base_ref_falls_back_to_default(repo: Path):
+    ex = _executor()  # base_branch="development" is set by the helper
+    # the configured base branch exists → used directly
+    assert await ex._resolve_base_ref(str(repo), "development") == "origin/development"
+    # a base branch this repo doesn't have → falls back to its default branch
+    ref = await ex._resolve_base_ref(str(repo), "no-such-branch")
+    assert ref is not None and ref.startswith("origin/")
+
+
 def test_scratch_base_defaults_beside_workspace(tmp_path: Path):
     ex = _executor(workspace_directory=str(tmp_path / "workspace"))
     # Short sibling of the workspace, not the deep system-temp path (MAX_PATH).

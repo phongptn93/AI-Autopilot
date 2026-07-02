@@ -194,6 +194,26 @@ class ClaudeExecutor:
             return str(Path(ws).parent / ".aiwt")
         return str(Path(tempfile.gettempdir()) / "ai-autopilot-worktrees")
 
+    async def _ref_exists(self, repo: str, ref: str) -> bool:
+        out = await self._git(["rev-parse", "--verify", "--quiet", ref], repo, check=False)
+        return bool(out.strip())
+
+    async def _resolve_base_ref(self, repo: str, base_branch: str) -> str | None:
+        """A base ref that exists in this repo: the configured base branch, else the
+        repo's own default branch (origin/HEAD), else common fallbacks. Different
+        repos in one workspace can have different base branches."""
+        candidates = [f"origin/{base_branch}"]
+        head = (
+            await self._git(["symbolic-ref", "refs/remotes/origin/HEAD"], repo, check=False)
+        ).strip()
+        if head.startswith("refs/remotes/"):
+            candidates.append(head[len("refs/remotes/"):])
+        candidates += ["origin/main", "origin/master", "origin/develop", "origin/development"]
+        for ref in candidates:
+            if ref and await self._ref_exists(repo, ref):
+                return ref
+        return None
+
     async def _acquire_agent_scratch(self, item_id: int, repos: list[str]) -> str | None:
         """Build an isolated scratch workspace for one AI-native task.
 
@@ -220,17 +240,31 @@ class ClaudeExecutor:
                     src_claude, Path(scratch) / ".claude",
                     ignore=shutil.ignore_patterns(".git"),
                 )
+            worktreed: list[str] = []
             for repo in repos:
                 src_repo = str(Path(workspace) / repo)
                 worktree = str(Path(scratch) / repo)
                 # Serialise per-repo so a concurrent task on the same repo doesn't
                 # collide on .git locks during fetch / worktree add.
                 async with self._repo_lock(src_repo):
-                    await self._git(["fetch", "origin", base_branch], src_repo, check=False)
-                    await self._git(
-                        ["worktree", "add", "--detach", worktree, f"origin/{base_branch}"], src_repo
-                    )
-            self._log.info("created agent scratch", id=item_id, path=scratch, repos=repos)
+                    await self._git(["fetch", "origin"], src_repo, check=False)
+                    # Repos may use different base branches — resolve one that exists
+                    # in THIS repo (configured base → its default branch), else skip
+                    # it rather than aborting the whole scratch.
+                    base_ref = await self._resolve_base_ref(src_repo, base_branch)
+                    if base_ref is None:
+                        self._log.warning(
+                            "scratch: skipping repo — no usable base branch",
+                            id=item_id, repo=repo, base=base_branch,
+                        )
+                        continue
+                    await self._git(["worktree", "add", "--detach", worktree, base_ref], src_repo)
+                    worktreed.append(repo)
+            if not worktreed:  # nothing isolated → fall back to the shared workspace
+                self._log.warning("scratch: no repos worktreed — using shared workspace", id=item_id)
+                await self.release_scratch(scratch)
+                return None
+            self._log.info("created agent scratch", id=item_id, path=scratch, repos=worktreed)
             return scratch
         except Exception as exc:  # noqa: BLE001 — never block the run on isolation failure
             self._log.warning(

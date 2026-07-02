@@ -214,7 +214,14 @@ class ClaudeExecutor:
                 return ref
         return None
 
-    async def _acquire_agent_scratch(self, item_id: int, repos: list[str]) -> str | None:
+    def interactive_scratch_dir(self, item_id: int) -> str:
+        """Deterministic scratch path for an interactive session, so it can be
+        finalised even after a restart (in-memory tracking is lost)."""
+        return str(Path(self._scratch_base()) / f"agent-{item_id}")
+
+    async def _acquire_agent_scratch(
+        self, item_id: int, repos: list[str], *, stable: bool = False
+    ) -> str | None:
         """Build an isolated scratch workspace for one AI-native task.
 
         ``<base>/agent-<id>-<uuid>`` holds a *copy* of the shared ``.claude`` plus a
@@ -228,7 +235,11 @@ class ClaudeExecutor:
             return None
         base_dir = self._scratch_base()
         Path(base_dir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 - fast local mkdir
-        scratch = str(Path(base_dir) / f"agent-{item_id}-{uuid.uuid4().hex[:8]}")
+        if stable:  # interactive: deterministic path (reused across restarts); clean any leftover
+            scratch = str(Path(base_dir) / f"agent-{item_id}")
+            await self.release_scratch(scratch)
+        else:  # headless: unique path
+            scratch = str(Path(base_dir) / f"agent-{item_id}-{uuid.uuid4().hex[:8]}")
         base_branch = self._config.base_branch
         try:
             Path(scratch).mkdir(parents=True, exist_ok=False)  # noqa: ASYNC240
@@ -309,7 +320,7 @@ class ClaudeExecutor:
         """
         workspace = self._config.workspace_directory
         repos = self._allowed_repos(workspace)
-        scratch = await self._acquire_agent_scratch(item.id, repos)
+        scratch = await self._acquire_agent_scratch(item.id, repos, stable=True)
         run_dir = scratch or workspace
         clear_result(run_dir, item.id)
         activity.clear(workspace, item.id)

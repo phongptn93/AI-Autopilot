@@ -49,6 +49,9 @@ class _FakeExec:
     def finalize_interactive(self, item, run_dir):
         return self._final
 
+    def interactive_scratch_dir(self, item_id):
+        return f"/ws/agent-{item_id}"
+
     async def release_scratch(self, run_dir):
         self.released.append(run_dir)
 
@@ -261,8 +264,21 @@ async def test_dispatch_interactive_tracks_live_session():
     await p._dispatch_interactive(_item())
     assert p._live == {7: 99}                                 # tracked for finalisation
     assert p._live_dirs == {7: "/ws/scratch"}                 # run dir tracked for cleanup
+    assert (7, c.config.live_tag) in c.ado.tags               # live tag → no re-dispatch on restart
     assert (7, PipelineState.IN_PROGRESS) in c.state_repo.calls
     assert any("Live session started" in t for _, t in c.ado.comments)
+
+
+async def test_orphan_interactive_session_finalized_after_restart():
+    p, c = _poller()  # assisted → draft PR → review outcome
+    done = ExecutionResult.ok(7, "agent", "done")
+    done.pr_url = "https://pr"
+    c.executor = _FakeExec(final=done)
+    # tagged live but NOT tracked in _live (in-memory state lost on restart)
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", c.config.live_tag])]
+    await p._finalize_live_sessions()
+    assert (7, c.config.live_tag) in c.ado.removed            # live tag cleared
+    assert (7, c.config.review_tag) in c.ado.tags             # outcome applied
 
 
 async def test_finalize_live_session_when_result_ready():

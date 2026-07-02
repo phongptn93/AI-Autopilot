@@ -129,7 +129,10 @@ class AdoPollerService:
         self._log.debug("polling ADO for pending work items")
         items = await c.ado.get_pending_work_items()
 
-        skip_tags = {cfg.processed_tag.lower(), cfg.review_tag.lower(), cfg.escalation_tag.lower()}
+        skip_tags = {
+            cfg.processed_tag.lower(), cfg.review_tag.lower(),
+            cfg.escalation_tag.lower(), cfg.live_tag.lower(),
+        } - {""}
         new_items = [
             i
             for i in items
@@ -292,6 +295,9 @@ class AdoPollerService:
             )
             return
         self._live_dirs[item.id] = run_dir
+        # Mark it live so a restart doesn't re-dispatch (and re-open) a duplicate session.
+        if cfg.live_tag and not cfg.dry_run:
+            await c.ado.add_tag(item.id, cfg.live_tag)
         await c.state_repo.set(
             item.id, PipelineState.IN_PROGRESS, title=item.title, detail=f"live session: {session}"
         )
@@ -324,6 +330,7 @@ class AdoPollerService:
             if result.cost_tokens:
                 await c.cost_tracker.track(record_id, result.cost_tokens)
                 metrics.record_cost(result.cost_tokens)
+            await self._remove_live_tag(item_id)
             await self._handle_agent_result(item, result)
             self._processed[item_id] = datetime.now(UTC)
             self._live.pop(item_id, None)
@@ -333,6 +340,37 @@ class AdoPollerService:
                 id=item_id,
                 status="SUCCESS" if result.success else "FAILED",
             )
+        await self._finalize_orphan_sessions()
+
+    async def _remove_live_tag(self, item_id: int) -> None:
+        cfg = self._config
+        if cfg.live_tag and not cfg.dry_run:
+            await self._c.ado.remove_tag(item_id, cfg.live_tag)
+
+    async def _finalize_orphan_sessions(self) -> None:
+        """Interactive sessions tagged live but not tracked in-memory (e.g. after a
+        restart) — finalise from their deterministic scratch once the result lands."""
+        c, cfg = self._c, self._config
+        if not cfg.live_tag:
+            return
+        try:
+            tagged = await c.ado.get_all_tagged_work_items()
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("orphan finalize: fetch failed", error=str(exc))
+            return
+        live = cfg.live_tag.lower()
+        for item in tagged:
+            if item.id in self._live or live not in {t.lower() for t in item.tags}:
+                continue
+            run_dir = c.executor.interactive_scratch_dir(item.id)
+            result = c.executor.finalize_interactive(item, run_dir)
+            if result is None:
+                continue  # session still running / no result yet
+            await self._remove_live_tag(item.id)
+            await self._handle_agent_result(item, result)
+            self._processed[item.id] = datetime.now(UTC)
+            await c.executor.release_scratch(run_dir)
+            self._log.info("orphan interactive session finalized", id=item.id)
 
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config

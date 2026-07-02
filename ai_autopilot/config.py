@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     # Applied when the agent escalates (needs_human); these items are held — the
     # poller skips them until a human removes the tag.
     escalation_tag: str = "autopilot-hold"
+    # Tag added while an interactive session is live, so the poller doesn't
+    # re-dispatch it (and re-open a duplicate console) after a restart. Removed
+    # when the session finalises.
+    live_tag: str = "autopilot-live"
     # Tag added when the autopilot gives up after exhausting retries. Blank = reuse
     # processed_tag (so the item is still marked handled and not re-polled).
     failed_tag: str = ""

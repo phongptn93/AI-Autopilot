@@ -749,9 +749,15 @@ class ClaudeExecutor:
         out = stdout.decode(errors="replace")
         if proc.returncode != 0:
             err = stderr.decode(errors="replace") or out
-            self._log.warning("git failed", code=proc.returncode, args=argv, error=err.strip())
             if check:
+                # A required step actually failed → surface it and raise.
+                self._log.warning("git failed", code=proc.returncode, args=argv, error=err.strip())
                 raise GitError(f"git {' '.join(argv)} failed: {err.strip()}")
+            # check=False means the caller expects and handles a non-zero exit
+            # (existence probes like `rev-parse --verify --quiet`, best-effort
+            # fetch/worktree cleanup). Not an error — log at debug, not warning,
+            # so it doesn't look like something broke.
+            self._log.debug("git non-zero (handled)", code=proc.returncode, args=argv, error=err.strip())
         return out
 
     async def _has_changes(self, work_dir: str) -> bool:

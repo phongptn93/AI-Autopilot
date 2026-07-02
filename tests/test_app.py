@@ -103,6 +103,44 @@ def test_import_config_applies_without_pat(tmp_path, monkeypatch):
     assert "ado_pat" not in saved                    # PAT never written
 
 
+def test_board_move_applies_tag_exclusively(tmp_path):
+    from ai_autopilot.models import WorkItemInfo
+
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        board_drop_map=["Done => autopilot-done", "In review => autopilot-review"],
+    )
+
+    class _FakeAdo:
+        def __init__(self):
+            self.added, self.removed, self.states = [], [], []
+
+        async def get_work_item(self, i):
+            return WorkItemInfo(id=i, tags=["autopilot-review"])  # currently in review
+
+        async def add_tag(self, i, t):
+            self.added.append((i, t))
+
+        async def remove_tag(self, i, t):
+            self.removed.append((i, t))
+
+        async def update_state(self, i, s):
+            self.states.append((i, s))
+
+    with TestClient(create_app(settings)) as client:
+        fake = _FakeAdo()
+        client.app.state.container.ado = fake
+        resp = client.post("/dashboard/board/move", data={"item_id": "5", "column": "Done"})
+        assert resp.status_code == 204
+        assert (5, "autopilot-done") in fake.added
+        assert (5, "autopilot-review") in fake.removed   # other drop-tag cleared
+
+        # a column not in the map → no-op
+        fake.added.clear()
+        resp = client.post("/dashboard/board/move", data={"item_id": "5", "column": "Queued"})
+        assert resp.status_code == 204 and fake.added == []
+
+
 def test_health_reports_checks(client: TestClient):
     resp = client.get("/health")
     body = resp.json()

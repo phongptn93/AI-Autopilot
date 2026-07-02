@@ -49,6 +49,29 @@ class BoardCard:
     pr_urls: list[str] = field(default_factory=list)  # every PR the task opened
 
 
+def parse_drop_map(entries: list[str]) -> dict[str, tuple[str, str]]:
+    """Parse board drag-drop rules into ``{column_lower: (kind, value)}``.
+
+    Each entry is ``"Column => value"``; ``value`` is a tag by default, or an ADO
+    state when prefixed with ``@`` (e.g. ``"Done => @Closed"``). ``=`` also works
+    as the separator.
+    """
+    out: dict[str, tuple[str, str]] = {}
+    for entry in entries:
+        sep = "=>" if "=>" in entry else ("=" if "=" in entry else "")
+        if not sep:
+            continue
+        col, val = entry.split(sep, 1)
+        col, val = col.strip(), val.strip()
+        if not col or not val:
+            continue
+        if val.startswith("@"):
+            out[col.lower()] = ("state", val[1:].strip())
+        else:
+            out[col.lower()] = ("tag", val)
+    return out
+
+
 def _record_pr_urls(record: ExecutionRecord | None) -> list[str]:
     """All PR URLs for a record: the JSON ``pr_urls`` list, else the single pr_url."""
     if record is None:

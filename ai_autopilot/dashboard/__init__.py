@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.templating import Jinja2Templates
 
 from ai_autopilot import activity
-from ai_autopilot.board import board_columns, build_board, latest_records
+from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
@@ -136,6 +136,34 @@ def create_dashboard_router() -> APIRouter:
     async def board_partial(request: Request):
         """Just the columns — fetched by the page's auto-refresh, no full reload."""
         return _TEMPLATES.TemplateResponse(request, "_board_cols.html", await _board_ctx(request))
+
+    @router.post("/board/move")
+    async def board_move(request: Request):
+        """Drag & drop: apply the configured tag/state for the target column."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        try:
+            item_id = int(str(form.get("item_id", "")))
+        except ValueError:
+            return Response(status_code=204)
+        column = str(form.get("column", "")).strip().lower()
+        dmap = parse_drop_map(c.config.board_drop_map)
+        action = dmap.get(column)
+        if not item_id or action is None or c.config.dry_run:
+            return Response(status_code=204)
+        kind, value = action
+        if kind == "state":
+            await c.ado.update_state(item_id, value)
+        else:  # tag — set exclusively among the configured drop-tags
+            managed = {v for (k, v) in dmap.values() if k == "tag"}
+            item = await c.ado.get_work_item(item_id)
+            if item is not None:
+                for tag in item.tags:
+                    if tag in managed and tag != value:
+                        await c.ado.remove_tag(item_id, tag)
+            await c.ado.add_tag(item_id, value)
+        _log.info("board move", id=item_id, column=column, action=action)
+        return Response(status_code=204)
 
     @router.get("/activity/{item_id}", response_class=HTMLResponse)
     async def activity_view(request: Request, item_id: int):

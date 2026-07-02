@@ -40,7 +40,10 @@
   .board-col-count { color:var(--text-muted); font-weight:700; background:var(--bg,#0d0d12); border-radius:20px; padding:1px 9px; font-size:12px; }
   .board-col-body { padding:10px; display:flex; flex-direction:column; gap:9px; flex:1 1 auto; overflow-y:auto; }
 
-  .board-card { background:var(--bg,#0d0d12); border:1px solid var(--border,#23232b); border-left:3px solid var(--stripe,#3a3a44); border-radius:9px; padding:11px 12px; transition:transform .08s ease, border-color .08s ease; }
+  .board-card { background:var(--bg,#0d0d12); border:1px solid var(--border,#23232b); border-left:3px solid var(--stripe,#3a3a44); border-radius:9px; padding:11px 12px; transition:transform .08s ease, border-color .08s ease; cursor:grab; }
+  .board-card:active { cursor:grabbing; }
+  .board-card.dragging { opacity:.5; }
+  .board-col.drop-hover { outline:2px dashed var(--accent,#6366f1); outline-offset:-2px; }
   .board-card:hover { transform:translateY(-1px); border-color:var(--accent,#6366f1); }
   .board-card-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
   .board-card-id { font-size:11px; color:var(--text-dim); font-family:var(--mono,monospace); }
@@ -91,6 +94,40 @@
     }
     setInterval(refresh, 15000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+
+    // ── Drag & drop: move a card to a column → apply that column's tag/state ──
+    // Delegated on the stable mount so it survives the 15s partial refresh.
+    let dragId = null, dragEl = null;
+    mount.addEventListener('dragstart', e => {
+      const card = e.target.closest('.board-card');
+      if (!card) return;
+      dragId = card.dataset.id; dragEl = card; card.classList.add('dragging');
+    });
+    mount.addEventListener('dragend', () => { if (dragEl) dragEl.classList.remove('dragging'); dragId = dragEl = null; });
+    mount.addEventListener('dragover', e => {
+      const col = e.target.closest('.board-col');
+      if (col && dragId) { e.preventDefault(); col.classList.add('drop-hover'); }
+    });
+    mount.addEventListener('dragleave', e => {
+      const col = e.target.closest('.board-col'); if (col) col.classList.remove('drop-hover');
+    });
+    mount.addEventListener('drop', async e => {
+      const col = e.target.closest('.board-col');
+      if (!col) return;
+      col.classList.remove('drop-hover');
+      const id = dragId; const column = col.dataset.column;
+      if (!id || !column) return;
+      e.preventDefault();
+      try {
+        await fetch('/dashboard/board/move', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ item_id: id, column }),
+        });
+      } catch (err) { /* keep last view */ }
+      dragId = dragEl = null;
+      refresh();
+    });
   })();
 </script>
 {% endblock %}

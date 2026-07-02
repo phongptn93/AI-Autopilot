@@ -1,7 +1,7 @@
 {# Board columns only — rendered standalone for the auto-refresh fetch. #}
 <div class="board-cols" style="grid-template-columns: repeat({{ columns|length }}, minmax(0,1fr))">
     {% for col in columns %}
-    <div class="board-col col-accent-{{ col|lower|replace(' ', '-') }}">
+    <div class="board-col col-accent-{{ col|lower|replace(' ', '-') }}" data-column="{{ col }}">
         <div class="board-col-head">
             <span class="board-col-name">{{ col }}</span>
             <span class="board-col-count">{{ board[col]|length }}</span>
@@ -9,7 +9,7 @@
         <div class="board-col-body">
             {% for card in board[col] %}
             {% set label, css = category_badge(card.category) %}
-            <div class="board-card {{ css }}">
+            <div class="board-card {{ css }}" draggable="true" data-id="{{ card.id }}">
                 <div class="board-card-head">
                     {% if card.category %}<span class="cat-badge {{ css }}">{{ label }}</span>{% endif %}
                     {% if ado_item_base %}

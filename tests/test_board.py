@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ai_autopilot.board import board_columns, build_board, latest_records
+from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
 from ai_autopilot.config import Settings
 from ai_autopilot.data.entities import ExecutionRecord, ExecutionStatus
 from ai_autopilot.models import WorkItemInfo
@@ -94,6 +94,16 @@ def test_unknown_persisted_state_falls_back_to_derived():
 def test_resolved_state_and_escalation_tag_defaults():
     assert CFG.resolved_state == "Resolved"
     assert CFG.escalation_tag == "autopilot-hold"
+
+
+def test_parse_drop_map():
+    assert parse_drop_map(
+        ["In review => autopilot-review", "Done => @Closed", "Ready => tag2", "bad-entry"]
+    ) == {
+        "in review": ("tag", "autopilot-review"),
+        "done": ("state", "Closed"),
+        "ready": ("tag", "tag2"),
+    }
 
 
 def test_done_states_map_to_done_column():

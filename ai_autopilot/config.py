@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     # "Ready to Testing" / "Closed"). Items in any of these states show in the Done
     # column regardless of tags. Read-only: does not change the item.
     done_states: list[str] = Field(default_factory=list)
+    # Drag & drop on the board: what to apply when a card is dropped in a column.
+    # Each entry "Column => value" — a tag by default, or an ADO state if prefixed
+    # with @, e.g. "In review => autopilot-review", "Done => @Closed". Columns not
+    # listed are not drop targets.
+    board_drop_map: list[str] = Field(default_factory=list)
     # When a human drags a handled item back to a trigger state (one the autopilot
     # never sets), clear its skip tags so it gets reprocessed. Guarded against loops:
     # only reopens on trigger states that are NOT the autopilot's own output states.

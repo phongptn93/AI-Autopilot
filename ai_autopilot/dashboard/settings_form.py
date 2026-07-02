@@ -90,6 +90,9 @@ FIELDS: tuple[Field, ...] = (
     Field("done_states", "Done states (→ Done column)", "stateset", "Board columns",
           "ADO states that count as Done on the board (e.g. Ready to Testing, Closed). "
           "Items a human moved to any of these show in the Done column."),
+    Field("board_drop_map", "Drag & drop (column => tag/state)", "list", "Board columns",
+          "Enable dragging cards: one 'Column => value' per line. Value is a tag, or an ADO state "
+          "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready to deploy => @Ready to Deploy'."),
     # ── Auto transitions ──
     Field("auto_transition_enabled", "Enable auto transitions", "bool", "Auto transitions",
           "Move the work item when its PR is merged, and roll a parent forward when all its "

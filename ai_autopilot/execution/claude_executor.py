@@ -260,7 +260,13 @@ class ClaudeExecutor:
                 # Serialise per-repo so a concurrent task on the same repo doesn't
                 # collide on .git locks during fetch / worktree add.
                 async with self._repo_lock(src_repo):
-                    await self._git(["fetch", "origin"], src_repo, check=False)
+                    # --no-recurse-submodules: some repos vendor a private/relative
+                    # submodule (e.g. .claude) that isn't reachable from this machine;
+                    # recursing turns a fine fetch into a scary code=1 "Could not
+                    # access submodule" error. We only need the repo's own refs.
+                    await self._git(
+                        ["fetch", "--no-recurse-submodules", "origin"], src_repo, check=False
+                    )
                     # Repos may use different base branches — resolve one that exists
                     # in THIS repo (configured base → its default branch), else skip
                     # it rather than aborting the whole scratch.

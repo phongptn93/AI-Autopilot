@@ -183,15 +183,17 @@ class ClaudeExecutor:
     def _scratch_base(self) -> str:
         """Base dir for per-task scratch worktrees.
 
-        Defaults to a short sibling of the workspace (``<parent>/.aiwt``) rather
-        than the deep system-temp path, so worktree file paths stay well under the
-        Windows 260-char MAX_PATH limit. Override with ``worktrees_dir``.
+        Defaults to ``<workspace>/.aiwt`` — kept inside the workspace so scratch
+        lives next to the repos it mirrors (a dotfolder, so ``discover_repos``
+        skips it and the worktrees are never mistaken for source repos). Short
+        ``agent-<id>`` names keep paths under the Windows 260-char MAX_PATH limit.
+        Override the location with ``worktrees_dir``.
         """
         if self._config.worktrees_dir:
             return self._config.worktrees_dir
         ws = self._config.workspace_directory
         if ws:
-            return str(Path(ws).parent / ".aiwt")
+            return str(Path(ws) / ".aiwt")
         return str(Path(tempfile.gettempdir()) / "ai-autopilot-worktrees")
 
     async def _ref_exists(self, repo: str, ref: str) -> bool:

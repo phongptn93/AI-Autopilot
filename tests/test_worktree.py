@@ -213,10 +213,11 @@ async def test_resolve_base_ref_falls_back_to_default(repo: Path):
     assert ref is not None and ref.startswith("origin/")
 
 
-def test_scratch_base_defaults_beside_workspace(tmp_path: Path):
-    ex = _executor(workspace_directory=str(tmp_path / "workspace"))
-    # Short sibling of the workspace, not the deep system-temp path (MAX_PATH).
-    assert ex._scratch_base() == str(tmp_path / ".aiwt")
+def test_scratch_base_defaults_inside_workspace(tmp_path: Path):
+    ws = tmp_path / "workspace"
+    ex = _executor(workspace_directory=str(ws))
+    # A dotfolder inside the workspace (discover_repos skips it), not system-temp.
+    assert ex._scratch_base() == str(ws / ".aiwt")
 
 
 def test_scratch_base_honours_override(tmp_path: Path):

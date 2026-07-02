@@ -34,6 +34,9 @@ FIELDS: tuple[Field, ...] = (
           "picks which repo subfolder to edit. Blank = legacy mode (run inside one repo)."),
     Field("base_branch", "Base branch", "text", "Workspace & Repository",
           "Branch new feature branches are cut from."),
+    Field("repo_descriptions", "Repo descriptions", "list", "Workspace & Repository",
+          "What each repo is, so the agent picks the right one. One 'RepoName = description' per "
+          "line, e.g. 'Backend-Fresh = .NET API', 'Dxfac-gitops = deploy manifests, don't edit'."),
     # ── Azure DevOps connection ──
     Field("ado_organization", "Organization URL", "text", "Azure DevOps Connection",
           "e.g. https://dev.azure.com/your-org"),

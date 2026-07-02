@@ -192,6 +192,10 @@ class Settings(BaseSettings):
     # Repos (subfolders of the workspace) the agent is allowed to edit. Empty =
     # all discovered repos. Acts as a safety whitelist in AI-native mode.
     allowed_repos: list[str] = Field(default_factory=list)
+    # What each repo is, so the agent picks the right one. Each entry
+    # "RepoName = description", e.g. "Backend-Fresh = .NET API" / "Dxfac-gitops =
+    # deploy manifests, don't edit for features". Shown in the agent brief.
+    repo_descriptions: list[str] = Field(default_factory=list)
     repos: list[RepoConfig] = Field(default_factory=list)
     max_concurrent: int = 1
     task_timeout_minutes: int = 30

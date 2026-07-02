@@ -72,6 +72,24 @@ def test_build_brief_includes_contract_and_autonomy():
     assert "Micro-Frontend" in brief          # lists all allowed repos
 
 
+def test_build_brief_includes_repo_descriptions():
+    ex = _executor(repo_descriptions=["Backend-Fresh = .NET API", "Micro-Frontend = Angular FE"])
+    brief = ex._build_brief(
+        _item(), ["Backend-Fresh", "Micro-Frontend"], autonomy="assisted", draft_pr=True
+    )
+    assert "./Backend-Fresh — .NET API" in brief
+    assert "./Micro-Frontend — Angular FE" in brief
+
+
+def test_parse_repo_descriptions():
+    from ai_autopilot.workspace import parse_repo_descriptions
+
+    assert parse_repo_descriptions(["Backend-Fresh = .NET API", "no-desc", "Gitops: manifests"]) == {
+        "backend-fresh": ".NET API",
+        "gitops": "manifests",
+    }
+
+
 def test_allowed_repos_whitelist(tmp_path):
     # discovered repos are filtered by the configured whitelist
     for name in ("Backend-Fresh", "Micro-Frontend", "Secret"):

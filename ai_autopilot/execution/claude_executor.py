@@ -28,7 +28,7 @@ from ai_autopilot.execution.claude_client import ClaudeRun, run_claude
 from ai_autopilot.execution.result_contract import clear_result, read_result
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
-from ai_autopilot.workspace import discover_repos
+from ai_autopilot.workspace import discover_repos, parse_repo_descriptions
 
 _BRANCH_PREFIX = {
     TaskCategory.BUG: "fix",
@@ -430,7 +430,13 @@ class ClaudeExecutor:
         """High-level brief: let Claude reason, pick repo(s) + skill(s), implement,
         open the PR(s), and report back via the structured result file."""
         result_rel = f".autopilot/runs/{item.id}.json"
-        repo_list = ", ".join(f"./{r}" for r in repos) if repos else "(none discovered)"
+        descs = parse_repo_descriptions(self._config.repo_descriptions)
+        if repos:
+            repo_list = "\n".join(
+                f"- ./{r}" + (f" — {descs[r.lower()]}" if r.lower() in descs else "") for r in repos
+            )
+        else:
+            repo_list = "(none discovered)"
 
         if autonomy == "report":
             action = (
@@ -457,7 +463,8 @@ class ClaudeExecutor:
             "",
             "# Repositories you may edit (subfolders of this workspace)",
             repo_list,
-            "Decide which of these repo(s) this work needs — it may touch one or several. "
+            "Use the description of each repo to pick ONLY the one(s) this work actually needs — "
+            "it may touch one or several. Leave infra/docs repos alone unless the task requires them. "
             "Do NOT edit anything outside these repos.",
             "",
             "# How to proceed",

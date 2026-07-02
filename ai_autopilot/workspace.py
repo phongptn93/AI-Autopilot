@@ -25,3 +25,18 @@ def discover_repos(workspace: str) -> list[str]:
         if sub.is_dir() and not sub.name.startswith(".") and (sub / ".git").exists()
     ]
     return sorted(repos)
+
+
+def parse_repo_descriptions(entries: list[str]) -> dict[str, str]:
+    """Parse ``["RepoName = what it is", ...]`` into ``{name_lower: description}``
+    so the agent's brief can explain each repo and pick the right one."""
+    out: dict[str, str] = {}
+    for entry in entries:
+        sep = "=" if "=" in entry else (":" if ":" in entry else "")
+        if not sep:
+            continue
+        name, desc = entry.split(sep, 1)
+        name, desc = name.strip(), desc.strip()
+        if name and desc:
+            out[name.lower()] = desc
+    return out

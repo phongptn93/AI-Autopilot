@@ -36,3 +36,7 @@ config.*.bak
 # IDE
 .idea/
 .vscode/
+.claude
+
+# Office lock files
+~$*

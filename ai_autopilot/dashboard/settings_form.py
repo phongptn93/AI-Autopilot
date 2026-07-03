@@ -129,6 +129,12 @@ FIELDS: tuple[Field, ...] = (
           "Restart required to take effect."),
     Field("task_timeout_minutes", "Task timeout (minutes)", "int", "Execution & Autonomy"),
     Field("auto_review_enabled", "Auto security review", "bool", "Execution & Autonomy"),
+    Field("pr_scoring_enabled", "Score each run (0–100)", "bool", "Execution & Autonomy",
+          "Grade each run from objective signals; below the review threshold → hold for human."),
+    Field("pr_score_auto_min", "Score ≥ this → auto-resolve", "int", "Execution & Autonomy",
+          "Only at unattended autonomy. Default 85."),
+    Field("pr_score_review_min", "Score < this → escalate", "int", "Execution & Autonomy",
+          "Below this the run is held for a human instead of review/done. Default 60."),
     Field("dry_run", "Dry run", "bool", "Execution & Autonomy",
           "Log only — never execute or write to ADO."),
 )

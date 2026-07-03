@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from ai_autopilot import metrics
 from ai_autopilot.container import Container
 from ai_autopilot.data import PipelineState
+from ai_autopilot.execution.pr_scorer import RunScore, ScoreInput, score_badge_html, score_run
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.routing import sort_by_priority
@@ -372,6 +373,22 @@ class AdoPollerService:
             await c.executor.release_scratch(run_dir)
             self._log.info("orphan interactive session finalized", id=item.id)
 
+    def _score_run(self, result: ExecutionResult) -> RunScore | None:
+        """Grade a successful run from its objective signals (None if disabled)."""
+        cfg = self._config
+        if not cfg.pr_scoring_enabled:
+            return None
+        inp = ScoreInput(
+            completed=result.success,
+            has_pr=bool(result.pr_url or result.pr_urls),
+            files_changed=len(result.files_changed),
+            needs_human=result.needs_human,
+            had_error=bool(result.error),
+        )
+        return score_run(
+            inp, auto_min=cfg.pr_score_auto_min, review_min=cfg.pr_score_review_min
+        )
+
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config
         if result.needs_human:
@@ -389,18 +406,39 @@ class AdoPollerService:
 
         if result.success:
             c.retry_policy.record_success(item.id)
+            score = self._score_run(result)
+            # "get a score" gate: a verified-weak run is held for a human rather
+            # than silently going to review/done. Skipped in report mode (L1, no PR
+            # is expected) and when scoring is disabled.
+            if score and score.gate == "escalate" and cfg.autonomy_level != "report":
+                await c.state_repo.set(
+                    item.id, PipelineState.NEEDS_HUMAN, detail=f"run score {score.score}/100"
+                )
+                await self._apply_outcome(item.id, "needs_human")
+                await c.ado.add_comment(
+                    item.id,
+                    score_badge_html(score)
+                    + "<div><b>🙋 Held for human</b> — điểm dưới ngưỡng review.</div>",
+                )
+                await c.notifier.notify_completed(item, result)
+                self._log.info("run below review threshold — escalated", id=item.id, score=score.score)
+                return
+            badge = score_badge_html(score) if score else ""
             if result.pr_url and cfg.pr_is_draft:
                 await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
                 await self._apply_outcome(item.id, "review")
                 await c.ado.add_comment(
                     item.id,
-                    "<div><b>🔍 PR created (draft)</b>, awaiting human review.<br/>"
+                    badge
+                    + "<div><b>🔍 PR created (draft)</b>, awaiting human review.<br/>"
                     f'PR: <a href="{result.pr_url}">{result.pr_url}</a></div>',
                 )
                 await c.notifier.notify_completed(item, result)
             elif result.pr_url:
                 await c.state_repo.set(item.id, PipelineState.DONE, pr_url=result.pr_url)
                 await self._apply_outcome(item.id, "done")
+                if badge:
+                    await c.ado.add_comment(item.id, badge)
                 await c.notifier.notify_completed(item, result)
             else:
                 # report mode: the agent commented a plan, no PR.

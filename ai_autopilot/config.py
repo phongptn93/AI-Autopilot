@@ -273,6 +273,11 @@ class Settings(BaseSettings):
     auto_review_enabled: bool = True
     block_on_severity: str = "Critical,High"
 
+    # ── PR scoring ("get a score": grade each run from objective signals) ──
+    pr_scoring_enabled: bool = True
+    pr_score_auto_min: int = 85     # ≥ this → eligible to auto-resolve (L3)
+    pr_score_review_min: int = 60   # < this → escalate to human instead of review/done
+
     # ── Scheduling ──
     schedule_start: str = ""
     schedule_end: str = ""

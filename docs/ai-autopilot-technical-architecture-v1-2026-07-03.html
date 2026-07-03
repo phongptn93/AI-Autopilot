@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Autopilot — Technical Architecture</title>
+<style>
+  :root {
+    --primary: #1a56db; --bg: #f8fafc; --card: #fff; --border: #e2e8f0;
+    --text: #1e293b; --muted: #64748b;
+    --green: #16a34a; --amber: #d97706; --red: #dc2626; --blue: #3b82f6; --violet:#7c3aed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 2rem; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 1.85rem; margin-bottom: .4rem; }
+  h2 { font-size: 1.3rem; margin: 1.5rem 0 1rem; padding-bottom: .5rem; border-bottom: 2px solid var(--primary); color: var(--primary); display:flex; align-items:center; gap:.5rem;}
+  h3 { font-size: 1.05rem; margin: 1.25rem 0 .6rem; color:#334155; }
+  .subtitle { color: var(--muted); margin-bottom: 1.5rem; }
+  .rev { display:inline-block; background:#ede9fe; color:var(--violet); font-size:.85rem; font-weight:700; padding:2px 10px; border-radius:12px; vertical-align:middle; margin-left:.5rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  table { width: 100%; border-collapse: collapse; margin: .75rem 0; font-size: .88rem; }
+  th, td { padding: .55rem .75rem; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  tr:hover { background: #f8fafc; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: .85em; font-family: 'Cascadia Code','Fira Code',monospace; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: .75rem 0; font-size: .82rem; line-height: 1.5; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: .78rem; font-weight: 600; }
+  .badge-new { background: #dcfce7; color: var(--green); }
+  .badge-modified { background: #fef3c7; color: var(--amber); }
+  .badge-core { background: #dbeafe; color: var(--primary); }
+  .badge-gap { background: #fee2e2; color: var(--red); }
+  .svg-container { text-align: center; margin: 1rem 0; overflow-x: auto; }
+  .svg-container svg { max-width: 100%; height: auto; }
+  .info { background: #eff6ff; border-left: 4px solid var(--blue); padding: .9rem 1.25rem; border-radius: 0 8px 8px 0; margin: .9rem 0; }
+  .info strong { color: var(--primary); }
+  .warn { background: #fffbeb; border-left: 4px solid var(--amber); padding: .9rem 1.25rem; border-radius: 0 8px 8px 0; margin: .9rem 0; }
+  .warn strong { color: var(--amber); }
+  .tag { display:inline-block; background:#ede9fe; color:var(--violet); padding:1px 9px; border-radius:5px; font-size:.85rem; font-weight:700; }
+  /* Part dividers + TOC */
+  .part-divider { margin: 2.5rem 0 1rem; padding: 1rem 1.25rem; background: linear-gradient(90deg,#eef2ff,#f8fafc); border-left: 5px solid var(--primary); border-radius: 0 8px 8px 0; }
+  .part-label { font-size:.75rem; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); font-weight:700; }
+  .part-roman { font-size:1.4rem; font-weight:800; color:var(--primary); margin-right:.5rem; }
+  .part-title { font-size:1.25rem; font-weight:700; }
+  .part-desc { color:var(--muted); font-style:italic; font-size:.9rem; margin-top:.15rem; }
+  .toc { columns:2; column-gap:2rem; }
+  .toc-part-title { font-weight:700; color:var(--primary); margin:.4rem 0 .2rem; break-after:avoid; }
+  .toc ol { list-style:none; margin:0 0 .6rem; padding:0; }
+  .toc a { color:var(--text); text-decoration:none; font-size:.9rem; }
+  .toc a:hover { color:var(--primary); text-decoration:underline; }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .85rem; text-align: center; }
+  @media(max-width:640px){ .toc{columns:1;} body{padding:1rem;} }
+</style>
+</head>
+<body>
+
+<!-- ========== HEADER ========== -->
+<h1>AI Autopilot — Technical Architecture <span class="rev">v1</span></h1>
+<p class="subtitle">Control plane quanh một AI agent tự trị: Python điều phối &bull; Claude làm kỹ thuật &bull; đồng bộ trạng thái Azure DevOps end-to-end &mdash; Ngày: 2026-07-03</p>
+
+<!-- ========== TOC ========== -->
+<div class="card">
+  <div class="toc">
+    <div class="toc-part-title">Part I — Nền tảng</div>
+    <ol>
+      <li><a href="#s1">1. Tổng quan</a></li>
+      <li><a href="#s2">2. Mô hình tiến trình &amp; composition</a></li>
+    </ol>
+    <div class="toc-part-title">Part II — Pipeline xử lý</div>
+    <ol>
+      <li><a href="#s3">3. Vòng poll của Poller</a></li>
+      <li><a href="#s4">4. Hai chế độ thực thi</a></li>
+      <li><a href="#s5">5. Cô lập theo task (worktree scratch)</a></li>
+    </ol>
+    <div class="toc-part-title">Part III — Trạng thái &amp; tích hợp</div>
+    <ol>
+      <li><a href="#s6">6. Outcome policy</a></li>
+      <li><a href="#s7">7. Auto state transitions + cross-project</a></li>
+      <li><a href="#s8">8. Dữ liệu &amp; idempotency</a></li>
+      <li><a href="#s9">9. Tầng tích hợp ADO</a></li>
+    </ol>
+    <div class="toc-part-title">Part IV — Bề mặt &amp; vận hành</div>
+    <ol>
+      <li><a href="#s10">10. Dashboard &amp; Board</a></li>
+      <li><a href="#s11">11. Config &amp; bảo mật</a></li>
+      <li><a href="#s12">12. Observability &amp; reliability</a></li>
+    </ol>
+    <div class="toc-part-title">Part V — Tham chiếu</div>
+    <ol>
+      <li><a href="#s13">13. Module map &amp; testing</a></li>
+      <li><a href="#s14">14. Known gaps / roadmap</a></li>
+      <li><a href="#s15">15. Tech stack</a></li>
+    </ol>
+    <div class="toc-part-title">Part VI — Đối chiếu &amp; chấm điểm</div>
+    <ol>
+      <li><a href="#s16">16. So với loop-engineering</a></li>
+      <li><a href="#s17">17. PR scoring — &ldquo;get a score&rdquo;</a></li>
+    </ol>
+  </div>
+</div>
+
+<!-- ================= PART I ================= -->
+<div class="part-divider">
+  <div class="part-label">Part I</div>
+  <div><span class="part-roman">I</span><span class="part-title">Nền tảng</span></div>
+  <div class="part-desc">Hệ thống làm gì, và tiến trình được lắp ráp ra sao.</div>
+</div>
+
+<section id="s1">
+<h2><span class="tag">1</span> Tổng quan</h2>
+<div class="card">
+  <p><strong>Vấn đề:</strong> Xử lý work item Azure DevOps (implement bug/feature, tạo PR, cập nhật trạng thái) tốn nhiều thao tác lặp lại của dev. Cần một dịch vụ tự động nhận việc từ board, để AI làm, rồi báo cáo &amp; đồng bộ trạng thái xuyên suốt vòng đời (merge → deploy → testing).</p>
+  <p style="margin-top:.6rem"><strong>Giải pháp:</strong> Một background service dạng <strong>control plane quanh agent tự trị</strong>. Python sở hữu <em>scheduling, cô lập, idempotency, trạng thái, báo cáo</em>; Claude sở hữu <em>lập luận kỹ thuật và chỉnh sửa file</em>. Autopilot poll board, nhặt item gắn trigger tag, giao cho Claude (branch → code → commit → push → PR), auto-review, rồi ghi lại trạng thái + tag + comment lên ADO và các kênh chat; sau đó tiếp tục đồng bộ trạng thái item khi PR được merge và deploy.</p>
+  <div class="info"><strong>Nguyên tắc thiết kế cốt lõi:</strong> mọi thay đổi tag/trạng thái theo một <em>outcome</em> đều đi qua <strong>một điểm duy nhất</strong> (<code>outcome_policy</code>) — xem §6. Điều này giữ cho hành vi vừa cấu hình được vừa dễ suy luận.</p>
+</div>
+</section>
+
+<section id="s2">
+<h2><span class="tag">2</span> Mô hình tiến trình &amp; composition</h2>
+<div class="card">
+  <p><code>app.py</code> là FastAPI application factory + <code>lifespan</code>. Khi khởi động, nó dựng <code>Container</code> (composition root) và chạy <strong>4 background service</strong>; khi tắt thì dừng chúng và giải phóng container. Toàn bộ chạy <strong>async hợp tác trên một event loop</strong> — không có thread pool; đồng thời được giới hạn bởi một semaphore (<code>max_concurrent</code>).</p>
+  <p style="margin-top:.5rem"><code>container.py</code> giữ mọi singleton cho suốt vòng đời tiến trình: HTTP client, DB + repositories, ADO auth/client, notifier + kênh, executor + reviewer + retry, router/decomposer, schedule guard, RBAC, cost tracker, tenants, plugins, webhook queue.</p>
+  <table>
+    <thead><tr><th>Service</th><th>File</th><th>Chu kỳ</th><th>Trách nhiệm</th></tr></thead>
+    <tbody>
+      <tr><td><strong>AdoPollerService</strong></td><td><code>services/poller.py</code></td><td>30s</td><td>Trái tim — poll board, dispatch việc, finalize kết quả</td></tr>
+      <tr><td><strong>StateSyncService</strong></td><td><code>services/state_sync.py</code></td><td>90s</td><td>Auto transitions: merge→state, deploy→state, parent roll-up</td></tr>
+      <tr><td><strong>PrMonitorService</strong></td><td><code>services/pr_monitor.py</code></td><td>—</td><td>Theo dõi PR autopilot đang mở</td></tr>
+      <tr><td><strong>LoopScheduler</strong></td><td><code>services/loop_scheduler.py</code></td><td>cron/interval</td><td>Chạy skill theo lịch (dependency sweep, changelog...)</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:.4rem">Endpoint HTTP (<code>:5080</code>): <code>/health</code>, <code>/metrics</code>, <code>/api/webhook/ado</code>, và router <code>/dashboard</code>.</p>
+</div>
+</section>
+
+<!-- ================= PART II ================= -->
+<div class="part-divider">
+  <div class="part-label">Part II</div>
+  <div><span class="part-roman">II</span><span class="part-title">Pipeline xử lý</span></div>
+  <div class="part-desc">Từ một item trên board đến một PR đã tạo — từng bước.</div>
+</div>
+
+<section id="s3">
+<h2><span class="tag">3</span> Vòng poll của Poller</h2>
+<div class="card">
+<p>Một chu kỳ <code>_poll_and_process</code> (mỗi <code>poll_interval_seconds</code>, mặc định 30s) chạy qua các phase sau:</p>
+<div class="svg-container">
+<svg viewBox="0 0 1040 380" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="9" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,3 L0,6Z" fill="#475569"/>
+    </marker>
+    <filter id="sh"><feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-opacity=".12"/></filter>
+  </defs>
+
+  <!-- Phase backgrounds -->
+  <rect x="14"  y="40" width="238" height="300" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-dasharray="5 4"/>
+  <rect x="266" y="40" width="238" height="300" rx="12" fill="#fffbeb" stroke="#fcd34d" stroke-dasharray="5 4"/>
+  <rect x="518" y="40" width="238" height="300" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-dasharray="5 4"/>
+  <rect x="770" y="40" width="256" height="300" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-dasharray="5 4"/>
+  <text x="133" y="62" text-anchor="middle" font-size="13" font-weight="700" fill="#1e40af">1 · Ingest</text>
+  <text x="385" y="62" text-anchor="middle" font-size="13" font-weight="700" fill="#b45309">2 · Select</text>
+  <text x="637" y="62" text-anchor="middle" font-size="13" font-weight="700" fill="#15803d">3 · Execute</text>
+  <text x="898" y="62" text-anchor="middle" font-size="13" font-weight="700" fill="#1e40af">4 · Report</text>
+
+  <!-- Phase 1 -->
+  <rect x="32" y="84" width="202" height="46" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="2" filter="url(#sh)"/>
+  <text x="133" y="104" text-anchor="middle" font-size="12.5" font-weight="700">ADO Board</text>
+  <text x="133" y="120" text-anchor="middle" font-size="10.5" fill="#64748b">trigger tag + trigger state</text>
+  <rect x="32" y="160" width="202" height="46" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#sh)"/>
+  <text x="133" y="180" text-anchor="middle" font-size="12" font-weight="600">Webhook queue</text>
+  <text x="133" y="196" text-anchor="middle" font-size="10.5" fill="#64748b">Service Hook → drain trước</text>
+  <rect x="32" y="236" width="202" height="46" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#sh)"/>
+  <text x="133" y="256" text-anchor="middle" font-size="12" font-weight="600">Reconcile reopened</text>
+  <text x="133" y="272" text-anchor="middle" font-size="10.5" fill="#64748b">kéo về trigger → gỡ skip tag</text>
+
+  <!-- Phase 2 -->
+  <rect x="284" y="84" width="202" height="46" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#sh)"/>
+  <text x="385" y="104" text-anchor="middle" font-size="12" font-weight="600">WIQL pending</text>
+  <text x="385" y="120" text-anchor="middle" font-size="10.5" fill="#64748b">tag ∈ trigger, state ∈ trigger</text>
+  <rect x="284" y="160" width="202" height="46" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2" filter="url(#sh)"/>
+  <text x="385" y="180" text-anchor="middle" font-size="12.5" font-weight="700" fill="#92400e">Filter skip-tags</text>
+  <text x="385" y="196" text-anchor="middle" font-size="10.5" fill="#92400e">processed/review/escalation/live</text>
+  <rect x="284" y="236" width="202" height="46" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#sh)"/>
+  <text x="385" y="256" text-anchor="middle" font-size="12" font-weight="600">Classify + prioritise</text>
+  <text x="385" y="272" text-anchor="middle" font-size="10.5" fill="#64748b">BE / FE / QC / Bug / Req</text>
+
+  <!-- Phase 3 -->
+  <rect x="536" y="84" width="202" height="46" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#sh)"/>
+  <text x="637" y="104" text-anchor="middle" font-size="12" font-weight="600">Scratch worktree</text>
+  <text x="637" y="120" text-anchor="middle" font-size="10.5" fill="#64748b">&lt;workspace&gt;/.aiwt/agent-&lt;id&gt;</text>
+  <rect x="536" y="160" width="202" height="46" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2" filter="url(#sh)"/>
+  <text x="637" y="180" text-anchor="middle" font-size="12" font-weight="700" fill="#166534">Claude runs</text>
+  <text x="637" y="196" text-anchor="middle" font-size="10.5" fill="#166534">Headless SDK | Interactive RC</text>
+  <rect x="536" y="236" width="202" height="46" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#sh)"/>
+  <text x="637" y="256" text-anchor="middle" font-size="12" font-weight="600">result.json</text>
+  <text x="637" y="272" text-anchor="middle" font-size="10.5" fill="#64748b">structured contract</text>
+
+  <!-- Phase 4 -->
+  <rect x="788" y="84" width="220" height="46" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="2" filter="url(#sh)"/>
+  <text x="898" y="104" text-anchor="middle" font-size="12.5" font-weight="700" fill="#5b21b6">outcome_policy</text>
+  <text x="898" y="120" text-anchor="middle" font-size="10.5" fill="#5b21b6">outcome → (tag, state)</text>
+  <rect x="788" y="160" width="220" height="46" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="2" filter="url(#sh)"/>
+  <text x="898" y="180" text-anchor="middle" font-size="12" font-weight="700">ADO state + comment</text>
+  <text x="898" y="196" text-anchor="middle" font-size="10.5" fill="#64748b">tag + state + PR link</text>
+  <rect x="788" y="236" width="220" height="46" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#sh)"/>
+  <text x="898" y="256" text-anchor="middle" font-size="12" font-weight="600">Notify</text>
+  <text x="898" y="272" text-anchor="middle" font-size="10.5" fill="#64748b">Teams · Zalo · Email</text>
+
+  <!-- cross-phase arrows (mid line) -->
+  <line x1="234" y1="183" x2="284" y2="183" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="486" y1="183" x2="536" y2="183" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="738" y1="183" x2="788" y2="183" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- finalize loop note -->
+  <text x="520" y="330" text-anchor="middle" font-size="10.5" fill="#64748b" font-style="italic">Đầu mỗi chu kỳ: finalize các interactive session đã ghi result.json (kể cả session mồ côi sau restart).</text>
+</svg>
+</div>
+<p style="font-size:.86rem;color:#475569"><code>_process</code> chạy RBAC + pre-processor plugin, rồi rẽ nhánh: có <code>workspace_directory</code> → đường <strong>AI-native</strong> (<code>_process_agent</code>); nếu không → đường <strong>legacy</strong> (classify→skill→git hardcoded).</p>
+</div>
+</section>
+
+<section id="s4">
+<h2><span class="tag">4</span> Hai chế độ thực thi</h2>
+<div class="card">
+  <p><code>_process_agent</code> chọn theo <code>execution_mode</code>. Cả hai hội tụ về cùng contract <code>result.json</code> và cùng cách xử lý outcome.</p>
+  <table>
+    <thead><tr><th>Chế độ</th><th>Cơ chế</th><th>Điều khiển</th><th>Finalize</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Headless</strong> (mặc định)</td><td>Claude Agent SDK stream từ scratch; token/chi phí về dạng dữ liệu có cấu trúc</td><td>Tự động, không người</td><td>Ngay trong <code>run_agent</code></td></tr>
+      <tr><td><strong>Interactive</strong></td><td>Mở một phiên Claude Code <em>Remote-Control</em> thật (console riêng); fire-and-forget</td><td>Người có thể attach qua claude.ai để lái</td><td>Poller nhặt khi <code>result.json</code> xuất hiện</td></tr>
+    </tbody>
+  </table>
+  <div class="info"><strong>Chống dispatch trùng khi restart:</strong> khi dispatch interactive, item được gắn tag <code>autopilot-live</code> (một skip tag) nên restart không bao giờ mở console thứ hai cho cùng item. Session mồ côi (mất tracking in-memory sau restart) được finalize lại từ scratch cố định.</div>
+</div>
+</section>
+
+<section id="s5">
+<h2><span class="tag">5</span> Cô lập theo task (worktree scratch)</h2>
+<div class="card">
+  <p>Mỗi task AI-native chạy trong scratch workspace riêng để không đụng vào checkout chính của user và không xung đột giữa các task đồng thời (<code>_acquire_agent_scratch</code>).</p>
+  <ul style="margin:.3rem 0 .3rem 1.2rem; font-size:.9rem;">
+    <li><strong>Base dir:</strong> <code>&lt;workspace&gt;/.aiwt</code> — dotfolder <em>bên trong</em> workspace (nên <code>discover_repos</code> bỏ qua). Override bằng <code>worktrees_dir</code>.</li>
+    <li><strong>Layout:</strong> <code>agent-&lt;id&gt;[-&lt;uuid&gt;]/</code> chứa bản <em>copy</em> của <code>.claude</code> + <code>git worktree</code> của từng repo được phép.</li>
+    <li><strong>Base branch theo từng repo</strong> (<code>_resolve_base_ref</code>): thử <code>origin/&lt;base_branch&gt;</code> → default của repo (<code>origin/HEAD</code>) → <code>main/master/develop/development</code>. Repo không có base khả dụng thì <em>bỏ qua</em> chứ không hủy cả scratch.</li>
+    <li><strong>Interactive</strong> dùng path <em>cố định</em> <code>agent-&lt;id&gt;</code> (dọn sạch trước) để finalize được sau restart.</li>
+    <li><code>fetch --no-recurse-submodules</code> — vài repo vendor submodule private/relative (vd <code>.claude</code>) không truy cập được từ máy dev.</li>
+    <li><strong>Teardown</strong> (<code>release_scratch</code>): <code>worktree remove --force</code> + <code>prune</code> + xóa thư mục — best-effort, không raise. (Thư mục bị console interactive đang mở ghim sẽ còn lại dưới dạng vỏ rỗng đến khi đóng console.)</li>
+  </ul>
+</div>
+</section>
+
+<!-- ================= PART III ================= -->
+<div class="part-divider">
+  <div class="part-label">Part III</div>
+  <div><span class="part-roman">III</span><span class="part-title">Trạng thái &amp; tích hợp</span></div>
+  <div class="part-desc">Cách trạng thái item được điều khiển một chỗ, đồng bộ theo vòng đời, và bền hóa.</div>
+</div>
+
+<section id="s6">
+<h2><span class="tag">6</span> Outcome policy — điểm mutate duy nhất</h2>
+<div class="card">
+  <p>Mọi thay đổi tag/state theo một outcome đi qua <code>outcome_policy(cfg, outcome) → (tag, state)</code>, áp dụng bởi <code>_apply_outcome</code>. Tag/state rỗng hoặc <code>dry_run</code> → bỏ qua. Best-effort: lỗi ADO được log, không chặn pipeline. Autonomy level quyết định một run hoàn tất map sang <em>review</em> (assisted → draft PR) hay <em>done</em> (unattended).</p>
+  <table>
+    <thead><tr><th>Outcome</th><th>Tag</th><th>State (config key)</th></tr></thead>
+    <tbody>
+      <tr><td><code>in_progress</code></td><td>—</td><td><code>state_in_progress</code></td></tr>
+      <tr><td><code>review</code></td><td><code>review_tag</code></td><td><code>state_in_review</code></td></tr>
+      <tr><td><code>done</code></td><td><code>processed_tag</code></td><td><code>resolved_state</code></td></tr>
+      <tr><td><code>report</code></td><td><code>processed_tag</code></td><td><code>state_report</code></td></tr>
+      <tr><td><code>needs_human</code></td><td><code>escalation_tag</code></td><td><code>state_needs_human</code></td></tr>
+      <tr><td><code>failed</code></td><td><code>failed_tag</code> (hoặc <code>processed_tag</code>)</td><td><code>state_failed</code></td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<section id="s7">
+<h2><span class="tag">7</span> Auto state transitions + cross-project</h2>
+<div class="card">
+  <p>Opt-in (<code>auto_transition_enabled</code>), loop ~90s, idempotent (seen-set / baseline), có cổng theo <strong>trigger tag</strong> và tùy chọn <strong>assignee</strong> (<code>auto_transition_assignee</code>, khớp display name <em>hoặc</em> email). Vòng đời trạng thái:</p>
+<div class="svg-container">
+<svg viewBox="0 0 1000 220" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="9" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,3 L0,6Z" fill="#475569"/></marker>
+  </defs>
+  <!-- states -->
+  <rect x="14"  y="80" width="150" height="52" rx="10" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="89" y="102" text-anchor="middle" font-size="12" font-weight="600">Trigger state</text>
+  <text x="89" y="118" text-anchor="middle" font-size="10.5" fill="#64748b">New / Active…</text>
+
+  <rect x="204" y="80" width="150" height="52" rx="10" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="279" y="102" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">In Review</text>
+  <text x="279" y="118" text-anchor="middle" font-size="10.5" fill="#92400e">draft PR mở</text>
+
+  <rect x="394" y="80" width="170" height="52" rx="10" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="479" y="102" text-anchor="middle" font-size="12" font-weight="700" fill="#1e40af">Ready to Deploy</text>
+  <text x="479" y="118" text-anchor="middle" font-size="10.5" fill="#1e40af">on_merge_state</text>
+
+  <rect x="604" y="80" width="170" height="52" rx="10" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="689" y="102" text-anchor="middle" font-size="12" font-weight="700" fill="#166534">Ready to Testing</text>
+  <text x="689" y="118" text-anchor="middle" font-size="10.5" fill="#166534">on_deploy_state</text>
+
+  <rect x="814" y="80" width="172" height="52" rx="10" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="900" y="102" text-anchor="middle" font-size="12" font-weight="700" fill="#5b21b6">Parent roll-up</text>
+  <text x="900" y="118" text-anchor="middle" font-size="10.5" fill="#5b21b6">child → parent state</text>
+
+  <!-- transitions -->
+  <line x1="164" y1="106" x2="204" y2="106" stroke="#475569" stroke-width="1.6" marker-end="url(#a2)"/>
+  <text x="184" y="72" text-anchor="middle" font-size="10" fill="#64748b">run</text>
+  <line x1="354" y1="106" x2="394" y2="106" stroke="#475569" stroke-width="1.6" marker-end="url(#a2)"/>
+  <text x="374" y="72" text-anchor="middle" font-size="10" fill="#64748b">merge PR</text>
+  <line x1="564" y1="106" x2="604" y2="106" stroke="#475569" stroke-width="1.6" marker-end="url(#a2)"/>
+  <text x="584" y="72" text-anchor="middle" font-size="10" fill="#64748b">deploy ✓</text>
+  <line x1="774" y1="106" x2="814" y2="106" stroke="#475569" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a2)"/>
+  <text x="794" y="72" text-anchor="middle" font-size="10" fill="#64748b">derive</text>
+</svg>
+</div>
+  <div class="warn"><strong>Cross-project scoping (quan trọng):</strong> work item và code thường ở <em>khác</em> ADO project (vd item ở <code>TLCL-DxFac</code>, repo/PR/build ở <code>DxFactory</code>). <code>code_project</code> đặt project cho mọi lời gọi git/PR/build (<code>_git_url</code>), trong khi lời gọi work-item ở <code>ado_project</code> (<code>_url</code>). Thiếu nó → merge/deploy detection query nhầm project và <strong>không bao giờ kích hoạt</strong>.</div>
+</div>
+</section>
+
+<section id="s8">
+<h2><span class="tag">8</span> Dữ liệu &amp; idempotency</h2>
+<div class="card">
+  <p><strong>Persistence:</strong> SQLAlchemy <em>async</em> + aiosqlite. <code>Database</code> (engine/session), <code>ExecutionRepository</code> (bản ghi execution, chi phí, phục hồi run đang chạy), <code>StateRepository</code> (một <code>PipelineState</code> mỗi item: QUEUED / IN_PROGRESS / IN_REVIEW / NEEDS_HUMAN / …).</p>
+  <h3>Chống xử lý trùng — nhiều lớp</h3>
+  <table>
+    <thead><tr><th>Lớp</th><th>Cơ chế</th></tr></thead>
+    <tbody>
+      <tr><td>ADO skip tags</td><td><code>processed</code> / <code>review</code> / <code>escalation</code> / <code>live</code> → loại khỏi query pending</td></tr>
+      <tr><td>In-memory <code>_processed</code></td><td>set TTL 1 giờ → tránh nhặt lại cùng chu kỳ</td></tr>
+      <tr><td>Startup recovery</td><td><code>requeue_in_progress</code> + <code>fail_running</code> phục hồi run dở; <code>prune_orphans</code> dọn scratch do crash</td></tr>
+    </tbody>
+  </table>
+  <div class="warn"><strong>Gap đã biết:</strong> map session interactive (<code>_live</code>) nằm in-memory. Đã có backstop bằng tag <code>autopilot-live</code> + scratch cố định + orphan-finalize, nhưng DB <em>chưa</em> là single source of truth cho việc đang chạy.</div>
+</div>
+</section>
+
+<section id="s9">
+<h2><span class="tag">9</span> Tầng tích hợp ADO</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>File</th><th>Vai trò</th></tr></thead>
+    <tbody>
+      <tr><td><code>ado/auth.py</code></td><td>PAT hoặc OAuth (client-credentials) bearer; dựng request header</td></tr>
+      <tr><td><code>ado/client.py</code></td><td>Wrapper httpx trên ADO REST 7.1: WIQL, work item (get/batch/tagged), git PR (theo status / completed), build pipeline, tag (add/remove), comment, update state, children, identity. Tách URL: <code>_url</code> (work item → <code>ado_project</code>) vs <code>_git_url</code> (code → <code>code_project</code>)</td></tr>
+      <tr><td><code>ado/notifier.py</code></td><td>Đăng comment ADO + fan-out sang các kênh thông báo</td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<!-- ================= PART IV ================= -->
+<div class="part-divider">
+  <div class="part-label">Part IV</div>
+  <div><span class="part-roman">IV</span><span class="part-title">Bề mặt &amp; vận hành</span></div>
+  <div class="part-desc">Con người nhìn thấy &amp; điều khiển hệ thống ra sao; cấu hình, bảo mật, quan sát.</div>
+</div>
+
+<section id="s10">
+<h2><span class="tag">10</span> Dashboard &amp; Board</h2>
+<div class="card">
+  <p>Server-rendered Jinja2 (không SPA). Trang: <strong>Overview</strong>, <strong>Board</strong>, <strong>History</strong>, <strong>Config</strong>, <strong>Capabilities</strong>, <strong>Settings</strong>.</p>
+  <ul style="margin:.3rem 0 .3rem 1.2rem; font-size:.9rem;">
+    <li><strong>Board</strong> xếp item vào cột; cột được suy ra (theo thứ tự) từ ADO state (done/hand-off) → <code>PipelineState</code> đã lưu → tag. Card <strong>kéo-thả</strong>: thả vào cột sẽ áp tag/state theo <code>board_drop_map</code> (giá trị prefix <code>@</code> = state, còn lại = tag), gỡ các drop-tag anh em.</li>
+    <li><strong>Settings</strong> ghi <code>config.yaml</code> và áp dụng live. <strong>Export không bao giờ kèm PAT</strong>; import bỏ qua mọi <code>ado_pat</code> trong file.</li>
+  </ul>
+</div>
+</section>
+
+<section id="s11">
+<h2><span class="tag">11</span> Config &amp; bảo mật</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Mảng</th><th>Chi tiết</th></tr></thead>
+    <tbody>
+      <tr><td>Config</td><td><code>config.py</code> pydantic-settings: nạp <code>config.yaml</code>, override bằng env <code>AUTOPILOT_*</code>. <strong>Secret đến từ env</strong>; PAT không ghi ra config export; <code>config.yaml*</code> bị git-ignore.</td></tr>
+      <tr><td>RBAC</td><td><code>security.py</code> — allow-list ai được kích hoạt autopilot (tùy chọn)</td></tr>
+      <tr><td>Schedule guard</td><td><code>scheduling.py</code> — chỉ hành động trong khung giờ cấu hình</td></tr>
+      <tr><td>Autonomy</td><td><code>report</code> (L1: chỉ comment) · <code>assisted</code> (L2: draft PR, mặc định) · <code>unattended</code> (L3: PR thường, tự resolve)</td></tr>
+      <tr><td>Multitenant / plugin</td><td>Tenant manager + plugin loader (<code>PreProcessor</code>/<code>PostProcessor</code>/<code>SkillProvider</code>)</td></tr>
+    </tbody>
+  </table>
+</div>
+</section>
+
+<section id="s12">
+<h2><span class="tag">12</span> Observability &amp; reliability</h2>
+<div class="card">
+  <ul style="margin:.3rem 0 .3rem 1.2rem; font-size:.9rem;">
+    <li><strong>Logging</strong>: structlog (JSON lines → <code>logs/autopilot.log</code>). Các probe git <code>check=False</code> (vd kiểm tra tồn tại base branch) hiện dưới dạng warning <code>git failed</code> — đây là probe đã được xử lý, <em>không</em> phải lỗi thật.</li>
+    <li><strong>Metrics</strong>: prometheus-client tại <code>/metrics</code> (tasks, cost, poll items…).</li>
+    <li><strong>Health</strong>: <code>/health</code> chạy check ADO / Claude / disk.</li>
+    <li><strong>Retry</strong>: <code>RetryPolicy</code> với retry giới hạn + backoff; item cạn retry bị loại khỏi pending và báo cáo.</li>
+  </ul>
+</div>
+</section>
+
+<!-- ================= PART V ================= -->
+<div class="part-divider">
+  <div class="part-label">Part V</div>
+  <div><span class="part-roman">V</span><span class="part-title">Tham chiếu</span></div>
+  <div class="part-desc">Bản đồ module, kiểm thử, giới hạn hiện tại, và stack.</div>
+</div>
+
+<section id="s13">
+<h2><span class="tag">13</span> Module map &amp; testing</h2>
+<div class="card">
+<table>
+  <thead><tr><th>#</th><th>Module</th><th>Vai trò</th><th>Trạng thái</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>services/poller.py</code></td><td>Vòng poll, dispatch, finalize (2 chế độ) — trái tim</td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>2</td><td><code>execution/claude_executor.py</code></td><td>Scratch worktree, run agent (SDK), dispatch interactive, git plumbing</td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>3</td><td><code>services/state_sync.py</code></td><td>merge→state, deploy monitor, parent roll-up</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>4</td><td><code>ado/client.py</code></td><td>ADO REST 7.1 + cross-project <code>_git_url</code></td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>5</td><td><code>board.py</code></td><td>Suy cột board, drop-map, roll-up map, multi-PR</td><td><span class="badge badge-modified">Sửa</span></td></tr>
+    <tr><td>6</td><td><code>config.py</code></td><td>pydantic-settings; toàn bộ bề mặt cấu hình</td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>7</td><td><code>container.py</code> · <code>app.py</code></td><td>Composition root + FastAPI lifespan (4 service)</td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>8</td><td><code>dashboard/</code></td><td>Jinja2 SSR: Overview/Board/History/Config/Settings</td><td><span class="badge badge-modified">Sửa</span></td></tr>
+    <tr><td>9</td><td><code>data/</code></td><td>SQLAlchemy async: Database, Execution/State repository</td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>10</td><td><code>routing/</code> · <code>notifications/</code> · <code>plugins/</code></td><td>Classify/prioritise · Teams/Zalo/Email · plugin hooks</td><td><span class="badge badge-core">Core</span></td></tr>
+  </tbody>
+</table>
+<p style="font-size:.88rem;color:#475569"><strong>Tests:</strong> pytest (<code>asyncio_mode=auto</code>), <strong>168 unit tests</strong>, fake cho ADO/executor/repo, không mạng. Bao phủ outcome policy, poller finalize, scratch base, board move, các luồng state-sync, export/import config (bỏ PAT), app smoke.</p>
+<p style="font-size:.88rem;color:#475569"><strong>Run:</strong> <code>python -m ai_autopilot</code> (hoặc <code>run.bat</code> trên Windows) → <code>:5080</code>. <strong>Deploy:</strong> <code>docker compose up --build</code>; manifest K8s ở <code>k8s/</code>.</p>
+</div>
+</section>
+
+<section id="s14">
+<h2><span class="tag">14</span> Known gaps / roadmap (thành thật)</h2>
+<div class="card">
+<table>
+  <thead><tr><th>Gap</th><th>Hiện trạng &amp; hướng</th><th></th></tr></thead>
+  <tbody>
+    <tr><td>Trạng thái in-flight chưa bền hẳn</td><td><code>_live</code> + vài set dedup ở in-memory; đã giảm nhẹ bằng tag + scratch cố định, nhưng nên đưa DB thành single source of truth</td><td><span class="badge badge-gap">Gap</span></td></tr>
+    <tr><td>Độ chính xác deploy monitor</td><td>với <code>deploy_pipeline_id: 0</code> coi <em>mọi</em> build xanh trên base branch là "đã deploy"; map chính xác từng item cần ADO build→work-item link</td><td><span class="badge badge-gap">Gap</span></td></tr>
+    <tr><td>Teardown scratch interactive</td><td>console Remote-Control còn mở sẽ ghim thư mục scratch rỗng đến khi đóng (nội dung worktree đã được thu hồi)</td><td><span class="badge badge-gap">Gap</span></td></tr>
+    <tr><td>Một <code>base_branch</code> toàn cục</td><td>đã che bằng resolve-theo-repo + fallback; repo có base branch khác sinh warning "git failed" vô hại</td><td><span class="badge badge-modified">Minor</span></td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<section id="s15">
+<h2><span class="tag">15</span> Tech stack</h2>
+<div class="card">
+  <p>Python 3.11 · FastAPI · uvicorn · <strong>Claude Agent SDK</strong> (<code>claude-agent-sdk</code>) + Claude Code (Remote Control) · httpx · SQLAlchemy (async) + aiosqlite · pydantic-settings · prometheus-client · structlog · Jinja2 · APScheduler · pytest.</p>
+  <p style="margin-top:.4rem;color:#475569;font-size:.88rem">Legacy .NET 8 worker được giữ tham chiếu tại <code>legacy-dotnet/</code>. Đây là bản viết lại Python v2.0: điểm nâng cấp chính là Claude được điều khiển qua SDK chính thức (dữ liệu có cấu trúc) thay vì scrape stdout của CLI.</p>
+</div>
+</section>
+
+<!-- ================= PART VI ================= -->
+<div class="part-divider">
+  <div class="part-label">Part VI</div>
+  <div><span class="part-roman">VI</span><span class="part-title">Đối chiếu</span></div>
+  <div class="part-desc">AI Autopilot đặt cạnh playbook loop-engineering: khớp ở đâu, đi xa hơn ở đâu, còn thiếu gì.</div>
+</div>
+
+<section id="s16">
+<h2><span class="tag">16</span> So với loop-engineering</h2>
+<div class="card">
+  <p>Autopilot là một hiện thực hóa production, chuyên biệt cho ADO, của playbook
+  <a href="https://github.com/cobusgreyling/loop-engineering">loop-engineering</a>. Nguyên tắc gốc:
+  <strong>&ldquo;loops discover, goals finish&rdquo;</strong> — loop đi khám phá việc, goal đưa từng việc về đích.</p>
+
+  <h3>Ba trục: Loop · Goal · Schedule</h3>
+  <table>
+    <thead><tr><th>Trục</th><th>loop-engineering</th><th>Claude Code (native)</th><th>AI Autopilot</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Loop</strong> (discover)</td><td>control loop chạy <em>ngoài</em> mọi conversation</td><td><code>/loop</code> dynamic, background task tự re-invoke</td><td><strong>Poller 30s</strong> quét WIQL tìm item pending — loop cấp service</td></tr>
+      <tr><td><strong>Goal</strong> (finish)</td><td>goal lái một việc đến hoàn tất</td><td>autonomous <code>/loop</code> 1 goal + tự lên lịch wakeup</td><td><strong>mỗi work item = 1 goal</strong>; <code>result.json</code> + <code>outcome_policy</code> + state machine đưa về done</td></tr>
+      <tr><td><strong>Schedule</strong> (cadence)</td><td>cadence + event trigger (on-tag, post-merge)</td><td><code>CronCreate</code>, <code>ScheduleWakeup</code></td><td><strong>đa trigger</strong>: <code>poll_interval</code> + ADO webhook + <code>LoopScheduler</code> cron + StateSync 90s</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Sáu primitive + Autonomy</h3>
+  <table>
+    <thead><tr><th>Primitive</th><th>AI Autopilot</th></tr></thead>
+    <tbody>
+      <tr><td>Automations/Scheduling</td><td>poll + webhook + cron loops + state-sync — đa nguồn</td></tr>
+      <tr><td>Worktrees</td><td><code>.aiwt/agent-&lt;id&gt;</code> per-task, per-repo base resolve, gate <code>max_concurrent</code></td></tr>
+      <tr><td>Skills</td><td>route tới <code>.claude</code> skills/rules/agents</td></tr>
+      <tr><td>Plugins &amp; MCP</td><td>ADO MCP + plugin loader (Pre/Post/SkillProvider) + kênh notify</td></tr>
+      <tr><td>Sub-agents (maker/checker)</td><td>AutoReviewer (review trước PR) + FeedbackHandler (PR babysitter)</td></tr>
+      <tr><td>Memory/State</td><td><strong>SQLAlchemy DB</strong> (PipelineState, ExecutionRepo) + ADO tags làm state bền</td></tr>
+      <tr><td>Autonomy L1/L2/L3</td><td><code>report</code> / <code>assisted</code> (draft PR) / <code>unattended</code> — <strong>khớp 1-1</strong></td></tr>
+    </tbody>
+  </table>
+
+  <div class="info"><strong>Đi xa hơn framework:</strong> quản lý <em>trọn vòng đời ticket</em> (merge → Ready to Deploy → deploy ✓ → Ready to Testing → parent roll-up), <em>cross-project scoping</em>, <em>2 execution mode</em> (headless + interactive người lái), <em>idempotency nhiều lớp</em>.</div>
+  <div class="warn"><strong>Còn thiếu (thành thật):</strong> (1) <em>&ldquo;Get a score&rdquo;</em> — <span class="badge badge-new">đã có v1 → §17</span> còn lại: chưa cắm CI/thread thật vào điểm; (2) <em>circuit breaker chi phí</em> toàn cục; (3) <em>durable spine</em> — <code>_live</code> (session interactive) vẫn in-memory, chưa 100% xuống DB.</div>
+</div>
+</section>
+
+<section id="s17">
+<h2><span class="tag">17</span> PR scoring — &ldquo;get a score&rdquo;</h2>
+<div class="card">
+  <p>Hiện thực stage <em>checker/verify</em> của loop-engineering: mỗi run được <strong>chấm 0–100</strong>
+  từ tín hiệu khách quan → <strong>grade</strong> (A–F) + <strong>gate</strong>. Điểm là <em>hàm thuần</em>
+  (<code>execution/pr_scorer.py</code>) nên deterministic &amp; dễ test — control plane thu tín hiệu, module chỉ phán xử.</p>
+  <table>
+    <thead><tr><th>Thành phần</th><th>Điểm</th><th>Chấm theo</th></tr></thead>
+    <tbody>
+      <tr><td><strong>delivery</strong></td><td>35</td><td>hoàn tất + có PR (35) · không PR (20) · lỗi/không xong (0)</td></tr>
+      <tr><td><strong>review</strong></td><td>30</td><td>auto-review: −15/critical (cap 2), −2/warning (cap 10); <em>unknown → 18</em></td></tr>
+      <tr><td><strong>ci</strong></td><td>20</td><td>CI build nhánh PR: pass 20 / đỏ 0 / <em>unknown → 10</em></td></tr>
+      <tr><td><strong>scope</strong></td><td>15</td><td>có file đổi (15) − 2×thread chưa resolve (cap 6)</td></tr>
+    </tbody>
+  </table>
+  <div class="info"><strong>Nguyên tắc thành thật:</strong> tín hiệu <em>unknown</em> chấm neutral-thấp, không full điểm — run <strong>không kiểm chứng được thì không thể đạt ngưỡng auto</strong> (trần khi thiếu review+CI = 78 → gate <code>review</code>).</div>
+  <p><strong>Gate:</strong> <code>auto</code> (≥ <code>pr_score_auto_min</code>=85) · <code>review</code> (≥ <code>pr_score_review_min</code>=60) · <code>escalate</code> (&lt; 60). Trong <code>_handle_agent_result</code>: run <strong>dưới ngưỡng review</strong> (và không phải L1) bị <strong>giữ cho người</strong> (<code>needs_human</code>) thay vì âm thầm sang review/done; điểm + breakdown đính vào <strong>comment ADO</strong> (badge màu). Cấu hình ở Settings.</p>
+  <div class="warn"><strong>Giới hạn v1:</strong> điểm tính từ <code>ExecutionResult</code> (completion/PR/files). <em>Chưa</em> kéo CI build thật + unresolved thread về (scorer đã có sẵn tham số <code>ci_passed</code>/<code>unresolved_threads</code> để cắm sau). Test: <code>tests/test_pr_scorer.py</code> (10 case).</div>
+</div>
+</section>
+
+<!-- ========== FOOTER ========== -->
+<footer>
+  Generated: 2026-07-03 &bull; Project: AI Autopilot (v2.0) &bull; Module: system-wide architecture &bull; See also: <code>TECHNICAL-NOTES.md</code>, <code>README.md</code>
+</footer>
+
+</body>
+</html>

@@ -4,7 +4,6 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>AI-Autopilot — Hướng dẫn sử dụng &amp; cấu hình đầy đủ</title>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
   :root{
     --bg:#0f1419; --panel:#171d26; --panel2:#1d242f; --border:#2a3441;
@@ -51,6 +50,10 @@
   .c-warn{border-left-color:var(--amber)} .c-warn .h{color:var(--amber)}
   .c-risk{border-left-color:var(--red)} .c-risk .h{color:var(--red)}
   .mermaid{background:#0b0f14;border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin:16px 0;text-align:center}
+  figure.fig{margin:18px 0;background:#0b0f14;border:1px solid var(--border);border-radius:var(--radius);padding:16px 16px 8px}
+  figure.fig svg{width:100%;height:auto;display:block}
+  figure.fig figcaption{color:var(--dim);font-size:12.5px;margin-top:8px;text-align:center}
+  .svg-t{font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
   ul,ol{margin:9px 0;padding-left:22px} li{margin:4px 0}
   .path{font-family:var(--mono);font-size:12px;color:var(--dim)}
   .tag{font-family:var(--mono);color:var(--amber)}
@@ -116,21 +119,56 @@
 <!-- 2 -->
 <section id="flow">
 <h2>2. Luồng hoạt động</h2>
-<div class="mermaid">
-flowchart TB
-  ADO[("Azure DevOps<br/>work items")] -->|"poll (tag+state)"| POLL["Poller (mỗi 30s)"]
-  POLL --> RBAC{"RBAC + schedule<br/>window OK?"}
-  RBAC -->|không| SKIP["bỏ qua"]
-  RBAC -->|có| SCHED["Dependency scheduler<br/>(link graph + AI conflict)"]
-  SCHED -->|ready| EXEC["Claude trong worktree<br/>implement → review → PR"]
-  SCHED -.->|deferred| POLL
-  EXEC --> SCORE["Chấm điểm run"]
-  SCORE --> OUT{"Kết cục"}
-  OUT -->|draft PR| REV["state+tag: review"]
-  OUT -->|điểm thấp| NH["state+tag: needs human"]
-  OUT -->|PR thật| DONE["state+tag: done"]
-  REV & NH & DONE -->|"comment + update"| ADO
-</div>
+<figure class="fig">
+<svg viewBox="0 0 980 220" role="img" aria-label="End-to-end pipeline">
+  <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5a6b80"/></marker>
+  <marker id="arG" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3fb950"/></marker></defs>
+  <!-- nodes -->
+  <g class="svg-t">
+    <rect x="8" y="60" width="118" height="62" rx="9" fill="#171d26" stroke="#2a3441"/><rect x="8" y="60" width="4" height="62" rx="2" fill="#39c5cf"/>
+    <text x="67" y="86" text-anchor="middle" font-size="13" font-weight="700" fill="#dbe3ec">Azure DevOps</text>
+    <text x="67" y="104" text-anchor="middle" font-size="11" fill="#95a3b5">work item</text>
+
+    <rect x="158" y="60" width="128" height="62" rx="9" fill="#171d26" stroke="#2a3441"/><rect x="158" y="60" width="4" height="62" rx="2" fill="#4c9aff"/>
+    <text x="222" y="86" text-anchor="middle" font-size="13" font-weight="700" fill="#dbe3ec">Poll + RBAC</text>
+    <text x="222" y="104" text-anchor="middle" font-size="11" fill="#95a3b5">+ schedule window</text>
+
+    <rect x="318" y="60" width="140" height="62" rx="9" fill="#171d26" stroke="#2a3441"/><rect x="318" y="60" width="4" height="62" rx="2" fill="#bc8cff"/>
+    <text x="388" y="86" text-anchor="middle" font-size="13" font-weight="700" fill="#dbe3ec">Dependency</text>
+    <text x="388" y="104" text-anchor="middle" font-size="11" fill="#95a3b5">scheduler + AI</text>
+
+    <rect x="490" y="60" width="150" height="62" rx="9" fill="#171d26" stroke="#2a3441"/><rect x="490" y="60" width="4" height="62" rx="2" fill="#3fb950"/>
+    <text x="565" y="86" text-anchor="middle" font-size="13" font-weight="700" fill="#dbe3ec">Worktree +</text>
+    <text x="565" y="104" text-anchor="middle" font-size="11" fill="#95a3b5">Claude Code</text>
+
+    <rect x="672" y="60" width="128" height="62" rx="9" fill="#171d26" stroke="#2a3441"/><rect x="672" y="60" width="4" height="62" rx="2" fill="#e3b341"/>
+    <text x="736" y="86" text-anchor="middle" font-size="13" font-weight="700" fill="#dbe3ec">Auto-review</text>
+    <text x="736" y="104" text-anchor="middle" font-size="11" fill="#95a3b5">+ run score</text>
+
+    <rect x="832" y="60" width="140" height="62" rx="9" fill="#171d26" stroke="#2a3441"/><rect x="832" y="60" width="4" height="62" rx="2" fill="#8bb8ff"/>
+    <text x="902" y="86" text-anchor="middle" font-size="13" font-weight="700" fill="#dbe3ec">Pull Request</text>
+    <text x="902" y="104" text-anchor="middle" font-size="11" fill="#95a3b5">+ tag / state</text>
+  </g>
+  <!-- arrows -->
+  <g>
+    <line x1="129" y1="91" x2="154" y2="91" stroke="#5a6b80" stroke-width="1.6" marker-end="url(#ar)"/>
+    <line x1="289" y1="91" x2="314" y2="91" stroke="#5a6b80" stroke-width="1.6" marker-end="url(#ar)"/>
+    <line x1="461" y1="91" x2="486" y2="91" stroke="#3fb950" stroke-width="1.8" marker-end="url(#arG)"/>
+    <line x1="643" y1="91" x2="668" y2="91" stroke="#5a6b80" stroke-width="1.6" marker-end="url(#ar)"/>
+    <line x1="803" y1="91" x2="828" y2="91" stroke="#5a6b80" stroke-width="1.6" marker-end="url(#ar)"/>
+  </g>
+  <!-- defer loop -->
+  <path d="M388,122 C388,168 222,168 222,124" fill="none" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+  <text x="305" y="162" text-anchor="middle" class="svg-t" font-size="10.5" fill="#e3b341">deferred → re-evaluate next cycle</text>
+  <!-- feedback to ADO -->
+  <path d="M902,122 C902,196 67,196 67,124" fill="none" stroke="#4c9aff" stroke-width="1.4" stroke-dasharray="2 3" marker-end="url(#ar)"/>
+  <text x="485" y="192" text-anchor="middle" class="svg-t" font-size="10.5" fill="#6f7d8f">comment · tag · state · notify — every outcome flows back to ADO · progress persisted → resume mid-flight</text>
+  <!-- header labels -->
+  <text x="8" y="34" class="svg-t" font-size="12" font-weight="700" fill="#8bb8ff">Mỗi 30s</text>
+  <text x="8" y="50" class="svg-t" font-size="10.5" fill="#6f7d8f">một work item đi trọn vòng — tự động, cô lập, có kiểm soát</text>
+</svg>
+<figcaption>Vòng đời một work item: poll → điều phối → chạy cô lập → review + chấm điểm → PR → cập nhật ADO. Item bị hoãn quay lại vòng sau; tiến trình lưu bền để resume sau crash.</figcaption>
+</figure>
 <p><b>Vòng lặp mỗi <code>poll_interval_seconds</code> (mặc định 30s):</b> nhặt item pending → RBAC + cửa sổ lịch → điều phối (item bị hoãn để lại chờ vòng sau) → chạy → chấm điểm → áp <b>outcome</b> (tag + state) + comment. Tiến trình được lưu DB nên restart tiếp tục đúng chỗ.</p>
 </section>
 
@@ -278,6 +316,32 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 
 <section id="cfg-exec">
 <h2>13. Cấu hình — Execution &amp; Autonomy</h2>
+<p>Triển khai tự động <b>theo bậc</b> — bắt đầu quan sát, tăng dần khi đã tin.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 190" role="img" aria-label="Autonomy ladder">
+  <defs><marker id="ara" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3fb950"/></marker></defs>
+  <g class="svg-t">
+    <!-- L1 -->
+    <rect x="30" y="120" width="250" height="48" rx="10" fill="#171d26" stroke="#374253"/>
+    <text x="48" y="141" font-size="13" font-weight="700" fill="#95a3b5">L1 · report</text>
+    <text x="48" y="159" font-size="11" fill="#6f7d8f">chỉ comment kế hoạch — không đổi code</text>
+    <!-- L2 -->
+    <rect x="325" y="78" width="250" height="48" rx="10" fill="#171d26" stroke="#4c9aff"/>
+    <text x="343" y="99" font-size="13" font-weight="700" fill="#8bb8ff">L2 · assisted <tspan fill="#6f7d8f" font-weight="400" font-size="10">(default)</tspan></text>
+    <text x="343" y="117" font-size="11" fill="#95a3b5">mở PR nháp cho người review</text>
+    <!-- L3 -->
+    <rect x="620" y="36" width="250" height="48" rx="10" fill="#171d26" stroke="#3fb950"/>
+    <text x="638" y="57" font-size="13" font-weight="700" fill="#7ee787">L3 · unattended</text>
+    <text x="638" y="75" font-size="11" fill="#95a3b5">PR thật + tự resolve item</text>
+    <!-- rising arrows -->
+    <line x1="282" y1="132" x2="323" y2="108" stroke="#3fb950" stroke-width="1.8" marker-end="url(#ara)"/>
+    <line x1="577" y1="90" x2="618" y2="66" stroke="#3fb950" stroke-width="1.8" marker-end="url(#ara)"/>
+    <text x="20" y="24" font-size="12" font-weight="700" fill="#dbe3ec">Tăng dần tự động →   giảm dần giám sát</text>
+  </g>
+</svg>
+<figcaption>Có PR scoring gác giữa: run điểm dưới <code>pr_score_review_min</code> bị <b>giữ chờ người</b> thay vì đi tiếp — an toàn ngay cả ở mức cao.</figcaption>
+</figure>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
 <tr><td><code>execution_mode</code></td><td class="def">interactive</td><td><b>interactive</b> = mở live Claude session bạn <code>/rc</code> vào lái · <b>headless</b> = tự động, không attach.</td></tr>
@@ -296,6 +360,74 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 
 <section id="cfg-sched">
 <h2>14. Cấu hình — Dependency scheduling</h2>
+<p>Đây là điểm khác biệt lớn: autopilot <b>không dội hết mọi item cùng lúc</b> mà đọc <b>link graph</b> ADO để xếp thành các <b>wave</b> — tránh 2 việc đụng nhau chạy song song rồi conflict git. Miễn phí (0 token).</p>
+
+<figure class="fig">
+<svg viewBox="0 0 900 250" role="img" aria-label="Scheduling waves">
+  <defs><marker id="arw" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5a6b80"/></marker></defs>
+  <g class="svg-t">
+    <!-- panel 1 -->
+    <rect x="24" y="46" width="372" height="180" rx="11" fill="#0f141b" stroke="#2a3441"/>
+    <text x="42" y="72" font-size="13" font-weight="700" fill="#8bb8ff">⟳ Poll cycle #1</text>
+    <!-- A run -->
+    <text x="42" y="104" font-size="12.5" fill="#dbe3ec">#A</text><text x="70" y="104" font-size="11" fill="#6f7d8f">độc lập</text>
+    <rect x="250" y="90" width="126" height="22" rx="11" fill="rgba(63,185,80,.16)" stroke="#3fb950"/><text x="313" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#7ee787">▶ RUN</text>
+    <!-- B defer -->
+    <text x="42" y="140" font-size="12.5" fill="#dbe3ec">#B</text><text x="70" y="140" font-size="11" fill="#6f7d8f">tiền nhiệm ⟵ #A</text>
+    <rect x="200" y="126" width="176" height="22" rx="11" fill="rgba(227,179,65,.14)" stroke="#e3b341"/><text x="288" y="141" text-anchor="middle" font-size="10.5" font-weight="700" fill="#f2cf6b">⏸ chờ #A xong</text>
+    <!-- C defer -->
+    <text x="42" y="176" font-size="12.5" fill="#dbe3ec">#C</text><text x="70" y="176" font-size="11" fill="#6f7d8f">related ~ #A</text>
+    <rect x="196" y="162" width="180" height="22" rx="11" fill="rgba(227,179,65,.14)" stroke="#e3b341"/><text x="286" y="177" text-anchor="middle" font-size="10.5" font-weight="700" fill="#f2cf6b">⏸ xung đột — wave sau</text>
+    <text x="42" y="208" font-size="10.5" fill="#6f7d8f">chỉ #A chạy · #B,#C không đánh dấu → xét lại</text>
+
+    <!-- arrow -->
+    <line x1="404" y1="136" x2="470" y2="136" stroke="#5a6b80" stroke-width="1.8" marker-end="url(#arw)"/>
+    <text x="437" y="126" text-anchor="middle" font-size="10.5" fill="#95a3b5">~30s</text>
+
+    <!-- panel 2 -->
+    <rect x="480" y="46" width="396" height="180" rx="11" fill="#0f141b" stroke="#2a3441"/>
+    <text x="498" y="72" font-size="13" font-weight="700" fill="#8bb8ff">⟳ Poll cycle #2 — #A done</text>
+    <text x="498" y="104" font-size="12.5" fill="#dbe3ec">#A</text>
+    <rect x="700" y="90" width="150" height="22" rx="11" fill="rgba(111,125,143,.14)" stroke="#374253"/><text x="775" y="105" text-anchor="middle" font-size="11" font-weight="700" fill="#95a3b5">✓ done</text>
+    <text x="498" y="140" font-size="12.5" fill="#dbe3ec">#B</text>
+    <rect x="700" y="126" width="150" height="22" rx="11" fill="rgba(63,185,80,.16)" stroke="#3fb950"/><text x="775" y="141" text-anchor="middle" font-size="11" font-weight="700" fill="#7ee787">▶ RUN</text>
+    <text x="498" y="176" font-size="12.5" fill="#dbe3ec">#C</text>
+    <rect x="700" y="162" width="150" height="22" rx="11" fill="rgba(63,185,80,.16)" stroke="#3fb950"/><text x="775" y="177" text-anchor="middle" font-size="11" font-weight="700" fill="#7ee787">▶ RUN</text>
+    <text x="498" y="208" font-size="10.5" fill="#6f7d8f">tiền nhiệm xong + hết xung đột → #B,#C chạy</text>
+  </g>
+  <text x="24" y="30" class="svg-t" font-size="12" font-weight="700" fill="#dbe3ec">Wave nổi lên qua nhiều chu kỳ — không cần state điều phối bền vững</text>
+</svg>
+<figcaption>Predecessor = thứ tự cứng (B chờ A). Related = xung đột mềm (C không chạy cùng A). Item hoãn được xét lại vòng sau → wave hình thành tự nhiên.</figcaption>
+</figure>
+
+<figure class="fig">
+<svg viewBox="0 0 900 150" role="img" aria-label="AI conflict feedback loop">
+  <defs><marker id="arf" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#bc8cff"/></marker></defs>
+  <g class="svg-t">
+    <rect x="20" y="46" width="200" height="58" rx="10" fill="#171d26" stroke="#2a3441"/><rect x="20" y="46" width="4" height="58" rx="2" fill="#bc8cff"/>
+    <text x="120" y="70" text-anchor="middle" font-size="12.5" font-weight="700" fill="#dbe3ec">Planning · Analyze</text>
+    <text x="120" y="88" text-anchor="middle" font-size="11" fill="#95a3b5">AI judge cặp nghi đụng code</text>
+
+    <path d="M270,75 h60 a14,14 0 0 1 14,14 v-28 a14,14 0 0 0 -14,14 z" fill="none"/>
+    <g><ellipse cx="410" cy="52" rx="52" ry="10" fill="#1d242f" stroke="#374253"/><path d="M358,52 v46 a52,10 0 0 0 104,0 v-46" fill="#1d242f" stroke="#374253"/><ellipse cx="410" cy="52" rx="52" ry="10" fill="#12171f" stroke="#374253"/>
+    <text x="410" y="82" text-anchor="middle" font-size="11.5" font-weight="700" fill="#d2b3ff">ai_conflicts</text></g>
+
+    <rect x="520" y="46" width="200" height="58" rx="10" fill="#171d26" stroke="#2a3441"/><rect x="520" y="46" width="4" height="58" rx="2" fill="#4c9aff"/>
+    <text x="620" y="70" text-anchor="middle" font-size="12.5" font-weight="700" fill="#dbe3ec">Poller · schedule</text>
+    <text x="620" y="88" text-anchor="middle" font-size="11" fill="#95a3b5">đọc mỗi vòng</text>
+
+    <rect x="760" y="46" width="120" height="58" rx="10" fill="#171d26" stroke="#2a3441"/><rect x="760" y="46" width="4" height="58" rx="2" fill="#e3b341"/>
+    <text x="820" y="70" text-anchor="middle" font-size="12.5" font-weight="700" fill="#dbe3ec">defer cặp</text>
+    <text x="820" y="88" text-anchor="middle" font-size="11" fill="#95a3b5">không chạy chung</text>
+
+    <line x1="222" y1="75" x2="352" y2="75" stroke="#bc8cff" stroke-width="1.6" marker-end="url(#arf)"/><text x="285" y="66" text-anchor="middle" font-size="10" fill="#bc8cff">score ≥ ngưỡng</text>
+    <line x1="466" y1="75" x2="516" y2="75" stroke="#bc8cff" stroke-width="1.6" marker-end="url(#arf)"/>
+    <line x1="722" y1="75" x2="756" y2="75" stroke="#5a6b80" stroke-width="1.6" marker-end="url(#arf)"/>
+    <text x="20" y="30" class="svg-t" font-size="12" font-weight="700" fill="#dbe3ec">Vòng phản hồi thông minh — AI tìm xung đột ẩn BA chưa link, hệ tự né</text>
+  </g>
+</svg>
+<figcaption>Xung đột ẩn AI xác nhận (score ≥ <code>scheduler_ai_conflict_min_score</code>) được lưu lại và feed ngược vào bộ điều phối — hệ <b>tự học</b> để không chạy song song 2 việc đụng code.</figcaption>
+</figure>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
 <tr><td><code>dependency_scheduling_enabled</code></td><td class="def">true</td><td>Điều phối theo <b>link graph</b> ADO: chờ Predecessor xong; 2 item Related không chạy đồng thời. 0 token.</td></tr>
@@ -310,6 +442,48 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 <section id="cfg-sdlc">
 <h2>15. Cấu hình — Closed-loop SDLC (v2)</h2>
 <p>Opt-in. Bật thì item chạy qua <b>chuỗi stage theo profile</b> (headless), gate từng bước, revise trong ngân sách chung, escalate, và bàn giao đa máy.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 960 210" role="img" aria-label="SDLC multi-machine assembly line">
+  <defs><marker id="ars" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8bb8ff"/></marker></defs>
+  <g class="svg-t">
+    <text x="20" y="26" font-size="12.5" font-weight="700" fill="#dbe3ec">Dây chuyền đa máy — mỗi người một vai, nối nhau CHỈ bằng ADO state (không coupling trực tiếp)</text>
+
+    <!-- BA -->
+    <rect x="20" y="52" width="180" height="130" rx="12" fill="#0f141b" stroke="#2a3441"/><rect x="20" y="52" width="4" height="130" rx="2" fill="#39c5cf"/>
+    <text x="40" y="76" font-size="13" font-weight="700" fill="#dbe3ec">🖥 Máy BA</text>
+    <text x="40" y="93" font-size="11" fill="#6f7d8f">profile: ba</text>
+    <rect x="40" y="106" width="140" height="24" rx="7" fill="rgba(57,197,207,.12)" stroke="#39c5cf"/><text x="110" y="122" text-anchor="middle" font-size="11.5" fill="#7fe3ea">analyze</text>
+    <text x="40" y="152" font-size="10" fill="#6f7d8f">trigger: New, Proposed</text>
+    <text x="40" y="168" font-size="10" fill="#6f7d8f">→ set “Ready for Dev”</text>
+
+    <!-- Dev -->
+    <rect x="360" y="42" width="220" height="150" rx="12" fill="#0f141b" stroke="#2a3441"/><rect x="360" y="42" width="4" height="150" rx="2" fill="#3fb950"/>
+    <text x="380" y="66" font-size="13" font-weight="700" fill="#dbe3ec">🖥 Máy Dev</text>
+    <text x="380" y="83" font-size="11" fill="#6f7d8f">profile: dev</text>
+    <rect x="380" y="94" width="180" height="22" rx="7" fill="rgba(63,185,80,.12)" stroke="#3fb950"/><text x="470" y="109" text-anchor="middle" font-size="11" fill="#7ee787">implement</text>
+    <rect x="380" y="120" width="180" height="22" rx="7" fill="rgba(227,179,65,.12)" stroke="#e3b341"/><text x="470" y="135" text-anchor="middle" font-size="11" fill="#f2cf6b">review</text>
+    <rect x="380" y="146" width="180" height="22" rx="7" fill="rgba(76,154,255,.12)" stroke="#4c9aff"/><text x="470" y="161" text-anchor="middle" font-size="11" fill="#8bb8ff">pr</text>
+    <text x="380" y="184" font-size="10" fill="#6f7d8f">→ set “Ready to Test”</text>
+
+    <!-- QC -->
+    <rect x="740" y="52" width="180" height="130" rx="12" fill="#0f141b" stroke="#2a3441"/><rect x="740" y="52" width="4" height="130" rx="2" fill="#bc8cff"/>
+    <text x="760" y="76" font-size="13" font-weight="700" fill="#dbe3ec">🖥 Máy QC</text>
+    <text x="760" y="93" font-size="11" fill="#6f7d8f">profile: qc</text>
+    <rect x="760" y="106" width="140" height="24" rx="7" fill="rgba(188,140,255,.12)" stroke="#bc8cff"/><text x="830" y="122" text-anchor="middle" font-size="11.5" fill="#d2b3ff">test</text>
+    <text x="760" y="152" font-size="10" fill="#6f7d8f">trigger: Ready to Test</text>
+    <text x="760" y="168" font-size="10" fill="#6f7d8f">→ set “Ready to Deploy”</text>
+
+    <!-- conveyor arrows + state pills -->
+    <line x1="200" y1="117" x2="358" y2="117" stroke="#8bb8ff" stroke-width="1.8" marker-end="url(#ars)"/>
+    <rect x="228" y="104" width="104" height="22" rx="11" fill="#12171f" stroke="#374253"/><text x="280" y="119" text-anchor="middle" font-size="10.5" font-weight="700" fill="#8bb8ff">Ready for Dev</text>
+    <line x1="580" y1="117" x2="738" y2="117" stroke="#8bb8ff" stroke-width="1.8" marker-end="url(#ars)"/>
+    <rect x="606" y="104" width="106" height="22" rx="11" fill="#12171f" stroke="#374253"/><text x="659" y="119" text-anchor="middle" font-size="10.5" font-weight="700" fill="#8bb8ff">Ready to Test</text>
+    <line x1="920" y1="117" x2="952" y2="117" stroke="#8bb8ff" stroke-width="1.8" marker-end="url(#ars)"/>
+  </g>
+</svg>
+<figcaption>Mỗi máy chạy 1 profile, xong đặt một ADO state mà máy kế <code>trigger_states</code>. Guard startup từ chối handoff vào chính trigger của mình (chống lặp). Persist theo item → crash resume giữa chừng.</figcaption>
+</figure>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
 <tr><td><code>sdlc_loop_enabled</code></td><td class="def">false</td><td>Công tắc tổng. false = flow một-lần như thường (không đổi hành vi). Bật = <b>ép headless</b>.</td></tr>
@@ -415,14 +589,8 @@ assignee_trigger_user: <span class="s">phong.pham@nois.vn</span>   <span class="
 </section>
 
 <hr/>
-<p style="color:var(--muted);font-size:12.5px">AI-Autopilot — hướng dẫn sử dụng &amp; cấu hình. Giá trị mặc định lấy từ <span class="path">config.py</span>; sơ đồ render bằng Mermaid (cần internet), nội dung bảng độc lập với sơ đồ.</p>
+<p style="color:var(--muted);font-size:12.5px">AI-Autopilot — hướng dẫn sử dụng &amp; cấu hình. Giá trị mặc định lấy từ <span class="path">config.py</span>. Sơ đồ là <b>SVG inline</b> — file hoạt động hoàn toàn offline (không cần internet).</p>
 </main>
 </div></div>
-<script>
-  mermaid.initialize({startOnLoad:true, theme:'dark', themeVariables:{
-    fontSize:'13px', fontFamily:'ui-monospace,Menlo,Consolas,monospace',
-    primaryColor:'#1d242f', primaryTextColor:'#dbe3ec', primaryBorderColor:'#374253',
-    lineColor:'#5a6b80', secondaryColor:'#171d26', tertiaryColor:'#0b0f14'}});
-</script>
 </body>
 </html>

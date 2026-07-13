@@ -405,7 +405,56 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 
 <section id="cfg-outcome">
 <h2>11. Cấu hình — Outcomes → tag + state</h2>
-<p><b>Một bảng chính sách duy nhất</b>: mỗi kết cục → (tag thêm, ADO state đặt). Để trống = bỏ qua phần đó.</p>
+<p><b>Một bảng chính sách duy nhất</b>: mỗi kết cục → (tag thêm, ADO state đặt). Để trống = bỏ qua phần đó. Đây là <b>nơi duy nhất</b> đổi tag/state — không rải rác trong code.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 960 340" role="img" aria-label="Outcome policy tree">
+  <defs><marker id="aro" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5a6b80"/></marker></defs>
+  <g class="svg-t">
+    <!-- in_progress -->
+    <rect x="16" y="22" width="288" height="48" rx="10" fill="#171d26" stroke="#2a3441"/><rect x="16" y="22" width="4" height="48" rx="2" fill="#4c9aff"/>
+    <text x="30" y="44" font-size="12.5" font-weight="700" fill="#8bb8ff">⏳ in_progress</text>
+    <text x="30" y="62" font-size="10.5" fill="#95a3b5">khi bắt đầu · state_in_progress · (không tag)</text>
+
+    <!-- run -->
+    <rect x="30" y="176" width="128" height="60" rx="11" fill="#12171f" stroke="#374253"/>
+    <text x="94" y="200" text-anchor="middle" font-size="12.5" font-weight="700" fill="#dbe3ec">Run</text>
+    <text x="94" y="218" text-anchor="middle" font-size="11" fill="#95a3b5">kết thúc</text>
+    <line x1="120" y1="70" x2="94" y2="174" stroke="#5a6b80" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#aro)"/>
+
+    <!-- outcomes -->
+    <g>
+      <rect x="360" y="30" width="360" height="46" rx="9" fill="#171d26" stroke="rgba(227,179,65,.45)"/>
+      <text x="376" y="50" font-size="12" font-weight="700" fill="#f2cf6b">🙋 needs_human</text>
+      <text x="376" y="67" font-size="10.5" fill="#95a3b5">tag: escalation_tag · state: state_needs_human</text>
+
+      <rect x="360" y="90" width="360" height="46" rx="9" fill="#171d26" stroke="rgba(188,140,255,.45)"/>
+      <text x="376" y="110" font-size="12" font-weight="700" fill="#d2b3ff">🔍 review</text>
+      <text x="376" y="127" font-size="10.5" fill="#95a3b5">tag: review_tag · state: state_in_review</text>
+
+      <rect x="360" y="150" width="360" height="46" rx="9" fill="#171d26" stroke="rgba(63,185,80,.45)"/>
+      <text x="376" y="170" font-size="12" font-weight="700" fill="#7ee787">✅ done</text>
+      <text x="376" y="187" font-size="10.5" fill="#95a3b5">tag: processed_tag · state: resolved_state</text>
+
+      <rect x="360" y="210" width="360" height="46" rx="9" fill="#171d26" stroke="rgba(57,197,207,.45)"/>
+      <text x="376" y="230" font-size="12" font-weight="700" fill="#7fe3ea">📝 report</text>
+      <text x="376" y="247" font-size="10.5" fill="#95a3b5">tag: processed_tag · state: state_report</text>
+
+      <rect x="360" y="270" width="360" height="46" rx="9" fill="#171d26" stroke="rgba(248,81,73,.45)"/>
+      <text x="376" y="290" font-size="12" font-weight="700" fill="#ff9d97">⛔ failed</text>
+      <text x="376" y="307" font-size="10.5" fill="#95a3b5">tag: failed_tag (→done) · state: state_failed</text>
+    </g>
+
+    <!-- fan arrows + conditions -->
+    <line x1="158" y1="200" x2="356" y2="53" stroke="#5a6b80" stroke-width="1.4" marker-end="url(#aro)"/><text x="250" y="120" font-size="10" fill="#6f7d8f">escalate / điểm thấp</text>
+    <line x1="158" y1="203" x2="356" y2="113" stroke="#5a6b80" stroke-width="1.4" marker-end="url(#aro)"/><text x="250" y="150" font-size="10" fill="#6f7d8f">PR nháp (assisted)</text>
+    <line x1="158" y1="206" x2="356" y2="173" stroke="#5a6b80" stroke-width="1.4" marker-end="url(#aro)"/><text x="250" y="182" font-size="10" fill="#6f7d8f">PR thật</text>
+    <line x1="158" y1="212" x2="356" y2="233" stroke="#5a6b80" stroke-width="1.4" marker-end="url(#aro)"/><text x="250" y="222" font-size="10" fill="#6f7d8f">không PR (report)</text>
+    <line x1="158" y1="218" x2="356" y2="293" stroke="#5a6b80" stroke-width="1.4" marker-end="url(#aro)"/><text x="250" y="262" font-size="10" fill="#6f7d8f">cạn retry</text>
+  </g>
+</svg>
+<figcaption>Kết quả run rẽ về đúng một <b>outcome</b>, mỗi outcome áp cặp (tag, state) đã cấu hình. Sửa ở <b>Settings → Outcomes</b>; blank = bỏ qua phần đó. Tag done/review/hold còn là skip-tag chống loop.</figcaption>
+</figure>
 <table>
 <tr><th>Kết cục</th><th>Tag</th><th>State (field)</th><th>Khi nào</th></tr>
 <tr><td>In progress</td><td>—</td><td><code>state_in_progress</code> <span class="def">Active</span></td><td>Bắt đầu làm</td></tr>
@@ -635,7 +684,50 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 
 <section id="cfg-auto">
 <h2>17. Cấu hình — Auto-transitions &amp; deploy</h2>
-<p>Độc lập với triggering: tự chuyển ADO state theo <b>sự kiện thật</b> (merge, deploy, children done).</p>
+<p>Độc lập với triggering: tự chuyển ADO state theo <b>sự kiện thật</b> (merge, deploy, children done). Bật bằng <code>auto_transition_enabled</code>.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 940 210" role="img" aria-label="Auto-transitions progression">
+  <defs><marker id="arx" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8bb8ff"/></marker></defs>
+  <g class="svg-t">
+    <text x="20" y="24" font-size="12" font-weight="700" fill="#dbe3ec">Dòng chảy trạng thái theo sự kiện (không phải trigger)</text>
+
+    <!-- event node -->
+    <rect x="16" y="42" width="168" height="52" rx="10" fill="#171d26" stroke="#2a3441"/><rect x="16" y="42" width="4" height="52" rx="2" fill="#3fb950"/>
+    <text x="100" y="64" text-anchor="middle" font-size="12" font-weight="700" fill="#7ee787">🔀 PR merged</text>
+    <text x="100" y="81" text-anchor="middle" font-size="10.3" fill="#95a3b5">(nhánh autopilot)</text>
+
+    <!-- on_merge_state -->
+    <rect x="292" y="42" width="176" height="52" rx="10" fill="#12171f" stroke="#374253"/>
+    <text x="380" y="64" text-anchor="middle" font-size="11.5" font-weight="700" fill="#8bb8ff">state = on_merge_state</text>
+    <text x="380" y="81" text-anchor="middle" font-size="10.3" fill="#95a3b5">vd “Ready to Deploy”</text>
+
+    <!-- on_deploy_state -->
+    <rect x="576" y="42" width="176" height="52" rx="10" fill="#12171f" stroke="#374253"/>
+    <text x="664" y="64" text-anchor="middle" font-size="11.5" font-weight="700" fill="#8bb8ff">state = on_deploy_state</text>
+    <text x="664" y="81" text-anchor="middle" font-size="10.3" fill="#95a3b5">vd “Ready to Testing”</text>
+
+    <text x="782" y="72" font-size="11" fill="#6f7d8f">→ done</text>
+
+    <line x1="184" y1="68" x2="290" y2="68" stroke="#8bb8ff" stroke-width="1.7" marker-end="url(#arx)"/><text x="237" y="60" text-anchor="middle" font-size="9.6" fill="#8bb8ff">→ set</text>
+    <line x1="468" y1="68" x2="574" y2="68" stroke="#8bb8ff" stroke-width="1.7" marker-end="url(#arx)"/><text x="521" y="60" text-anchor="middle" font-size="9.6" fill="#8bb8ff">deploy build ✓</text>
+
+    <!-- parent rollup row -->
+    <rect x="16" y="132" width="360" height="52" rx="10" fill="#171d26" stroke="#2a3441"/><rect x="16" y="132" width="4" height="52" rx="2" fill="#bc8cff"/>
+    <text x="30" y="154" font-size="12" font-weight="700" fill="#d2b3ff">👶 mọi child đạt một child-state</text>
+    <text x="30" y="171" font-size="10.3" fill="#95a3b5">theo parent_rollup_map (parent theo child kém tiến nhất)</text>
+
+    <rect x="470" y="132" width="300" height="52" rx="10" fill="#12171f" stroke="#374253"/>
+    <text x="620" y="154" text-anchor="middle" font-size="11.5" font-weight="700" fill="#8bb8ff">📦 parent → parent-state</text>
+    <text x="620" y="171" text-anchor="middle" font-size="10.3" fill="#95a3b5">roll-up tự động</text>
+    <line x1="376" y1="158" x2="468" y2="158" stroke="#8bb8ff" stroke-width="1.7" marker-end="url(#arx)"/>
+
+    <text x="782" y="158" font-size="10" fill="#6f7d8f">gate:</text>
+    <text x="782" y="172" font-size="10" fill="#6f7d8f">auto_transition_assignee</text>
+  </g>
+</svg>
+<figcaption>Trên: PR merge → <code>on_merge_state</code> → khi deploy build thành công → <code>on_deploy_state</code>. Dưới: khi mọi con đạt trạng thái, parent tự roll-up theo <code>parent_rollup_map</code>. Chỉ áp cho item gán <code>auto_transition_assignee</code> (nếu đặt).</figcaption>
+</figure>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
 <tr><td><code>auto_transition_enabled</code></td><td class="def">false</td><td>Bật tự chuyển state khi PR merge / roll-up parent.</td></tr>

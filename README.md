@@ -1,191 +1,177 @@
-# AI Autopilot
+<div align="center">
 
-Autonomously process Azure DevOps work items with the **Claude Agent SDK**.
+# 🤖 AI Autopilot
 
-AI Autopilot polls an ADO board, classifies each work item tagged `autopilot`,
-routes it to the matching Claude Code skill, runs Claude to implement it
-(branch → code → commit → push), auto-reviews the change, opens a pull request,
-and reports back on ADO, Microsoft Teams, Zalo and email.
+**An autonomous software engineer that turns Azure DevOps work items into reviewed pull requests.**
 
-> **v2.0 — Python rewrite.** This is a from-scratch Python port of the original
-> .NET 8 worker service (preserved under [`legacy-dotnet/`](legacy-dotnet/)).
-> The key upgrade: Claude is now driven through the official
-> [`claude-agent-sdk`](https://pypi.org/project/claude-agent-sdk/) instead of
-> shelling out to the CLI and scraping stdout — so token usage, cost and results
-> come back as **structured data**.
+Polls your ADO board, understands each tagged work item, and drives **Claude Code** to implement it end‑to‑end — branch → code → self‑review → PR — then reports back on ADO, Teams, Zalo and email. A built‑in web dashboard lets you watch, plan, and steer everything.
+
+![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
+![Claude Agent SDK](https://img.shields.io/badge/Claude-Agent%20SDK-8A63D2)
+![Tests](https://img.shields.io/badge/tests-pytest-brightgreen)
+![Status](https://img.shields.io/badge/status-active-success)
+
+</div>
+
+---
+
+## ✨ Highlights
+
+| | |
+|---|---|
+| 🎯 **Tag‑driven autopilot** | Picks up work items by tag + state, classifies (BE/FE/Bug/QC/Requirement), and routes to the right skill. |
+| 🧑‍✈️ **Three autonomy levels** | `report` (comment only) → `assisted` (draft PR) → `unattended` (auto PR + resolve). Roll out trust gradually. |
+| 🧭 **Planning workbench** | Load your work, let AI group it & flag hidden conflicts, then **start now** or **schedule** a run. |
+| 🔀 **Dependency‑aware scheduling** | Orders work by the ADO link graph (0 tokens) and avoids running conflicting items concurrently — with an AI conflict feed‑back loop. |
+| 🔁 **Closed‑loop SDLC (v2)** | Optional multi‑stage engine (analyze → design → implement → test → review → PR) with per‑stage gating and multi‑machine handoff. |
+| 🛡️ **Safe by design** | Isolated git worktrees, auto security review, objective run scoring, and a single tag/state policy table. |
+| 📊 **Live dashboard** | Overview · Board · Planning · History · Settings · Config — full‑width, filterable, drag‑and‑drop. |
+| 🔌 **Extensible** | Python plugins (pre/post/skill hooks), scheduled loops, multi‑tenant, and Teams/Zalo/Email notifications. |
+
+> **v2.0 — Python rewrite.** A from‑scratch port of the original .NET 8 worker
+> (kept under [`legacy-dotnet/`](legacy-dotnet/)). Claude is now driven through the
+> official [`claude-agent-sdk`](https://pypi.org/project/claude-agent-sdk/), so token
+> usage, cost and results return as **structured data**.
+
+---
+
+## 🔄 How it works
 
 ```
-ADO Board                    AI Autopilot                      Claude Agent SDK
-  |                               |                                |
-  |  tag "autopilot" + New/ToDo   |                                |
-  |------------------------------>|  classify (BE/FE/Bug/Req...)   |
-  |                               |  git checkout -b feature/xxx   |
-  |                               |------------------------------->|
-  |                               |       /skill-command {id}      |
-  |                               |<-------------------------------|
-  |                               |  review → commit → push → PR   |
-  |    comment + tag "done"       |                                |
-  |<------------------------------|                                |
+Azure DevOps                 AI Autopilot                       Claude Code
+     │                            │                                  │
+     │  tag + trigger state       │                                  │
+     ├───────────────────────────►│  classify · RBAC · schedule      │
+     │                            │  (dependency + AI conflicts)     │
+     │                            │  git worktree ─ isolated branch  │
+     │                            ├─────────────────────────────────►│
+     │                            │        implement the item        │
+     │                            │◄─────────────────────────────────┤
+     │                            │  auto‑review → score → PR        │
+     │   comment · tag · state    │                                  │
+     │◄───────────────────────────┤                                  │
 ```
 
-## Architecture
+Every `poll_interval_seconds` (default 30s) the poller fetches pending items, gates them
+through RBAC and the schedule window, orders them with the dependency scheduler
+(deferred items are re‑evaluated next cycle), runs the ready ones, scores the result, and
+applies the configured **outcome** (tag + state) plus a comment. Progress is persisted, so
+a restart resumes exactly where it left off.
 
-```
-ai_autopilot/
-├── app.py                 # FastAPI app factory + lifespan (replaces Program.cs)
-├── __main__.py            # uvicorn entry point
-├── config.py              # pydantic-settings config (YAML + env)
-├── container.py           # composition root / dependency injection
-├── logging_config.py      # structlog setup
-├── metrics.py             # Prometheus metrics
-├── health.py              # readiness checks (ado / claude / disk)
-├── security.py            # RBAC policy
-├── scheduling.py          # schedule-window guard
-├── tracking.py            # token cost tracking + budget alerts
-├── multitenant.py         # tenant manager
-├── webhook.py             # ADO Service Hook queue
-├── models/                # WorkItemInfo, ExecutionResult, TaskCategory
-├── ado/                   # auth (PAT/OAuth), REST client, notifier
-├── execution/             # Claude Agent SDK wrapper, executor, reviewer, retry, feedback
-├── routing/               # classify → prioritise → route → decompose
-├── notifications/         # Teams, Zalo, Email channels
-├── data/                  # SQLAlchemy async engine, entities, repository
-├── plugins/               # Python plugin loader (pre/post/skill hooks)
-├── services/              # background poller + PR monitor
-└── dashboard/             # Jinja2 server-rendered dashboard
+---
 
-tests/                     # pytest unit tests
-legacy-dotnet/             # original .NET 8 implementation (reference)
-```
-
-## Quick start
+## 🚀 Quick start
 
 ```bash
 # 1. Install (Python 3.11+)
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
-# 2. Configure (see config.example.yaml + .env.example)
+# 2. Configure — keep secrets in the environment, not YAML
 cp config.example.yaml config.yaml
 export ANTHROPIC_API_KEY=sk-ant-...
-export AUTOPILOT_ADO_PAT=...           # keep secrets in env, not YAML
+export AUTOPILOT_ADO_PAT=...
 
 # 3. Run
 python -m ai_autopilot
 ```
 
-**Windows:** just run `run.bat` — it creates the venv, installs dependencies on
-first run, copies `config.yaml` from the example, and starts the service. Use
-`run.bat install` to (re)install dependencies only.
+**Windows:** run `run.bat` — it creates the venv, installs deps on first run, copies
+`config.yaml` from the example, and starts the service (`run.bat install` reinstalls deps).
 
-The service listens on `:5080` by default:
+The service listens on **`:5080`** by default:
 
-| Endpoint            | Purpose                                  |
-|---------------------|------------------------------------------|
-| `/health`           | Readiness checks (JSON)                  |
-| `/metrics`          | Prometheus metrics                       |
-| `/api/webhook/ado`  | ADO Service Hook → instant pickup        |
-| `/dashboard`        | Overview / History / Config / Capabilities |
+| Endpoint | Purpose |
+|----------|---------|
+| `/dashboard` | Overview · Board · Planning · History · Settings · Config · Capabilities |
+| `/health` | Readiness checks (ado / claude / disk) as JSON |
+| `/metrics` | Prometheus metrics |
+| `/api/webhook/ado` | ADO Service Hook → instant pickup |
 
-## Configuration
+---
 
-Settings are loaded from `config.yaml` and overridden by `AUTOPILOT_*`
-environment variables (nested keys use `__`). **Secrets should always come from
-the environment.**
+## 📊 Dashboard
 
-| Key | Env var | Default | Description |
-|-----|---------|---------|-------------|
-| `ado_organization` | `AUTOPILOT_ADO_ORGANIZATION` | — | ADO org URL |
-| `ado_project` | `AUTOPILOT_ADO_PROJECT` | — | Project name |
-| `ado_pat` | `AUTOPILOT_ADO_PAT` | — | Personal Access Token (Work Items R/W, Code R/W) |
-| `repo_working_directory` | `AUTOPILOT_REPO_WORKING_DIRECTORY` | — | Local git repo path |
-| `trigger_tag` | `AUTOPILOT_TRIGGER_TAG` | `autopilot` | Tag that triggers processing |
-| `base_branch` | `AUTOPILOT_BASE_BRANCH` | `development` | Base for feature branches |
-| `poll_interval_seconds` | `AUTOPILOT_POLL_INTERVAL_SECONDS` | `30` | Poll cadence |
-| `max_concurrent` | `AUTOPILOT_MAX_CONCURRENT` | `1` | Concurrent executions |
-| `use_worktrees` | `AUTOPILOT_USE_WORKTREES` | `true` | Run each execution in its own git worktree (safe parallelism) |
-| `dependency_scheduling_enabled` | `AUTOPILOT_DEPENDENCY_SCHEDULING_ENABLED` | `true` | Order work by the ADO link graph — wait on Predecessor links, never run Related items together (0 tokens) |
-| `sibling_conflict_scheduling` | `AUTOPILOT_SIBLING_CONFLICT_SCHEDULING` | `false` | Heuristic: treat same-Parent + same-category siblings as a soft conflict |
-| `sdlc_loop_enabled` | `AUTOPILOT_SDLC_LOOP_ENABLED` | `false` | Opt into the closed-loop SDLC engine (see below) |
-| `sdlc_profile` | `AUTOPILOT_SDLC_PROFILE` | — | This machine's role/profile (`ba`/`dev`/`qc`/`full`…) |
-| `sdlc_max_iterations` | `AUTOPILOT_SDLC_MAX_ITERATIONS` | `3` | Shared revise budget across all stages of one item |
-| `task_timeout_minutes` | `AUTOPILOT_TASK_TIMEOUT_MINUTES` | `30` | Per-task timeout |
-| `autonomy_level` | `AUTOPILOT_AUTONOMY_LEVEL` | `assisted` | `report` / `assisted` / `unattended` (L1/L2/L3) |
-| `feedback_loop_enabled` | `AUTOPILOT_FEEDBACK_LOOP_ENABLED` | `false` | Enable the PR babysitter |
-| `dry_run` | `AUTOPILOT_DRY_RUN` | `false` | Log only, never execute |
-| `claude_model` | `AUTOPILOT_CLAUDE_MODEL` | SDK default | Model override |
+| Page | What it does |
+|------|--------------|
+| **Overview** | Run metrics (success / failed / tokens) and recent activity. |
+| **Board** | Live Kanban of every autopilot item; drag‑and‑drop, search / type / date filters, per‑column cap + *Load more*, 15s auto‑refresh. |
+| **Planning** | Load your assigned work, run AI grouping & conflict analysis, then **Start now** or **Schedule**. Live scheduling view with history. |
+| **History** | Paginated, filterable log of every execution (skill, PR, duration, tokens). |
+| **Settings** | Edit all configuration with grouped sections, an *Active tags* overview, live‑apply, and Export/Import (secrets excluded). |
+| **Configuration** | Read‑only snapshot of the live config (secrets shown as set / not‑set). |
 
-See [`config.example.yaml`](config.example.yaml) for the full set (retry, RBAC,
-scheduling, multi-repo, multi-tenant, notifications, budget).
+---
 
-## Skill routing
+## ⚙️ Configuration
 
-| Condition | Category | Skill |
-|-----------|----------|-------|
-| Title starts with `[BE]` | BackendTask | `/implement-task-be {id}` |
-| Title starts with `[FE]` | FrontendTask | `/implement-task-fe {id}` |
-| Title starts with `[QC]` | TestTask | `/qc-test-management {id}` |
-| WorkItemType = `Bug` | Bug | `/bugfix-workflow {id}` |
-| WorkItemType = `Requirement`/`User Story` | Requirement | `/analyze-requirement {id}` |
-| Keywords (api, controller, service…) | BackendTask | `/implement-task-be {id}` |
-| Keywords (component, page, angular…) | FrontendTask | `/implement-task-fe {id}` |
+Settings load from `config.yaml`, overridden by `AUTOPILOT_*` environment variables
+(nested keys use `__`, e.g. `AUTOPILOT_SMTP__PASSWORD`). **Secrets should always come from
+the environment.** A full, explained reference lives in
+[**`docs/ai-autopilot-user-guide.html`**](docs/ai-autopilot-user-guide.html) and
+[`config.example.yaml`](config.example.yaml).
 
-## Autonomy & loops (loop-engineering)
+Most‑used keys:
 
-Beyond reactive work-item processing, the service implements the
-[loop-engineering](https://github.com/cobusgreyling/loop-engineering) patterns:
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ado_organization` / `ado_project` | — | ADO org URL and the work‑item project |
+| `code_project` | — | Project holding repos/PRs, if different from the work‑item project |
+| `ado_pat` 🔒 | — | PAT (Work Items R/W, Code R/W). Prefer `AUTOPILOT_ADO_PAT` |
+| `workspace_directory` | — | Root holding the shared `.claude/` and repo subfolders |
+| `trigger_tag` | `<host>-autopilot` | Per‑machine tag that triggers processing |
+| `assignee_trigger_tag` | `ai-autopilot` | Shared team tag — processed only for `assignee_trigger_user` |
+| `trigger_states` | `New, To Do, Proposed, Active` | ADO states eligible for pickup |
+| `autonomy_level` | `assisted` | `report` / `assisted` / `unattended` (L1 / L2 / L3) |
+| `execution_mode` | `interactive` | `interactive` (steerable session) or `headless` |
+| `use_worktrees` | `true` | Isolated git worktree per task (required for `max_concurrent > 1`) |
+| `max_concurrent` | `1` | Concurrent executions |
+| `dependency_scheduling_enabled` | `true` | Order work by the ADO link graph (0 tokens) |
+| `pr_scoring_enabled` | `true` | Grade each run; weak runs are held for a human |
+| `sdlc_loop_enabled` | `false` | Opt into the closed‑loop SDLC engine (below) |
+| `dry_run` | `false` | Log only — never execute or write to ADO |
 
-**Autonomy levels** (`autonomy_level`) — phased rollout from observation to full automation:
+### Outcomes → tag + state
+
+A single policy table maps each outcome to the ADO **tag** to add and **state** to set
+(blank = skip): `in_progress` · `review` · `done` · `report` · `needs_human` · `failed`.
+This is the one place that controls all tagging and state transitions — edit it in
+**Settings → Outcomes**.
+
+---
+
+## 🧭 Key capabilities
+
+### Autonomy levels
 
 | Level | Value | Behaviour |
 |-------|-------|-----------|
 | L1 | `report` | Classify and comment what it *would* do; no code changes |
-| L2 | `assisted` | Execute and open a **draft** PR for human review (default) |
-| L3 | `unattended` | Execute and open a normal PR, auto-resolving the item |
+| L2 | `assisted` | Execute and open a **draft** PR for human review *(default)* |
+| L3 | `unattended` | Execute and open a normal PR, auto‑resolving the item |
 
-**Isolated worktrees** — each execution runs in its own `git worktree`, so
-`max_concurrent > 1` is safe (no shared-checkout collisions).
+### Dependency‑aware scheduling
 
-**PR babysitter** (`feedback_loop_enabled: true`) — watches open autopilot PRs for
-unresolved human review comments and feeds them back to Claude to revise the
-branch (bounded by `max_revisions`).
+Reads the ADO link graph and, without spending tokens, waits on **Predecessor** links and
+never runs **Related** items concurrently (they'd fight in git). Deferred items re‑evaluate
+each cycle, so waves emerge naturally. The **Planning → Analyze** action can additionally
+ask Claude to flag *hidden* conflicts; confirmed ones feed back into scheduling
+(`scheduler_use_ai_conflicts`).
 
-**Scheduled loops** (`scheduled_loops`) — run skills on a cadence (cron or
-interval), each opening a PR. Use for dependency sweeps, changelog drafting,
-CI sweeping, etc.:
+### Closed‑loop SDLC engine (v2) — opt‑in
 
-```yaml
-scheduled_loops:
-  - name: dependency-sweeper
-    prompt: "/update-deps"
-    cron: "0 6 * * 1"        # Mondays 06:00
-  - name: changelog-drafter
-    prompt: "/draft-changelog"
-    interval_minutes: 1440    # daily
-```
+Drives an item through a **profile‑selected** sequence of stages — `analyze` · `design` ·
+`implement` · `test` · `review` · `pr` — gating each with the run scorer, revising on
+failure under one **shared budget**, and escalating when it's spent. Built‑in profiles:
+`full`, `dev` (`implement→review→pr`), `ba`, `qc`, `review`, `design` (extend via
+`sdlc_profiles`).
 
-## Closed-loop SDLC engine (v2)
+**Profile selection** (highest wins): `sdlc:<name>` item tag → `sdlc_stages` →
+`sdlc_profile` → `sdlc_type_profiles[type]` → `sdlc_default_profile`.
 
-Beyond the one-shot agent run, an **opt-in** engine (`sdlc_loop_enabled: true`) drives
-each work item through an explicit, **profile-selected** sequence of SDLC stages —
-gating each with the run scorer, revising on failure under one **shared budget**, and
-escalating to a human when it's spent. It is designed to be configured **per machine**,
-so a team can split the lifecycle across people's autopilots.
-
-**Stages** (built-in catalog): `analyze` (BA) · `design` · `implement` (Dev) · `test`
-(QC) · `review` · `pr`. Each stage states a **goal** and **Claude picks the right
-skill(s)** from the workspace itself — nothing is pinned (set a stage's `skill` in
-`sdlc_stages` only when you want to force a specific command). **Profiles** are ordered
-subsets — `full`, `dev` (`implement→review→pr`), `ba`, `qc`, `review`, `design` —
-extendable via `sdlc_profiles`.
-
-**Profile selection** (highest wins): a per-item `sdlc:<name>` tag → per-machine
-`sdlc_stages` → per-machine `sdlc_profile` → `sdlc_type_profiles[type]` →
-`sdlc_default_profile`.
-
-**Cross-machine handoff** — each machine runs one role and, on completion, sets an ADO
-state the next machine triggers on (coordinated purely by `System.State`, no direct
-coupling):
+**Multi‑machine handoff** — each machine runs one role and sets an ADO state the next
+machine triggers on:
 
 | Machine | `sdlc_profile` | `trigger_states` | `sdlc_profile_states` |
 |---------|----------------|------------------|-----------------------|
@@ -193,15 +179,47 @@ coupling):
 | Dev | `dev` | Ready for Dev | `{ dev: "Ready to Test" }` |
 | Tester | `qc` | Ready to Test | `{ qc: "Ready to Deploy" }` |
 
-Progress is persisted per item (`sdlc_loop_states` table) so a crash resumes mid-loop.
-A startup check refuses to hand off to one of the machine's own `trigger_states` (which
-would re-pick items forever). SDLC mode is headless-only. Default off → zero behaviour
-change.
+Progress is persisted per item so a crash resumes mid‑loop; a startup check refuses a
+handoff into the machine's own `trigger_states`. **Headless‑only. Default off → zero
+behaviour change.**
 
-## Plugins
+### Scheduled loops & PR babysitter
 
-Drop a `*.py` file in the `plugins/` directory that subclasses `PreProcessor`,
-`PostProcessor` or `SkillProvider`:
+```yaml
+scheduled_loops:
+  - name: dependency-sweeper
+    prompt: "/update-deps"
+    cron: "0 6 * * 1"          # Mondays 06:00
+  - name: changelog-drafter
+    prompt: "/draft-changelog"
+    interval_minutes: 1440      # daily
+```
+
+Enable `feedback_loop_enabled` to have the **PR babysitter** watch open autopilot PRs for
+unresolved review comments and feed them back to Claude to revise (bounded by
+`max_revisions`).
+
+---
+
+## 🧩 Skill routing
+
+| Condition | Category | Skill |
+|-----------|----------|-------|
+| Title `[BE]` / backend keywords | BackendTask | `/implement-task-be {id}` |
+| Title `[FE]` / frontend keywords | FrontendTask | `/implement-task-fe {id}` |
+| Title `[QC]` / `[TEST]` | TestTask | `/qc-test-management {id}` |
+| WorkItemType `Bug` | Bug | `/bugfix-workflow {id}` |
+| WorkItemType `Requirement` / `User Story` | Requirement | `/analyze-requirement {id}` |
+
+> In AI‑native mode (a `workspace_directory` is set) the agent chooses the right skill(s)
+> itself; hardcoded routing is the legacy fallback.
+
+---
+
+## 🔌 Plugins
+
+Drop a `*.py` file in `plugins/` that subclasses `PreProcessor`, `PostProcessor`, or
+`SkillProvider`:
 
 ```python
 from ai_autopilot.plugins import PreProcessor
@@ -216,27 +234,62 @@ class TitleNormalizer(PreProcessor):
         return item
 ```
 
-## Development
+---
 
-```bash
-pytest            # run unit tests
-ruff check .      # lint
-mypy ai_autopilot # type-check
+## 🏗️ Architecture
+
+```
+ai_autopilot/
+├── app.py / __main__.py     # FastAPI app factory + uvicorn entry
+├── config.py                # pydantic-settings (YAML + env)
+├── container.py             # composition root / dependency injection
+├── models/                  # WorkItemInfo, ExecutionResult, TaskCategory
+├── ado/                     # auth (PAT/OAuth), REST client, notifier
+├── execution/               # Claude SDK wrapper, executor, reviewer, scorer, SDLC engine
+├── routing/                 # classify → prioritise → schedule → route → decompose
+├── services/                # background poller, state-sync, scheduled loops
+├── data/                    # SQLAlchemy async engine, entities, repositories
+├── dashboard/               # Jinja2 server-rendered dashboard + settings form
+├── notifications/           # Teams, Zalo, Email channels
+├── plugins/                 # Python plugin loader (pre/post/skill hooks)
+├── security.py · scheduling.py · tracking.py · multitenant.py · webhook.py
+└── health.py · metrics.py · logging_config.py
+
+tests/                       # pytest unit tests
+docs/                        # HTML guides (user guide, technical notes)
+legacy-dotnet/               # original .NET 8 implementation (reference)
 ```
 
-## Deployment
+---
+
+## 🛠️ Development
 
 ```bash
-docker compose up --build          # app on :5080
-docker compose --profile monitoring up   # + Prometheus + Grafana
+pytest              # run unit tests
+ruff check .        # lint
+mypy ai_autopilot   # type-check
+```
+
+## 📦 Deployment
+
+```bash
+docker compose up --build                 # app on :5080
+docker compose --profile monitoring up    # + Prometheus + Grafana
 ```
 
 Kubernetes manifests live in [`k8s/`](k8s/).
 
-## Tech stack
+## 📚 Documentation
 
-- Python 3.11 · FastAPI · uvicorn
-- Claude Agent SDK (`claude-agent-sdk`)
-- httpx · SQLAlchemy (async) + aiosqlite · pydantic-settings
-- prometheus-client · structlog · Jinja2 · APScheduler
-- pytest (tests)
+| Doc | Contents |
+|-----|----------|
+| [`docs/ai-autopilot-user-guide.html`](docs/ai-autopilot-user-guide.html) | Full usage & configuration guide (every setting explained). |
+| [`docs/planning-sdlc-v2-full-guide.html`](docs/planning-sdlc-v2-full-guide.html) | Technical deep‑dive on Planning + SDLC v2. |
+| [`config.example.yaml`](config.example.yaml) | Annotated example configuration. |
+
+---
+
+## 🧱 Tech stack
+
+Python 3.11 · FastAPI · uvicorn · Claude Agent SDK · httpx · SQLAlchemy (async) + aiosqlite ·
+pydantic‑settings · APScheduler · prometheus‑client · structlog · Jinja2 · pytest

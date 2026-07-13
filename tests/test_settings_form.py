@@ -16,7 +16,7 @@ def test_parse_form_coerces_types():
         "poll_interval_seconds": "45",
         "max_concurrent": "3",
         "autonomy_level": "unattended",
-        "trigger_tags": "squad-a, squad-b\nsquad-c",  # list kind: comma + newline split
+        "repo_descriptions": "squad-a, squad-b\nsquad-c",  # list kind: comma + newline split
         # checkboxes present → True; absent keys → False
         "auto_review_enabled": "on",
     }
@@ -25,7 +25,7 @@ def test_parse_form_coerces_types():
     assert updates["poll_interval_seconds"] == 45
     assert updates["max_concurrent"] == 3
     assert updates["autonomy_level"] == "unattended"
-    assert updates["trigger_tags"] == ["squad-a", "squad-b", "squad-c"]
+    assert updates["repo_descriptions"] == ["squad-a", "squad-b", "squad-c"]
     assert updates["auto_review_enabled"] is True
     assert updates["dry_run"] is False  # checkbox not in form
 

@@ -24,6 +24,31 @@ def test_git_url_uses_code_project_when_set():
     assert c._url("wit/workitems/5") == "https://dev.azure.com/org/WorkItems/_apis/wit/workitems/5"
 
 
+def test_candidate_clause_tag_only_by_default():
+    c = _client(trigger_tag="phong-autopilot")
+    clause = c._candidate_clause()
+    assert "CONTAINS 'phong-autopilot'" in clause
+    assert "AssignedTo" not in clause                 # no assignee branch when tag blank
+
+
+def test_candidate_clause_adds_assignee_scoped_tag():
+    c = _client(
+        trigger_tag="phong-autopilot",
+        assignee_trigger_tag="ai-autopilot",
+        assignee_trigger_user="phong.pham@nois.vn",
+    )
+    clause = c._candidate_clause()
+    # shared tag only counts when assigned to this machine's user
+    assert "[System.Tags] CONTAINS 'ai-autopilot'" in clause
+    assert "[System.AssignedTo] CONTAINS 'phong.pham@nois.vn'" in clause
+    assert " OR " in clause                            # OR-ed with the normal trigger tag
+
+
+def test_candidate_clause_falls_back_to_auto_assignee():
+    c = _client(assignee_trigger_tag="ai-autopilot", auto_transition_assignee="alice@x.com")
+    assert "AssignedTo] CONTAINS 'alice@x.com'" in c._candidate_clause()
+
+
 class _CaptureResp:
     status_code = 200
     text = '{"workItems": []}'

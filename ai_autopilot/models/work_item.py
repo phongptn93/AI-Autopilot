@@ -35,6 +35,11 @@ class WorkItemInfo:
     description: str | None = None
     acceptance_criteria: str | None = None
     parent_id: int | None = None
+    # Dependency-aware scheduling (P1): work items this one depends on (must finish
+    # first) and items merely Related (soft conflict — don't run concurrently).
+    # Populated only when the link graph is fetched (``$expand=relations``).
+    predecessor_ids: list[int] = field(default_factory=list)
+    related_ids: list[int] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     area_path: str | None = None
     iteration_path: str | None = None

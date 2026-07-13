@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AI-Autopilot — Hướng dẫn sử dụng &amp; cấu hình đầy đủ</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#171d26; --panel2:#1d242f; --border:#2a3441;
+    --text:#dbe3ec; --dim:#95a3b5; --muted:#6f7d8f;
+    --accent:#4c9aff; --accent2:#8bb8ff; --green:#3fb950; --amber:#e3b341; --red:#f85149;
+    --purple:#bc8cff; --cyan:#39c5cf;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-size:15px;line-height:1.62}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 26px}
+  header.hero{padding:50px 0 28px;border-bottom:1px solid var(--border)}
+  header.hero h1{font-size:30px;margin:0 0 8px}
+  header.hero .sub{color:var(--dim);font-size:16px}
+  header.hero .meta{margin-top:15px;display:flex;flex-wrap:wrap;gap:8px}
+  .pill{background:var(--panel2);border:1px solid var(--border);border-radius:999px;padding:4px 12px;font-size:12px;color:var(--dim)}
+  .pill b{color:var(--accent2)}
+  .layout{display:grid;grid-template-columns:250px 1fr;gap:34px;align-items:start}
+  nav.toc{position:sticky;top:14px;max-height:calc(100vh - 28px);overflow:auto;padding:16px 4px 16px 0;font-size:13.5px;border-right:1px solid var(--border)}
+  nav.toc h4{margin:15px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  nav.toc a{display:block;color:var(--dim);text-decoration:none;padding:3px 10px;border-radius:6px}
+  nav.toc a:hover{color:var(--text);background:var(--panel)}
+  main{padding:26px 0 90px;min-width:0}
+  section{margin:0 0 40px;scroll-margin-top:16px}
+  h2{font-size:23px;margin:36px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{font-size:18px;margin:24px 0 10px;color:var(--accent2)}
+  h4{font-size:15px;margin:16px 0 7px;color:var(--cyan)}
+  p{margin:10px 0}
+  code{font-family:var(--mono);font-size:12.6px;background:var(--panel2);border:1px solid var(--border);border-radius:5px;padding:1px 6px;color:var(--accent2)}
+  pre{background:#0b0f14;border:1px solid var(--border);border-radius:var(--radius);padding:15px 17px;overflow:auto;font-family:var(--mono);font-size:12.6px;line-height:1.55;color:#c9d4e0}
+  pre .c{color:var(--muted)} pre .k{color:var(--purple)} pre .s{color:var(--green)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.2px}
+  th,td{border:1px solid var(--border);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--dim);font-weight:650;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em}
+  tr:nth-child(even) td{background:rgba(255,255,255,.012)}
+  td code{white-space:nowrap}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin:14px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .callout{border-radius:var(--radius);padding:12px 16px;margin:14px 0;border:1px solid var(--border);border-left-width:4px;background:var(--panel)}
+  .callout .h{font-weight:700;margin-bottom:3px}
+  .c-info{border-left-color:var(--accent)} .c-info .h{color:var(--accent2)}
+  .c-ok{border-left-color:var(--green)} .c-ok .h{color:var(--green)}
+  .c-warn{border-left-color:var(--amber)} .c-warn .h{color:var(--amber)}
+  .c-risk{border-left-color:var(--red)} .c-risk .h{color:var(--red)}
+  .mermaid{background:#0b0f14;border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin:16px 0;text-align:center}
+  ul,ol{margin:9px 0;padding-left:22px} li{margin:4px 0}
+  .path{font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .tag{font-family:var(--mono);color:var(--amber)}
+  .def{font-family:var(--mono);font-size:12px;color:var(--green)}
+  hr{border:none;border-top:1px solid var(--border);margin:28px 0}
+  @media(max-width:900px){.layout{grid-template-columns:1fr}nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--border)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="hero"><div class="wrap">
+  <h1>🤖 AI-Autopilot — Hướng dẫn sử dụng &amp; cấu hình đầy đủ</h1>
+  <div class="sub">Kỹ sư tự động biến work item Azure DevOps thành Pull Request đã review — cài đặt, vận hành, và giải thích từng cấu hình.</div>
+  <div class="meta">
+    <span class="pill">Cập nhật: <b>2026-07-13</b></span>
+    <span class="pill">Đối tượng: <b>Dev / Lead / PO</b></span>
+    <span class="pill">Nền: <b>FastAPI + Claude Code + Azure DevOps</b></span>
+  </div>
+</div></header>
+
+<div class="wrap"><div class="layout">
+<nav class="toc">
+  <h4>Bắt đầu</h4>
+  <a href="#what">1. AI-Autopilot là gì</a>
+  <a href="#flow">2. Luồng hoạt động</a>
+  <a href="#setup">3. Cài đặt &amp; khởi động</a>
+  <h4>Sử dụng Dashboard</h4>
+  <a href="#dash">4. Tổng quan Dashboard</a>
+  <a href="#board">5. Board</a>
+  <a href="#planning">6. Planning workbench</a>
+  <a href="#history">7. History</a>
+  <a href="#settings">8. Settings &amp; Config</a>
+  <h4>Cấu hình (giải thích)</h4>
+  <a href="#cfg-conn">9. Kết nối ADO</a>
+  <a href="#cfg-trigger">10. Triggering (tag/state)</a>
+  <a href="#cfg-outcome">11. Outcomes → tag+state</a>
+  <a href="#cfg-board">12. Board columns</a>
+  <a href="#cfg-exec">13. Execution &amp; Autonomy</a>
+  <a href="#cfg-sched">14. Dependency scheduling</a>
+  <a href="#cfg-sdlc">15. SDLC v2</a>
+  <a href="#cfg-planning">16. Planning &amp; scoring</a>
+  <a href="#cfg-auto">17. Auto-transitions &amp; deploy</a>
+  <a href="#cfg-misc">18. Schedule · budget · notify · RBAC</a>
+  <h4>Vận hành</h4>
+  <a href="#scenarios">19. Các kịch bản mẫu</a>
+  <a href="#pitfalls">20. Lưu ý &amp; lỗi thường gặp</a>
+</nav>
+
+<main>
+
+<!-- 1 -->
+<section id="what">
+<h2>1. AI-Autopilot là gì</h2>
+<p><b>AI-Autopilot</b> là một dịch vụ nền (background service) liên tục theo dõi <b>Azure DevOps</b>, nhặt các work item được đánh dấu, và giao cho <b>Claude Code</b> thực hiện end-to-end: hiểu yêu cầu → viết code trong nhánh riêng → tự review bảo mật → mở <b>Pull Request</b> → cập nhật trạng thái/tag/comment trên ADO. Có <b>dashboard web</b> để theo dõi và điều khiển.</p>
+<div class="grid2">
+  <div class="card"><h4 style="margin-top:0">Nó tự làm gì</h4>
+  <ul><li>Poll ADO theo <b>tag + state</b></li><li>Phân loại &amp; ưu tiên</li><li>Điều phối tránh xung đột (link graph + AI)</li><li>Chạy Claude trong <b>git worktree</b> cô lập</li><li>Auto-review + chấm điểm run</li><li>Mở PR (nháp/thật) + cập nhật ADO</li></ul></div>
+  <div class="card"><h4 style="margin-top:0">Bạn kiểm soát qua</h4>
+  <ul><li><b>Autonomy level</b>: report / assisted / unattended</li><li><b>Execution mode</b>: interactive (lái tay) / headless</li><li><b>Tag/state policy</b> cho mọi kết cục</li><li><b>Dashboard</b>: Board, Planning, History, Settings</li><li><b>Config</b>: ~100 knob (giải thích ở §9–18)</li></ul></div>
+</div>
+<div class="callout c-info"><div class="h">ℹ️ Triết lý</div>AI-native (nêu mục tiêu, để Claude chọn skill), fail-soft (lỗi không làm sập vòng lặp), resume-safe (crash khởi động lại tiếp tục), và <b>mọi tag/state đổi qua một bảng chính sách duy nhất</b>.</div>
+</section>
+
+<!-- 2 -->
+<section id="flow">
+<h2>2. Luồng hoạt động</h2>
+<div class="mermaid">
+flowchart TB
+  ADO[("Azure DevOps<br/>work items")] -->|"poll (tag+state)"| POLL["Poller (mỗi 30s)"]
+  POLL --> RBAC{"RBAC + schedule<br/>window OK?"}
+  RBAC -->|không| SKIP["bỏ qua"]
+  RBAC -->|có| SCHED["Dependency scheduler<br/>(link graph + AI conflict)"]
+  SCHED -->|ready| EXEC["Claude trong worktree<br/>implement → review → PR"]
+  SCHED -.->|deferred| POLL
+  EXEC --> SCORE["Chấm điểm run"]
+  SCORE --> OUT{"Kết cục"}
+  OUT -->|draft PR| REV["state+tag: review"]
+  OUT -->|điểm thấp| NH["state+tag: needs human"]
+  OUT -->|PR thật| DONE["state+tag: done"]
+  REV & NH & DONE -->|"comment + update"| ADO
+</div>
+<p><b>Vòng lặp mỗi <code>poll_interval_seconds</code> (mặc định 30s):</b> nhặt item pending → RBAC + cửa sổ lịch → điều phối (item bị hoãn để lại chờ vòng sau) → chạy → chấm điểm → áp <b>outcome</b> (tag + state) + comment. Tiến trình được lưu DB nên restart tiếp tục đúng chỗ.</p>
+</section>
+
+<!-- 3 -->
+<section id="setup">
+<h2>3. Cài đặt &amp; khởi động</h2>
+<h3>3.1 Chuẩn bị</h3>
+<ul>
+<li><b>Azure DevOps PAT</b> (quyền Work Items read/write, Code read/write, Build read).</li>
+<li><b>Claude Code</b> đã cài + đăng nhập (autopilot gọi qua đó).</li>
+<li><b>Workspace</b>: 1 thư mục chứa <code>.claude/</code> (skills/rules/MCP) + các repo nguồn là subfolder.</li>
+</ul>
+<h3>3.2 Cấu hình tối thiểu</h3>
+<p>Tạo <span class="path">config.yaml</span> (secrets nên để <b>biến môi trường</b>, không để trong file):</p>
+<pre><span class="c"># config.yaml — tối thiểu để chạy</span>
+ado_organization: <span class="s">https://dev.azure.com/your-org</span>
+ado_project: <span class="s">YourProject</span>          <span class="c"># nơi chứa work items</span>
+code_project: <span class="s">YourCodeProject</span>      <span class="c"># nơi chứa repo/PR (nếu khác)</span>
+workspace_directory: <span class="s">D:\work\workspace</span>
+base_branch: <span class="s">development</span>
+allowed_repos: [Backend, Frontend]
+trigger_states: [Active, Proposed]
+autonomy_level: <span class="s">assisted</span>          <span class="c"># PR nháp cho người review</span>
+execution_mode: <span class="s">interactive</span>       <span class="c"># mở live session lái tay được</span></pre>
+<pre><span class="c"># PAT qua ENV (khuyến nghị) — KHÔNG để trong config.yaml</span>
+setx AUTOPILOT_ADO_PAT <span class="s">"your-pat-here"</span>      <span class="c"># Windows</span>
+export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class="c"># Linux/mac</span></pre>
+<div class="callout c-warn"><div class="h">🔒 Secrets</div>Ưu tiên biến môi trường <code>AUTOPILOT_ADO_PAT</code>, <code>AUTOPILOT_SMTP__PASSWORD</code>… (nested dùng <code>__</code>). <code>config.yaml</code> nên nằm trong <code>.gitignore</code> (mặc định đã có). Nếu lỡ để PAT plaintext trong file → nên rotate.</div>
+<h3>3.3 Thứ tự đọc cấu hình (cao thắng)</h3>
+<pre>init args  &gt;  ENV (AUTOPILOT_*)  &gt;  .env  &gt;  config.yaml  &gt;  secrets dir</pre>
+<h3>3.4 Khởi động</h3>
+<p>Chạy service; mở dashboard tại <code>http://localhost:{{health_port}}</code> (mặc định <span class="def">5080</span>) → <code>/dashboard</code>. Nếu chưa có auth → chạy "offline mode" (không poll). Sửa cấu hình sống qua <b>Settings</b> rồi bấm <b>Reload from file</b> — không cần restart (trừ vài field ghi <span class="tag">restart</span>).</p>
+</section>
+
+<!-- 4 -->
+<section id="dash">
+<h2>4. Tổng quan Dashboard</h2>
+<table>
+<tr><th>Trang</th><th>Dùng để</th></tr>
+<tr><td>📊 <b>Overview</b></td><td>Số liệu run (success/failed/tokens), hoạt động gần đây.</td></tr>
+<tr><td>🗂️ <b>Board</b></td><td>Kanban trực tiếp mọi item autopilot: Queued → In progress → Review → Done… Kéo-thả, lọc, phân trang.</td></tr>
+<tr><td>🧭 <b>Planning</b></td><td>Nạp việc của bạn, cho AI gom nhóm/kiểm xung đột, Start ngay hoặc hẹn giờ.</td></tr>
+<tr><td>📜 <b>History</b></td><td>Nhật ký mọi execution: skill, PR, duration, tokens — có lọc + phân trang.</td></tr>
+<tr><td>🛠️ <b>Settings</b></td><td>Chỉnh mọi cấu hình (editable). Có Export/Import, panel Active tags.</td></tr>
+<tr><td>⚙️ <b>Configuration</b></td><td>Xem cấu hình hiện tại (read-only), secret chỉ hiện set/chưa.</td></tr>
+<tr><td>✨ <b>Capabilities</b></td><td>Các skill khả dụng trong workspace.</td></tr>
+</table>
+</section>
+
+<!-- 5 -->
+<section id="board">
+<h2>5. Board</h2>
+<p>Cột được sinh từ cấu hình: <code>Queued · In progress · In review · [Ready for review] · [Ready to deploy] · Needs human · Done · Failed</code> (2 cột trong ngoặc chỉ hiện khi cấu hình <code>board_review_state</code> / <code>board_deploy_state</code>).</p>
+<ul>
+<li><b>Cột item nằm ở đâu</b>: ưu tiên ADO state (done_states → Done; board_*_state) → pipeline state đã lưu → tag (hold/review/done) → record cuối.</li>
+<li><b>Kéo-thả</b>: bật bằng <code>board_drop_map</code> (mỗi dòng <code>Cột =&gt; tag</code> hoặc <code>Cột =&gt; @State</code>).</li>
+<li><b>Lọc</b>: search id/title · loại (BE/FE/DB/QC) · khoảng ngày (changed) · tag. <b>Giới hạn</b> <code>board_max_per_column</code> card/cột + nút <b>Load more</b>.</li>
+<li><b>Tự refresh</b> mỗi 15s (giữ filter).</li>
+</ul>
+</section>
+
+<!-- 6 -->
+<section id="planning">
+<h2>6. Planning workbench</h2>
+<ol>
+<li><b>Filter</b> assignee (nhiều người: phân tách <code>,</code>/<code>;</code>) + state + type → <b>Load</b>. Filter được <b>nhớ xuyên phiên</b> (cookie).</li>
+<li>Chọn item → <b>🔬 Analyze</b>: AI gom nhóm theo link (serial/conflict/parallel), preview wave, và chấm điểm cặp nghi đụng code. Xung đột AI xác nhận được <b>feed ngược</b> vào bộ điều phối.</li>
+<li><b>▶ Start now</b> (đưa vào pipeline ngay) hoặc <b>🕒 Schedule</b> (hẹn giờ — poller tự chạy khi đến hạn).</li>
+<li><b>📡 Live schedule</b>: quyết định điều phối mỗi vòng + <b>History</b> các chu kỳ hoãn việc (Tier mới).</li>
+</ol>
+</section>
+
+<!-- 7 -->
+<section id="history">
+<h2>7. History</h2>
+<p>Bảng mọi execution, <b>phân trang</b> 25 dòng/trang + <b>bộ lọc</b>: search (id/title), status (Success/Failed/Running/Retrying/Pending), loại (BE/FE/DB/QC/Bug/Req), khoảng ngày bắt đầu. Xoá 1 dòng hoặc Clear all.</p>
+<div class="callout c-info"><div class="h">⏱️ Duration</div>Tính từ lúc dispatch → khi xong (kể cả interactive session dài); hiển thị <code>MM:SS</code> hoặc <code>H:MM:SS</code> khi ≥ 1 giờ.</div>
+</section>
+
+<!-- 8 -->
+<section id="settings">
+<h2>8. Settings &amp; Config</h2>
+<ul>
+<li><b>Settings</b> (editable): mọi field nhóm theo section, có <b>quick-nav</b>, <b>Active tags</b> tổng quan, lưu sống + Reload.</li>
+<li><b>Export/Import</b>: chia sẻ cấu hình cho đồng đội — <b>không</b> gồm secrets &amp; giá trị máy-riêng (PAT, workspace path, tenants, database_url, notifications…). Bản export gồm <b>toàn bộ field còn lại</b>.</li>
+<li><b>Configuration</b> (read-only): xem nhanh cấu hình sống.</li>
+</ul>
+</section>
+
+<!-- ══════════ CẤU HÌNH ══════════ -->
+<section id="cfg-conn">
+<h2>9. Cấu hình — Kết nối Azure DevOps</h2>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>ado_organization</code></td><td class="def">""</td><td>URL org, vd <code>https://dev.azure.com/your-org</code>.</td></tr>
+<tr><td><code>ado_project</code></td><td class="def">""</td><td>Project chứa <b>work items</b>.</td></tr>
+<tr><td><code>code_project</code></td><td class="def">""</td><td>Project chứa <b>repo/PR/pipeline</b> nếu khác. Trống = cùng <code>ado_project</code>.</td></tr>
+<tr><td><code>ado_pat</code> 🔒</td><td class="def">""</td><td>Personal Access Token. <b>Nên để ENV</b> <code>AUTOPILOT_ADO_PAT</code>.</td></tr>
+<tr><td><code>oauth_app_id/secret</code> 🔒</td><td class="def">""</td><td>Thay cho PAT nếu dùng OAuth app.</td></tr>
+</table>
+</section>
+
+<section id="cfg-trigger">
+<h2>10. Cấu hình — Triggering (tag / state)</h2>
+<p>Item được nhặt khi: <b>(mang tag trigger)</b> <b>VÀ</b> <b>(đang ở một trigger state)</b>.</p>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>trigger_tag</code></td><td class="def">&lt;host&gt;-autopilot</td><td>Tag chính của máy này. Mỗi máy mặc định 1 tag riêng (tránh 2 máy giành việc).</td></tr>
+<tr><td><code>trigger_tags</code></td><td class="def">[]</td><td>Tag phụ (nhiều stream). <em>(Ẩn khỏi form — set qua YAML.)</em></td></tr>
+<tr><td><code>assignee_trigger_tag</code></td><td class="def">ai-autopilot</td><td><b>Tag chung cả team</b>: item mang tag này chỉ được nhặt nếu <b>gán cho</b> <code>assignee_trigger_user</code>. Cho phép cả team dùng 1 tag, mỗi máy lo việc của chủ nó. Trống = tắt.</td></tr>
+<tr><td><code>assignee_trigger_user</code></td><td class="def">""</td><td>Người máy này nhận (name/email). Trống → dùng <code>auto_transition_assignee</code>.</td></tr>
+<tr><td><code>trigger_states</code></td><td class="def">[New, To Do, Proposed, Active]</td><td>Các ADO state "vào việc". <b>Nên rời khỏi output states</b> (xem §20).</td></tr>
+<tr><td><code>poll_interval_seconds</code></td><td class="def">30</td><td>Chu kỳ poll.</td></tr>
+<tr><td><code>reprocess_on_reopen</code></td><td class="def">true</td><td>Kéo item đã xử lý về trigger state → xoá skip-tag &amp; chạy lại (có guard chống loop).</td></tr>
+</table>
+<div class="callout c-info"><div class="h">Tag hệ thống (không phải trigger)</div><code>processed_tag</code> (done) · <code>review_tag</code> · <code>escalation_tag</code> (hold) · <code>live_tag</code> (session live) · <code>failed_tag</code> — dùng để đánh dấu &amp; <b>skip</b> item đã xử lý (chống loop).</div>
+</section>
+
+<section id="cfg-outcome">
+<h2>11. Cấu hình — Outcomes → tag + state</h2>
+<p><b>Một bảng chính sách duy nhất</b>: mỗi kết cục → (tag thêm, ADO state đặt). Để trống = bỏ qua phần đó.</p>
+<table>
+<tr><th>Kết cục</th><th>Tag</th><th>State (field)</th><th>Khi nào</th></tr>
+<tr><td>In progress</td><td>—</td><td><code>state_in_progress</code> <span class="def">Active</span></td><td>Bắt đầu làm</td></tr>
+<tr><td>Review</td><td><code>review_tag</code></td><td><code>state_in_review</code></td><td>Mở PR nháp (assisted)</td></tr>
+<tr><td>Done</td><td><code>processed_tag</code></td><td><code>resolved_state</code> <span class="def">Resolved</span></td><td>PR thật (unattended)</td></tr>
+<tr><td>Report</td><td><code>processed_tag</code></td><td><code>state_report</code></td><td>Chỉ comment kế hoạch (report mode)</td></tr>
+<tr><td>Needs human</td><td><code>escalation_tag</code></td><td><code>state_needs_human</code></td><td>Escalate / điểm dưới ngưỡng</td></tr>
+<tr><td>Failed</td><td><code>failed_tag</code> (trống→done tag)</td><td><code>state_failed</code></td><td>Cạn retry</td></tr>
+</table>
+<div class="callout c-warn"><div class="h">⚠️ Tránh trùng nghĩa</div>Đừng để một state vừa là output vừa là <code>trigger_states</code>, và đừng để <code>state_needs_human</code> nằm trong <code>done_states</code> (item "cần người" sẽ hiện nhầm ở cột Done). Xem §20.</div>
+</section>
+
+<section id="cfg-board">
+<h2>12. Cấu hình — Board columns</h2>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>board_review_state</code></td><td class="def">""</td><td>Item ở state này → cột "Ready for review" (read-only, người tự kéo). Trống = không có cột.</td></tr>
+<tr><td><code>board_deploy_state</code></td><td class="def">""</td><td>Tương tự cho cột "Ready to deploy".</td></tr>
+<tr><td><code>done_states</code></td><td class="def">[]</td><td>Các state tính là <b>Done</b> trên board (vd Closed, Resolved, Ready to Testing).</td></tr>
+<tr><td><code>board_drop_map</code></td><td class="def">[]</td><td>Bật kéo-thả: mỗi dòng <code>Cột =&gt; tag</code> hoặc <code>Cột =&gt; @State</code>.</td></tr>
+<tr><td><code>board_max_per_column</code></td><td class="def">20</td><td>Số card tối đa/cột trước khi hiện <b>Load more</b>. 0 = hiện hết.</td></tr>
+</table>
+</section>
+
+<section id="cfg-exec">
+<h2>13. Cấu hình — Execution &amp; Autonomy</h2>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>execution_mode</code></td><td class="def">interactive</td><td><b>interactive</b> = mở live Claude session bạn <code>/rc</code> vào lái · <b>headless</b> = tự động, không attach.</td></tr>
+<tr><td><code>autonomy_level</code></td><td class="def">assisted</td><td><b>report</b> = chỉ comment kế hoạch · <b>assisted</b> = mở PR nháp cho người review · <b>unattended</b> = PR thật + tự resolve.</td></tr>
+<tr><td><code>use_worktrees</code></td><td class="def">true</td><td>Chạy mỗi task trong git worktree riêng. <b>Bắt buộc</b> khi <code>max_concurrent&gt;1</code>.</td></tr>
+<tr><td><code>max_concurrent</code></td><td class="def">1</td><td>Số task song song. <span class="tag">restart</span>.</td></tr>
+<tr><td><code>task_timeout_minutes</code></td><td class="def">30</td><td>Timeout mỗi task.</td></tr>
+<tr><td><code>max_retries</code> / <code>retry_backoff_seconds</code></td><td class="def">3 / 60</td><td>Thử lại khi fail + backoff.</td></tr>
+<tr><td><code>claude_model</code></td><td class="def">""</td><td>Model Claude (trống = default SDK).</td></tr>
+<tr><td><code>claude_permission_mode</code></td><td class="def">acceptEdits</td><td>Quyền cho run tự động.</td></tr>
+<tr><td><code>auto_review_enabled</code> / <code>block_on_severity</code></td><td class="def">true / Critical,High</td><td>Gate auto-review chặn PR nếu có lỗi ở mức này.</td></tr>
+<tr><td><code>auto_decompose</code></td><td class="def">true</td><td>Requirement được tách tự động thành task con.</td></tr>
+<tr><td><code>dry_run</code></td><td class="def">false</td><td>Chỉ log, không ghi ADO / không chạy. Để test.</td></tr>
+</table>
+</section>
+
+<section id="cfg-sched">
+<h2>14. Cấu hình — Dependency scheduling</h2>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>dependency_scheduling_enabled</code></td><td class="def">true</td><td>Điều phối theo <b>link graph</b> ADO: chờ Predecessor xong; 2 item Related không chạy đồng thời. 0 token.</td></tr>
+<tr><td><code>sibling_conflict_scheduling</code></td><td class="def">false</td><td>Coi sibling (cùng Parent + cùng loại) là xung đột mềm dù chưa link. Thô — chỉ bật nếu siblings hay conflict thật.</td></tr>
+<tr><td><code>scheduler_max_dispatch</code></td><td class="def">0</td><td>Giới hạn số item "ready"/chu kỳ. 0 = không giới hạn (đã có <code>max_concurrent</code> chặn song song thật).</td></tr>
+<tr><td><code>scheduler_use_ai_conflicts</code></td><td class="def">true</td><td>Đưa xung đột ẩn AI-xác-nhận (từ Planning Analyze) vào điều phối.</td></tr>
+<tr><td><code>scheduler_ai_conflict_min_score</code></td><td class="def">60</td><td>Chỉ xung đột AI ≥ ngưỡng này mới ảnh hưởng điều phối (độc lập ngưỡng hiển thị).</td></tr>
+<tr><td><code>scheduler_history_limit</code></td><td class="def">20</td><td>Số quyết định điều phối gần nhất lưu lại (panel History).</td></tr>
+</table>
+</section>
+
+<section id="cfg-sdlc">
+<h2>15. Cấu hình — Closed-loop SDLC (v2)</h2>
+<p>Opt-in. Bật thì item chạy qua <b>chuỗi stage theo profile</b> (headless), gate từng bước, revise trong ngân sách chung, escalate, và bàn giao đa máy.</p>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>sdlc_loop_enabled</code></td><td class="def">false</td><td>Công tắc tổng. false = flow một-lần như thường (không đổi hành vi). Bật = <b>ép headless</b>.</td></tr>
+<tr><td><code>sdlc_profile</code></td><td class="def">""</td><td>Profile máy này (ba/dev/qc/review/design/full). Trống → theo type-map/default.</td></tr>
+<tr><td><code>sdlc_default_profile</code></td><td class="def">full</td><td>Profile fallback cuối.</td></tr>
+<tr><td><code>sdlc_type_profiles</code></td><td class="def">{}</td><td>Route theo loại item, vd <code>{Bug: dev, "User Story": full}</code>.</td></tr>
+<tr><td><code>sdlc_profile_states</code></td><td class="def">{}</td><td>Handoff: profile xong → đặt state gì (máy vai trò kế nhặt). Chỉ cần khi chia nhiều máy.</td></tr>
+<tr><td><code>sdlc_max_iterations</code></td><td class="def">3</td><td>Ngân sách revise <b>chung</b> mọi stage/item.</td></tr>
+<tr><td><code>sdlc_advance_on_draft</code></td><td class="def">false</td><td>Có bàn giao khi PR còn nháp không (false = chờ người review).</td></tr>
+<tr><td><code>sdlc_profiles</code> / <code>sdlc_stages</code></td><td class="def">{} / []</td><td>Định nghĩa/ghi đè profile &amp; stage tuỳ biến.</td></tr>
+</table>
+<p><b>Profile dựng sẵn:</b> full = analyze→design→implement→test→review→pr · dev = implement→review→pr · ba/qc/review/design = 1 stage tương ứng.</p>
+<p><b>Thang chọn profile:</b> <code>tag sdlc:*</code> &gt; <code>sdlc_stages</code> &gt; <code>sdlc_profile</code> &gt; <code>sdlc_type_profiles[type]</code> &gt; <code>sdlc_default_profile</code>.</p>
+</section>
+
+<section id="cfg-planning">
+<h2>16. Cấu hình — Planning &amp; PR scoring</h2>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>planning_ai_analysis</code></td><td class="def">true</td><td>Bật AI judge trong Analyze (tốn token). Off = chỉ gom link (0 token).</td></tr>
+<tr><td><code>planning_ai_max_pairs</code></td><td class="def">6</td><td>Số cặp tối đa gọi judge/lần Analyze.</td></tr>
+<tr><td><code>planning_ai_min_score</code></td><td class="def">50</td><td>Ngưỡng <b>hiển thị</b> gợi ý xung đột (0–100).</td></tr>
+<tr><td><code>planning_ai_timeout_seconds</code></td><td class="def">120</td><td>Timeout mỗi judge.</td></tr>
+<tr><td><code>conflict_ai_min_token_len</code> / <code>conflict_ai_extra_stopwords</code></td><td class="def">4 / []</td><td>Tinh chỉnh bộ lọc keyword (ASCII). <em>Lưu ý: từ tiếng Việt có dấu không tách được.</em></td></tr>
+<tr><td><code>planning_schedule_default_hour</code></td><td class="def">21</td><td>Giờ mặc định ô Schedule.</td></tr>
+<tr><td><code>planning_load_limit</code></td><td class="def">200</td><td>Số item Load tối đa/assignee.</td></tr>
+<tr><td><code>planning_live_refresh_seconds</code></td><td class="def">0</td><td>Auto-refresh panel Live (0 = tắt).</td></tr>
+<tr><td><code>planning_start_state</code></td><td class="def">""</td><td>State nút Start chuyển tới (trống = trigger đầu tiên).</td></tr>
+<tr><td><code>pr_scoring_enabled</code></td><td class="def">true</td><td>Chấm điểm run từ tín hiệu khách quan.</td></tr>
+<tr><td><code>pr_score_auto_min</code> / <code>pr_score_review_min</code></td><td class="def">85 / 60</td><td>≥auto → đủ auto-resolve (unattended); &lt;review → giữ chờ người.</td></tr>
+</table>
+</section>
+
+<section id="cfg-auto">
+<h2>17. Cấu hình — Auto-transitions &amp; deploy</h2>
+<p>Độc lập với triggering: tự chuyển ADO state theo <b>sự kiện thật</b> (merge, deploy, children done).</p>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>auto_transition_enabled</code></td><td class="def">false</td><td>Bật tự chuyển state khi PR merge / roll-up parent.</td></tr>
+<tr><td><code>auto_transition_assignee</code></td><td class="def">""</td><td>Chỉ áp cho item gán người này (name/email). Trống = mọi assignee.</td></tr>
+<tr><td><code>on_merge_state</code></td><td class="def">""</td><td>PR (autopilot mở) merge → đặt state này.</td></tr>
+<tr><td><code>parent_rollup_map</code></td><td class="def">[]</td><td>Map <code>Child state = Parent state</code> — parent theo child kém tiến nhất.</td></tr>
+<tr><td><code>on_deploy_state</code> / <code>deploy_pipeline_id</code> / <code>deploy_branch</code></td><td class="def">"" / 0 / ""</td><td>Build deploy thành công → chuyển item từ <code>on_merge_state</code> sang <code>on_deploy_state</code>.</td></tr>
+<tr><td><code>bot_branch_prefixes</code></td><td class="def">feature/, fix/, bugfix/, autopilot/</td><td>Prefix để nhận PR "của mình" (merge detection).</td></tr>
+</table>
+</section>
+
+<section id="cfg-misc">
+<h2>18. Cấu hình — Schedule · Budget · Notifications · RBAC</h2>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>schedule_start</code>/<code>end</code>/<code>days</code></td><td class="def">"" / "" / Mon..Fri</td><td>Cửa sổ giờ chạy. Trống = luôn chạy.</td></tr>
+<tr><td><code>daily_budget_tokens</code> / <code>cost_alert_enabled</code></td><td class="def">0 / false</td><td>Ngân sách token/ngày + cảnh báo. 0 = không giới hạn.</td></tr>
+<tr><td><code>allowed_users</code> / <code>approver_users</code></td><td class="def">[] / []</td><td>RBAC: chỉ xử lý item của user cho phép; ai được duyệt.</td></tr>
+<tr><td><code>allowed_skills</code></td><td class="def">[]</td><td>Giới hạn skill được chạy (trống = tất cả).</td></tr>
+<tr><td><code>tenants</code></td><td class="def">[]</td><td>Multi-tenant: nhiều org/project trên cùng instance.</td></tr>
+<tr><td><code>scheduled_loops</code></td><td class="def">[]</td><td>Vòng lặp định kỳ (sweeper/changelog) mở PR theo cron/interval.</td></tr>
+<tr><td><code>teams_webhook_url</code> / <code>zalo_*</code> / <code>smtp_*</code> 🔒</td><td class="def">""</td><td>Kênh thông báo (Teams/Zalo/Email). Để ENV.</td></tr>
+<tr><td><code>database_url</code></td><td class="def">sqlite+aiosqlite:///autopilot.db</td><td>DB trạng thái/lịch sử (resume). Máy-riêng.</td></tr>
+<tr><td><code>health_host</code> / <code>health_port</code></td><td class="def">0.0.0.0 / 5080</td><td>Web dashboard + health.</td></tr>
+</table>
+</section>
+
+<!-- 19 -->
+<section id="scenarios">
+<h2>19. Các kịch bản mẫu</h2>
+<h4>A. 1 máy, có người giám sát (khuyến nghị khởi đầu)</h4>
+<pre>execution_mode: <span class="s">interactive</span>
+autonomy_level: <span class="s">assisted</span>
+sdlc_loop_enabled: <span class="s">false</span>
+max_concurrent: <span class="s">2</span></pre>
+<p>→ Mỗi item mở live session lái tay được, ra PR nháp cho người review. An toàn nhất.</p>
+<h4>B. 1 máy, tự động hoàn toàn (batch)</h4>
+<pre>execution_mode: <span class="s">headless</span>
+autonomy_level: <span class="s">assisted</span>      <span class="c"># hoặc unattended nếu đã tin</span>
+sdlc_loop_enabled: <span class="s">true</span>
+sdlc_profile: <span class="s">dev</span>              <span class="c"># implement → review → pr</span></pre>
+<h4>C. Chia vai nhiều máy (dây chuyền BA → Dev → QC)</h4>
+<pre><span class="c"># Máy Dev</span>
+sdlc_loop_enabled: <span class="s">true</span>
+sdlc_profile: <span class="s">dev</span>
+trigger_states: [<span class="s">"Ready for Dev"</span>]
+sdlc_profile_states: { dev: <span class="s">"Ready to Test"</span> }</pre>
+<h4>D. Team dùng chung 1 tag, mỗi người 1 máy</h4>
+<pre>assignee_trigger_tag: <span class="s">ai-autopilot</span>
+assignee_trigger_user: <span class="s">phong.pham@nois.vn</span>   <span class="c"># máy của Phong chỉ lo việc gán cho Phong</span></pre>
+</section>
+
+<!-- 20 -->
+<section id="pitfalls">
+<h2>20. Lưu ý &amp; lỗi thường gặp</h2>
+<table>
+<tr><th>Vấn đề</th><th>Triệu chứng</th><th>Cách tránh</th></tr>
+<tr><td><b>trigger_states trùng output states</b></td><td>Item đã merge/deploy bị nhặt xử lý lại (PR trùng)</td><td>Để <code>trigger_states</code> <b>rời</b> khỏi mọi output state; dùng "Proposed"/"Specification Done" làm state vào việc.</td></tr>
+<tr><td><b>needs_human ∈ done_states</b></td><td>Item "cần người" hiện ở cột Done</td><td>Đặt <code>state_needs_human</code> sang state riêng, không thuộc <code>done_states</code>.</td></tr>
+<tr><td><b>Bật SDLC khi đang interactive</b></td><td>Mất live session để lái tay</td><td>SDLC luôn headless — chỉ bật khi chấp nhận tự động; muốn lái tay thì <code>sdlc_loop_enabled: false</code>.</td></tr>
+<tr><td><b>PAT plaintext trong config.yaml</b></td><td>Rủi ro lộ credential</td><td>Chuyển sang ENV <code>AUTOPILOT_ADO_PAT</code> + rotate. <code>config.yaml</code> đã gitignore.</td></tr>
+<tr><td><b>handoff_collides</b></td><td>Log lỗi lúc startup, có thể lặp</td><td>Handoff state của máy <b>không</b> được trùng <code>trigger_states</code> của chính nó.</td></tr>
+<tr><td><b>Title thuần tiếng Việt có dấu</b></td><td>AI Analyze ít chạy</td><td>Bộ lọc keyword chỉ khớp ASCII/thuật ngữ code — dựa vào BA links khi title thuần Việt.</td></tr>
+<tr><td><b>max_concurrent&gt;1 mà tắt worktrees</b></td><td>Các task đụng checkout chung</td><td>Luôn <code>use_worktrees: true</code> khi chạy song song.</td></tr>
+</table>
+<div class="callout c-ok"><div class="h">✅ Cấu hình khởi đầu an toàn</div><code>autonomy_level: assisted</code> + <code>use_worktrees: true</code> + <code>auto_review_enabled: true</code> + <code>pr_scoring_enabled: true</code> + <code>dependency_scheduling_enabled: true</code> + trigger_states rời khỏi output. Bật dần unattended/SDLC khi đã tin.</div>
+</section>
+
+<hr/>
+<p style="color:var(--muted);font-size:12.5px">AI-Autopilot — hướng dẫn sử dụng &amp; cấu hình. Giá trị mặc định lấy từ <span class="path">config.py</span>; sơ đồ render bằng Mermaid (cần internet), nội dung bảng độc lập với sơ đồ.</p>
+</main>
+</div></div>
+<script>
+  mermaid.initialize({startOnLoad:true, theme:'dark', themeVariables:{
+    fontSize:'13px', fontFamily:'ui-monospace,Menlo,Consolas,monospace',
+    primaryColor:'#1d242f', primaryTextColor:'#dbe3ec', primaryBorderColor:'#374253',
+    lineColor:'#5a6b80', secondaryColor:'#171d26', tertiaryColor:'#0b0f14'}});
+</script>
+</body>
+</html>

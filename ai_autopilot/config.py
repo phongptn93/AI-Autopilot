@@ -136,6 +136,14 @@ class Settings(BaseSettings):
     # effective trigger tags are processed; the dashboard can filter Board/Overview
     # by tag. Useful to run several streams (e.g. per squad) on one autopilot.
     trigger_tags: list[str] = Field(default_factory=list)
+    # Additional trigger mechanism: items carrying this SHARED tag are also picked
+    # up, but ONLY when assigned to ``assignee_trigger_user`` — so a whole team can
+    # share one tag (e.g. "ai-autopilot") while each machine handles only its
+    # owner's items. Blank = disabled (only the trigger_tag(s) above apply).
+    assignee_trigger_tag: str = "ai-autopilot"
+    # The assignee (name/email substring) this machine claims for the shared tag.
+    # Blank → falls back to ``auto_transition_assignee``.
+    assignee_trigger_user: str = ""
     processed_tag: str = "autopilot-done"
     review_tag: str = "autopilot-review"
     # Applied when the agent escalates (needs_human); these items are held — the
@@ -380,6 +388,10 @@ class Settings(BaseSettings):
     schedule_start: str = ""
     schedule_end: str = ""
     schedule_days: str = "Mon,Tue,Wed,Thu,Fri"
+
+    # ── Board ──
+    # Max cards shown per board column before a "Load more" appears (0 = no cap).
+    board_max_per_column: int = 20
 
     # ── Web / health ──
     health_port: int = 5080

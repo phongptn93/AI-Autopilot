@@ -1,25 +1,51 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+  .main { max-width: none; }
+  .hist-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0; }
+  .hf-input { background:var(--bg-input,#0c0d12); color:var(--text); border:1px solid var(--border,#23232b);
+    border-radius:8px; padding:6px 10px; font-size:13px; font-family:inherit; }
+  .hf-input:focus { outline:none; border-color:var(--accent,#6366f1); }
+  .hist-pager { display:flex; align-items:center; justify-content:space-between; gap:14px;
+    padding:14px 22px; border-top:1px solid var(--border-soft); flex-wrap:wrap; }
+  .hist-pager .pginfo { color:var(--text-muted); font-size:13px; }
+  .hist-pager .pgnav { display:flex; align-items:center; gap:10px; }
+  .pgbtn { border:1px solid var(--border); color:var(--text); border-radius:8px; padding:6px 14px;
+    font-size:13px; font-weight:600; text-decoration:none; }
+  .pgbtn:hover { border-color:var(--accent,#6366f1); background:var(--accent-bg,rgba(99,102,241,.13)); }
+  .pgbtn.disabled { opacity:.35; pointer-events:none; }
+</style>
+
 <div class="page-header">
     <h2>Execution History</h2>
     <p>Detailed log of all automated work item executions</p>
 </div>
 
 <div class="card">
-    <div class="card-header">
+    <div class="card-header" style="flex-wrap:wrap; gap:12px;">
         <h3>All Executions</h3>
-        <div style="display:flex;align-items:center;gap:14px;">
-            <span style="font-size:13px;color:var(--text-muted)">{{ records|length }} records</span>
+        <form method="get" action="/dashboard/history" class="hist-filters">
+            <input type="text" name="q" value="{{ q }}" placeholder="🔍 id or title" class="hf-input" style="width:150px"/>
+            <select name="status" class="hf-input">
+                {% for v, lbl in [('','All status'),('Success','Success'),('Failed','Failed'),('Running','Running'),('Retrying','Retrying'),('Pending','Pending')] %}
+                <option value="{{ v }}" {% if status == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select>
+            <select name="cat" class="hf-input">
+                {% for v, lbl in [('','All types'),('BackendTask','BE'),('FrontendTask','FE'),('DatabaseTask','DB'),('TestTask','QC'),('Bug','Bug'),('Requirement','Req')] %}
+                <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select>
+            <input type="date" name="from" value="{{ date_from }}" class="hf-input" title="Started from"/>
+            <input type="date" name="to" value="{{ date_to }}" class="hf-input" title="Started to"/>
+            <button type="submit" class="btn-ghost">Apply</button>
+            {% if q or status or cat or date_from or date_to %}
+            <a href="/dashboard/history" class="btn-ghost" style="text-decoration:none">Reset</a>{% endif %}
             {% if records %}
             <form method="post" action="/dashboard/history/clear"
                   onsubmit="return confirm('Xoá TẤT CẢ lịch sử execution? Không thể hoàn tác.');" style="margin:0;">
-                <button type="submit" class="table-link"
-                        style="background:transparent;border:1px solid var(--red,#e5484d);color:var(--red,#e5484d);border-radius:6px;padding:4px 12px;cursor:pointer;">
-                    🗑 Clear all
-                </button>
+                <button type="submit" class="btn-ghost" style="border-color:var(--red,#e5484d);color:var(--red,#e5484d)">🗑 Clear all</button>
             </form>
             {% endif %}
-        </div>
+        </form>
     </div>
     <div class="card-body">
         {% if records %}
@@ -54,8 +80,16 @@
                 {% endfor %}
             </tbody>
         </table>
+        <div class="hist-pager">
+            <span class="pginfo">Showing <b>{{ start_idx }}–{{ end_idx }}</b> of <b>{{ total }}</b></span>
+            <div class="pgnav">
+                <a class="pgbtn {{ 'disabled' if not prev_url }}" href="{{ prev_url or '#' }}">← Prev</a>
+                <span class="pginfo">Page {{ page }} / {{ pages }}</span>
+                <a class="pgbtn {{ 'disabled' if not next_url }}" href="{{ next_url or '#' }}">Next →</a>
+            </div>
+        </div>
         {% else %}
-        <div class="empty-state"><p>No execution history yet.</p></div>
+        <div class="empty-state"><p>{% if q or status or cat or date_from or date_to %}No executions match the filter.{% else %}No execution history yet.{% endif %}</p></div>
         {% endif %}
     </div>
 </div>

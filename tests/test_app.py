@@ -248,6 +248,42 @@ def test_planning_filter_remembered_via_cookie(tmp_path):
         assert "alice@x.com" in r2.text and "Active" in r2.text
 
 
+def test_board_filters_and_limit(tmp_path):
+    from datetime import datetime
+
+    from ai_autopilot.models import WorkItemInfo
+
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}", board_max_per_column=20
+    )
+
+    class _FakeAdo:
+        async def get_all_tagged_work_items(self):
+            items = [
+                WorkItemInfo(id=i, title=f"[BE] task {i}", state="Active",
+                             tags=["phong-autopilot"], changed_date=datetime(2026, 7, 1))
+                for i in range(1, 31)
+            ]
+            items.append(WorkItemInfo(id=99, title="[FE] special login", state="Active",
+                                      tags=["phong-autopilot"], changed_date=datetime(2026, 7, 10)))
+            return items
+
+    with TestClient(create_app(settings)) as client:
+        client.app.state.container.ado = _FakeAdo()
+        # Cap: 31 BE items in one column > 20 → a Load more appears.
+        assert "Load more" in client.get("/dashboard/board").text
+        # limit override removes it.
+        assert "Load more" not in client.get("/dashboard/board?limit=100").text
+        # Category filter keeps only FE.
+        fe = client.get("/dashboard/board?cat=FE").text
+        assert "special login" in fe and "task 5" not in fe
+        # Changed-date filter keeps only the recent one.
+        dated = client.get("/dashboard/board?from=2026-07-05").text
+        assert "special login" in dated and "task 5" not in dated
+        # Search by title.
+        assert "special login" in client.get("/dashboard/board?q=login").text
+
+
 def test_planning_live_partial_renders(tmp_path):
     settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
     with TestClient(create_app(settings)) as client:

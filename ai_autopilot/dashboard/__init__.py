@@ -54,8 +54,10 @@ def _status_class(status: str) -> str:
 
 
 def _mmss(seconds: float) -> str:
-    total = int(seconds)
-    return f"{total // 60:02d}:{total % 60:02d}"
+    total = max(0, int(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
 def _fmt_duration(seconds: float) -> str:
@@ -101,21 +103,82 @@ def create_dashboard_router() -> APIRouter:
             ),
         )
 
+    _BOARD_CATS = {
+        "BE": "[BE]", "FE": "[FE]", "DB": "[DB]", "QC": "[QC]", "TEST": "[TEST]",
+    }
+
+    def _filter_board_items(items: list, q: str, cat: str, dfrom: str, dto: str) -> list:
+        """Apply the board's search / category / changed-date filters to work items."""
+        out = items
+        if q:
+            ql = q.lower()
+            out = [i for i in out if ql in str(i.id) or ql in (i.title or "").lower()]
+        if cat and cat != "all":
+            marker = _BOARD_CATS.get(cat.upper())
+            if marker:
+                out = [i for i in out if (i.title or "").upper().startswith(marker)]
+        if dfrom or dto:
+            def _in_range(i) -> bool:
+                cd = getattr(i, "changed_date", None)
+                if cd is None:
+                    return False               # can't verify a date → exclude when filtering
+                d = cd.date().isoformat()
+                if dfrom and d < dfrom:
+                    return False
+                if dto and d > dto:
+                    return False
+                return True
+            out = [i for i in out if _in_range(i)]
+        return out
+
     async def _board_ctx(request: Request) -> dict:
         c: Container = request.app.state.container
+        qp = request.query_params
         try:
             items = await c.ado.get_all_tagged_work_items()
             error = None
         except Exception as exc:  # noqa: BLE001
             items, error = [], str(exc)
         tags = c.config.effective_trigger_tags
-        selected_tag = request.query_params.get("tag") or "all"
+        selected_tag = qp.get("tag") or "all"
         if selected_tag != "all":
             sel = selected_tag.lower()
             items = [i for i in items if any(t.lower() == sel for t in i.tags)]
+
+        # Filters: search (id/title), category, changed-date range.
+        q = (qp.get("q") or "").strip()
+        cat = (qp.get("cat") or "all").strip()
+        dfrom = (qp.get("from") or "").strip()
+        dto = (qp.get("to") or "").strip()
+        items = _filter_board_items(items, q, cat, dfrom, dto)
+
         records = await c.execution_repo.get_recent(200)
         states = {s.work_item_id: s.state.value for s in await c.state_repo.all()}
         cols = build_board(items, latest_records(records), c.config, states)
+
+        # Per-column display cap + "load more".
+        cap = max(0, getattr(c.config, "board_max_per_column", 20))
+        try:
+            limit = int(qp.get("limit") or cap)
+        except ValueError:
+            limit = cap
+        limit = max(0, limit)
+
+        base = {}
+        if selected_tag != "all":
+            base["tag"] = selected_tag
+        if q:
+            base["q"] = q
+        if cat and cat != "all":
+            base["cat"] = cat
+        if dfrom:
+            base["from"] = dfrom
+        if dto:
+            base["to"] = dto
+        filter_qs = urlencode(base)
+        step = cap or 20
+        more_qs = urlencode({**base, "limit": (limit or step) + step})
+
         org = c.config.ado_organization.rstrip("/")
         proj = c.config.ado_project
         ado_item_base = f"{org}/{quote(proj)}/_workitems/edit" if org and proj else ""
@@ -131,6 +194,10 @@ def create_dashboard_router() -> APIRouter:
             tags=tags,
             selected_tag=selected_tag,
             ado_item_base=ado_item_base,
+            board_limit=limit,
+            filter_qs=filter_qs,
+            more_url="/dashboard/board?" + more_qs,
+            q=q, cat=cat, date_from=dfrom, date_to=dto,
         )
 
     @router.get("/board", response_class=HTMLResponse)
@@ -366,10 +433,48 @@ def create_dashboard_router() -> APIRouter:
     @router.get("/history", response_class=HTMLResponse)
     async def history(request: Request):
         c: Container = request.app.state.container
-        records = await c.execution_repo.get_recent(100)
-        return _TEMPLATES.TemplateResponse(
-            request, "history.html", _ctx(request, "history", records=records)
+        qp = request.query_params
+        status = (qp.get("status") or "").strip()
+        cat = (qp.get("cat") or "").strip()
+        q = (qp.get("q") or "").strip()
+        dfrom = (qp.get("from") or "").strip()
+        dto = (qp.get("to") or "").strip()
+        page_size = 25
+        try:
+            page = max(1, int(qp.get("page") or 1))
+        except ValueError:
+            page = 1
+
+        async def _run(pg: int):
+            return await c.execution_repo.search(
+                status=status or None, category=cat or None, q=q or None,
+                dfrom=dfrom or None, dto=dto or None,
+                offset=(pg - 1) * page_size, limit=page_size,
+            )
+
+        rows, total = await _run(page)
+        pages = max(1, -(-total // page_size))          # ceil
+        if page > pages:                                # out-of-range → clamp + re-query
+            page = pages
+            rows, total = await _run(page)
+
+        base = {k: v for k, v in {
+            "status": status, "cat": cat, "q": q, "from": dfrom, "to": dto,
+        }.items() if v}
+
+        def purl(pg: int) -> str:
+            return "/dashboard/history?" + urlencode({**base, "page": pg})
+
+        ctx = _ctx(
+            request, "history",
+            records=rows, total=total, page=page, pages=pages, page_size=page_size,
+            status=status, cat=cat, q=q, date_from=dfrom, date_to=dto,
+            start_idx=((page - 1) * page_size + 1) if total else 0,
+            end_idx=min(page * page_size, total),
+            prev_url=purl(page - 1) if page > 1 else "",
+            next_url=purl(page + 1) if page < pages else "",
         )
+        return _TEMPLATES.TemplateResponse(request, "history.html", ctx)
 
     @router.post("/history/{record_id}/delete")
     async def delete_history(request: Request, record_id: int):

@@ -67,8 +67,16 @@ class ExecutionRepository:
             )
             record.error = (result.error or "")[:2000] or None
             record.output = (result.output or "")[:5000]
+            now = datetime.now(UTC)
+            record.completed_at = now
             record.duration_seconds = result.duration_seconds
-            record.completed_at = datetime.now(UTC)
+            # Interactive sessions (and any path that didn't time itself) leave
+            # duration at 0 — fall back to elapsed wall-clock (dispatch → finish).
+            if not record.duration_seconds and record.started_at is not None:
+                start = record.started_at
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=UTC)
+                record.duration_seconds = max(0.0, (now - start).total_seconds())
             if result.cost_tokens:
                 record.cost_tokens = result.cost_tokens
             await session.commit()
@@ -106,6 +114,60 @@ class ExecutionRepository:
                 row.completed_at = datetime.now(UTC)
             await session.commit()
             return len(rows)
+
+    async def search(
+        self,
+        *,
+        status: str | None = None,
+        category: str | None = None,
+        q: str | None = None,
+        dfrom: str | None = None,
+        dto: str | None = None,
+        trigger_tag: str | None = None,
+        offset: int = 0,
+        limit: int = 25,
+    ) -> tuple[list[ExecutionRecord], int]:
+        """Filtered + paginated executions, newest-first, with the total match count.
+
+        Filters: status, category, free-text ``q`` (work-item id or title), started
+        date range (``dfrom``/``dto`` as ``YYYY-MM-DD``), and trigger tag.
+        """
+        conds = []
+        if status:
+            try:
+                conds.append(ExecutionRecord.status == ExecutionStatus(status))
+            except ValueError:
+                pass
+        if category:
+            conds.append(ExecutionRecord.category == category)
+        if trigger_tag:
+            conds.append(ExecutionRecord.trigger_tag == trigger_tag)
+        if q:
+            s = q.strip()
+            if s.isdigit():
+                conds.append(ExecutionRecord.work_item_id == int(s))
+            else:
+                conds.append(ExecutionRecord.title.ilike(f"%{s}%"))
+        if dfrom:
+            conds.append(func.date(ExecutionRecord.started_at) >= dfrom)
+        if dto:
+            conds.append(func.date(ExecutionRecord.started_at) <= dto)
+        async with self._db.session() as session:
+            total = (
+                await session.execute(
+                    select(func.count()).select_from(ExecutionRecord).where(*conds)
+                )
+            ).scalar_one()
+            rows = (
+                await session.execute(
+                    select(ExecutionRecord)
+                    .where(*conds)
+                    .order_by(ExecutionRecord.started_at.desc())
+                    .offset(max(0, offset))
+                    .limit(max(1, limit))
+                )
+            ).scalars().all()
+        return list(rows), int(total)
 
     async def get_recent(
         self, count: int = 50, trigger_tag: str | None = None

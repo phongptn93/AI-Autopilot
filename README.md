@@ -104,6 +104,11 @@ the environment.**
 | `poll_interval_seconds` | `AUTOPILOT_POLL_INTERVAL_SECONDS` | `30` | Poll cadence |
 | `max_concurrent` | `AUTOPILOT_MAX_CONCURRENT` | `1` | Concurrent executions |
 | `use_worktrees` | `AUTOPILOT_USE_WORKTREES` | `true` | Run each execution in its own git worktree (safe parallelism) |
+| `dependency_scheduling_enabled` | `AUTOPILOT_DEPENDENCY_SCHEDULING_ENABLED` | `true` | Order work by the ADO link graph — wait on Predecessor links, never run Related items together (0 tokens) |
+| `sibling_conflict_scheduling` | `AUTOPILOT_SIBLING_CONFLICT_SCHEDULING` | `false` | Heuristic: treat same-Parent + same-category siblings as a soft conflict |
+| `sdlc_loop_enabled` | `AUTOPILOT_SDLC_LOOP_ENABLED` | `false` | Opt into the closed-loop SDLC engine (see below) |
+| `sdlc_profile` | `AUTOPILOT_SDLC_PROFILE` | — | This machine's role/profile (`ba`/`dev`/`qc`/`full`…) |
+| `sdlc_max_iterations` | `AUTOPILOT_SDLC_MAX_ITERATIONS` | `3` | Shared revise budget across all stages of one item |
 | `task_timeout_minutes` | `AUTOPILOT_TASK_TIMEOUT_MINUTES` | `30` | Per-task timeout |
 | `autonomy_level` | `AUTOPILOT_AUTONOMY_LEVEL` | `assisted` | `report` / `assisted` / `unattended` (L1/L2/L3) |
 | `feedback_loop_enabled` | `AUTOPILOT_FEEDBACK_LOOP_ENABLED` | `false` | Enable the PR babysitter |
@@ -158,6 +163,40 @@ scheduled_loops:
     prompt: "/draft-changelog"
     interval_minutes: 1440    # daily
 ```
+
+## Closed-loop SDLC engine (v2)
+
+Beyond the one-shot agent run, an **opt-in** engine (`sdlc_loop_enabled: true`) drives
+each work item through an explicit, **profile-selected** sequence of SDLC stages —
+gating each with the run scorer, revising on failure under one **shared budget**, and
+escalating to a human when it's spent. It is designed to be configured **per machine**,
+so a team can split the lifecycle across people's autopilots.
+
+**Stages** (built-in catalog): `analyze` (BA) · `design` · `implement` (Dev) · `test`
+(QC) · `review` · `pr`. Each stage states a **goal** and **Claude picks the right
+skill(s)** from the workspace itself — nothing is pinned (set a stage's `skill` in
+`sdlc_stages` only when you want to force a specific command). **Profiles** are ordered
+subsets — `full`, `dev` (`implement→review→pr`), `ba`, `qc`, `review`, `design` —
+extendable via `sdlc_profiles`.
+
+**Profile selection** (highest wins): a per-item `sdlc:<name>` tag → per-machine
+`sdlc_stages` → per-machine `sdlc_profile` → `sdlc_type_profiles[type]` →
+`sdlc_default_profile`.
+
+**Cross-machine handoff** — each machine runs one role and, on completion, sets an ADO
+state the next machine triggers on (coordinated purely by `System.State`, no direct
+coupling):
+
+| Machine | `sdlc_profile` | `trigger_states` | `sdlc_profile_states` |
+|---------|----------------|------------------|-----------------------|
+| BA | `ba` | New, Proposed | `{ ba: "Ready for Dev" }` |
+| Dev | `dev` | Ready for Dev | `{ dev: "Ready to Test" }` |
+| Tester | `qc` | Ready to Test | `{ qc: "Ready to Deploy" }` |
+
+Progress is persisted per item (`sdlc_loop_states` table) so a crash resumes mid-loop.
+A startup check refuses to hand off to one of the machine's own `trigger_states` (which
+would re-pick items forever). SDLC mode is headless-only. Default off → zero behaviour
+change.
 
 ## Plugins
 

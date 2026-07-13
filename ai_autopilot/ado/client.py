@@ -68,12 +68,32 @@ class AdoClient:
         ors = " OR ".join(f"[System.Tags] CONTAINS '{t}'" for t in tags)
         return f"({ors})"
 
+    def _candidate_clause(self) -> str:
+        """The full trigger predicate: any trigger tag, OR the shared assignee-trigger
+        tag scoped to this machine's assignee (so a team can share one tag)."""
+        parts = [self._tag_clause()]
+        atag = (self._config.assignee_trigger_tag or "").strip().replace("'", "''")
+        if atag:
+            user = (
+                self._config.assignee_trigger_user
+                or self._config.auto_transition_assignee
+                or ""
+            ).strip().replace("'", "''")
+            if user:
+                parts.append(
+                    f"([System.Tags] CONTAINS '{atag}' "
+                    f"AND [System.AssignedTo] CONTAINS '{user}')"
+                )
+            else:  # no assignee configured → treat the tag like a plain trigger tag
+                parts.append(f"[System.Tags] CONTAINS '{atag}'")
+        return "(" + " OR ".join(parts) + ")"
+
     async def get_pending_work_items(self) -> list[WorkItemInfo]:
         """Query work items tagged with any trigger tag in pending states."""
         states = ", ".join(f"'{s}'" for s in self._config.trigger_states) or "'New'"
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
-            f"WHERE {self._tag_clause()} "
+            f"WHERE {self._candidate_clause()} "
             f"AND [System.State] IN ({states}) "
             f"AND [System.TeamProject] = '{self._config.ado_project}' "
             "ORDER BY [System.ChangedDate] DESC"
@@ -166,7 +186,7 @@ class AdoClient:
         """
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
-            f"WHERE {self._tag_clause()} "
+            f"WHERE {self._candidate_clause()} "
             f"AND [System.TeamProject] = '{self._config.ado_project}' "
             "ORDER BY [System.ChangedDate] DESC"
         )

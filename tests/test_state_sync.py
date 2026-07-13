@@ -8,6 +8,7 @@ from ai_autopilot.config import Settings
 from ai_autopilot.models import WorkItemInfo
 from ai_autopilot.services.state_sync import (
     StateSyncService,
+    already_at_or_past_merge,
     items_awaiting_deploy,
     parent_rollup_target,
     parse_rollup_map,
@@ -119,6 +120,44 @@ async def test_merge_skips_item_without_trigger_tag():
     c.ado.items[42] = _wi(42, state="Active", tags=["someone-else"])
     await svc._scan()
     assert c.ado.states == [] and c.ado.tags == []
+
+
+def test_already_at_or_past_merge():
+    cfg = Settings(
+        on_merge_state="Ready to Deploy", on_deploy_state="Ready to Testing",
+        done_states=["Closed", "Resolved"],
+    )
+    assert already_at_or_past_merge("Ready to Deploy", cfg) is True
+    assert already_at_or_past_merge("ready to testing", cfg) is True   # case-insensitive
+    assert already_at_or_past_merge("Closed", cfg) is True
+    assert already_at_or_past_merge("Active", cfg) is False
+    assert already_at_or_past_merge("", cfg) is False
+
+
+async def test_merge_does_not_pull_advanced_item_backward():
+    # The bug: an item already at on_deploy_state must NOT be dragged back to
+    # on_merge_state by a still-"completed" merged PR (e.g. after a restart).
+    svc, c = _svc_shared(
+        on_merge_state="Ready to Deploy", on_deploy_state="Ready to Testing",
+        done_states=["Closed"],
+    )
+    c.ado.completed = [{"pullRequestId": 7, "sourceRefName": "refs/heads/feature/be/42-x"}]
+    c.ado.items[42] = _wi(42, state="Ready to Testing", tags=["autopilot"])  # already deployed
+    await svc._scan()
+    assert c.ado.states == []            # not moved back to Ready to Deploy
+    # Simulate a restart: dedup memory lost → guard must STILL protect it.
+    svc._merged.clear()
+    await svc._scan()
+    assert c.ado.states == []
+
+
+async def test_merge_still_transitions_a_fresh_item():
+    # Guard must not block the legitimate forward transition.
+    svc, c = _svc_shared(on_merge_state="Ready to Deploy", on_deploy_state="Ready to Testing")
+    c.ado.completed = [{"pullRequestId": 8, "sourceRefName": "refs/heads/feature/be/43-x"}]
+    c.ado.items[43] = _wi(43, state="Active", tags=["autopilot"])
+    await svc._scan()
+    assert (43, "Ready to Deploy") in c.ado.states
 
 
 def test_parse_rollup_map():

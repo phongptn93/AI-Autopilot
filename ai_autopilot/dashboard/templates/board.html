@@ -5,16 +5,25 @@
         <h2>Board</h2>
         <p>Live view of every work item tagged for the autopilot in <span class="mono">{{ project }}</span> — {{ total }} item(s)</p>
     </div>
-    <div style="display:flex;align-items:center;gap:16px">
+    <form method="get" action="/dashboard/board" class="board-filters">
+        <input type="text" name="q" value="{{ q }}" placeholder="🔍 id or title" class="bf-input" style="width:160px"/>
+        <select name="cat" class="bf-input">
+            {% for v, lbl in [('all','All types'),('BE','BE'),('FE','FE'),('DB','DB'),('QC','QC')] %}
+            <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+        </select>
+        <input type="date" name="from" value="{{ date_from }}" class="bf-input" title="Changed from"/>
+        <input type="date" name="to" value="{{ date_to }}" class="bf-input" title="Changed to"/>
         {% if tags %}
-        <select onchange="location.href='/dashboard/board' + (this.value==='all' ? '' : '?tag=' + encodeURIComponent(this.value))"
-                style="background:var(--bg-card);color:var(--text);border:1px solid var(--border,#23232b);border-radius:8px;padding:6px 10px;font-size:13px">
+        <select name="tag" class="bf-input" onchange="this.form.submit()">
             <option value="all" {% if selected_tag == 'all' %}selected{% endif %}>All tags</option>
             {% for t in tags %}<option value="{{ t }}" {% if selected_tag == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
         </select>
         {% endif %}
-        <div class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto-refresh 15s</span></div>
-    </div>
+        <button type="submit" class="btn-ghost">Apply</button>
+        {% if q or (cat and cat != 'all') or date_from or date_to or selected_tag != 'all' %}
+        <a href="/dashboard/board" class="btn-ghost" style="text-decoration:none">Reset</a>{% endif %}
+        <div class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto 15s</span></div>
+    </form>
 </div>
 
 {% if error %}
@@ -59,6 +68,13 @@
   .board-card-who { margin-top:7px; font-size:11px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .board-card-pr { margin-left:auto; color:var(--accent,#818cf8); font-weight:600; text-decoration:none; white-space:nowrap; }
   .board-col-empty { color:var(--text-dim); font-size:12px; text-align:center; padding:14px 0; opacity:.5; }
+  .board-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0; }
+  .bf-input { background:var(--bg-card); color:var(--text); border:1px solid var(--border,#23232b);
+    border-radius:8px; padding:6px 10px; font-size:13px; font-family:inherit; }
+  .bf-input:focus { outline:none; border-color:var(--accent,#6366f1); }
+  .board-more { display:block; text-align:center; margin-top:2px; padding:8px; font-size:12px; font-weight:600;
+    color:var(--accent-hover,#818cf8); text-decoration:none; border:1px dashed var(--border,#23232b); border-radius:8px; }
+  .board-more:hover { border-color:var(--accent,#6366f1); background:var(--accent-bg,rgba(99,102,241,.13)); }
 
   /* column accent dots + card stripe colours */
   .col-accent-queued .board-col-name::before { background:#6b7280; }
@@ -80,8 +96,9 @@
   (function () {
     const mount = document.getElementById('board-mount');
     const stamp = document.getElementById('board-updated');
-    const tag = {{ selected_tag|tojson }};
-    const partialUrl = '/dashboard/board/partial' + (tag && tag !== 'all' ? '?tag=' + encodeURIComponent(tag) : '');
+    const fq = {{ filter_qs|tojson }};
+    const lim = {{ board_limit|default(0)|int }};
+    const partialUrl = '/dashboard/board/partial?' + (fq ? fq + '&' : '') + 'limit=' + lim;
     let busy = false;
     async function refresh() {
       if (busy || document.hidden) return;

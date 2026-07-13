@@ -78,6 +78,42 @@ max_revisions: 3
 auto_review_enabled: true
 block_on_severity: "Critical,High"
 
+# ── Dependency-aware scheduling (P1) ──
+# Order work by the ADO link graph instead of dispatching every pending item at
+# once. An item waits for its Predecessor links (Dependency-Reverse) to be done;
+# two Related items never run concurrently (they likely touch the same code).
+# Deferred items are re-evaluated next poll — waves emerge across cycles. Reads
+# links only, calls no model (0 tokens). Set false to keep plain priority order.
+dependency_scheduling_enabled: true
+# Heuristic: treat sibling candidates (same Parent + same category, e.g. two [BE]
+# tasks under one Requirement) as a Related soft-conflict even without an explicit
+# link. Off by default — enable if siblings often collide.
+sibling_conflict_scheduling: false
+
+# ── Closed-loop SDLC engine (v2, Phase 1) — opt-in, PER-MACHINE ──
+# When enabled, items route through the SdlcLoopEngine: a PROFILE-selected ordered
+# list of SDLC stages, each gated (revise under one shared budget, escalate on
+# exhaustion), then handed off to the next machine's role via an ADO state. Off by
+# default → behaviour is unchanged. sdlc_profile is the PRIMARY per-machine knob.
+#
+# Example team split (each person's machine sets its own profile + trigger_states):
+#   BA machine:     sdlc_profile: ba    trigger_states: [New, Proposed]
+#                   sdlc_profile_states: { ba: "Ready for Dev" }
+#   Dev machine:    sdlc_profile: dev   trigger_states: ["Ready for Dev"]
+#                   sdlc_profile_states: { dev: "Ready to Test" }
+#   Tester machine: sdlc_profile: qc    trigger_states: ["Ready to Test"]
+#                   sdlc_profile_states: { qc: "Ready to Deploy" }
+sdlc_loop_enabled: false
+sdlc_max_iterations: 3
+sdlc_profile: ""                # "ba" | "dev" | "qc" | "review" | "design" | "full"
+sdlc_default_profile: "full"
+sdlc_profile_tag_prefix: "sdlc:"   # per-item override, e.g. tag "sdlc:dev"
+sdlc_advance_on_draft: false
+sdlc_type_profiles: {}          # { Bug: dev, "User Story": full }
+sdlc_profiles: {}               # extra/override profiles: { mini: [implement, pr] }
+sdlc_profile_states: {}         # profile → handoff ADO state
+sdlc_stages: []                 # explicit ordered stage override (wins over profile)
+
 # ── Scheduling (empty start/end = always on) ──
 schedule_start: ""           # "08:00"
 schedule_end: ""             # "18:00"

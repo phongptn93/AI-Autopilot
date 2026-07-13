@@ -151,21 +151,258 @@
         <div class="brand"><span class="brand-badge">🤖</span> AI Autopilot</div>
         <div class="nav-section">Operate</div>
         <nav>
-            <a class="nav-link {{ 'active' if active == 'overview' else '' }}" href="/dashboard"><span class="ico">📊</span> Overview</a>
-            <a class="nav-link {{ 'active' if active == 'board' else '' }}" href="/dashboard/board"><span class="ico">🗂️</span> Board</a>
-            <a class="nav-link {{ 'active' if active == 'planning' else '' }}" href="/dashboard/planning"><span class="ico">🧭</span> Planning</a>
-            <a class="nav-link {{ 'active' if active == 'history' else '' }}" href="/dashboard/history"><span class="ico">📜</span> History</a>
+            <a class="nav-link " href="/dashboard"><span class="ico">📊</span> Overview</a>
+            <a class="nav-link " href="/dashboard/board"><span class="ico">🗂️</span> Board</a>
+            <a class="nav-link active" href="/dashboard/planning"><span class="ico">🧭</span> Planning</a>
+            <a class="nav-link " href="/dashboard/history"><span class="ico">📜</span> History</a>
         </nav>
         <div class="nav-section">Configure</div>
         <nav>
-            <a class="nav-link {{ 'active' if active == 'config' else '' }}" href="/dashboard/config"><span class="ico">⚙️</span> Configuration</a>
-            <a class="nav-link {{ 'active' if active == 'settings' else '' }}" href="/dashboard/settings"><span class="ico">🛠️</span> Settings</a>
-            <a class="nav-link {{ 'active' if active == 'capabilities' else '' }}" href="/dashboard/capabilities"><span class="ico">✨</span> Capabilities</a>
+            <a class="nav-link " href="/dashboard/config"><span class="ico">⚙️</span> Configuration</a>
+            <a class="nav-link " href="/dashboard/settings"><span class="ico">🛠️</span> Settings</a>
+            <a class="nav-link " href="/dashboard/capabilities"><span class="ico">✨</span> Capabilities</a>
         </nav>
         <div class="sidebar-foot"><span class="live-dot"></span> autopilot online</div>
     </aside>
     <main class="main">
-        {% block content %}{% endblock %}
+        
+<style>
+  .pf-toolbar { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; padding:16px 20px; }
+  .pf-field { display:flex; flex-direction:column; gap:6px; }
+  .pf-field > span { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); }
+  .pf-input { background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:8px 11px; font-size:13.5px; font-family:inherit; min-height:36px; }
+  .pf-input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-bg); }
+  .btn-primary { background:var(--accent); color:#fff; border:none; border-radius:var(--radius-sm);
+    padding:9px 16px; font-size:13px; font-weight:650; cursor:pointer; font-family:inherit; min-height:36px; }
+  .btn-primary:hover { background:var(--accent-hover); }
+  .btn-go { background:var(--green); color:#04140b; border:none; border-radius:var(--radius-sm);
+    padding:9px 18px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit; min-height:36px; }
+  .btn-go:hover { filter:brightness(1.08); }
+  .btn-go:disabled { opacity:.45; cursor:not-allowed; filter:none; }
+  .flash { padding:11px 16px; border-radius:var(--radius-sm); font-size:13px; margin-bottom:18px; font-weight:600; }
+  .flash-ok { background:var(--green-bg); color:var(--green); }
+  .flash-info { background:var(--blue-bg); color:var(--blue); }
+  .actionbar { display:flex; flex-wrap:wrap; gap:14px; align-items:center;
+    padding:14px 20px; border-top:1px solid var(--border-soft); background:var(--bg-elev); }
+  .seg { display:inline-flex; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
+  .seg label { font-size:12.5px; color:var(--text-muted); padding:7px 13px; cursor:pointer; user-select:none; }
+  .seg label.on { background:var(--accent-bg); color:var(--accent-hover); font-weight:650; }
+  .seg input { display:none; }
+  .cell-chk { width:17px; height:17px; accent-color:var(--accent); cursor:pointer; vertical-align:middle; }
+  .grp-line { padding:6px 20px; font-size:13px; border-bottom:1px solid var(--border-soft); }
+  .grp-line:last-child { border-bottom:none; }
+  .grp-line .k { color:var(--text-dim); font-weight:600; margin-right:8px; text-transform:uppercase; font-size:10.5px; letter-spacing:.05em; }
+  .ai-card { background:var(--bg-input); border:1px solid var(--border); border-left:2px solid var(--amber);
+    border-radius:var(--radius-sm); padding:10px 13px; margin:8px 20px; font-size:13px; }
+  .ai-score { font-weight:750; color:var(--amber); font-family:var(--mono); }
+  .sched-row { display:flex; align-items:center; gap:12px; padding:11px 20px; border-bottom:1px solid var(--border-soft); }
+  .sched-row:last-child { border-bottom:none; }
+  .sel-count { color:var(--accent-hover); font-weight:700; }
+  .muted { color:var(--text-muted); } .dim { color:var(--text-dim); }
+  .rowlink { color:var(--text); text-decoration:none; } .rowlink:hover { color:var(--accent-hover); }
+</style>
+
+<div class="page-header">
+  <h2>🧭 Planning workbench</h2>
+  <p>Load your assigned work, let AI group &amp; check conflicts, then start now or schedule a run.</p>
+</div>
+
+
+
+
+<!-- ── Filter / load ── -->
+<div class="card">
+  <div class="card-header"><h3>🔎 Filter</h3></div>
+  <form method="get" action="/dashboard/planning">
+    <div class="pf-toolbar">
+      <div class="pf-field" style="flex:1; min-width:240px">
+        <span>Assignee</span>
+        <input class="pf-input" name="assignee" value="phong.pham@nois.vn" placeholder="email or display name"/>
+      </div>
+      <div class="pf-field" style="min-width:150px">
+        <span>State</span>
+        <select class="pf-input" name="state">
+          <option value="all" selected>All states</option>
+          <option value="Active" >Active</option><option value="New" >New</option><option value="Proposed" >Proposed</option>
+        </select>
+      </div>
+      <div class="pf-field" style="min-width:150px">
+        <span>Work item type</span>
+        <select class="pf-input" name="type">
+          <option value="all" selected>All types</option>
+          <option value="Bug" >Bug</option><option value="Feature" >Feature</option><option value="Requirement" >Requirement</option><option value="Task" >Task</option><option value="Test Case" >Test Case</option><option value="User Story" >User Story</option>
+        </select>
+      </div>
+      <button class="btn-primary" type="submit">Load</button>
+    </div>
+  </form>
+</div>
+
+<!-- ── Work items + actions ── -->
+<form method="post" id="wb">
+  <input type="hidden" name="assignee" value="phong.pham@nois.vn"/>
+  <input type="hidden" name="state" value="all"/>
+  <input type="hidden" name="type" value="all"/>
+  <div class="card">
+    <div class="card-header">
+      <h3>📋 Work items</h3>
+      <span class="dim" style="font-size:12.5px">5 loaded ·
+        <span class="sel-count" id="selcount">0</span> selected</span>
+    </div>
+    
+    <div class="card-body">
+      <table>
+        <thead><tr>
+          <th style="width:40px"><input class="cell-chk" type="checkbox"
+            onclick="document.querySelectorAll('.wbchk').forEach(c=>c.checked=this.checked);_sel()"></th>
+          <th>Item</th><th style="width:120px">Type</th><th style="width:150px">State</th><th style="width:120px">In pipeline</th>
+        </tr></thead>
+        <tbody>
+          
+          <tr>
+            <td><input class="cell-chk wbchk" type="checkbox" name="ids" value="5201" onclick="_sel()" ></td>
+            <td>
+              <span class="id-col">#5201</span>&nbsp;
+              SparePart create API + validation
+            </td>
+            <td><span class="chip">Task</span></td>
+            <td class="muted">Active</td>
+            <td>
+              
+              <span class="chip chip-accent">⚑ queued</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td><input class="cell-chk wbchk" type="checkbox" name="ids" value="5202" onclick="_sel()" ></td>
+            <td>
+              <span class="id-col">#5202</span>&nbsp;
+              SparePart list screen (Angular)
+            </td>
+            <td><span class="chip">Task</span></td>
+            <td class="muted">Proposed</td>
+            <td>
+              
+              <span class="dim">—</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td><input class="cell-chk wbchk" type="checkbox" name="ids" value="5188" onclick="_sel()" ></td>
+            <td>
+              <span class="id-col">#5188</span>&nbsp;
+              Fix: invoice PDF wrong total
+            </td>
+            <td><span class="chip">Bug</span></td>
+            <td class="muted">Active</td>
+            <td>
+              
+              <span class="dim">—</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td><input class="cell-chk wbchk" type="checkbox" name="ids" value="5150" onclick="_sel()" ></td>
+            <td>
+              <span class="id-col">#5150</span>&nbsp;
+              Requirement: warehouse transfer flow
+            </td>
+            <td><span class="chip">Requirement</span></td>
+            <td class="muted">New</td>
+            <td>
+              
+              <span class="dim">—</span>
+            </td>
+          </tr>
+          
+          <tr>
+            <td><input class="cell-chk wbchk" type="checkbox" name="ids" value="5210" onclick="_sel()" ></td>
+            <td>
+              <span class="id-col">#5210</span>&nbsp;
+              QC test cases for spare part
+            </td>
+            <td><span class="chip">Test Case</span></td>
+            <td class="muted">Proposed</td>
+            <td>
+              
+              <span class="dim">—</span>
+            </td>
+          </tr>
+          
+        </tbody>
+      </table>
+    </div>
+    <div class="actionbar">
+      <button class="btn-ghost" type="submit" formaction="/dashboard/planning/analyze">🔬 Analyze &amp; group</button>
+      <span style="flex:1"></span>
+      <div class="seg">
+        <label id="lbl-now" class="on"><input type="radio" name="mode" value="now" checked onchange="_mode()"> Start now</label>
+        <label id="lbl-sch"><input type="radio" name="mode" value="schedule" onchange="_mode()"> Schedule</label>
+      </div>
+      <input class="pf-input" id="whenat" type="datetime-local" name="when_at" value="2026-07-06T21:00" disabled/>
+      <button class="btn-go" type="submit" formaction="/dashboard/planning/start">▶ Start</button>
+    </div>
+    
+  </div>
+</form>
+
+<script>
+  function _sel() {
+    var n = document.querySelectorAll('.wbchk:checked').length;
+    var el = document.getElementById('selcount'); if (el) el.textContent = n;
+  }
+  function _mode() {
+    var r = document.querySelector('input[name=mode]:checked');
+    var sched = r && r.value === 'schedule';
+    var f = document.getElementById('whenat');
+    if (f) { f.disabled = !sched; f.required = sched; if (sched && !f.value) f.focus(); }
+    var ln = document.getElementById('lbl-now'), ls = document.getElementById('lbl-sch');
+    if (ln && ls) { ln.className = sched ? '' : 'on'; ls.className = sched ? 'on' : ''; }
+  }
+  _sel(); _mode();
+</script>
+
+<!-- ── Analysis ── -->
+
+
+<!-- ── Scheduled runs ── -->
+
+<div class="card">
+  <div class="card-header"><h3>🕒 Scheduled runs</h3></div>
+  <div class="card-body">
+    
+    <div class="sched-row">
+      <span class="chip chip-amber">2026-07-07 04:00</span>
+      <span class="muted">2 item(s)</span>
+      <span style="flex:1"></span>
+      <form method="post" action="/dashboard/planning/cancel">
+        <input type="hidden" name="run_id" value="1"/>
+        <button class="btn-ghost" type="submit">Cancel</button>
+      </form>
+    </div>
+    
+  </div>
+</div>
+
+
+<!-- ── Live schedule (read-only) ── -->
+<div class="card">
+  <div class="card-header"><h3>📡 Live schedule</h3>
+    <span class="dim" style="font-size:12px">dependency scheduler decision each poll</span></div>
+  <div class="card-body">
+    
+      <div class="grp-line"><span class="k">Dispatched</span>
+        <span class="id-col">#5201</span></div>
+      
+        <div class="grp-line"><span class="k">Waiting</span> <span class="id-col">#5202</span> SparePart list screen
+          <span style="color:var(--amber)">— cho tien nhiem #5201 hoan tat</span></div>
+      
+      <div class="grp-line dim">Computed 13:00:42 · 3 candidate(s)</div>
+    
+  </div>
+</div>
+
     </main>
 </div>
 </body>

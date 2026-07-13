@@ -49,8 +49,12 @@ FIELDS: tuple[Field, ...] = (
     # ── Tags & trigger ──
     Field("trigger_tag", "Trigger tag", "text", "Tags & Trigger",
           "Work items with this tag get processed."),
-    Field("trigger_tags", "Additional trigger tags", "list", "Tags & Trigger",
-          "Extra tags to also process (comma or newline separated). Board/Overview can filter by tag."),
+    Field("assignee_trigger_tag", "Assignee trigger tag", "text", "Tags & Trigger",
+          "Also process items with THIS shared tag, but only those assigned to the user below "
+          "(e.g. 'ai-autopilot' shared across a team). Blank = off."),
+    Field("assignee_trigger_user", "↳ handled by (assignee)", "text", "Tags & Trigger",
+          "Assignee (name/email) this machine claims for the shared tag above. "
+          "Blank = use the auto-transition assignee."),
     Field("trigger_states", "Trigger states", "stateset", "Tags & Trigger",
           "ADO states eligible for processing — tick from your board, or add custom ones below."),
     Field("reprocess_on_reopen", "Reprocess when reopened", "bool", "Tags & Trigger",
@@ -90,6 +94,8 @@ FIELDS: tuple[Field, ...] = (
     Field("done_states", "Done states (→ Done column)", "stateset", "Board columns",
           "ADO states that count as Done on the board (e.g. Ready to Testing, Closed). "
           "Items a human moved to any of these show in the Done column."),
+    Field("board_max_per_column", "Max cards / column", "int", "Board columns",
+          "Show at most this many cards per column, then a 'Load more'. 0 = show all."),
     Field("board_drop_map", "Drag & drop (column => tag/state)", "list", "Board columns",
           "Enable dragging cards: one 'Column => value' per line. Value is a tag, or an ADO state "
           "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready to deploy => @Ready to Deploy'."),
@@ -207,21 +213,35 @@ RESTART_REQUIRED = frozenset({"max_concurrent"})
 # Never echo these values back into the form.
 SECRET_KEYS = frozenset({"ado_pat"})
 
-# Keys excluded from an exported/shared config: secrets + machine-specific values.
-# Sharing these would leak credentials or pin a teammate to this host's paths/tag.
-EXPORT_EXCLUDE = frozenset(
-    {"ado_pat", "oauth_app_id", "oauth_app_secret", "workspace_directory", "trigger_tag"}
-)
+# Keys excluded from an exported/shared config. Everything else in the Settings
+# model IS exported, so new config knobs are shared automatically. Two groups:
+#   • secrets — sharing them leaks credentials
+#   • machine/host-specific — sharing them pins a teammate to this host's paths,
+#     ports, tenants or per-host trigger tag
+EXPORT_EXCLUDE = frozenset({
+    # ── secrets ──
+    "ado_pat", "oauth_app_id", "oauth_app_secret",
+    "smtp_host", "smtp_port", "smtp_user", "smtp_password",
+    "zalo_oa_access_token", "zalo_recipient_user_id",
+    "teams_webhook_url", "email_to", "email_from",
+    "tenants",              # each tenant embeds its own ado_pat
+    # ── machine / host specific ──
+    "workspace_directory", "repo_working_directory", "worktrees_dir",
+    "database_url", "health_host", "health_port", "plugins_directory",
+    "trigger_tag",          # per-host default tag
+    "repos",                # RepoConfig entries embed local filesystem paths
+})
 
 
 def export_settings(config: Any) -> dict[str, Any]:
-    """Shareable settings dict: the editable fields minus secrets and machine-
-    specific values (PAT, OAuth app, workspace path, the per-host trigger tag)."""
-    return {
-        f.key: getattr(config, f.key, None)
-        for f in FIELDS
-        if f.key not in EXPORT_EXCLUDE
-    }
+    """Shareable settings dict: EVERY Settings field except secrets and machine-
+    specific values (see ``EXPORT_EXCLUDE``). Uses ``model_dump`` so nested models
+    (scheduled_loops, sdlc_stages…) serialise to plain dicts for YAML."""
+    if hasattr(config, "model_dump"):
+        data = config.model_dump(mode="json")
+    else:  # fallback for non-pydantic configs (tests)
+        data = {f.key: getattr(config, f.key, None) for f in FIELDS}
+    return {k: v for k, v in data.items() if k not in EXPORT_EXCLUDE}
 
 
 def export_yaml(config: Any) -> str:

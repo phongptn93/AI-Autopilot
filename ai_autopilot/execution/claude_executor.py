@@ -312,6 +312,48 @@ class ClaudeExecutor:
                     await self._git(["worktree", "prune"], src_repo, check=False)
         shutil.rmtree(run_dir, ignore_errors=True)  # noqa: ASYNC240
 
+    # ── SDLC loop: one shared branch across many stage runs in a scratch ──────
+
+    async def prepare_stage_branch(self, scratch: str, repos: list[str], branch: str) -> None:
+        """Create/reset the item's single feature branch in each worktree.
+
+        ``_acquire_agent_scratch`` adds worktrees ``--detach`` at their base ref; the
+        SDLC loop needs ONE stable branch to accumulate every stage's commits and to
+        push from the ``pr`` stage. Best-effort per repo (a repo that can't branch is
+        skipped, not fatal)."""
+        for repo in repos:
+            worktree = Path(scratch) / repo
+            if worktree.is_dir():
+                await self._git(["checkout", "-B", branch], str(worktree), check=False)
+
+    async def stage_commit(
+        self, scratch: str, repos: list[str], message: str
+    ) -> dict[str, list[str]]:
+        """Commit any changes a stage produced in each worktree. Returns
+        ``{repo: [changed files]}`` for the repos that actually committed."""
+        committed: dict[str, list[str]] = {}
+        for repo in repos:
+            worktree = Path(scratch) / repo
+            if not worktree.is_dir():
+                continue
+            files = await self._changed_files(str(worktree))
+            if not files:
+                continue
+            await self._git("add -A", str(worktree), check=False)
+            await self._git(["commit", "-m", message], str(worktree), check=False)
+            committed[repo] = files
+        return committed
+
+    async def push_stage_branch(self, scratch: str, repos: list[str], branch: str) -> None:
+        """Force-push the shared feature branch for the given repos (the autopilot
+        owns these branches — see the legacy force-push rationale)."""
+        for repo in repos:
+            worktree = Path(scratch) / repo
+            if worktree.is_dir():
+                await self._git(
+                    ["push", "-u", "origin", branch, "--force"], str(worktree), check=False
+                )
+
     # ── Interactive mode: a real Remote-Control session per task ──────────────
 
     async def dispatch_interactive(

@@ -7,7 +7,9 @@
             <span class="board-col-count">{{ board[col]|length }}</span>
         </div>
         <div class="board-col-body">
-            {% for card in board[col] %}
+            {% set full = board[col] %}
+            {% set shown = full if not board_limit else full[:board_limit] %}
+            {% for card in shown %}
             {% set label, css = category_badge(card.category) %}
             <div class="board-card {{ css }}" draggable="true" data-id="{{ card.id }}">
                 <div class="board-card-head">
@@ -40,6 +42,9 @@
             {% else %}
             <div class="board-col-empty">No items</div>
             {% endfor %}
+            {% if board_limit and full|length > board_limit %}
+            <a class="board-more" href="{{ more_url }}">＋ Load more ({{ full|length - board_limit }} more of {{ full|length }})</a>
+            {% endif %}
         </div>
     </div>
     {% endfor %}

@@ -32,6 +32,25 @@ def items_awaiting_deploy(tagged: list[WorkItemInfo], on_merge_state: str) -> li
     return [i.id for i in tagged if (i.state or "").strip().lower() == target]
 
 
+def already_at_or_past_merge(state: str, cfg: object) -> bool:
+    """True if an item is already at or past the merge state — i.e. its state is the
+    ``on_merge_state``, the ``on_deploy_state``, or any ``done_states`` entry.
+
+    The merge→state transition must never pull such an item BACKWARD. A merged PR
+    stays ``completed`` forever, so without this guard a restart (which clears the
+    in-memory dedup) re-applies ``on_merge_state`` to items that had already advanced
+    (e.g. an item at "Ready to Testing" yanked back to "Ready to Deploy")."""
+    s = (state or "").strip().lower()
+    if not s:
+        return False
+    advanced = {
+        getattr(cfg, "on_merge_state", ""),
+        getattr(cfg, "on_deploy_state", ""),
+        *(getattr(cfg, "done_states", None) or []),
+    }
+    return s in {x.strip().lower() for x in advanced if x and x.strip()}
+
+
 def parse_rollup_map(entries: list[str]) -> list[tuple[str, str]]:
     """Parse ``["Child = Parent", ...]`` into ordered (child_state, parent_state)
     pairs. An entry without ``=``/``:`` maps a state to itself (same name)."""
@@ -76,6 +95,8 @@ class StateSyncService:
         self._parent_targets: dict[int, str] = {}  # parent id → last state we rolled it to
         self._last_deploy_build: int | None = None  # newest deploy build id seen
         self._task: asyncio.Task | None = None
+        # Persisted dedup (survives restarts). Optional so tests can omit it.
+        self._sync_repo = getattr(c, "sync_repo", None)
 
     def start(self) -> None:
         if not self._config.auto_transition_enabled:
@@ -91,6 +112,11 @@ class StateSyncService:
 
     async def _run(self) -> None:
         self._log.info("state-sync started — merged PRs → state, parent roll-up")
+        # Restore the dedup from disk so a restart doesn't re-transition merged PRs.
+        if self._sync_repo is not None:
+            with contextlib.suppress(Exception):
+                self._merged = await self._sync_repo.seen_merged_prs()
+                self._log.info("state-sync: restored merged-PR memory", count=len(self._merged))
         while True:
             try:
                 await asyncio.sleep(_POLL_INTERVAL_SECONDS)
@@ -177,8 +203,14 @@ class StateSyncService:
         item = await c.ado.get_work_item(work_item_id)
         if item is None or not self._has_trigger_tag(item) or not self._assignee_ok(item):
             return
-        self._merged.add(pr_id)
+        # Never pull an item BACKWARD: if it's already at/after the merge state
+        # (merged / deployed / done), just remember the PR and leave it alone. This
+        # keeps the transition idempotent even when the in-memory dedup was lost.
+        if already_at_or_past_merge(item.state, cfg):
+            await self._remember(pr_id, work_item_id, item.state or "")
+            return
         if cfg.dry_run:
+            self._merged.add(pr_id)
             self._log.info("[DRY-RUN] would transition on merge", id=work_item_id, pr=pr_id)
             return
         if cfg.on_merge_state:
@@ -187,7 +219,15 @@ class StateSyncService:
         await c.ado.add_comment(
             work_item_id, "<div><b>🔀 PR merged</b> — autopilot marked it done.</div>"
         )
+        await self._remember(pr_id, work_item_id, cfg.on_merge_state)
         self._log.info("transitioned on merge", id=work_item_id, pr=pr_id, state=cfg.on_merge_state)
+
+    async def _remember(self, pr_id: int, work_item_id: int, state: str) -> None:
+        """Record a PR as handled — in memory and (best-effort) persisted."""
+        self._merged.add(pr_id)
+        if self._sync_repo is not None:
+            with contextlib.suppress(Exception):
+                await self._sync_repo.mark_merged_pr(pr_id, work_item_id, state)
 
     async def _maybe_roll_up_parent(self, parent_id: int) -> None:
         c, cfg = self._c, self._config

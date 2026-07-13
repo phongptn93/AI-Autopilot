@@ -20,7 +20,7 @@ import yaml
 class Field:
     key: str
     label: str
-    kind: str  # text | password | int | bool | select | list | stateset | stateone
+    kind: str  # text | password | int | bool | select | list | stateset | stateone | map
     section: str
     help: str = ""
     options: tuple[str, ...] = field(default_factory=tuple)
@@ -137,6 +137,68 @@ FIELDS: tuple[Field, ...] = (
           "Below this the run is held for a human instead of review/done. Default 60."),
     Field("dry_run", "Dry run", "bool", "Execution & Autonomy",
           "Log only — never execute or write to ADO."),
+    # ── Dependency scheduling ──
+    Field("dependency_scheduling_enabled", "Order by link graph", "bool",
+          "Dependency scheduling",
+          "Wait on Predecessor links, never run Related items together (0 tokens). "
+          "Off = plain priority order."),
+    Field("sibling_conflict_scheduling", "Sibling soft-conflict", "bool",
+          "Dependency scheduling",
+          "Treat same-Parent + same-category siblings as a soft conflict even without a link."),
+    Field("scheduler_max_dispatch", "Max dispatch / cycle", "int", "Dependency scheduling",
+          "Cap items marked ready per poll cycle. 0 = no cap (max_concurrent still throttles)."),
+    Field("scheduler_use_ai_conflicts", "Use AI-found conflicts", "bool", "Dependency scheduling",
+          "Feed hidden conflicts the Planning Analyze confirmed back into scheduling as "
+          "soft-conflicts, so the poller won't run those items concurrently."),
+    Field("scheduler_ai_conflict_min_score", "AI conflict min score", "int", "Dependency scheduling",
+          "Only AI conflicts scoring at least this (0–100) affect scheduling. Default 60."),
+    Field("scheduler_history_limit", "History to keep", "int", "Dependency scheduling",
+          "How many recent scheduling decisions (that held work back) to keep for the "
+          "Planning history panel. 0 = keep only the live view."),
+    # ── Closed-loop SDLC engine (v2) ──
+    Field("sdlc_loop_enabled", "Enable SDLC loop", "bool", "Closed-loop SDLC (v2)",
+          "Drive items through profile-selected SDLC stages (gate + revise + escalate + handoff). "
+          "Off = one-shot behaviour, unchanged. Headless only."),
+    Field("sdlc_profile", "This machine's profile", "select", "Closed-loop SDLC (v2)",
+          "Role this machine runs. Blank = fall through to type-map / default.",
+          ("", "ba", "dev", "qc", "review", "design", "full")),
+    Field("sdlc_default_profile", "Default profile", "select", "Closed-loop SDLC (v2)",
+          "Used when neither a per-item sdlc:* tag nor this machine's profile resolves.",
+          ("full", "dev", "ba", "qc", "review", "design")),
+    Field("sdlc_max_iterations", "Max revise iterations", "int", "Closed-loop SDLC (v2)",
+          "Shared budget across all stages of one item before escalating to a human. Default 3."),
+    Field("sdlc_advance_on_draft", "Advance on draft PR", "bool", "Closed-loop SDLC (v2)",
+          "Apply the handoff state even for a draft PR. Off = a draft awaits human review."),
+    Field("sdlc_profile_states", "Handoff (profile => state)", "map",
+          "Closed-loop SDLC (v2)",
+          "One 'profile => ADO state' per line — set when that profile completes, so the next "
+          "machine's trigger_states picks it up. E.g. 'ba => Ready for Dev'."),
+    Field("sdlc_type_profiles", "Type → profile", "map",
+          "Closed-loop SDLC (v2)",
+          "Optional: map a work-item type to a profile, e.g. 'Bug => dev', 'User Story => full'."),
+    # ── Planning workbench ──
+    Field("planning_ai_analysis", "AI conflict analysis", "bool", "Planning workbench",
+          "The Analyze action runs bounded Claude judges over keyword-overlapping pairs "
+          "(tokens). Off = link-graph grouping only (0 tokens)."),
+    Field("planning_ai_max_pairs", "AI max pairs / analyze", "int", "Planning workbench",
+          "Cap on how many suspicious pairs get an AI judge per Analyze click. Default 6."),
+    Field("planning_ai_min_score", "AI min score to flag", "int", "Planning workbench",
+          "A judge verdict must score at least this (0–100) to be shown. Default 50."),
+    Field("planning_ai_timeout_seconds", "AI judge timeout (s)", "int", "Planning workbench",
+          "Per-judge Claude timeout during Analyze. Default 120."),
+    Field("conflict_ai_min_token_len", "Keyword min length", "int", "Planning workbench",
+          "Shortest keyword the pre-filter considers when pairing items. Default 4."),
+    Field("conflict_ai_extra_stopwords", "Extra stopwords", "list", "Planning workbench",
+          "Project-specific noise words to ignore when matching keywords (comma/newline)."),
+    Field("planning_schedule_default_hour", "Schedule default hour", "int", "Planning workbench",
+          "Hour (0–23, local) pre-filled in the Schedule date-time picker. Default 21."),
+    Field("planning_load_limit", "Load limit", "int", "Planning workbench",
+          "Max work items the Load button fetches for an assignee. Default 200."),
+    Field("planning_live_refresh_seconds", "Live schedule refresh (s)", "int", "Planning workbench",
+          "Auto-refresh the read-only Live schedule panel every N seconds. 0 = off."),
+    Field("planning_start_state", "Start → state", "stateone", "Planning workbench",
+          "State the Start action moves an item to (so the poller picks it up) if it isn't "
+          "already in a trigger state. Blank = the first trigger state."),
 )
 
 # Fields that only take effect after a restart (the value is captured at startup).
@@ -214,9 +276,27 @@ def parse_form(form: Mapping[str, Any]) -> dict[str, Any]:
             updates[f.key] = [x.strip() for x in re.split(r"[,\n]", raw) if x.strip()]
         elif f.kind == "stateset":
             updates[f.key] = parse_states(form, f.key)
+        elif f.kind == "map":
+            updates[f.key] = parse_map(form.get(f.key, ""))
         else:  # text, select
             updates[f.key] = str(form.get(f.key, "")).strip()
     return updates
+
+
+def parse_map(raw: Any) -> dict[str, str]:
+    """Parse a ``key => value`` textarea into a dict (one pair per line).
+
+    Lines without ``=>`` or with a blank key are ignored; later duplicates win.
+    """
+    out: dict[str, str] = {}
+    for line in str(raw).splitlines():
+        if "=>" not in line:
+            continue
+        key, value = line.split("=>", 1)
+        key = key.strip()
+        if key:
+            out[key] = value.strip()
+    return out
 
 
 def parse_states(form: Mapping[str, Any], key: str) -> list[str]:

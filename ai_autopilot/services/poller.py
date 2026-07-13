@@ -16,9 +16,11 @@ from ai_autopilot import metrics
 from ai_autopilot.container import Container
 from ai_autopilot.data import PipelineState
 from ai_autopilot.execution.pr_scorer import RunScore, ScoreInput, score_badge_html, score_run
+from ai_autopilot.execution.sdlc_plan import handoff_state, resolve_profile_name
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
-from ai_autopilot.routing import sort_by_priority
+from ai_autopilot.routing import plan_schedule, sort_by_priority
+from ai_autopilot.services.planning_analyzer import run_due_plans
 
 
 def outcome_policy(cfg: object, outcome: str) -> tuple[str, str]:
@@ -45,6 +47,54 @@ def outcome_policy(cfg: object, outcome: str) -> tuple[str, str]:
     }.get(outcome, ("", ""))
 
 
+def _scheduler_snapshot(items: list[WorkItemInfo], plan: object, at: datetime) -> dict:
+    """A JSON-friendly snapshot of one scheduling decision for the Planning UI:
+    the wave dispatched now (priority order) and the items held, each with a reason."""
+    by_id = {i.id: i for i in items}
+
+    def row(i: WorkItemInfo) -> dict:
+        return {
+            "id": i.id, "title": i.title, "category": str(i.category), "priority": i.priority,
+            "predecessors": sorted(i.predecessor_ids), "related": sorted(i.related_ids),
+        }
+
+    deferred = []
+    for iid, reason in plan.deferred.items():
+        it = by_id.get(iid)
+        deferred.append({"id": iid, "title": it.title if it else "", "reason": reason})
+    return {
+        "at": at,
+        "candidates": len(items),
+        "ready": [row(i) for i in plan.ready],
+        "deferred": deferred,
+    }
+
+
+def _symmetrize(related: dict[int, set[int]]) -> dict[int, set[int]]:
+    """Make a Related map undirected — if A links B, B also links A. ADO stores the
+    link on both items, but symmetrising is cheap insurance for partial fetches."""
+    out: dict[int, set[int]] = {k: set(v) for k, v in related.items()}
+    for a, peers in related.items():
+        for b in peers:
+            out.setdefault(b, set()).add(a)
+    return out
+
+
+def _add_sibling_conflicts(items: list[WorkItemInfo], related: dict[int, set[int]]) -> None:
+    """Heuristic: candidates sharing a Parent and repo-category likely touch the same
+    code, so mark them mutually Related (soft conflict). Mutates ``related``."""
+    groups: dict[tuple[int, object], list[int]] = {}
+    for it in items:
+        if it.parent_id is None:
+            continue
+        groups.setdefault((it.parent_id, it.category), []).append(it.id)
+    for ids in groups.values():
+        if len(ids) < 2:
+            continue
+        for a in ids:
+            related.setdefault(a, set()).update(x for x in ids if x != a)
+
+
 class AdoPollerService:
     def __init__(self, c: Container) -> None:
         self._c = c
@@ -54,6 +104,9 @@ class AdoPollerService:
         # Interactive mode: live Remote-Control sessions awaiting their result.json.
         self._live: dict[int, int] = {}  # work_item_id → execution record id
         self._live_dirs: dict[int, str] = {}  # work_item_id → run dir (worktree scratch)
+        # Dependency scheduling: ids we've already told the human are deferred, so we
+        # comment "waiting for #X" once per episode rather than every poll cycle.
+        self._deferred_notified: set[int] = set()
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
 
@@ -111,6 +164,10 @@ class AdoPollerService:
         # Finalise any interactive sessions that have written their result.
         await self._finalize_live_sessions()
 
+        # Fire any Planning-workbench runs whose scheduled time has come.
+        with contextlib.suppress(Exception):
+            await run_due_plans(c)
+
         if not c.schedule.is_within_window():
             self._log.debug("outside schedule window — skipping")
             return
@@ -149,12 +206,104 @@ class AdoPollerService:
 
         for item in new_items:
             c.router.classify(item)
-        new_items = sort_by_priority(new_items)
+
+        ready = await self._schedule(new_items)
 
         metrics.set_poll_items_found(len(new_items))
-        self._log.info("found new work items", count=len(new_items))
+        self._log.info(
+            "found new work items", count=len(new_items), dispatching=len(ready)
+        )
 
-        await asyncio.gather(*(self._process(item) for item in new_items))
+        await asyncio.gather(*(self._process(item) for item in ready))
+
+    async def _schedule(self, new_items: list[WorkItemInfo]) -> list[WorkItemInfo]:
+        """Order the cycle's candidates by the ADO link graph (P1).
+
+        Returns the items to dispatch *this* cycle. Deferred items are left
+        un-processed so the next poll re-evaluates them — waves form across cycles.
+        Falls back to plain priority order if scheduling is disabled or the link
+        fetch fails (offline / bad PAT), so a graph hiccup never stalls the board.
+        """
+        c, cfg = self._c, self._config
+        if not cfg.dependency_scheduling_enabled or not new_items:
+            return sort_by_priority(new_items)
+
+        candidate_ids = {i.id for i in new_items}
+        try:
+            preds, related = await c.ado.get_work_item_links(list(candidate_ids))
+        except Exception as exc:  # noqa: BLE001 — never let scheduling break the poll
+            self._log.warning("link-graph fetch failed — plain priority order", error=str(exc))
+            return sort_by_priority(new_items)
+
+        related = _symmetrize(related)
+        if cfg.sibling_conflict_scheduling:
+            _add_sibling_conflicts(new_items, related)
+        # Feed AI-confirmed hidden conflicts (from Planning Analyze) back in as
+        # Related soft-conflicts, so the autopilot avoids running them concurrently.
+        if cfg.scheduler_use_ai_conflicts:
+            try:
+                ai_edges = await c.ai_conflict_repo.related_edges(
+                    list(candidate_ids), cfg.scheduler_ai_conflict_min_score
+                )
+                for a, peers in ai_edges.items():
+                    related.setdefault(a, set()).update(peers)
+            except Exception as exc:  # noqa: BLE001 — never let this break the poll
+                self._log.warning("ai-conflict edges fetch failed", error=str(exc))
+
+        # Attach links to the items (handy for the dashboard) and work out which
+        # predecessors are still open (block their successors).
+        for item in new_items:
+            item.predecessor_ids = sorted(preds.get(item.id, set()))
+            item.related_ids = sorted(related.get(item.id, set()))
+
+        live_ids = set(self._live)
+        active_ids = candidate_ids | live_ids
+        # Predecessors that aren't candidates/in-flight: fetch their state; anything
+        # not in a done state (or unfetchable) still blocks — safest for ordering.
+        all_pred = set().union(*preds.values()) if preds else set()
+        unknown = all_pred - candidate_ids - live_ids
+        if unknown:
+            done_states = {s.lower() for s in cfg.done_states}
+            linked = await c.ado.get_work_items_by_ids(list(unknown))
+            fetched = {wi.id: (wi.state or "") for wi in linked}
+            active_ids |= {i for i, st in fetched.items() if st.lower() not in done_states}
+            active_ids |= unknown - set(fetched)  # couldn't fetch → assume still open
+
+        plan = plan_schedule(
+            new_items,
+            predecessors=preds,
+            related=related,
+            active_ids=active_ids,
+            busy_ids=live_ids,
+            max_dispatch=cfg.scheduler_max_dispatch or None,
+        )
+
+        # Publish the decision for the Planning dashboard (ready order + why deferred).
+        snapshot = _scheduler_snapshot(new_items, plan, datetime.now(UTC))
+        self._c.scheduler_view = snapshot
+        # Persist a bounded history of *interesting* cycles (something was deferred)
+        # so the dashboard shows the recent trend across restarts. Best-effort.
+        if plan.deferred and cfg.scheduler_history_limit > 0:
+            with contextlib.suppress(Exception):
+                await self._c.scheduler_history_repo.record(
+                    snapshot["at"], snapshot["candidates"],
+                    [i.id for i in plan.ready], snapshot["deferred"],
+                    keep=cfg.scheduler_history_limit,
+                )
+
+        # Tell the human (once per episode) why an item is waiting.
+        for item in plan.ready:
+            self._deferred_notified.discard(item.id)
+        if plan.deferred:
+            self._log.info("deferred by dependency scheduler", deferred=plan.deferred)
+        for item_id, reason in plan.deferred.items():
+            if item_id in self._deferred_notified or cfg.dry_run:
+                continue
+            self._deferred_notified.add(item_id)
+            with contextlib.suppress(Exception):
+                await c.ado.add_comment(item_id, f"<div>⏸️ <b>Autopilot hoãn:</b> {reason}.</div>")
+
+        return plan.ready
 
     def _matched_tag(self, item: WorkItemInfo) -> str | None:
         """The first effective trigger tag this item carries (for dashboard filtering)."""
@@ -248,6 +397,11 @@ class AdoPollerService:
         """Control plane around the agent: track, run, read structured result, react."""
         c, cfg = self._c, self._config
 
+        # Closed-loop SDLC engine (opt-in) — headless only, takes precedence.
+        if cfg.sdlc_loop_enabled:
+            await self._process_sdlc(item, classified)
+            return
+
         # Interactive mode: launch a Remote-Control session and let the human steer.
         if cfg.execution_mode == "interactive":
             if len(self._live) >= cfg.max_concurrent:
@@ -283,6 +437,59 @@ class AdoPollerService:
         self._log.info(
             "finished", id=item.id, status=status, duration=round(result.duration_seconds, 1)
         )
+
+    async def _process_sdlc(self, item: WorkItemInfo, classified: WorkItemInfo) -> None:
+        """Run the item through the closed-loop SDLC engine, then hand it off.
+
+        Reuses the headless bookkeeping and ``_handle_agent_result`` for terminal
+        state/tags, then overrides the ADO state with the profile's handoff state so
+        the NEXT machine's role (its ``trigger_states``) picks the item up."""
+        c = self._c
+
+        await c.state_repo.set(item.id, PipelineState.IN_PROGRESS, title=item.title)
+        await self._apply_outcome(item.id, "in_progress")
+        await c.notifier.notify_started(item, "sdlc")
+        record_id = await c.execution_repo.start_execution(
+            item, "sdlc", trigger_tag=self._matched_tag(item)
+        )
+
+        result = await c.sdlc_engine.run(item)
+
+        await c.execution_repo.complete_execution(record_id, result)
+        if result.cost_tokens:
+            await c.cost_tracker.track(record_id, result.cost_tokens)
+            metrics.record_cost(result.cost_tokens)
+
+        await self._handle_agent_result(item, result)
+        await self._apply_sdlc_handoff(item, result)
+        await c.plugins.run_post_processors(item, result)
+
+        status = (
+            "NEEDS_HUMAN" if result.needs_human else ("SUCCESS" if result.success else "FAILED")
+        )
+        metrics.record_task(status.lower(), str(classified.category), "sdlc")
+        metrics.record_duration(str(classified.category), result.duration_seconds)
+        self._log.info(
+            "sdlc finished", id=item.id, status=status, duration=round(result.duration_seconds, 1)
+        )
+
+    async def _apply_sdlc_handoff(self, item: WorkItemInfo, result: ExecutionResult) -> None:
+        """On a successful SDLC run, set the profile's handoff ADO state (unless a
+        draft PR should await human review first)."""
+        cfg = self._config
+        if cfg.dry_run or not result.success or result.needs_human:
+            return
+        name = resolve_profile_name(item.tags, item.work_item_type, cfg)
+        state = handoff_state(name, cfg)
+        if not state:
+            return
+        # A draft PR shouldn't auto-advance to the next role before human review.
+        draft_block = bool(result.pr_url) and cfg.pr_is_draft and not cfg.sdlc_advance_on_draft
+        if draft_block:
+            self._log.info("sdlc handoff held (draft PR)", id=item.id, would_be=state)
+            return
+        await self._c.ado.update_state(item.id, state)
+        self._log.info("sdlc handoff", id=item.id, profile=name, state=state)
 
     async def _dispatch_interactive(self, item: WorkItemInfo) -> None:
         """Launch a Remote-Control session for the item; finalise later from its result."""

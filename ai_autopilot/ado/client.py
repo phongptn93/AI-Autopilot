@@ -8,6 +8,7 @@ Code, so it does not use MCP). Auth headers are injected per-request via
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -26,6 +27,11 @@ _FIELDS = (
     "System.Parent,System.Tags,System.AreaPath,System.IterationPath,System.ChangedDate,"
     "Microsoft.VSTS.Common.Priority,System.CreatedBy"
 )
+
+# ADO relation types used for dependency-aware scheduling (P1).
+_REL_PREDECESSOR = "System.LinkTypes.Dependency-Reverse"  # this item depends on target
+_REL_SUCCESSOR = "System.LinkTypes.Dependency-Forward"    # target depends on this item
+_REL_RELATED = "System.LinkTypes.Related"                 # soft conflict (touch same area)
 
 
 class AdoClient:
@@ -102,6 +108,54 @@ class AdoClient:
         )
         if not ids:
             return []
+        return await self.get_work_items_by_ids(ids)
+
+    async def get_work_items_by_assignee(
+        self, assignee: str, states: list[str] | None = None,
+        types: list[str] | None = None, top: int = 200,
+    ) -> list[WorkItemInfo]:
+        """Work items assigned to ``assignee`` — email/unique name, or several separated
+        by comma/semicolon (a team) — any tag, for the Planning workbench to pick from.
+        Optionally filtered to ``states`` / ``types``."""
+        people = [
+            p.replace("'", "''").strip()
+            for p in re.split(r"[,;]", assignee or "")
+            if p.strip()
+        ]
+        if not people:
+            return []
+        if len(people) == 1:
+            who_clause = f"[System.AssignedTo] = '{people[0]}'"
+        else:
+            who_list = ", ".join(f"'{p}'" for p in people)
+            who_clause = f"[System.AssignedTo] IN ({who_list})"
+        clauses = [
+            who_clause,
+            f"[System.TeamProject] = '{self._config.ado_project}'",
+        ]
+        if states:
+            state_list = ", ".join(f"'{s}'" for s in states)
+            clauses.append(f"[System.State] IN ({state_list})")
+        if types:
+            type_list = ", ".join(f"'{t}'" for t in types)
+            clauses.append(f"[System.WorkItemType] IN ({type_list})")
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY [System.ChangedDate] DESC"
+        )
+        try:
+            resp = await self._http.post(
+                self._url(f"wit/wiql?{_API}"), json={"query": wiql}, headers=await self._headers()
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("assignee WIQL request error", error=str(exc))
+            return []
+        text = resp.text.lstrip()
+        if resp.status_code >= 400 or not text.startswith("{"):
+            self._log.warning("assignee WIQL failed", status=resp.status_code)
+            return []
+        ids = [r["id"] for r in (resp.json().get("workItems") or [])][:top]
         return await self.get_work_items_by_ids(ids)
 
     async def get_all_tagged_work_items(self) -> list[WorkItemInfo]:
@@ -291,6 +345,52 @@ class AdoClient:
         ids = [r["id"] for r in (resp.json().get("workItems") or [])]
         return await self.get_work_items_by_ids(ids)
 
+    async def get_work_item_links(
+        self, ids: list[int]
+    ) -> tuple[dict[int, set[int]], dict[int, set[int]]]:
+        """Read the dependency link graph for ``ids`` via ``$expand=relations``.
+
+        Returns ``(predecessors, related)`` — each ``id → {linked ids}``:
+        ``predecessors`` are items this one must wait for (``Dependency-Reverse``),
+        ``related`` are soft-conflict neighbours (``Related``). Best-effort: any
+        error yields empty maps so scheduling degrades to plain priority order.
+        """
+        preds: dict[int, set[int]] = {}
+        related: dict[int, set[int]] = {}
+        if not ids:
+            return preds, related
+        ids_param = ",".join(str(i) for i in list(ids)[:200])
+        try:
+            resp = await self._http.get(
+                self._url(f"wit/workitems?ids={ids_param}&$expand=relations&{_API}"),
+                headers=await self._auth.get_auth_header(),
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("get_work_item_links request error", error=str(exc))
+            return preds, related
+        if resp.status_code >= 400:
+            self._log.warning("get_work_item_links failed", status=resp.status_code)
+            return preds, related
+        for wi in resp.json().get("value") or []:
+            wid = wi.get("id")
+            if wid is None:
+                continue
+            p, r = set(), set()
+            for rel in wi.get("relations") or []:
+                target = _rel_target_id(str(rel.get("url", "")))
+                if target is None or target == wid:
+                    continue
+                rel_type = rel.get("rel", "")
+                if rel_type == _REL_PREDECESSOR:
+                    p.add(target)
+                elif rel_type == _REL_RELATED:
+                    r.add(target)
+            if p:
+                preds[wid] = p
+            if r:
+                related[wid] = r
+        return preds, related
+
     async def get_pull_request_threads(self, repo_id: str, pr_id: int) -> list[dict[str, Any]]:
         url = self._git_url(f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads?{_API}")
         resp = await self._http.get(url, headers=await self._auth.get_auth_header())
@@ -369,6 +469,15 @@ class AdoClient:
             created_by=_identity(f.get("System.CreatedBy")),
             category=TaskCategory.UNKNOWN,
         )
+
+
+_REL_ID_RE = re.compile(r"/workItems/(\d+)", re.IGNORECASE)
+
+
+def _rel_target_id(url: str) -> int | None:
+    """Parse the work-item id from a relation url (…/_apis/wit/workItems/1234)."""
+    m = _REL_ID_RE.search(url)
+    return int(m.group(1)) if m else None
 
 
 def _json(obj: Any) -> str:

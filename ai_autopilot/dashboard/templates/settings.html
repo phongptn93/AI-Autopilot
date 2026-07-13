@@ -1,162 +1,198 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-header">
-    <h2>Settings</h2>
-    <p>Edit the workspace, connection, and trigger tags. Saved to <code>{{ config_path }}</code> and applied live.</p>
-    <div style="margin-top: 8px; display:flex; flex-wrap:wrap; align-items:center; gap:10px;">
-        <form method="post" action="/dashboard/settings/reload" style="margin:0;">
-            <button type="submit" class="btn-save" style="background: transparent; border: 1px solid var(--text-muted);">
-                ↻ Reload config from file
-            </button>
-        </form>
-        <a href="/dashboard/settings/export" class="btn-save"
-           style="background: transparent; border: 1px solid var(--text-muted); text-decoration:none;">
-            ⬇ Export config
-        </a>
-        <form method="post" action="/dashboard/settings/import" enctype="multipart/form-data"
-              style="margin:0; display:flex; align-items:center; gap:6px;">
-            <input type="file" name="file" accept=".yaml,.yml" required
-                   style="font-size:12px; color:var(--text-muted); max-width:200px;">
-            <button type="submit" class="btn-save" style="background: transparent; border: 1px solid var(--text-muted);">
-                ⬆ Import config
-            </button>
-        </form>
-    </div>
-    <span class="form-help" style="display:block; margin-top:6px;">
-        <b>Export</b> shares your setup (org, tags, states, pipeline mapping…) as a YAML file —
-        <b>never the PAT</b> or this host's trigger tag. Teammates <b>Import</b> it, then set their own PAT.
-    </span>
-</div>
+<style>
+  /* ── Settings page (scoped) ── */
+  .set-head{display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:space-between;margin-bottom:6px}
+  .set-head h2{font-size:22px;font-weight:750;letter-spacing:-.02em}
+  .set-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .set-actions form{margin:0}
+  .file-mini{font-size:12px;color:var(--text-muted);max-width:190px}
+  .subnote{color:var(--text-muted);font-size:12.5px;margin:2px 0 16px}
+  .subnote code{font-family:var(--mono);font-size:11.5px;background:var(--bg-input);padding:1px 6px;border-radius:5px}
 
-{% if saved %}
-<div class="card" style="border-color: var(--green);">
-    <div class="card-body" style="padding: 14px 22px; color: var(--green);">
-        ✅ Settings saved and applied. <span style="color: var(--text-muted);">(fields marked <em>restart</em> take effect after a restart)</span>
-    </div>
-</div>
-{% endif %}
+  /* sticky section nav + save */
+  .set-nav{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;
+    background:rgba(10,11,15,.86);backdrop-filter:blur(8px);border-bottom:1px solid var(--border-soft);
+    padding:10px 2px;margin:0 -2px 18px;overflow-x:auto}
+  .set-nav .tabs{display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+  .set-nav .tabs::-webkit-scrollbar{display:none}
+  .set-tab{white-space:nowrap;font-size:12.5px;font-weight:600;color:var(--text-muted);text-decoration:none;
+    padding:6px 12px;border-radius:20px;border:1px solid var(--border);transition:.12s}
+  .set-tab:hover{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
 
-{% if reloaded %}
-<div class="card" style="border-color: var(--green);">
-    <div class="card-body" style="padding: 14px 22px; color: var(--green);">
-        ↻ Config reloaded from <code>{{ config_path }}</code> into the running app.
-    </div>
-</div>
-{% endif %}
+  /* tags overview */
+  .tagbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;
+    padding:16px 20px}
+  .tagrow{display:flex;flex-direction:column;gap:6px}
+  .tagrow .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+  .tagrow .h{font-size:11.5px;color:var(--text-dim)}
+  .chip-blue{background:var(--blue-bg);color:var(--blue);border-color:transparent}
+  .chip-red{background:var(--red-bg);color:var(--red);border-color:transparent}
+  .chip-empty{background:transparent;color:var(--text-dim);border:1px dashed var(--border);font-style:italic}
 
-{% if imported %}
-<div class="card" style="border-color: var(--green);">
-    <div class="card-body" style="padding: 14px 22px; color: var(--green);">
-        ⬆ Config imported and applied. <span style="color: var(--text-muted);">(PAT and host trigger tag were not changed — set your PAT if needed)</span>
-    </div>
-</div>
-{% endif %}
+  /* compact 2-col field grid */
+  .field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 30px;padding:8px 20px 16px}
+  .field{padding:13px 0;border-bottom:1px solid var(--border-soft);min-width:0}
+  .field.wide{grid-column:1/-1}
+  @media(max-width:820px){.field-grid{grid-template-columns:1fr}.field.wide{grid-column:auto}}
+  .field > label{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--text);margin-bottom:7px}
+  .field .form-help{margin-top:6px}
+  .field .form-input input[type=text],.field .form-input input[type=password],
+  .field .form-input input[type=number],.field .form-input select,.field .form-input textarea{max-width:100%}
+  .field.bool{display:flex;flex-direction:row;align-items:flex-start;gap:11px;justify-content:space-between}
+  .field.bool > label{margin-bottom:0;order:1}
+  .field.bool .form-input{order:2}
+  .field.bool .form-input input[type=checkbox]{margin-top:1px}
+  .field.bool .form-help{flex-basis:100%;order:3;margin-top:2px}
 
-{% if import_error %}
-<div class="card" style="border-color: var(--red,#e5484d);">
-    <div class="card-body" style="padding: 14px 22px; color: var(--red,#e5484d);">
-        ⚠️ Import failed: {{ import_error }}
-    </div>
-</div>
-{% endif %}
+  .savebar{position:sticky;bottom:0;z-index:20;display:flex;justify-content:flex-end;gap:12px;align-items:center;
+    background:rgba(10,11,15,.9);backdrop-filter:blur(8px);border-top:1px solid var(--border-soft);
+    padding:14px 4px;margin:8px -4px 0}
+  .savebar .hint{color:var(--text-dim);font-size:12px;margin-right:auto}
+</style>
 
-<form method="post" action="/dashboard/settings">
-    <div class="card">
-        <div class="card-header">
-            <h3>Allowed repositories</h3>
-            <span class="form-help" style="margin:0">Repos the agent may edit (auto-discovered in the workspace). None ticked = all allowed.</span>
-        </div>
-        <div class="card-body" style="padding:16px 22px;">
-            <input type="hidden" name="_all_repos" value="{{ repos|join(',') }}">
-            {% if repos %}
-            <div class="chips">
-                {% for r in repos %}
-                {% set on = (not allowed_repos) or (r|lower in allowed_repos) %}
-                <label class="chip {{ 'chip-accent' if on else '' }}">
-                    <input type="checkbox" name="repo__{{ r }}" {% if on %}checked{% endif %}
-                           style="width:15px;height:15px;accent-color:var(--accent)"> {{ r }}
-                </label>
-                {% endfor %}
-            </div>
-            {% else %}
-            <div class="form-help" style="margin:0">No git repos found in the workspace. Set the Workspace directory first.</div>
-            {% endif %}
-        </div>
-    </div>
-    {% for section, fields in sections %}
-    <div class="card">
-        <div class="card-header">
-            <h3>{{ section }}</h3>
-            {% if section == 'Outcomes → tag + state' %}
-            <span class="form-help" style="margin:0">For each outcome: the ADO tag to add and the state to set on your board. Blank = skip. One place that controls all tagging + state transitions.</span>
-            {% endif %}
-        </div>
-        <div class="card-body" style="padding: 8px 22px 18px;">
-            {% for f in fields %}
-            <div class="form-row">
-                <label for="{{ f.key }}">
-                    {{ f.label }}
-                    {% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}
-                </label>
-                <div class="form-input">
-                    {% if f.kind == 'bool' %}
-                        <input type="checkbox" id="{{ f.key }}" name="{{ f.key }}" {% if current.get(f.key) %}checked{% endif %} />
-                    {% elif f.kind == 'select' %}
-                        <select id="{{ f.key }}" name="{{ f.key }}">
-                            {% for opt in f.options %}
-                            <option value="{{ opt }}" {% if current.get(f.key) == opt %}selected{% endif %}>{{ opt }}</option>
-                            {% endfor %}
-                        </select>
-                    {% elif f.kind == 'password' %}
-                        <input type="password" id="{{ f.key }}" name="{{ f.key }}"
-                               placeholder="{{ '•••••• set — leave blank to keep' if has_pat else 'not set' }}" autocomplete="off" />
-                    {% elif f.kind == 'int' %}
-                        <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
-                    {% elif f.kind == 'list' %}
-                        <textarea id="{{ f.key }}" name="{{ f.key }}" rows="2">{{ current.get(f.key)|join(', ') }}</textarea>
-                    {% elif f.kind == 'stateset' %}
-                        {% set selected = current.get(f.key) or [] %}
-                        {% set candidates = (ado_states or []) + selected %}
-                        {% set seen = [] %}
-                        <input type="hidden" name="_all_states__{{ f.key }}" value="{{ candidates|join(',') }}">
-                        {% if candidates %}
-                        <div class="chips">
-                            {% for s in candidates %}
-                            {% if s not in seen %}{% set _ = seen.append(s) %}
-                            <label class="chip {{ 'chip-accent' if s in selected else '' }}">
-                                <input type="checkbox" name="{{ f.key }}__{{ s }}" {% if s in selected %}checked{% endif %}
-                                       style="width:15px;height:15px;accent-color:var(--accent)"> {{ s }}
-                            </label>
-                            {% endif %}
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                        <textarea name="{{ f.key }}__manual" rows="1" placeholder="Add custom states (comma or newline)"
-                                  style="margin-top:8px"></textarea>
-                    {% elif f.kind == 'stateone' %}
-                        {% set cur = current.get(f.key) %}
-                        {% set opts = (ado_states or []) + ([cur] if cur and cur not in (ado_states or []) else []) %}
-                        {% if opts %}
-                        <select id="{{ f.key }}" name="{{ f.key }}">
-                            <option value="" {% if not cur %}selected{% endif %}>(leave unchanged)</option>
-                            {% for opt in opts %}
-                            <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
-                            {% endfor %}
-                        </select>
-                        {% else %}
-                        <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ cur }}"
-                               placeholder="No ADO states loaded — type the state name (blank = unchanged)" />
-                        {% endif %}
-                    {% else %}
-                        <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
-                    {% endif %}
-                    {% if f.help %}<div class="form-help">{{ f.help }}</div>{% endif %}
-                </div>
-            </div>
-            {% endfor %}
-        </div>
+<div class="set-head">
+  <h2>🛠️ Settings</h2>
+  <div class="set-actions">
+    <form method="post" action="/dashboard/settings/reload">
+      <button type="submit" class="btn-ghost">↻ Reload from file</button>
+    </form>
+    <a href="/dashboard/settings/export" class="btn-ghost" style="text-decoration:none">⬇ Export</a>
+    <form method="post" action="/dashboard/settings/import" enctype="multipart/form-data"
+          style="display:flex;align-items:center;gap:6px">
+      <input type="file" name="file" accept=".yaml,.yml" required class="file-mini">
+      <button type="submit" class="btn-ghost">⬆ Import</button>
+    </form>
+  </div>
+</div>
+<p class="subnote">Saved to <code>{{ config_path }}</code> and applied live. <b>Export</b> shares your setup
+  (org, tags, states, pipeline map…) — <b>never the PAT</b> or this host's trigger tag.</p>
+
+{% for flag, msg, col in [
+    (saved, '✅ Settings saved and applied. Fields marked <em>restart</em> take effect after a restart.', 'green'),
+    (reloaded, '↻ Config reloaded from file into the running app.', 'green'),
+    (imported, '⬆ Config imported and applied. PAT and host trigger tag were not changed.', 'green')] %}
+  {% if flag %}<div class="card" style="border-color:var(--{{col}})"><div style="padding:13px 20px;color:var(--{{col}})">{{ msg|safe }}</div></div>{% endif %}
+{% endfor %}
+{% if import_error %}<div class="card" style="border-color:var(--red)"><div style="padding:13px 20px;color:var(--red)">⚠️ Import failed: {{ import_error }}</div></div>{% endif %}
+
+<!-- ── Active tags overview (read-only) ── -->
+<div class="card">
+  <div class="card-header"><h3>🏷️ Active tags</h3>
+    <span class="form-help" style="margin:0">The full tag vocabulary the autopilot writes/reads — edit values in the sections below.</span></div>
+  <div class="tagbar">
+    {% for row in tag_overview %}
+    <div class="tagrow">
+      <span class="k">{{ row.label }}</span>
+      <div class="chips">
+        {% for t in row.tags %}
+          {% if t %}<span class="chip {{ row.cls }}">{{ t }}</span>{% else %}<span class="chip chip-empty">— none —</span>{% endif %}
+        {% else %}<span class="chip chip-empty">— none —</span>{% endfor %}
+      </div>
+      <span class="h">{{ row.hint }}</span>
     </div>
     {% endfor %}
+  </div>
+</div>
+
+<form method="post" action="/dashboard/settings">
+  <!-- section quick-nav -->
+  <div class="set-nav">
+    <div class="tabs">
+      <a class="set-tab" href="#sec-repos">Repos</a>
+      {% for section, fields in sections %}<a class="set-tab" href="#sec-{{ loop.index }}">{{ section }}</a>{% endfor %}
+    </div>
+    <button type="submit" class="btn-save">💾 Save</button>
+  </div>
+
+  <!-- Allowed repositories -->
+  <div class="card" id="sec-repos">
+    <div class="card-header"><h3>📁 Allowed repositories</h3>
+      <span class="form-help" style="margin:0">Repos the agent may edit (auto-discovered). None ticked = all allowed.</span></div>
+    <div style="padding:16px 20px">
+      <input type="hidden" name="_all_repos" value="{{ repos|join(',') }}">
+      {% if repos %}
+      <div class="chips">
+        {% for r in repos %}{% set on = (not allowed_repos) or (r|lower in allowed_repos) %}
+        <label class="chip {{ 'chip-accent' if on else '' }}">
+          <input type="checkbox" name="repo__{{ r }}" {% if on %}checked{% endif %}
+                 style="width:15px;height:15px;accent-color:var(--accent)"> {{ r }}
+        </label>{% endfor %}
+      </div>
+      {% else %}<div class="form-help" style="margin:0">No git repos found. Set the Workspace directory first.</div>{% endif %}
+    </div>
+  </div>
+
+  {% for section, fields in sections %}
+  <div class="card" id="sec-{{ loop.index }}">
+    <div class="card-header"><h3>{{ section }}</h3>
+      {% if section == 'Outcomes → tag + state' %}
+      <span class="form-help" style="margin:0">Per outcome: the ADO tag + state. Blank = skip. One place controls all tagging + transitions.</span>
+      {% endif %}
+    </div>
+    <div class="field-grid">
+      {% for f in fields %}
+      {% set wide = f.kind in ('list','map','stateset') %}
+      <div class="field {{ 'wide' if wide else '' }} {{ 'bool' if f.kind=='bool' else '' }}">
+        <label for="{{ f.key }}">{{ f.label }}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}</label>
+        <div class="form-input">
+          {% if f.kind == 'bool' %}
+            <input type="checkbox" id="{{ f.key }}" name="{{ f.key }}" {% if current.get(f.key) %}checked{% endif %} />
+          {% elif f.kind == 'select' %}
+            <select id="{{ f.key }}" name="{{ f.key }}">
+              {% for opt in f.options %}<option value="{{ opt }}" {% if current.get(f.key) == opt %}selected{% endif %}>{{ opt or '(default)' }}</option>{% endfor %}
+            </select>
+          {% elif f.kind == 'password' %}
+            <input type="password" id="{{ f.key }}" name="{{ f.key }}"
+                   placeholder="{{ '•••••• set — leave blank to keep' if has_pat else 'not set' }}" autocomplete="off" />
+          {% elif f.kind == 'int' %}
+            <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
+          {% elif f.kind == 'list' %}
+            <textarea id="{{ f.key }}" name="{{ f.key }}" rows="2">{{ current.get(f.key)|join(', ') }}</textarea>
+          {% elif f.kind == 'map' %}
+            <textarea id="{{ f.key }}" name="{{ f.key }}" rows="3" placeholder="ba => Ready for Dev">{% for k, v in (current.get(f.key) or {}).items() %}{{ k }} => {{ v }}
+{% endfor %}</textarea>
+          {% elif f.kind == 'stateset' %}
+            {% set selected = current.get(f.key) or [] %}
+            {% set candidates = (ado_states or []) + selected %}
+            {% set seen = [] %}
+            <input type="hidden" name="_all_states__{{ f.key }}" value="{{ candidates|join(',') }}">
+            {% if candidates %}
+            <div class="chips">
+              {% for s in candidates %}{% if s not in seen %}{% set _ = seen.append(s) %}
+              <label class="chip {{ 'chip-accent' if s in selected else '' }}">
+                <input type="checkbox" name="{{ f.key }}__{{ s }}" {% if s in selected %}checked{% endif %}
+                       style="width:15px;height:15px;accent-color:var(--accent)"> {{ s }}
+              </label>{% endif %}{% endfor %}
+            </div>{% endif %}
+            <textarea name="{{ f.key }}__manual" rows="1" placeholder="Add custom states (comma or newline)" style="margin-top:8px"></textarea>
+          {% elif f.kind == 'stateone' %}
+            {% set cur = current.get(f.key) %}
+            {% set opts = (ado_states or []) + ([cur] if cur and cur not in (ado_states or []) else []) %}
+            {% if opts %}
+            <select id="{{ f.key }}" name="{{ f.key }}">
+              <option value="" {% if not cur %}selected{% endif %}>(leave unchanged)</option>
+              {% for opt in opts %}<option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>{% endfor %}
+            </select>
+            {% else %}
+            <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ cur }}"
+                   placeholder="No ADO states loaded — type the state name (blank = unchanged)" />
+            {% endif %}
+          {% else %}
+            <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
+          {% endif %}
+          {% if f.help %}<div class="form-help">{{ f.help }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <div class="savebar">
+    <span class="hint">Changes apply live · fields marked <span class="restart-badge">restart</span> need a restart</span>
+    <a href="#" class="btn-ghost" style="text-decoration:none">↑ Top</a>
     <button type="submit" class="btn-save">💾 Save settings</button>
+  </div>
 </form>
 {% endblock %}

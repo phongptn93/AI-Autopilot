@@ -47,6 +47,87 @@ class WorkItemState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class SdlcLoopState(Base):
+    """Per-item progress of the closed-loop SDLC engine — resumable across restarts.
+
+    Separate from ``work_item_states`` (which stays the coarse board state) so a
+    crash mid-loop resumes at the exact ``(stage_index, iterations)``. A NEW table
+    (not extra columns) because ``create_all`` won't ALTER an existing one.
+    """
+
+    __tablename__ = "sdlc_loop_states"
+
+    work_item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile: Mapped[str] = mapped_column(String(64), default="")   # resolved profile name
+    stage_index: Mapped[int] = mapped_column(Integer, default=0)   # cursor into the stage list
+    iterations: Mapped[int] = mapped_column(Integer, default=0)    # SHARED revise counter
+    branch: Mapped[str] = mapped_column(String(200), default="")   # item's feature branch
+    signals_json: Mapped[str] = mapped_column(Text, default="")    # serialized StageSignals
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class PlannedRun(Base):
+    """A batch of work items the Planning workbench scheduled to Start at ``run_at``.
+
+    Persisted so a scheduled run survives restarts. The poller sweeps due rows each
+    cycle and applies Start (trigger tag + state) to their items."""
+
+    __tablename__ = "planned_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_ids: Mapped[str] = mapped_column(Text, default="")   # JSON array of work-item ids
+    run_at: Mapped[datetime] = mapped_column(DateTime)         # local wall-clock time to fire
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|done|cancelled
+    note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AiConflict(Base):
+    """A hidden code-conflict the Planning workbench's Analyze confirmed via an AI
+    judge (two items likely touch the same files). Persisted so the poller can feed
+    it back into scheduling as a Related soft-conflict — the autopilot then avoids
+    running the pair concurrently even though the BA never linked them.
+
+    Key is the ordered pair ``(a_id < b_id)`` so the same conflict upserts once."""
+
+    __tablename__ = "ai_conflicts"
+
+    a_id: Mapped[int] = mapped_column(Integer, primary_key=True)   # always < b_id
+    b_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    score: Mapped[int] = mapped_column(Integer, default=0)          # 0–100 likelihood
+    modules: Mapped[str] = mapped_column(Text, default="")          # JSON array
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class SchedulerDecision(Base):
+    """One dependency-scheduler decision worth keeping (a cycle that deferred work),
+    persisted so the Planning dashboard can show the recent trend across restarts.
+
+    Bounded: the repository prunes to ``scheduler_history_limit`` newest rows."""
+
+    __tablename__ = "scheduler_decisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime)                 # decision time (UTC)
+    candidates: Mapped[int] = mapped_column(Integer, default=0)
+    ready_ids: Mapped[str] = mapped_column(Text, default="")       # JSON array of ids
+    deferred_json: Mapped[str] = mapped_column(Text, default="")   # JSON [{id,title,reason}]
+
+
+class MergedPr(Base):
+    """PR ids the state-sync already transitioned on merge — persisted so a restart
+    doesn't re-apply ``on_merge_state`` to items that have since moved on (the cause
+    of items bouncing back from a later state to the merge state)."""
+
+    __tablename__ = "merged_prs"
+
+    pr_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[str] = mapped_column(String(100), default="")  # state applied / seen
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class ExecutionRecord(Base):
     __tablename__ = "executions"
     __table_args__ = (

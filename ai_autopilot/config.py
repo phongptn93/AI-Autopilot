@@ -54,6 +54,28 @@ class TenantConfig(BaseModel):
     allowed_skills: list[str] = Field(default_factory=list)
 
 
+class SdlcStage(BaseModel):
+    """One stage in the closed-loop SDLC engine (Phase 1).
+
+    A stage runs in the item's scratch worktree, is gated, and either advances,
+    revises (under the shared budget), or escalates.
+
+    By default a stage states its ``goal`` and **Claude chooses the right skill(s)**
+    from the workspace itself (the AI-native philosophy — nothing pinned). Set
+    ``skill`` only to PIN a specific command (``"/implement-task-be {id}"``) or the
+    special value ``"route"`` (defer to the category router) when you want
+    determinism. ``gate`` ``soft`` is advisory; ``hard`` consumes budget on failure.
+    """
+
+    name: str                      # unique key, e.g. "implement"
+    role: str = ""                 # ba|design|dev|qc|review|pr (free string, for display)
+    goal: str = ""                 # what the stage should achieve (Claude picks the skill)
+    skill: str = ""                # OPTIONAL pin: "/implement-task-be {id}" | "route" | ""
+    artifact_skill: str = ""       # optional HTML producer, e.g. "technical-note" (Phase 2)
+    gate: str = "hard"             # soft|hard
+    produces_pr: bool = False      # this stage opens the PR
+
+
 class ScheduledLoop(BaseModel):
     """A recurring autonomous loop (loop-engineering pattern).
 
@@ -262,9 +284,61 @@ class Settings(BaseSettings):
     # ── Decomposition ──
     auto_decompose: bool = True
 
+    # ── Dependency-aware scheduling (P1) ──
+    # Order work by the ADO link graph instead of dispatching every pending item at
+    # once: an item waits for its Predecessor (Dependency-Reverse) links to be done,
+    # and two Related items never run concurrently (they likely touch the same area,
+    # which would fight in git). Deferred items are re-evaluated next poll — waves
+    # emerge across cycles. No tokens: it reads links, it does not call Claude.
+    dependency_scheduling_enabled: bool = True
+    # Heuristic add-on: treat sibling candidates (same Parent + same repo-category,
+    # e.g. two [BE] tasks under one Requirement) as a Related soft-conflict even when
+    # the BA didn't link them. Off by default — enable if siblings often collide.
+    sibling_conflict_scheduling: bool = False
+    # Cap on how many items the dependency scheduler marks *ready* per poll cycle.
+    # 0 = no cap (the executor's max_concurrent semaphore still throttles real
+    # parallelism). Set >0 to smooth bursts into smaller waves.
+    scheduler_max_dispatch: int = 0
+    # Feed AI-confirmed hidden conflicts back into scheduling: pairs the Planning
+    # workbench's Analyze flagged (score ≥ threshold) become Related soft-conflicts
+    # for the poller too, so the autopilot avoids running them concurrently.
+    scheduler_use_ai_conflicts: bool = True
+    scheduler_ai_conflict_min_score: int = 60
+    # How many recent scheduling decisions to keep (for the Planning dashboard's
+    # history / trend view). 0 = keep only the latest.
+    scheduler_history_limit: int = 20
+
     # ── Feedback loop / PR babysitter ──
     feedback_loop_enabled: bool = False
     max_revisions: int = 3
+
+    # ── Closed-loop SDLC engine (v2, Phase 1) ──
+    # Opt-in. When true, items route to the SdlcLoopEngine which drives them through
+    # a PROFILE-selected ordered list of SDLC stages, gating each with score_run,
+    # revising under one SHARED budget, escalating on exhaustion, and handing off to
+    # the next machine's role via an ADO state. False = zero behaviour change.
+    sdlc_loop_enabled: bool = False
+    # SHARED revise budget across ALL stages of one item.
+    sdlc_max_iterations: int = 3
+    # PRIMARY per-machine knob: this instance's active profile ("ba"|"dev"|"qc"|
+    # "review"|"design"|"full"). Blank → fall through to type-map / default.
+    sdlc_profile: str = ""
+    # Explicit per-machine ordered stage list — overrides sdlc_profile when non-empty.
+    sdlc_stages: list[SdlcStage] = Field(default_factory=list)
+    # Profile used when nothing else resolves.
+    sdlc_default_profile: str = "full"
+    # Per-item override tag prefix: an item tagged "sdlc:dev" forces the dev profile.
+    sdlc_profile_tag_prefix: str = "sdlc:"
+    # Map work-item type → profile, e.g. {"Bug": "dev", "User Story": "full"}.
+    sdlc_type_profiles: dict[str, str] = Field(default_factory=dict)
+    # Extra / overriding profiles merged over the built-ins (name → ordered stage names).
+    sdlc_profiles: dict[str, list[str]] = Field(default_factory=dict)
+    # Handoff: profile name → ADO state to set when its stages complete (the next
+    # machine's trigger_states pick it up). Blank/absent → reuse resolved_state.
+    sdlc_profile_states: dict[str, str] = Field(default_factory=dict)
+    # Whether to apply the handoff state even when the PR is a draft (default: no —
+    # a draft awaits human review before advancing to the next role's machine).
+    sdlc_advance_on_draft: bool = False
 
     # ── Scheduled loops (dependency sweeper, changelog drafter, …) ──
     scheduled_loops: list[ScheduledLoop] = Field(default_factory=list)
@@ -277,6 +351,30 @@ class Settings(BaseSettings):
     pr_scoring_enabled: bool = True
     pr_score_auto_min: int = 85     # ≥ this → eligible to auto-resolve (L3)
     pr_score_review_min: int = 60   # < this → escalate to human instead of review/done
+
+    # ── Planning workbench ──
+    # AI relationship analysis in the Planning workbench's "Analyze" action. When on,
+    # each Analyze runs a few bounded Claude judges over suspicious pairs (tokens);
+    # off = link-graph grouping only (0 tokens).
+    planning_ai_analysis: bool = True
+    planning_ai_max_pairs: int = 6
+    # A judge verdict must score at least this (0–100) to be shown / fed back.
+    planning_ai_min_score: int = 50
+    # Per-judge Claude timeout (seconds) during Analyze.
+    planning_ai_timeout_seconds: int = 120
+    # Keyword pre-filter knobs (which pairs are worth an AI judge). Shorter tokens
+    # or a longer stop-list = fewer/cheaper judges.
+    conflict_ai_min_token_len: int = 4
+    conflict_ai_extra_stopwords: list[str] = Field(default_factory=list)
+    # Default hour (0–23, local) pre-filled in the "Schedule" date-time picker.
+    planning_schedule_default_hour: int = 21
+    # Max work items the Planning "Load" fetches for an assignee.
+    planning_load_limit: int = 200
+    # Auto-refresh the read-only "Live schedule" panel every N seconds (0 = off).
+    planning_live_refresh_seconds: int = 0
+    # State the "Start" action moves a selected item to (so the poller picks it up),
+    # if it isn't already in a trigger state. Blank → the first trigger_states entry.
+    planning_start_state: str = ""
 
     # ── Scheduling ──
     schedule_start: str = ""

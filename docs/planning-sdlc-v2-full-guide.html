@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AI-Autopilot · Planning Workbench &amp; SDLC v2 — Tài liệu review &amp; đánh giá</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#171d26; --panel2:#1d242f; --border:#2a3441; --border2:#374253;
+    --text:#dbe3ec; --dim:#95a3b5; --muted:#6f7d8f;
+    --accent:#4c9aff; --accent2:#8bb8ff; --green:#3fb950; --amber:#e3b341; --red:#f85149;
+    --purple:#bc8cff; --cyan:#39c5cf;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --radius:10px; --radius-sm:7px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.62}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 26px}
+  header.hero{padding:52px 0 30px;border-bottom:1px solid var(--border)}
+  header.hero h1{font-size:31px;margin:0 0 8px;letter-spacing:-.4px}
+  header.hero .sub{color:var(--dim);font-size:16px}
+  header.hero .meta{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+  .pill{background:var(--panel2);border:1px solid var(--border);border-radius:999px;
+    padding:4px 12px;font-size:12px;color:var(--dim)}
+  .pill b{color:var(--accent2);font-weight:650}
+  .layout{display:grid;grid-template-columns:250px 1fr;gap:34px;align-items:start}
+  nav.toc{position:sticky;top:14px;max-height:calc(100vh - 28px);overflow:auto;
+    padding:16px 4px 16px 0;font-size:13.5px;border-right:1px solid var(--border)}
+  nav.toc h4{margin:16px 0 7px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  nav.toc a{display:block;color:var(--dim);text-decoration:none;padding:3px 10px;border-radius:6px;border-left:2px solid transparent}
+  nav.toc a:hover{color:var(--text);background:var(--panel)}
+  main{padding:26px 0 90px;min-width:0}
+  section{margin:0 0 40px;scroll-margin-top:16px}
+  h2{font-size:23px;margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border);letter-spacing:-.3px}
+  h3{font-size:18px;margin:26px 0 10px;color:var(--accent2)}
+  h4{font-size:15px;margin:18px 0 8px;color:var(--cyan)}
+  p{margin:10px 0}
+  code{font-family:var(--mono);font-size:12.6px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:5px;padding:1px 6px;color:var(--accent2)}
+  pre{background:#0b0f14;border:1px solid var(--border);border-radius:var(--radius);
+    padding:15px 17px;overflow:auto;font-family:var(--mono);font-size:12.6px;line-height:1.55;color:#c9d4e0}
+  pre .c{color:var(--muted)} pre .k{color:var(--purple)} pre .s{color:var(--green)} pre .n{color:var(--amber)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13.4px}
+  th,td{border:1px solid var(--border);padding:8px 11px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--dim);font-weight:650;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  tr:nth-child(even) td{background:rgba(255,255,255,.012)}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;margin:16px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .callout{border-radius:var(--radius);padding:13px 16px 13px 18px;margin:14px 0;border:1px solid var(--border);border-left-width:4px;background:var(--panel)}
+  .callout .h{font-weight:700;margin-bottom:3px}
+  .c-info{border-left-color:var(--accent)} .c-info .h{color:var(--accent2)}
+  .c-ok{border-left-color:var(--green)} .c-ok .h{color:var(--green)}
+  .c-warn{border-left-color:var(--amber)} .c-warn .h{color:var(--amber)}
+  .c-risk{border-left-color:var(--red)} .c-risk .h{color:var(--red)}
+  .badge{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;letter-spacing:.03em;vertical-align:middle}
+  .b-crit{background:rgba(248,81,73,.16);color:#ff9d97;border:1px solid rgba(248,81,73,.4)}
+  .b-med{background:rgba(227,179,65,.15);color:#f2cf6b;border:1px solid rgba(227,179,65,.4)}
+  .b-low{background:rgba(63,185,80,.14);color:#7ee787;border:1px solid rgba(63,185,80,.4)}
+  .b-info{background:rgba(76,154,255,.14);color:var(--accent2);border:1px solid rgba(76,154,255,.4)}
+  .b-pure{background:rgba(188,140,255,.14);color:#d2b3ff;border:1px solid rgba(188,140,255,.4)}
+  .b-io{background:rgba(57,197,207,.13);color:#7fe3ea;border:1px solid rgba(57,197,207,.4)}
+  .mermaid{background:#0b0f14;border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin:16px 0;text-align:center}
+  .kv{font-family:var(--mono);font-size:12.5px}
+  ul,ol{margin:9px 0;padding-left:22px} li{margin:4px 0}
+  .fnrow{display:flex;gap:10px;align-items:baseline;margin:5px 0}
+  .fnrow code{white-space:nowrap}
+  hr{border:none;border-top:1px solid var(--border);margin:30px 0}
+  .tag{font-family:var(--mono);color:var(--amber)}
+  .path{font-family:var(--mono);font-size:12px;color:var(--dim)}
+  a.src{color:var(--accent);text-decoration:none} a.src:hover{text-decoration:underline}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--dim);margin:8px 0}
+  @media(max-width:900px){.layout{grid-template-columns:1fr}nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--border)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="hero"><div class="wrap">
+  <h1>🧭 Planning Workbench &amp; SDLC v2 — Tài liệu review &amp; đánh giá</h1>
+  <div class="sub">Kiến trúc, luồng hoạt động, hướng dẫn sử dụng và đánh giá cấu hình cho hệ điều phối tự động <b>AI-Autopilot</b>.</div>
+  <div class="meta">
+    <span class="pill">Nhánh: <b>claude/codebase-architecture-review</b></span>
+    <span class="pill">Ngày: <b>2026-07-13</b></span>
+    <span class="pill">Phạm vi: <b>Planning + SDLC v2 (Phase 1)</b></span>
+    <span class="pill">Đối tượng: <b>Dev / Architect + PO</b></span>
+  </div>
+</div></header>
+
+<div class="wrap"><div class="layout">
+<nav class="toc">
+  <h4>Tổng quan</h4>
+  <a href="#overview">1. Tổng quan &amp; phạm vi</a>
+  <a href="#arch">2. Kiến trúc tổng thể</a>
+  <h4>Planning Workbench</h4>
+  <a href="#pw-user">3. Hướng dẫn sử dụng</a>
+  <a href="#pw-tech">4. Kỹ thuật &amp; route</a>
+  <a href="#pw-fix">5. Bug &quot;mất bộ lọc&quot; đã fix</a>
+  <h4>Điều phối &amp; AI</h4>
+  <a href="#scheduler">6. Dependency Scheduler (P1)</a>
+  <a href="#groups">7. Link grouping</a>
+  <a href="#conflict-ai">8. Conflict AI</a>
+  <h4>SDLC v2</h4>
+  <a href="#sdlc">9. Closed-loop SDLC engine</a>
+  <a href="#sdlc-score">10. Run scoring &amp; gate</a>
+  <a href="#handoff">11. Handoff đa máy</a>
+  <h4>Nâng cấp dynamic</h4>
+  <a href="#upgrades">12. Nâng cấp đã triển khai</a>
+  <a href="#settings-ui">13. Settings mới + Active tags</a>
+  <a href="#more-issues">14. ⚠️ Vấn đề khác phát hiện</a>
+  <h4>Tham chiếu</h4>
+  <a href="#data">15. Mô hình dữ liệu</a>
+  <a href="#config">16. Bảng cấu hình</a>
+  <a href="#assess">17. ⚠️ Đánh giá cấu hình hiện tại</a>
+  <a href="#review">18. Checklist review</a>
+  <a href="#tests">19. Test &amp; cách chạy</a>
+</nav>
+
+<main>
+
+<!-- ══════════════ 1 ══════════════ -->
+<section id="overview">
+<h2>1. Tổng quan &amp; phạm vi</h2>
+<p><b>AI-Autopilot</b> là dịch vụ nền (FastAPI + background poller) nhận work item từ <b>Azure DevOps</b> theo tag/state, phân loại, và giao cho <b>Claude Code</b> thực thi (implement → review → PR) rồi cập nhật lại ADO. Tài liệu này tập trung vào <b>hai khối tính năng mới</b> trên nhánh review:</p>
+<div class="grid2">
+  <div class="card">
+    <h3 style="margin-top:0">🧭 Planning Workbench</h3>
+    <p>Trang điều khiển cho người dùng: nạp work item được gán cho mình, cho AI <b>gom nhóm &amp; kiểm tra xung đột</b>, rồi <b>Start ngay</b> hoặc <b>hẹn giờ (Schedule)</b> đưa vào pipeline. Kèm bảng <b>Live schedule</b> phản chiếu quyết định của bộ điều phối mỗi vòng poll.</p>
+    <div class="legend"><span>Files:</span>
+      <span class="path">dashboard/templates/planning.html</span>,
+      <span class="path">services/planning_analyzer.py</span></div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">🔁 SDLC v2 (closed-loop)</h3>
+    <p>Động cơ đưa <b>một</b> work item qua chuỗi <b>stage</b> (analyze → design → implement → test → review → pr) theo <b>profile</b>, mỗi stage được <b>chấm điểm/gate</b>, sửa lại trong <b>ngân sách chung</b>, escalate khi cạn, và <b>bàn giao (handoff)</b> sang máy vai trò kế tiếp qua ADO state.</p>
+    <div class="legend"><span>Files:</span>
+      <span class="path">execution/sdlc_loop.py</span>,
+      <span class="path">execution/sdlc_plan.py</span></div>
+  </div>
+</div>
+<div class="callout c-info"><div class="h">ℹ️ Trạng thái kích hoạt hiện tại</div>
+  <b>Planning Workbench: ĐANG BẬT</b> (luôn khả dụng). <b>Dependency Scheduler: ĐANG BẬT</b> (<code>dependency_scheduling_enabled: true</code>).
+  <b>SDLC v2 loop: ĐANG TẮT</b> (<code>sdlc_loop_enabled</code> mặc định <code>false</code>, không set trong <code>config.yaml</code>) — xem <a class="src" href="#assess">§14</a> về rủi ro trước khi bật.</div>
+
+<h3>Triết lý thiết kế xuyên suốt</h3>
+<table>
+<tr><th>Nguyên tắc</th><th>Ý nghĩa</th></tr>
+<tr><td><b>Pure / Impure tách bạch</b> <span class="badge b-pure">PURE</span> <span class="badge b-io">I/O</span></td><td>Mọi quyết định (scheduler, grouping, gate, parse) là <b>hàm thuần</b> — dễ unit-test; phần I/O (ADO, git, Claude) gói riêng trong service/engine.</td></tr>
+<tr><td><b>AI-native, không pin cứng</b></td><td>Stage nêu <em>goal</em>, để Claude tự chọn skill phù hợp trong workspace; chỉ pin skill khi cần tính xác định.</td></tr>
+<tr><td><b>Degrade, không crash</b></td><td>Lỗi fetch link / judge / comment đều <em>fail-soft</em> → điều phối vẫn chạy, tệ nhất là rơi về priority order.</td></tr>
+<tr><td><b>Resume sau crash</b></td><td>Tiến trình được persist sau mỗi bước (SDLC state, planned runs, pipeline state) → khởi động lại tiếp tục đúng chỗ.</td></tr>
+</table>
+</section>
+
+<!-- ══════════════ 2 ══════════════ -->
+<section id="arch">
+<h2>2. Kiến trúc tổng thể</h2>
+<p><b>Composition root</b> là <code>Container</code> (<span class="path">container.py</span>) — khởi tạo mọi singleton một lần và gắn vào <code>app.state</code>. <code>AdoPollerService</code> là vòng lặp nền điều phối tất cả.</p>
+
+<div class="mermaid">
+flowchart TB
+  subgraph ADO["Azure DevOps"]
+    WI["Work Items<br/>(tags + state + links)"]
+  end
+  subgraph SVC["AI-Autopilot process"]
+    direction TB
+    POLL["AdoPollerService<br/>vòng lặp 30s"]
+    SCHED["plan_schedule()<br/><b>PURE</b> — ready / deferred"]
+    PROC["_process → agent / SDLC / legacy"]
+    SDLC["SdlcLoopEngine<br/>stage machine"]
+    EXEC["ClaudeExecutor<br/>worktree + git + Claude"]
+    DASH["Dashboard FastAPI<br/>/dashboard/planning"]
+    PA["planning_analyzer<br/>analyze / start / run_due"]
+    DB[("SQLite<br/>states · sdlc · planned_runs")]
+  end
+  WI -->|"get_pending / links"| POLL
+  POLL --> SCHED --> PROC
+  PROC --> SDLC --> EXEC
+  PROC --> EXEC
+  EXEC -->|"PR + comment + state"| WI
+  DASH --> PA --> WI
+  PA -->|"schedule run"| DB
+  POLL -->|"run_due_plans"| PA
+  SCHED -.->|"scheduler_view"| DASH
+  SDLC <--> DB
+  POLL <--> DB
+</div>
+
+<h3>Bản đồ module (nhánh review)</h3>
+<table>
+<tr><th>Module</th><th>Loại</th><th>Vai trò</th></tr>
+<tr><td><span class="path">routing/scheduler.py</span></td><td><span class="badge b-pure">PURE</span></td><td><code>plan_schedule()</code> — chia candidate thành <b>ready</b> / <b>deferred</b> theo link graph.</td></tr>
+<tr><td><span class="path">routing/planning_groups.py</span></td><td><span class="badge b-pure">PURE</span></td><td><code>group_by_links()</code> — gom nhóm serial / conflict / parallel để hiển thị Analyze.</td></tr>
+<tr><td><span class="path">routing/conflict_ai.py</span></td><td><span class="badge b-pure">PURE</span></td><td>Pre-filter cặp nghi ngờ + build prompt + parse verdict cho AI judge.</td></tr>
+<tr><td><span class="path">services/planning_analyzer.py</span></td><td><span class="badge b-io">I/O</span></td><td><code>analyze()</code>, <code>start_items()</code>, <code>run_due_plans()</code> — điều phối các phần pure + gọi ADO/Claude.</td></tr>
+<tr><td><span class="path">execution/sdlc_plan.py</span></td><td><span class="badge b-pure">PURE</span></td><td>Catalog/profile, <code>resolve_stages</code>, <code>decide</code>, <code>is_blocking</code>, <code>handoff_state</code>, <code>StageSignals</code>.</td></tr>
+<tr><td><span class="path">execution/sdlc_loop.py</span></td><td><span class="badge b-io">I/O</span></td><td><code>SdlcLoopEngine.run()</code> — chạy stage, commit, review, chấm điểm, escalate.</td></tr>
+<tr><td><span class="path">dashboard/__init__.py</span></td><td><span class="badge b-io">I/O</span></td><td>Route Planning (<code>/planning</code>, <code>/analyze</code>, <code>/start</code>, <code>/cancel</code>).</td></tr>
+<tr><td><span class="path">data/{entities,repository}.py</span></td><td><span class="badge b-io">I/O</span></td><td>Bảng <code>planned_runs</code>, <code>sdlc_loop_states</code> + repository.</td></tr>
+</table>
+</section>
+
+<!-- ══════════════ 3 ══════════════ -->
+<section id="pw-user">
+<h2>3. Planning Workbench — Hướng dẫn sử dụng</h2>
+<p>Truy cập <span class="kv">/dashboard/planning</span>. Màn hình gồm 5 khối, đi từ trên xuống là một quy trình.</p>
+
+<div class="mermaid">
+flowchart LR
+  A["🔎 Filter<br/>assignee + state + type"] -->|Load| B["📋 Work items<br/>chọn checkbox"]
+  B -->|🔬 Analyze| C["🔬 Analysis<br/>nhóm + wave + AI"]
+  B -->|▶ Start now| D["Vào pipeline ngay"]
+  B -->|🕒 Schedule| E["🕒 Scheduled runs<br/>hẹn giờ"]
+  E -.->|đến giờ, poller sweep| D
+  F["📡 Live schedule<br/>(read-only)"]
+</div>
+
+<h3>Từng khối &amp; ý nghĩa control</h3>
+<table>
+<tr><th>Khối</th><th>Control</th><th>Tác dụng</th></tr>
+<tr><td rowspan="4"><b>🔎 Filter</b></td><td><b>Assignee</b></td><td>Email/tên hiển thị người được gán. Mặc định điền sẵn <code>auto_transition_assignee</code>.</td></tr>
+<tr><td><b>State</b></td><td>Lọc theo ADO state (union của <code>trigger_states</code> + <code>done_states</code>), hoặc “All states”.</td></tr>
+<tr><td><b>Work item type</b></td><td>Lọc theo loại (Bug, Task, User Story…); danh sách gộp loại phổ biến + loại thực có trong kết quả.</td></tr>
+<tr><td><b>Load</b></td><td>Gọi WIQL lấy work item khớp filter (tối đa 200), không phụ thuộc tag.</td></tr>
+<tr><td rowspan="2"><b>📋 Work items</b></td><td><b>Checkbox</b></td><td>Chọn item; ô header chọn/bỏ tất cả; bộ đếm “selected” cập nhật realtime.</td></tr>
+<tr><td><b>Cột “In pipeline”</b></td><td>Hiển thị <span class="tag">⚑ queued</span> nếu item đã mang trigger tag (đang/sắp được autopilot xử lý).</td></tr>
+<tr><td rowspan="3"><b>Action bar</b></td><td><b>🔬 Analyze &amp; group</b></td><td>Phân tích các item đã chọn: nhóm theo link, xem trước wave, và (nếu bật) chạy AI judge tìm xung đột ẩn.</td></tr>
+<tr><td><b>Start now / Schedule</b></td><td>Toggle chế độ. “Schedule” bật ô <code>datetime-local</code> (mặc định 21:00 hôm nay).</td></tr>
+<tr><td><b>▶ Start</b></td><td>Với item đã chọn: gắn trigger tag + đưa về <code>planning_start_state</code> → poller nhặt xử lý; hoặc tạo <b>planned run</b> nếu ở chế độ Schedule.</td></tr>
+<tr><td><b>🔬 Analysis</b></td><td>—</td><td>Kết quả read-only: chuỗi <b>Serial</b> (chạy tuần tự), cụm <b>Conflict</b> (không chạy cùng lúc), nhóm <b>Parallel</b>, <b>Wave</b> (chạy ngay / hoãn), và thẻ <b>🤖 AI</b> chấm điểm khả năng đụng code.</td></tr>
+<tr><td><b>🕒 Scheduled runs</b></td><td><b>Cancel</b></td><td>Danh sách planned run đang chờ; huỷ một run.</td></tr>
+<tr><td><b>📡 Live schedule</b></td><td>—</td><td>Read-only: quyết định điều phối thực tế mỗi vòng poll (Dispatched / Waiting + lý do). Cần bật Dependency scheduling.</td></tr>
+</table>
+
+<div class="callout c-ok"><div class="h">✅ Sau khi fix</div>Mọi thao tác Load → Analyze → Start / Schedule / Cancel đều <b>giữ nguyên bộ lọc</b> (assignee/state/type). Danh sách đã lọc không còn bị reset về mặc định — xem <a class="src" href="#pw-fix">§5</a>.</div>
+</section>
+
+<!-- ══════════════ 4 ══════════════ -->
+<section id="pw-tech">
+<h2>4. Planning Workbench — Kỹ thuật &amp; route</h2>
+<h3>Các endpoint</h3>
+<table>
+<tr><th>Method + path</th><th>Handler</th><th>Việc chính</th></tr>
+<tr><td><span class="kv">GET /dashboard/planning</span></td><td><code>planning_page</code></td><td>Đọc query <code>assignee/state/type/started/scheduled</code> → <code>_planning_load</code> → render.</td></tr>
+<tr><td><span class="kv">POST …/planning/analyze</span></td><td><code>planning_analyze</code></td><td>Đọc <code>ids</code>+filter từ form → <code>analyze()</code> → render kèm kết quả, <b>giữ filter</b>.</td></tr>
+<tr><td><span class="kv">POST …/planning/start</span></td><td><code>planning_start</code></td><td>Start now (<code>start_items</code>) hoặc tạo planned run → redirect 303 <b>giữ filter</b>.</td></tr>
+<tr><td><span class="kv">POST …/planning/cancel</span></td><td><code>planning_cancel</code></td><td>Đặt planned run về <code>cancelled</code> → redirect 303 <b>giữ filter</b>.</td></tr>
+</table>
+
+<h3>Luồng nạp dữ liệu</h3>
+<pre><span class="c"># _planning_load: rỗng nếu không có assignee; "all"/"" → None (không lọc)</span>
+<span class="k">async def</span> _planning_load(c, assignee, state, wtype):
+    <span class="k">if not</span> assignee: <span class="k">return</span> []
+    states = <span class="k">None if</span> state <span class="k">in</span> (<span class="s">""</span>,<span class="s">"all"</span>) <span class="k">else</span> [state]
+    types  = <span class="k">None if</span> wtype <span class="k">in</span> (<span class="s">""</span>,<span class="s">"all"</span>) <span class="k">else</span> [wtype]
+    <span class="k">return await</span> c.ado.get_work_items_by_assignee(assignee, states, types)  <span class="c"># WIQL, top=200</span></pre>
+
+<h3>Analyze — điều phối 3 phần pure</h3>
+<pre><span class="k">async def</span> analyze(container, ids):
+    items          = <span class="k">await</span> ado.get_work_items_by_ids(ids)
+    preds, related = <span class="k">await</span> ado.get_work_item_links(ids)     <span class="c"># fail-soft → {},{}</span>
+    groups = group_by_links(items, preds, related)            <span class="c"># serial/conflict/parallel</span>
+    plan   = plan_schedule(items, predecessors=preds, related=related, active_ids=set(ids))
+    wave   = {<span class="s">"ready"</span>:[i.id <span class="k">for</span> i <span class="k">in</span> plan.ready], <span class="s">"deferred"</span>:plan.deferred}
+    <span class="k">if</span> cfg.planning_ai_analysis <span class="k">and</span> len(items) &gt;= <span class="n">2</span>:                <span class="c"># AI judges (tốn token)</span>
+        <span class="k">for</span> a,b,shared <span class="k">in</span> suspicious_pairs(items, max_pairs=cfg.planning_ai_max_pairs):
+            verdict = parse_verdict(run_claude(build_judge_prompt(...)).text)
+            <span class="k">if</span> verdict <span class="k">and</span> verdict[<span class="s">"score"</span>] &gt;= <span class="n">50</span>: ai.append(...)
+    <span class="k">return</span> {<span class="s">"items"</span>,<span class="s">"groups"</span>,<span class="s">"wave"</span>,<span class="s">"ai"</span>, …}</pre>
+
+<h3>Start — bàn giao cho autopilot</h3>
+<p><code>start_items()</code> chỉ làm 2 việc idempotent với mỗi id (tôn trọng <code>dry_run</code>): (1) thêm <b>trigger tag</b> nếu chưa có; (2) chuyển sang <b>planning_start_state</b> (mặc định = phần tử đầu <code>trigger_states</code>) nếu chưa nằm trong trigger state. Sau đó <b>poller</b> tự nhặt như work item bình thường. Dùng chung bởi nút Start và bộ sweep <code>run_due_plans</code>.</p>
+</section>
+
+<!-- ══════════════ 5 ══════════════ -->
+<section id="pw-fix">
+<h2>5. Bug &quot;mất bộ lọc&quot; — nguyên nhân &amp; cách fix</h2>
+<div class="callout c-warn"><div class="h">🐞 Triệu chứng</div>Sau khi bấm <b>Start / Schedule / Cancel</b>, trang Planning reset về assignee mặc định + “All states” + “All types”; danh sách vừa lọc biến mất. Chỉ <b>Analyze</b> giữ đúng filter.</div>
+<p><b>Nguyên nhân:</b> các handler POST redirect về <code>/dashboard/planning?started=N</code> mà <b>không kèm lại</b> <code>assignee/state/type</code>. Form <code>#wb</code> đã gửi sẵn hidden fields nhưng handler bỏ qua khi dựng URL redirect → route GET rơi về giá trị mặc định.</p>
+
+<div class="grid2">
+<div class="card"><h4 style="margin-top:0">❌ Trước</h4>
+<pre><span class="k">return</span> RedirectResponse(
+  <span class="s">f"/dashboard/planning?started={n}"</span>,
+  status_code=<span class="n">303</span>)  <span class="c"># mất filter</span></pre></div>
+<div class="card"><h4 style="margin-top:0">✅ Sau</h4>
+<pre><span class="k">def</span> _planning_redirect(form, **extra):
+  params = {<span class="s">"assignee"</span>:form.get(<span class="s">"assignee"</span>),
+            <span class="s">"state"</span>:…, <span class="s">"type"</span>:…, **extra}
+  q = urlencode({k:v <span class="k">for</span> k,v <span class="k">in</span> params.items()
+                 <span class="k">if</span> v <span class="k">not in</span> (<span class="s">""</span>,<span class="s">"all"</span>,<span class="n">0</span>)})
+  <span class="k">return</span> RedirectResponse(<span class="s">"/dashboard/planning"</span>+(<span class="s">f"?{q}"</span> <span class="k">if</span> q <span class="k">else</span> <span class="s">""</span>),<span class="n">303</span>)</pre></div>
+</div>
+<p>Áp dụng cho <code>planning_start</code> (cả nhánh empty-ids), <code>planning_cancel</code>; đồng thời template thêm hidden <code>assignee/state/type</code> vào form Cancel (vốn nằm riêng, chưa mang filter). Bỏ giá trị bằng default để URL sạch.</p>
+<div class="callout c-ok"><div class="h">✅ Verify</div>Thêm test <code>test_planning_start_preserves_filter_on_redirect</code> — assert redirect chứa <code>assignee/state/type/started</code>. <code>pytest -k planning</code> → <b>5 passed</b>.</div>
+</section>
+
+<!-- ══════════════ 6 ══════════════ -->
+<section id="scheduler">
+<h2>6. Dependency Scheduler (P1) — điều phối theo link graph</h2>
+<p>Giải bài toán “xung đột giữa các requirement” <b>không tốn token</b>: đọc <b>link graph</b> ADO rồi để hàm thuần <code>plan_schedule()</code> quyết định wave. Item bị hoãn không được đánh dấu processed → vòng poll 30s sau đánh giá lại; <b>wave nổi lên qua nhiều chu kỳ</b> mà không cần state điều phối bền vững.</p>
+
+<div class="legend">
+  <span>🔗 Quan hệ:</span>
+  <span><b style="color:var(--red)">Predecessor</b> (Dependency-Reverse) = thứ tự cứng: B chờ A xong.</span>
+  <span><b style="color:var(--amber)">Related</b> = xung đột mềm: không chạy đồng thời.</span>
+</div>
+
+<div class="mermaid">
+flowchart TB
+  S["candidate pending<br/>(đã priority-sort)"] --> R1{"predecessor<br/>còn mở?"}
+  R1 -->|có| D1["⏸️ defer: chờ tiền nhiệm #X"]
+  R1 -->|không| R2{"related đã bị<br/>claim/đang chạy?"}
+  R2 -->|có| D2["⏸️ defer: xung đột Related → wave sau"]
+  R2 -->|không| R3{"vượt max_dispatch?"}
+  R3 -->|có| D3["⏸️ defer: đủ slot chu kỳ"]
+  R3 -->|không| RD["▶ ready + claim cả nhóm related"]
+</div>
+
+<h3>Poller nối vào scheduler (<span class="path">poller.py::_schedule</span>)</h3>
+<ol>
+<li>Lấy <code>preds, related</code> cho candidate; nếu lỗi → <b>fallback priority order</b> (không stall board).</li>
+<li><code>_symmetrize(related)</code> — bảo hiểm cho fetch thiếu chiều.</li>
+<li>Nếu <code>sibling_conflict_scheduling</code>: <code>_add_sibling_conflicts</code> — cùng Parent + cùng category ⇒ Related mềm dù BA không link.</li>
+<li>Xác định <code>active_ids</code>: candidate + item đang live + predecessor <b>chưa ở done_states</b> (fetch state; không fetch được ⇒ coi như còn mở — an toàn).</li>
+<li><code>plan_schedule(...)</code> → publish <code>scheduler_view</code> cho UI, comment “⏸️ hoãn: lý do” <b>một lần/episode</b>.</li>
+</ol>
+<div class="callout c-info"><div class="h">ℹ️ Vì sao không cần cap concurrency ở scheduler?</div><code>max_dispatch=None</code> mặc định; giới hạn song song thật do <b>semaphore</b> <code>max_concurrent</code> ở executor đảm nhiệm. Scheduler chỉ lo <em>thứ tự &amp; xung đột</em>.</div>
+</section>
+
+<!-- ══════════════ 7 ══════════════ -->
+<section id="groups">
+<h2>7. Link grouping — hiển thị Analyze</h2>
+<p><code>group_by_links()</code> chỉ tính cạnh mà <b>cả hai đầu</b> đều nằm trong selection:</p>
+<table>
+<tr><th>Nhóm</th><th>Nguồn cạnh</th><th>Thuật toán</th><th>Ý nghĩa UI</th></tr>
+<tr><td><b>serial</b></td><td>Predecessor (có hướng)</td><td>Weakly-connected component + <b>Kahn topo-sort</b> trong component (rơi về sorted nếu có chu trình)</td><td>Chuỗi <code>#A → #B</code> — chạy theo thứ tự.</td></tr>
+<tr><td><b>conflicts</b></td><td>Related (vô hướng)</td><td>Connected component kích thước ≥ 2</td><td>Cụm <code>#A ~ #B</code> — không chạy cùng lúc.</td></tr>
+<tr><td><b>parallel</b></td><td>phần còn lại</td><td><code>idset − (serial ∪ conflicts)</code></td><td>Độc lập — chạy song song thoải mái.</td></tr>
+</table>
+</section>
+
+<!-- ══════════════ 8 ══════════════ -->
+<section id="conflict-ai">
+<h2>8. Conflict AI — tìm xung đột ẩn (tuỳ chọn)</h2>
+<p>Analyze có thể hỏi Claude: hai item có khả năng <b>đụng cùng code</b> không (xung đột mà BA chưa link). Để rẻ, một <b>pre-filter heuristic</b> chọn cặp chia sẻ keyword, chỉ những cặp đó mới gọi AI judge.</p>
+<table>
+<tr><th>Hàm <span class="badge b-pure">PURE</span></th><th>Nhiệm vụ</th></tr>
+<tr><td><code>suspicious_pairs()</code></td><td>Tokenize title+description (bỏ stopword VI/EN + marker <span class="tag">[be]/[fe]/…</span>), lấy cặp có ≥1 keyword chung, xếp theo độ trùng, cắt <code>max_pairs</code> (mặc định 6). <b>0 keyword chung → 0 token.</b></td></tr>
+<tr><td><code>build_judge_prompt()</code></td><td>Prompt one-shot yêu cầu trả <b>chỉ JSON</b> <code>{score, modules, reason}</code>.</td></tr>
+<tr><td><code>parse_verdict()</code></td><td>Regex bắt JSON, parse khoan dung; clamp score 0–100, cắt tối đa 5 module, reason ≤300 ký tự; không hợp lệ → <code>None</code>.</td></tr>
+</table>
+<p>Impure call ở <code>planning_analyzer.analyze</code>: <code>run_claude(..., max_turns=1, permission_mode="plan", timeout=120s)</code>; verdict <b>score ≥ 50</b> mới hiển thị. Một judge lỗi <b>không</b> làm hỏng Analyze (fail-soft).</p>
+<div class="callout c-warn"><div class="h">💰 Chi phí</div>Với <code>planning_ai_analysis: true</code> (mặc định), mỗi lần Analyze tốn tới <b>6 lượt gọi Claude</b>. Đặt <code>false</code> nếu muốn chỉ gom nhóm link (0 token).</div>
+</section>
+
+<!-- ══════════════ 9 ══════════════ -->
+<section id="sdlc">
+<h2>9. Closed-loop SDLC engine (v2, Phase 1)</h2>
+<p>Khi <code>sdlc_loop_enabled: true</code>, item được route sang <code>SdlcLoopEngine</code> thay vì flow agent thường (SDLC <b>headless</b>, ưu tiên trên cả interactive). Một item chạy qua <b>profile</b> = danh sách stage có thứ tự.</p>
+
+<h3>Catalog stage &amp; profile dựng sẵn</h3>
+<div class="grid2">
+<div class="card"><h4 style="margin-top:0">Stage (CATALOG)</h4>
+<table style="font-size:12.5px">
+<tr><th>name</th><th>role</th><th>gate</th></tr>
+<tr><td>analyze</td><td>ba</td><td>soft</td></tr>
+<tr><td>design</td><td>design</td><td>soft</td></tr>
+<tr><td>implement</td><td>dev</td><td><b>hard</b></td></tr>
+<tr><td>test</td><td>qc</td><td><b>hard</b></td></tr>
+<tr><td>review</td><td>review</td><td><b>hard</b></td></tr>
+<tr><td>pr</td><td>pr</td><td><b>hard</b> · produces_pr</td></tr>
+</table></div>
+<div class="card"><h4 style="margin-top:0">Profile (PROFILES)</h4>
+<table style="font-size:12.5px">
+<tr><th>profile</th><th>stages</th></tr>
+<tr><td><b>full</b></td><td>analyze→design→implement→test→review→pr</td></tr>
+<tr><td>dev</td><td>implement→review→pr</td></tr>
+<tr><td>ba</td><td>analyze</td></tr>
+<tr><td>qc</td><td>test</td></tr>
+<tr><td>review</td><td>review</td></tr>
+<tr><td>design</td><td>design</td></tr>
+</table></div>
+</div>
+
+<h3>Chọn profile — thang ưu tiên (<code>resolve_profile_name</code>)</h3>
+<pre>tag <span class="tag">sdlc:&lt;name&gt;</span>  &gt;  sdlc_stages (=&gt;<span class="s">"custom"</span>)  &gt;  sdlc_profile  &gt;  sdlc_type_profiles[type]  &gt;  sdlc_default_profile</pre>
+
+<h3>Vòng lặp state machine (<code>SdlcLoopEngine.run</code>)</h3>
+<div class="mermaid">
+flowchart TB
+  ST["resolve profile+stages<br/>+ resume từ DB"] --> SC["scratch worktree<br/>prepare branch"]
+  SC --> LOOP{"còn stage?"}
+  LOOP -->|có| RUN["chạy stage<br/>(skill / review gate)"]
+  RUN --> ABS["absorb signals<br/>+ đọc result.json"]
+  ABS --> NH{"needs_human?"}
+  NH -->|có| ESC["🙋 ESCALATE"]
+  NH -->|không| SCO["score_run + comment badge"]
+  SCO --> DEC{"decide()"}
+  DEC -->|advance| ADV["stage_index++"] --> SAVE
+  DEC -->|revise| REV["iterations++ (ngân sách chung)"] --> SAVE
+  DEC -->|escalate| ESC
+  SAVE["💾 save progress"] --> LOOP
+  LOOP -->|hết| DONE["✅ completed → handoff state"]
+</div>
+
+<h3>Gate &amp; quyết định (PURE)</h3>
+<table>
+<tr><th>Hàm</th><th>Luật</th></tr>
+<tr><td><code>is_blocking(stage,signals)</code></td><td>Stage <code>soft</code> → không bao giờ block. Stage <code>hard</code> block khi: <b>had_error</b>, hoặc review <b>review_passed=False</b>, hoặc <b>ci_passed=False</b>. <em>Không</em> gate bằng điểm 0–100 (điểm chỉ để hiển thị — stage giữa chưa có PR nên không thể đạt ngưỡng auto).</td></tr>
+<tr><td><code>decide(stage,blocking,iter,budget)</code></td><td>Không block → <b>ADVANCE</b>. Block → <b>REVISE</b> đến khi <code>iter+1 &gt; budget</code> thì <b>ESCALATE</b>. Ngân sách <code>sdlc_max_iterations</code> <b>chia sẻ chung</b> mọi stage.</td></tr>
+</table>
+<div class="callout c-info"><div class="h">🔁 Resume-safe</div>Sau mỗi bước, <code>SdlcLoopStateRepository.save</code> ghi <code>(profile, stage_index, iterations, branch, signals_json)</code>. Crash giữa loop → khởi động lại tiếp đúng <code>(stage, iter)</code>; dùng lại profile đã lưu để tránh drift cấu hình.</div>
+</section>
+
+<!-- ══════════════ 10 ══════════════ -->
+<section id="sdlc-score">
+<h2>10. Run scoring &amp; gate “get a score”</h2>
+<p><code>score_run</code> (pr_scorer) biến tín hiệu khách quan thành điểm 0–100 + <b>gate</b>. Poller dùng ở <code>_handle_agent_result</code>:</p>
+<table>
+<tr><th>Điều kiện</th><th>Hành động</th></tr>
+<tr><td><code>score.gate == "escalate"</code> (và không phải report mode)</td><td>Giữ item cho người: state <b>NEEDS_HUMAN</b> + tag <code>escalation_tag</code> + comment “điểm dưới ngưỡng review”.</td></tr>
+<tr><td>PR draft (assisted/L2)</td><td>State <b>IN_REVIEW</b> + badge + comment link PR.</td></tr>
+<tr><td>PR thật (unattended/L3)</td><td>State <b>DONE</b> + <code>resolved_state</code> + badge.</td></tr>
+<tr><td>Không PR (report/L1)</td><td>State <b>DONE</b> + outcome “report”.</td></tr>
+</table>
+<p>Ngưỡng: <code>pr_score_auto_min: 85</code> (đủ điều kiện auto-resolve), <code>pr_score_review_min: 60</code> (dưới ngưỡng → escalate thay vì review/done).</p>
+</section>
+
+<!-- ══════════════ 11 ══════════════ -->
+<section id="handoff">
+<h2>11. Handoff đa máy — vòng lặp SDLC xuyên tổ chức</h2>
+<p>Khi một profile hoàn tất, máy đặt <b>handoff state</b> = <code>sdlc_profile_states[profile]</code> (hoặc <code>resolved_state</code>). Máy vai trò kế tiếp có <code>trigger_states</code> chứa state đó sẽ nhặt item lên — tạo “dây chuyền” BA → Dev → QC.</p>
+<div class="mermaid">
+flowchart LR
+  BA["Máy BA<br/>profile: ba<br/>trigger: New/Proposed"] -->|"→ Ready for Dev"| DEV["Máy Dev<br/>profile: dev<br/>trigger: Ready for Dev"]
+  DEV -->|"→ Ready to Test"| QC["Máy QC<br/>profile: qc<br/>trigger: Ready to Test"]
+  QC -->|"→ Ready to Deploy"| END["Human deploy"]
+</div>
+<div class="callout c-risk"><div class="h">⛔ Guard chống loop vô hạn</div><code>handoff_collides()</code> = True nếu handoff state của máy <b>trùng</b> một <code>trigger_states</code> của chính nó → máy tự nhặt lại việc vừa xong. <code>Container.startup</code> <b>log error</b> (không abort). ⚠️ Cấu hình hiện tại vướng điều này nếu bật SDLC — xem <a class="src" href="#assess">§14</a>.</div>
+</section>
+
+<!-- ══════════════ 12 ══════════════ -->
+<!-- ══════════════ 12 — NÂNG CẤP ══════════════ -->
+<section id="upgrades">
+<h2>12. Nâng cấp dynamic đã triển khai</h2>
+<p>Bốn nhóm nâng cấp đưa hệ về hướng <b>config-driven &amp; thích ứng</b> thay vì hằng số cứng. Tất cả có test, full suite <b>252 passed</b>.</p>
+
+<h3>Tier 1 — hằng số → config</h3>
+<table>
+<tr><th>Trước (hardcode)</th><th>Config mới</th><th>Mặc định</th></tr>
+<tr><td>ngưỡng hiện thẻ AI <code>>= 50</code></td><td><code>planning_ai_min_score</code></td><td>50</td></tr>
+<tr><td>judge <code>timeout=120</code></td><td><code>planning_ai_timeout_seconds</code></td><td>120</td></tr>
+<tr><td>giờ Schedule <code>hour=21</code></td><td><code>planning_schedule_default_hour</code></td><td>21</td></tr>
+<tr><td>Load <code>top=200</code></td><td><code>planning_load_limit</code></td><td>200</td></tr>
+<tr><td><code>max_dispatch=None</code> (không nối)</td><td><code>scheduler_max_dispatch</code> — <b>knob thật</b></td><td>0 = unbounded</td></tr>
+<tr><td>token <code>{4,}</code> + <code>_STOP</code></td><td><code>conflict_ai_min_token_len</code> · <code>conflict_ai_extra_stopwords</code></td><td>4 · []</td></tr>
+</table>
+
+<h3>Tier 2.1 — AI conflict feed-back ⭐ (điều phối thích ứng)</h3>
+<p>Trước đây AI Analyze chỉ <b>hiển thị</b> xung đột ẩn cho người. Giờ verdict được <b>persist</b> và <b>feed ngược</b> vào bộ điều phối: cặp item bị nghi đụng code sẽ <b>không chạy đồng thời</b> dù BA chưa link.</p>
+<div class="mermaid">
+flowchart LR
+  AN["Planning Analyze<br/>AI judge score≥min"] -->|record| DB[("ai_conflicts<br/>(a&lt;b, score)")]
+  POLL["poller._schedule<br/>mỗi 30s"] -->|"related_edges(ids, min)"| DB
+  DB --> MERGE["merge vào Related"] --> PS["plan_schedule<br/>defer cặp"]
+</div>
+<ul>
+<li>Bảng <code>ai_conflicts</code>, repo <code>AiConflictRepository</code> (chuẩn hoá <code>a&lt;b</code>, upsert 1 lần).</li>
+<li>Ngưỡng <b>feed</b> (<code>scheduler_ai_conflict_min_score=60</code>) <b>độc lập</b> ngưỡng <b>hiển thị</b> (<code>planning_ai_min_score=50</code>).</li>
+<li>Bật/tắt qua <code>scheduler_use_ai_conflicts</code>; fail-soft — lỗi đọc không phá poll.</li>
+</ul>
+
+<h3>Tier 4 — persist scheduler history</h3>
+<p><code>scheduler_view</code> cũ chỉ giữ chu kỳ cuối trong RAM (mất khi restart). Thêm bảng <code>scheduler_decisions</code> + <code>SchedulerHistoryRepository</code>: ghi <b>chọn lọc</b> (chỉ chu kỳ có defer) và <b>prune</b> về <code>scheduler_history_limit</code> (mặc định 20) → bảng luôn bé. Panel <b>History</b> trên Planning hiện xu hướng “giữ việc lại”, sống qua restart.</p>
+
+<h3>Tier 3 — Planning UX dynamic</h3>
+<table>
+<tr><th>Tính năng</th><th>Cơ chế</th></tr>
+<tr><td><b>Multi-assignee / team</b></td><td>Filter nhận nhiều người (<code>,</code>/<code>;</code>) → WIQL <code>[System.AssignedTo] IN (…)</code>; 1 người vẫn <code>=</code>.</td></tr>
+<tr><td><b>Nhớ filter xuyên phiên</b></td><td>Cookie <code>planning_filter</code> (30 ngày, httponly). Vào trang không param → khôi phục; có param → param thắng.</td></tr>
+<tr><td><b>Auto-refresh Live schedule</b></td><td>Partial <code>planning_live.html</code> + route <code>/planning/live-partial</code>; JS poll mỗi <code>planning_live_refresh_seconds</code>s, chỉ thay panel Live (không mất list/analysis).</td></tr>
+</table>
+<div class="callout c-ok"><div class="h">✅ Verify</div>Thêm ~9 test: <code>test_conflict_ai</code> (stopword/min-len), <code>test_state_repository</code> (ai_conflict + history prune), <code>test_scheduler_ai_feedback</code> (bật→defer / tắt→chạy cả 2), <code>test_ado_client</code> (single= / multi IN / blank), <code>test_app</code> (cookie-restore + live-partial). Full suite <b>252 passed</b>.</div>
+</section>
+
+<!-- ══════════════ 13 — SETTINGS UI ══════════════ -->
+<section id="settings-ui">
+<h2>13. Màn hình Settings mới + Active tags</h2>
+<p>Màn hình cấu hình cũ là <b>một danh sách dọc ~50 field</b> → rối. Đã redesign gọn &amp; chuyên nghiệp hơn (đổi <b>chỉ template</b>, giữ nguyên logic parse form → không rủi ro):</p>
+<table>
+<tr><th>Trước</th><th>Sau</th></tr>
+<tr><td>~50 field xếp 1 cột, label 240px</td><td><b>Grid 2 cột</b> cho field đơn; field phức (list/map/stateset) full-width</td></tr>
+<tr><td>Phải cuộn tìm section</td><td><b>Section sub-nav</b> sticky (chip blur) — bấm nhảy tới nhóm + nút <b>Save</b> luôn hiện</td></tr>
+<tr><td>Action rời rạc trên page</td><td><b>Sticky action bar</b> (Reload/Export/Import) + <b>sticky save bar</b> cuối trang</td></tr>
+<tr><td>Tag rải rác nhiều field</td><td><b>Panel 🏷️ Active tags</b> — gom toàn bộ tag theo vai trò</td></tr>
+</table>
+<div class="callout c-info"><div class="h">🏷️ Panel “Active tags” (đúng ý “danh tags”)</div>Đọc-only, gom 6 nhóm tag autopilot thực dùng — <b>gồm cả <code>live_tag</code></b> vốn không có trong form: <b>Trigger</b> (effective) · <b>Review</b> · <b>Done</b> · <b>Needs human</b> · <b>Live</b> · <b>Failed</b>. Mỗi nhóm có hint; tag rỗng hiện chip gạch “— none —”. Chỉnh giá trị vẫn ở các section bên dưới.</div>
+<p>Các knob mới (Tier 1–4) đều đã xuất hiện trong Settings: mục <b>Planning workbench</b> (min-score, timeout, keyword min-len, extra stopwords, default hour, load limit, live refresh) và <b>Dependency scheduling</b> (max dispatch, use AI conflicts, AI min score, history limit).</p>
+</section>
+
+<!-- ══════════════ 14 — VẤN ĐỀ KHÁC ══════════════ -->
+<section id="more-issues">
+<h2>14. ⚠️ Vấn đề khác phát hiện thêm</h2>
+<p>Ngoài các điểm cấu hình ở §17, đây là những điểm <b>trong code/thiết kế</b> nên cân nhắc (chưa sửa — để bạn quyết định).</p>
+<table>
+<tr><th>#</th><th>Mức</th><th>Vấn đề</th><th>Gợi ý</th></tr>
+<tr><td>1</td><td><span class="badge b-med">MEDIUM</span></td>
+  <td><b>Chu trình predecessor</b> trong <code>_serial_components</code> (Kahn) rơi âm thầm về <code>sorted(comp)</code> khi topo-sort không phủ hết — không cảnh báo.</td>
+  <td>Log warning khi phát hiện cycle để BA biết link sai (A→B→A).</td></tr>
+<tr><td>2</td><td><span class="badge b-med">MEDIUM</span></td>
+  <td><b>Thời gian naive local</b>: planned run + scheduler history dùng <code>datetime.now()</code>/<code>now(UTC)</code> lẫn lộn. So sánh nội bộ nhất quán nhưng UI trộn múi giờ.</td>
+  <td>Chuẩn hoá 1 chuẩn (UTC lưu, local hiển thị) nếu triển khai đa vùng.</td></tr>
+<tr><td>3</td><td><span class="badge b-low">LOW</span></td>
+  <td><b>AI conflict không hết hạn</b>: bảng <code>ai_conflicts</code> giữ vĩnh viễn — một verdict cũ vẫn defer cặp dù item đã đổi nhiều.</td>
+  <td>Thêm TTL (vd bỏ qua verdict &gt; N ngày) hoặc xoá khi item done.</td></tr>
+<tr><td>4</td><td><span class="badge b-low">LOW</span></td>
+  <td><b>Planning route không có RBAC</b>: ai vào được dashboard đều Start/Schedule được. RBAC chỉ áp ở poller.</td>
+  <td>OK nếu dashboard đã sau lớp auth; nếu không, thêm gate cho action ghi.</td></tr>
+<tr><td>5</td><td><span class="badge b-info">INFO</span></td>
+  <td><b>Auto-refresh poll cố định</b>: JS poll <code>/live-partial</code> đều đặn kể cả khi không có gì đổi.</td>
+  <td>Chấp nhận được (payload nhỏ); có thể nâng lên SSE/htmx nếu cần realtime thật.</td></tr>
+</table>
+</section>
+
+<!-- ══════════════ 15 ══════════════ -->
+<section id="data">
+<h2>15. Mô hình dữ liệu (SQLite)</h2>
+<table>
+<tr><th>Bảng</th><th>Khoá</th><th>Mục đích</th></tr>
+<tr><td><code>planned_runs</code></td><td>id</td><td>Batch item hẹn giờ Start; <code>item_ids</code> (JSON), <code>run_at</code> (local), <code>status</code> pending/done/cancelled. Sweep bởi <code>run_due_plans</code>.</td></tr>
+<tr><td><code>ai_conflicts</code> <span class="badge b-info">mới</span></td><td>(a_id&lt;b_id)</td><td>Xung đột ẩn AI xác nhận (Tier 2.1) → feed vào điều phối. <code>score/modules/reason</code>.</td></tr>
+<tr><td><code>scheduler_decisions</code> <span class="badge b-info">mới</span></td><td>id</td><td>Lịch sử quyết định điều phối (Tier 4), prune về <code>scheduler_history_limit</code>. <code>ready_ids</code>, <code>deferred_json</code>.</td></tr>
+<tr><td><code>sdlc_loop_states</code></td><td>work_item_id</td><td>Tiến trình loop resumable: profile, stage_index, iterations, branch, signals_json.</td></tr>
+<tr><td><code>work_item_states</code></td><td>work_item_id</td><td>State pipeline thô (board): Queued/In progress/In review/Needs human/Done/Failed.</td></tr>
+<tr><td><code>merged_prs</code></td><td>pr_id</td><td>PR đã transition on-merge — chống re-apply sau restart.</td></tr>
+<tr><td><code>executions</code></td><td>id</td><td>Lịch sử chạy (skill, PR, files, tokens, duration…).</td></tr>
+</table>
+<div class="callout c-warn"><div class="h">⚠️ Schema migration</div><code>create_all</code> <b>không ALTER</b> bảng có sẵn. Bảng mới (<code>planned_runs</code>, <code>sdlc_loop_states</code>) được tạo tự động, nhưng nếu <em>thêm cột</em> vào bảng cũ sau này phải migrate tay. Đây là lý do SDLC dùng <b>bảng riêng</b> thay vì thêm cột vào <code>work_item_states</code>.</div>
+</section>
+
+<!-- ══════════════ 13 ══════════════ -->
+<section id="config">
+<h2>16. Bảng cấu hình liên quan</h2>
+<table>
+<tr><th>Key</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>dependency_scheduling_enabled</code></td><td>true</td><td>Bật điều phối theo link graph.</td></tr>
+<tr><td><code>sibling_conflict_scheduling</code></td><td>false</td><td>Coi sibling cùng Parent+category là Related mềm.</td></tr>
+<tr><td><code>planning_ai_analysis</code></td><td>true</td><td>Bật AI judge trong Analyze (tốn token).</td></tr>
+<tr><td><code>planning_ai_max_pairs</code></td><td>6</td><td>Số cặp tối đa gọi judge/lần Analyze.</td></tr>
+<tr><td><code>planning_start_state</code></td><td>"" → trigger_states[0]</td><td>State nút Start chuyển item tới.</td></tr>
+<tr><td><code>sdlc_loop_enabled</code></td><td>false</td><td>Bật closed-loop SDLC (headless).</td></tr>
+<tr><td><code>sdlc_max_iterations</code></td><td>3</td><td>Ngân sách revise <b>chung</b> mọi stage/item.</td></tr>
+<tr><td><code>sdlc_profile</code></td><td>""</td><td>Profile chính của máy (ba/dev/qc/review/design/full).</td></tr>
+<tr><td><code>sdlc_profile_states</code></td><td>{}</td><td>profile → ADO state handoff.</td></tr>
+<tr><td><code>sdlc_advance_on_draft</code></td><td>false</td><td>Có handoff khi PR còn draft không.</td></tr>
+<tr><td><code>pr_score_auto_min / review_min</code></td><td>85 / 60</td><td>Ngưỡng auto-resolve / escalate.</td></tr>
+</table>
+</section>
+
+<!-- ══════════════ 14 ══════════════ -->
+<section id="assess">
+<h2>17. ⚠️ Đánh giá cấu hình hiện tại (<span class="path">config.yaml</span>)</h2>
+<p>Rà soát <code>config.yaml</code> thực tế trên máy này. <code>config.yaml</code> <b>đã được gitignore</b> (không commit lên repo).</p>
+
+<h3>✅ Điểm tốt</h3>
+<ul>
+<li><b>Worktrees bật</b> (<code>use_worktrees: true</code>) + <code>max_concurrent: 3</code> → chạy song song an toàn, không đụng checkout chính.</li>
+<li><b>Dependency scheduling bật</b>, <b>auto_review bật</b> (block Critical/High), <b>pr_scoring bật</b> (85/60).</li>
+<li><code>done_states</code> đầy đủ (Closed, Implement Done, Ready to Testing, Resolved, Testing) → board phản ánh đúng.</li>
+<li><code>reprocess_on_reopen: true</code> có guard loop (chỉ reopen trên trigger state <em>không phải</em> output state).</li>
+<li><b>SDLC v2 đang tắt</b> → guard <code>handoff_collides</code> chưa kích hoạt (an toàn ở hiện tại).</li>
+</ul>
+
+<h3>Vấn đề &amp; khuyến nghị</h3>
+<table>
+<tr><th>#</th><th>Mức</th><th>Vấn đề</th><th>Khuyến nghị</th></tr>
+<tr>
+  <td>1</td><td><span class="badge b-med">MEDIUM</span></td>
+  <td><b>Trigger states chồng với output states.</b> <code>trigger_states</code> chứa <code>Active</code> (=state_in_progress), <code>Ready to Review</code> (=state_in_review) và <code>Ready to Deploy</code> (=resolved_state/on_merge_state/board_deploy_state). 3/5 trigger state cũng là output state.</td>
+  <td>Hiện được che bởi skip-tag + reconcile loại output state, nhưng <b>mong manh &amp; khó hiểu</b>. Nên để trigger_states <b>rời</b> khỏi output — dùng <code>Proposed</code> + <code>Specification Done</code> làm state “vào việc” thật; bỏ <code>Ready to Deploy</code>/<code>Ready to Review</code> khỏi trigger nếu không cố ý re-trigger thủ công.</td>
+</tr>
+<tr>
+  <td>2</td><td><span class="badge b-med">MEDIUM</span></td>
+  <td><b>Một state mang 3 nghĩa.</b> <code>Ready to Testing</code> vừa là <code>state_needs_human</code>, vừa nằm trong <code>done_states</code>, vừa là <code>on_deploy_state</code>. ⇒ item “cần người” sẽ hiển thị ở cột <b>Done</b> trên board (vì done_states thắng bất kể tag).</td>
+  <td>Tách nghĩa: đặt <code>state_needs_human</code> sang một state riêng (vd “Blocked”/“Needs Human”) <b>không</b> thuộc done_states, để không lẫn với việc đã xong.</td>
+</tr>
+<tr>
+  <td>3</td><td><span class="badge b-med">MEDIUM</span></td>
+  <td><b>Rủi ro nếu bật SDLC v2.</b> <code>sdlc_profile: ""</code> → default <code>full</code>; <code>handoff_state("full") = resolved_state = "Ready to Deploy"</code>, mà <code>Ready to Deploy</code> đang là trigger state ⇒ <code>handoff_collides = True</code> → startup log error, có nguy cơ lặp.</td>
+  <td>Trước khi đặt <code>sdlc_loop_enabled: true</code>: đặt <code>sdlc_profile_states</code> handoff sang state <b>không</b> thuộc trigger_states (vd <code>{full: "Ready to Deploy"}</code> chỉ khi đã bỏ Ready to Deploy khỏi trigger), hoặc chỉnh trigger_states cho rời.</td>
+</tr>
+<tr>
+  <td>4</td><td><span class="badge b-med">MEDIUM</span></td>
+  <td><b>PAT để plaintext trong <code>config.yaml</code>.</b> (Đã gitignore nên không lộ lên git, nhưng vẫn nằm trên đĩa dạng rõ.) Docstring config khuyến nghị để secret ở env var.</td>
+  <td>Chuyển sang biến môi trường <code>AUTOPILOT_ADO_PAT</code> (xoá khỏi YAML) và <b>rotate</b> PAT định kỳ. <em>(Không in giá trị token trong tài liệu này.)</em></td>
+</tr>
+<tr>
+  <td>5</td><td><span class="badge b-low">LOW</span></td>
+  <td><b>Placeholder chưa set.</b> <code>repo_working_directory: /path/to/your/git/repo</code>. Hiện <em>không dùng</em> vì <code>workspace_directory</code> (AI-native) đã set và thắng.</td>
+  <td>Để trống <code>""</code> cho gọn, hoặc set đúng nếu có ý định chạy legacy mode (bỏ workspace_directory).</td>
+</tr>
+<tr>
+  <td>6</td><td><span class="badge b-low">LOW</span></td>
+  <td><b>Scheduled runs dùng local wall-clock naive</b> (không timezone). <code>run_at</code> so với <code>datetime.now()</code>.</td>
+  <td>Nhất quán trong 1 máy nên OK; lưu ý cạnh DST / đổi timezone máy chủ. Nếu triển khai đa vùng, cân nhắc chuẩn hoá UTC.</td>
+</tr>
+<tr>
+  <td>7</td><td><span class="badge b-info">INFO</span></td>
+  <td><b>AI Analyze tốn token.</b> <code>planning_ai_analysis</code> mặc định bật (không khai trong config.yaml) → mỗi Analyze gọi tới 6 judge.</td>
+  <td>Nếu muốn Analyze miễn phí (chỉ gom link), thêm <code>planning_ai_analysis: false</code>.</td>
+</tr>
+<tr>
+  <td>8</td><td><span class="badge b-info">INFO</span></td>
+  <td><b>SDLC luôn headless.</b> <code>execution_mode: interactive</code> nhưng nếu bật SDLC, <code>_process_agent</code> ưu tiên SDLC (headless) trước nhánh interactive.</td>
+  <td>Nắm rõ khi bật: item chạy SDLC sẽ <b>không</b> mở live session để bạn steer. Muốn steer thủ công thì giữ SDLC tắt.</td>
+</tr>
+</table>
+
+<div class="callout c-info"><div class="h">🎯 Tóm tắt hành động đề xuất (ưu tiên giảm dần)</div>
+1) Tách <b>trigger_states</b> khỏi output states (#1) và tách nghĩa <code>Ready to Testing</code> (#2) — giảm nhầm lẫn board + chuẩn bị an toàn cho SDLC.
+&nbsp;2) Chuyển <b>PAT sang env var</b> + rotate (#4).
+&nbsp;3) Chỉ bật <code>sdlc_loop_enabled</code> sau khi xử lý #1/#3.
+&nbsp;4) Dọn placeholder (#5) &amp; cân nhắc tắt AI Analyze nếu tiếc token (#7).</div>
+</section>
+
+<!-- ══════════════ 15 ══════════════ -->
+<section id="review">
+<h2>18. Checklist review &amp; tiêu chí đánh giá</h2>
+<div class="grid2">
+<div class="card"><h4 style="margin-top:0">✔️ Correctness</h4>
+<ul>
+<li>Filter được giữ qua mọi POST (đã fix + test).</li>
+<li>Predecessor không fetch được ⇒ coi như còn mở (an toàn thứ tự).</li>
+<li>Related được <code>_symmetrize</code> trước khi lập kế hoạch.</li>
+<li>Gate stage giữa không dùng điểm PR-shaped (<code>is_blocking</code> dùng tín hiệu âm rõ ràng).</li>
+<li>Resume dùng lại profile đã lưu (chống config drift).</li>
+</ul></div>
+<div class="card"><h4 style="margin-top:0">🔒 Security / an toàn</h4>
+<ul>
+<li>WIQL escape nháy đơn cho assignee (<code>replace("'","''")</code>).</li>
+<li><code>dry_run</code> chặn mọi write (start/badge/comment).</li>
+<li>PAT nên ở env (xem #4).</li>
+<li>RBAC (<code>allowed_users/skills</code>) áp ở poller — không ở Planning route (Planning tin cậy người đăng nhập dashboard).</li>
+</ul></div>
+<div class="card"><h4 style="margin-top:0">⚡ Performance / chi phí</h4>
+<ul>
+<li>Scheduler &amp; grouping: 0 token, thuần CPU.</li>
+<li>AI Analyze giới hạn <code>max_pairs</code>; 0 keyword chung → 0 call.</li>
+<li>Link fetch cap 200 id/lần.</li>
+<li>Deferred comment <b>1 lần/episode</b> (không spam mỗi 30s).</li>
+</ul></div>
+<div class="card"><h4 style="margin-top:0">🧩 Maintainability</h4>
+<ul>
+<li>Pure/impure tách rõ → test dễ.</li>
+<li>Bảng DB mới thay vì ALTER (né giới hạn <code>create_all</code>).</li>
+<li>Profile/stage override hoàn toàn qua config.</li>
+<li>Fail-soft đồng nhất (không crash cả cycle).</li>
+</ul></div>
+</div>
+<h3>Điểm nên soi kỹ khi review</h3>
+<ul>
+<li><b>Chồng state</b> (#1/#2) — quyết định nghiệp vụ, cần PO xác nhận ý nghĩa từng ADO state.</li>
+<li><b>Kahn topo-sort</b> khi có chu trình predecessor: rơi về <code>sorted(comp)</code> — chấp nhận được, nhưng nên log cảnh báo chu trình.</li>
+<li><b>Timezone</b> planned run (#6) nếu chạy container UTC nhưng người dùng nhập giờ local.</li>
+</ul>
+</section>
+
+<!-- ══════════════ 16 ══════════════ -->
+<section id="tests">
+<h2>19. Test &amp; cách chạy</h2>
+<table>
+<tr><th>File test</th><th>Bao phủ</th></tr>
+<tr><td><code>tests/test_scheduler.py</code></td><td>plan_schedule: predecessor gate, related conflict, max_dispatch, busy_ids.</td></tr>
+<tr><td><code>tests/test_planning_groups.py</code></td><td>serial/conflict/parallel + topo-sort.</td></tr>
+<tr><td><code>tests/test_conflict_ai.py</code></td><td>suspicious_pairs, parse_verdict khoan dung.</td></tr>
+<tr><td><code>tests/test_planning.py</code></td><td>start_items (tag+state, dry_run), run_due_plans (fire quá hạn).</td></tr>
+<tr><td><code>tests/test_sdlc_plan.py</code></td><td>resolve_stages, decide, is_blocking, handoff, StageSignals.</td></tr>
+<tr><td><code>tests/test_sdlc_loop.py</code></td><td>Vòng lặp engine (advance/revise/escalate/resume).</td></tr>
+<tr><td><code>tests/test_app.py</code></td><td>Route Planning: start/schedule + <b>giữ filter</b> + <b>cookie-restore</b> + live-partial.</td></tr>
+<tr><td><code>tests/test_scheduler_ai_feedback.py</code> <span class="badge b-info">mới</span></td><td>Tier 2.1: AI conflict bật → defer cặp; tắt → chạy cả 2.</td></tr>
+<tr><td><code>tests/test_state_repository.py</code></td><td>+ <code>ai_conflicts</code> (chuẩn hoá/filter) + <code>scheduler_decisions</code> (prune).</td></tr>
+<tr><td><code>tests/test_ado_client.py</code></td><td>+ multi-assignee WIQL (single <code>=</code> / multi <code>IN</code> / blank).</td></tr>
+</table>
+<div class="callout c-ok"><div class="h">✅ Trạng thái</div>Toàn bộ nâng cấp Tier 1 → Tier 4 + redesign Settings: full suite <b>252 passed</b>.</div>
+<pre><span class="c"># chạy toàn bộ test liên quan</span>
+python -m pytest tests/test_planning.py tests/test_scheduler.py \
+  tests/test_planning_groups.py tests/test_conflict_ai.py \
+  tests/test_sdlc_plan.py tests/test_sdlc_loop.py -q
+<span class="c"># chỉ route Planning</span>
+python -m pytest tests/test_app.py -k planning -q   <span class="c"># → 5 passed</span></pre>
+<div class="callout c-info"><div class="h">▶️ Chạy app để review thủ công</div>Khởi động service (FastAPI, cổng <code>health_port: 5080</code>) rồi mở <span class="kv">http://localhost:5080/dashboard/planning</span>. Nhập assignee → Load → Analyze → thử Start/Schedule/Cancel và xác nhận filter còn nguyên trên URL.</div>
+</section>
+
+<hr/>
+<p style="color:var(--muted);font-size:12.5px">Tài liệu tự sinh phục vụ review nội bộ AI-Autopilot · Planning Workbench &amp; SDLC v2 (Phase 1). Sơ đồ render bằng Mermaid (cần internet để hiển thị; nội dung bảng/text độc lập với sơ đồ).</p>
+</main>
+</div></div>
+
+<script>
+  mermaid.initialize({startOnLoad:true, theme:'dark',
+    themeVariables:{
+      fontSize:'13px', fontFamily:'ui-monospace,Menlo,Consolas,monospace',
+      primaryColor:'#1d242f', primaryTextColor:'#dbe3ec', primaryBorderColor:'#374253',
+      lineColor:'#5a6b80', secondaryColor:'#171d26', tertiaryColor:'#0b0f14'
+    }});
+</script>
+</body>
+</html>

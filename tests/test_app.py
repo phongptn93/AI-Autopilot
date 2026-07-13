@@ -34,6 +34,7 @@ def test_metrics_endpoint(client: TestClient):
     [
         "/dashboard",
         "/dashboard/board",
+        "/dashboard/planning",
         "/dashboard/history",
         "/dashboard/config",
         "/dashboard/capabilities",
@@ -139,6 +140,132 @@ def test_board_move_applies_tag_exclusively(tmp_path):
         fake.added.clear()
         resp = client.post("/dashboard/board/move", data={"item_id": "5", "column": "Queued"})
         assert resp.status_code == 204 and fake.added == []
+
+
+def test_planning_page_shows_wave_and_reasons(client: TestClient):
+    from datetime import UTC, datetime
+
+    client.app.state.container.scheduler_view = {
+        "at": datetime.now(UTC),
+        "candidates": 2,
+        "ready": [
+            {"id": 10, "title": "Build A", "category": "BackendTask",
+             "priority": 2, "predecessors": [], "related": [11]},
+        ],
+        "deferred": [
+            {"id": 11, "title": "Build B", "reason": "xung đột (Related) với #10 — chạy wave sau"},
+        ],
+    }
+    resp = client.get("/dashboard/planning")
+    assert resp.status_code == 200
+    assert "#10" in resp.text                 # ready item id in the live-schedule panel
+    assert "Build B" in resp.text             # deferred item title
+    assert "xung đột" in resp.text            # deferred reason
+
+
+def test_planning_start_tags_and_sets_state(tmp_path):
+    from ai_autopilot.models import WorkItemInfo
+
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        trigger_tag="autopilot", trigger_states=["Active"], planning_start_state="Active",
+    )
+
+    class _FakeAdo:
+        def __init__(self):
+            self.tags, self.states = [], []
+
+        async def get_work_item(self, i):
+            return WorkItemInfo(id=i, state="Closed", tags=[])       # not in a trigger state
+
+        async def add_tag(self, i, t):
+            self.tags.append((i, t))
+
+        async def update_state(self, i, s):
+            self.states.append((i, s))
+
+    with TestClient(create_app(settings)) as client:
+        fake = _FakeAdo()
+        client.app.state.container.ado = fake
+        resp = client.post(
+            "/dashboard/planning/start",
+            data={"ids": ["5", "6"], "mode": "now"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303 and "started=2" in resp.headers["location"]
+        assert (5, "autopilot") in fake.tags and (5, "Active") in fake.states
+
+
+def test_planning_start_preserves_filter_on_redirect(tmp_path):
+    from ai_autopilot.models import WorkItemInfo
+
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        trigger_tag="autopilot", trigger_states=["Active"], planning_start_state="Active",
+    )
+
+    class _FakeAdo:
+        async def get_work_item(self, i):
+            return WorkItemInfo(id=i, state="Closed", tags=[])
+
+        async def add_tag(self, i, t):
+            pass
+
+        async def update_state(self, i, s):
+            pass
+
+    with TestClient(create_app(settings)) as client:
+        client.app.state.container.ado = _FakeAdo()
+        resp = client.post(
+            "/dashboard/planning/start",
+            data={
+                "ids": ["5"], "mode": "now",
+                "assignee": "alice@example.com", "state": "Active", "type": "Bug",
+            },
+            follow_redirects=False,
+        )
+        loc = resp.headers["location"]
+        assert resp.status_code == 303
+        assert "assignee=alice%40example.com" in loc
+        assert "state=Active" in loc and "type=Bug" in loc and "started=1" in loc
+
+
+def test_planning_filter_remembered_via_cookie(tmp_path):
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+
+    class _FakeAdo:
+        async def get_work_items_by_assignee(self, assignee, states=None, types=None, top=200):
+            return []
+
+    with TestClient(create_app(settings)) as client:
+        client.app.state.container.ado = _FakeAdo()
+        # Explicit filter → rendered + stored in a cookie.
+        r1 = client.get("/dashboard/planning?assignee=alice@x.com&state=Active&type=Bug")
+        assert r1.status_code == 200 and "alice@x.com" in r1.text
+        assert client.cookies.get("planning_filter")
+        # No params → restored from the cookie (the client jar re-sends it).
+        r2 = client.get("/dashboard/planning")
+        assert "alice@x.com" in r2.text and "Active" in r2.text
+
+
+def test_planning_live_partial_renders(tmp_path):
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        r = client.get("/dashboard/planning/live-partial")
+        assert r.status_code == 200 and "Live schedule" in r.text
+
+
+def test_planning_schedule_creates_a_run(tmp_path):
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        resp = client.post(
+            "/dashboard/planning/start",
+            data={"ids": ["7"], "mode": "schedule", "when_at": "2099-01-01T08:00"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303 and "scheduled=1" in resp.headers["location"]
+        page = client.get("/dashboard/planning")
+        assert "Scheduled runs" in page.text
 
 
 def test_health_reports_checks(client: TestClient):

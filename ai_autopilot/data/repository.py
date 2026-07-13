@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,9 +11,14 @@ from sqlalchemy import delete, func, select
 
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
+    AiConflict,
     ExecutionRecord,
     ExecutionStatus,
+    MergedPr,
     PipelineState,
+    PlannedRun,
+    SchedulerDecision,
+    SdlcLoopState,
     WorkItemState,
 )
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
@@ -226,3 +232,223 @@ class StateRepository:
                 row.updated_at = datetime.now(UTC)
             await session.commit()
             return len(rows)
+
+
+class SdlcLoopStateRepository:
+    """Resumable per-item progress for the closed-loop SDLC engine."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def load(self, work_item_id: int) -> SdlcLoopState | None:
+        async with self._db.session() as session:
+            return await session.get(SdlcLoopState, work_item_id)
+
+    async def save(
+        self,
+        work_item_id: int,
+        *,
+        profile: str,
+        stage_index: int,
+        iterations: int,
+        branch: str,
+        signals_json: str,
+    ) -> None:
+        """Upsert the loop progress (called after every stage step → crash-safe)."""
+        async with self._db.session() as session:
+            row = await session.get(SdlcLoopState, work_item_id)
+            if row is None:
+                row = SdlcLoopState(work_item_id=work_item_id)
+                session.add(row)
+            row.profile = profile
+            row.stage_index = stage_index
+            row.iterations = iterations
+            row.branch = branch
+            row.signals_json = signals_json
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def clear(self, work_item_id: int) -> None:
+        async with self._db.session() as session:
+            row = await session.get(SdlcLoopState, work_item_id)
+            if row is not None:
+                await session.delete(row)
+                await session.commit()
+
+
+class PlannedRunRepository:
+    """Scheduled Planning-workbench runs (fire a batch of items at a future time)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def create(self, item_ids: list[int], run_at: datetime, note: str = "") -> int:
+        async with self._db.session() as session:
+            row = PlannedRun(
+                item_ids=json.dumps(item_ids), run_at=run_at, status="pending",
+                note=note, created_at=datetime.now(UTC),
+            )
+            session.add(row)
+            await session.commit()
+            return row.id
+
+    async def list_active(self) -> list[PlannedRun]:
+        """Pending runs, soonest first (for the workbench panel)."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(PlannedRun).where(PlannedRun.status == "pending").order_by(PlannedRun.run_at)
+            )
+            return list(rows.scalars().all())
+
+    async def due(self, now: datetime) -> list[PlannedRun]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(PlannedRun).where(
+                    PlannedRun.status == "pending", PlannedRun.run_at <= now
+                )
+            )
+            return list(rows.scalars().all())
+
+    async def set_status(self, run_id: int, status: str) -> None:
+        async with self._db.session() as session:
+            row = await session.get(PlannedRun, run_id)
+            if row is not None:
+                row.status = status
+                await session.commit()
+
+    @staticmethod
+    def ids_of(row: PlannedRun) -> list[int]:
+        try:
+            return [int(x) for x in json.loads(row.item_ids or "[]")]
+        except (ValueError, TypeError):
+            return []
+
+
+class SchedulerHistoryRepository:
+    """Recent dependency-scheduler decisions (bounded ring, persisted for the UI)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def record(
+        self, at: datetime, candidates: int, ready_ids: list[int],
+        deferred: list[dict], *, keep: int,
+    ) -> None:
+        """Append one decision and prune to the ``keep`` newest rows. ``keep <= 0``
+        is a no-op (history disabled)."""
+        if keep <= 0:
+            return
+        async with self._db.session() as session:
+            session.add(SchedulerDecision(
+                at=at, candidates=candidates,
+                ready_ids=json.dumps(list(ready_ids)),
+                deferred_json=json.dumps(deferred),
+            ))
+            await session.commit()
+            stale = (
+                await session.execute(
+                    select(SchedulerDecision.id)
+                    .order_by(SchedulerDecision.at.desc())
+                    .offset(keep)
+                )
+            ).scalars().all()
+            if stale:
+                await session.execute(
+                    delete(SchedulerDecision).where(SchedulerDecision.id.in_(stale))
+                )
+                await session.commit()
+
+    async def recent(self, limit: int = 20) -> list[dict]:
+        """Newest-first decisions, decoded for the template."""
+        async with self._db.session() as session:
+            rows = (
+                await session.execute(
+                    select(SchedulerDecision)
+                    .order_by(SchedulerDecision.at.desc())
+                    .limit(max(1, limit))
+                )
+            ).scalars().all()
+        out: list[dict] = []
+        for r in rows:
+            with contextlib.suppress(ValueError, TypeError):
+                out.append({
+                    "at": r.at,
+                    "candidates": r.candidates,
+                    "ready": json.loads(r.ready_ids or "[]"),
+                    "deferred": json.loads(r.deferred_json or "[]"),
+                })
+        return out
+
+
+class AiConflictRepository:
+    """AI-confirmed hidden conflicts (Planning Analyze → poller scheduling feedback)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    @staticmethod
+    def _order(a: int, b: int) -> tuple[int, int]:
+        return (a, b) if a <= b else (b, a)
+
+    async def record(
+        self, a: int, b: int, score: int, modules: list[str] | None = None, reason: str = ""
+    ) -> None:
+        """Upsert one confirmed conflict pair (normalised so a<b, recorded once)."""
+        if a == b:
+            return
+        lo, hi = self._order(a, b)
+        async with self._db.session() as session:
+            row = await session.get(AiConflict, (lo, hi))
+            if row is None:
+                row = AiConflict(a_id=lo, b_id=hi)
+                session.add(row)
+            row.score = max(0, min(100, int(score)))
+            row.modules = json.dumps(modules or [])
+            row.reason = (reason or "")[:500]
+            row.created_at = datetime.now(UTC)
+            await session.commit()
+
+    async def related_edges(
+        self, ids: list[int], min_score: int
+    ) -> dict[int, set[int]]:
+        """Symmetric ``id → {conflicting ids}`` for stored pairs where BOTH endpoints
+        are in ``ids`` and ``score >= min_score``. Empty ``ids`` → ``{}``."""
+        edges: dict[int, set[int]] = {}
+        idset = set(ids)
+        if not idset:
+            return edges
+        async with self._db.session() as session:
+            rows = (
+                await session.execute(
+                    select(AiConflict).where(AiConflict.score >= min_score)
+                )
+            ).scalars().all()
+        for row in rows:
+            if row.a_id in idset and row.b_id in idset:
+                edges.setdefault(row.a_id, set()).add(row.b_id)
+                edges.setdefault(row.b_id, set()).add(row.a_id)
+        return edges
+
+
+class SyncStateRepository:
+    """Persisted memory for the state-sync service — which merged PRs it has already
+    handled, so a restart never re-transitions items that have moved on."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def seen_merged_prs(self) -> set[int]:
+        async with self._db.session() as session:
+            rows = await session.execute(select(MergedPr.pr_id))
+            return set(rows.scalars().all())
+
+    async def mark_merged_pr(self, pr_id: int, work_item_id: int, state: str) -> None:
+        async with self._db.session() as session:
+            row = await session.get(MergedPr, pr_id)
+            if row is None:
+                row = MergedPr(pr_id=pr_id)
+                session.add(row)
+            row.work_item_id = work_item_id
+            row.state = state
+            row.created_at = datetime.now(UTC)
+            await session.commit()

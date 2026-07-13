@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<style>.main { max-width: none; }</style>
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+    <div>
+        <h2>Overview</h2>
+        <p>Real-time execution metrics and recent activity</p>
+    </div>
+    {% if tags %}
+    <select onchange="location.href='/dashboard/' + (this.value==='all' ? '' : '?tag=' + encodeURIComponent(this.value))"
+            style="background:var(--bg-card);color:var(--text);border:1px solid var(--border,#23232b);border-radius:8px;padding:6px 10px;font-size:13px">
+        <option value="all" {% if selected_tag == 'all' %}selected{% endif %}>All tags</option>
+        {% for t in tags %}<option value="{{ t }}" {% if selected_tag == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+    {% endif %}
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Total Executions</span><div class="stat-card-icon">📊</div></div>
+        <div class="stat-card-value">{{ stats.total }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Succeeded</span><div class="stat-card-icon">✅</div></div>
+        <div class="stat-card-value success-val">{{ stats.success }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Failed</span><div class="stat-card-icon">❌</div></div>
+        <div class="stat-card-value failed-val">{{ stats.failed }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Avg Duration</span><div class="stat-card-icon">⏱️</div></div>
+        <div class="stat-card-value">{{ fmt_duration(stats.avg_duration) }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h3>Recent Executions</h3><span style="font-size:13px;color:var(--text-muted)">Last {{ recent|length }} items</span></div>
+    <div class="card-body">
+        {% if recent %}
+        <table>
+            <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Status</th><th>Duration</th><th>Started</th><th>Finished</th></tr></thead>
+            <tbody>
+                {% for e in recent %}
+                {% set label, css = category_badge(e.category) %}
+                <tr>
+                    <td class="id-col">#{{ e.work_item_id }}</td>
+                    <td class="title-col">{{ e.title }}</td>
+                    <td><span class="cat-badge {{ css }}">{{ label }}</span></td>
+                    <td><span class="badge {{ status_class(e.status.value) }}"><span class="badge-dot"></span>{{ e.status.value }}</span></td>
+                    <td class="mono">{% if e.completed_at %}{{ fmt_duration(e.duration_seconds) }}{% else %}<span style="color:var(--text-muted)">running…</span>{% endif %}</td>
+                    <td>{{ e.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{% if e.completed_at %}{{ e.completed_at.strftime('%Y-%m-%d %H:%M') }}{% else %}<span style="color:var(--text-muted)">—</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><p>No executions yet. Tag a work item with <strong>autopilot</strong> to get started.</p></div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

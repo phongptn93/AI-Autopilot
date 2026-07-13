@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AI Autopilot — SDLC Looping v2 · Báo cáo</title>
+<style>
+  :root{--bg:#0b1020;--card:#141b2e;--ink:#e8ecf5;--mut:#9aa6c0;--line:#26304b;
+        --ac:#5b8cff;--ok:#2dd4a7;--warn:#f5b13d;--bad:#ff6b6b;--pill:#1d2740}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0b1020,#0d1428);color:var(--ink);
+       font:15px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  .wrap{max-width:1040px;margin:0 auto;padding:40px 22px 80px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:.2px}
+  h2{font-size:21px;margin:38px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:20px 0 8px;color:#cdd6ee}
+  .sub{color:var(--mut);margin:0 0 8px}
+  .tag{display:inline-block;background:var(--pill);border:1px solid var(--line);color:var(--mut);
+       border-radius:999px;padding:3px 11px;font-size:12px;margin:2px 4px 2px 0}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:760px){.g2,.g3{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .card h3{margin-top:0}
+  .kpi{font-size:26px;font-weight:700}
+  .ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.ac{color:var(--ac)}
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.4px}
+  code{background:#0c1526;border:1px solid var(--line);border-radius:6px;
+       padding:1px 6px;font:13px/1.4 ui-monospace,Consolas,monospace;color:#bcd0ff}
+  pre{background:#0c1526;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;
+      font:13px/1.5 ui-monospace,Consolas,monospace;color:#c7d4f5}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
+  .step{background:var(--pill);border:1px solid var(--line);border-radius:9px;padding:7px 11px;font-size:13px}
+  .arrow{color:var(--ac);font-weight:700}
+  .badge{display:inline-block;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:600}
+  .b-new{background:rgba(45,212,167,.15);color:var(--ok);border:1px solid rgba(45,212,167,.4)}
+  .b-old{background:rgba(255,107,107,.12);color:var(--bad);border:1px solid rgba(255,107,107,.35)}
+  .lead{background:var(--card);border-left:3px solid var(--ac);padding:12px 16px;border-radius:8px;color:#d7def2}
+  ul{margin:6px 0 6px 2px;padding-left:18px}li{margin:3px 0}
+  .foot{color:var(--mut);font-size:12.5px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+  .chk{color:var(--ok);font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>AI Autopilot — <span class="ac">SDLC Looping v2</span></h1>
+  <p class="sub">Báo cáo tổng kết · đã làm gì · cách dùng khác biệt · so sánh với bản gốc</p>
+  <div>
+    <span class="tag">Phong Pham</span>
+    <span class="tag">2026-07-04</span>
+    <span class="tag">Python · Claude Agent SDK · ADO</span>
+    <span class="tag ac">213 test pass · ruff clean</span>
+  </div>
+
+  <div class="lead" style="margin-top:18px">
+    Mục tiêu: biến AI Autopilot từ <b>one-shot</b> (1 lần chạy → 1 PR → dừng) thành
+    <b>closed-loop SDLC</b> — chạy work item qua các <b>giai đoạn chỉ định</b>, tự lặp lại
+    khi lỗi, và <b>chia vai trò theo từng máy</b> (BA / Dev / Tester), bàn giao nhau qua trạng thái ADO.
+  </div>
+
+  <!-- ===== KPI ===== -->
+  <h2>1 · Kết quả một cái nhìn</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Tính năng giao</h3><div class="kpi ok">2</div>
+      <div class="sub">P1 Dependency Scheduler + P2 SDLC Loop Engine (Phase 1)</div></div>
+    <div class="card"><h3>Test</h3><div class="kpi ok">213 ✓</div>
+      <div class="sub">+35 test mới (scheduler 8 · sdlc_plan 23 · sdlc_loop 4). Ruff sạch.</div></div>
+    <div class="card"><h3>Token engine lõi</h3><div class="kpi ac">0</div>
+      <div class="sub">Điều phối/gate/handoff là logic thuần — chỉ stage mới gọi Claude.</div></div>
+  </div>
+
+  <!-- ===== ĐÃ LÀM GÌ ===== -->
+  <h2>2 · Đã làm những gì</h2>
+
+  <h3>🅐 P1 — Dependency-aware Scheduler <span class="badge b-new">đã có</span></h3>
+  <p class="sub">Chống xung đột giữa các req bằng <b>link-graph ADO</b> (0 token). Predecessor = chờ tiền nhiệm;
+     Related = không chạy đồng thời → tự thành “wave” qua các vòng poll.</p>
+  <table>
+    <tr><th>File</th><th>Vai trò</th></tr>
+    <tr><td><code>routing/scheduler.py</code></td><td>Hàm thuần <code>plan_schedule()</code> → (ready, deferred)</td></tr>
+    <tr><td><code>ado/client.py</code></td><td><code>get_work_item_links()</code> đọc Predecessor/Related</td></tr>
+    <tr><td><code>services/poller.py</code></td><td><code>_schedule()</code> dựng graph → dispatch ready, comment lý do hoãn</td></tr>
+  </table>
+
+  <h3>🅑 P2 — Closed-loop SDLC Engine (Phase 1) <span class="badge b-new">mới</span></h3>
+  <p class="sub">Engine đẩy 1 item qua chuỗi stage <b>chọn theo profile/máy</b>, gate mỗi stage, revise theo
+     <b>budget chung</b>, escalate khi hết lượt, và bàn giao sang máy kế qua trạng thái ADO.</p>
+  <table>
+    <tr><th>File</th><th>Vai trò</th></tr>
+    <tr><td><code>execution/sdlc_plan.py</code> <span class="badge b-new">new</span></td>
+        <td><b>PURE</b>: catalog stage, profiles, <code>resolve_stages</code> (5 tầng ưu tiên), <code>decide</code>,
+            <code>is_blocking</code>, <code>handoff_state</code>, <code>handoff_collides</code>, <code>StageSignals</code></td></tr>
+    <tr><td><code>execution/sdlc_loop.py</code> <span class="badge b-new">new</span></td>
+        <td><code>SdlcLoopEngine</code>: acquire scratch 1 lần → chạy từng stage → commit → gate → advance/revise/escalate → handoff. Resumable.</td></tr>
+    <tr><td><code>data/entities.py</code> · <code>repository.py</code></td>
+        <td>Bảng <code>sdlc_loop_states</code> + repo (lưu tiến độ mỗi bước → crash resume)</td></tr>
+    <tr><td><code>execution/claude_executor.py</code></td>
+        <td>+ <code>prepare_stage_branch</code> / <code>stage_commit</code> / <code>push_stage_branch</code> (1 branch chung cho nhiều stage)</td></tr>
+    <tr><td><code>config.py</code></td>
+        <td><code>SdlcStage</code> model + 10 cờ <code>sdlc_*</code></td></tr>
+    <tr><td><code>container.py</code> · <code>services/poller.py</code></td>
+        <td>Dựng <code>sdlc_engine</code>; guard <code>_process_sdlc</code>; ghi handoff; check va chạm lúc khởi động</td></tr>
+    <tr><td><code>tests/test_sdlc_plan.py</code> · <code>test_sdlc_loop.py</code></td>
+        <td>27 test (thuần + tích hợp bằng fake, không cần git/SDK)</td></tr>
+  </table>
+
+  <h3>Stage catalog &amp; profiles</h3>
+  <div class="flow">
+    <span class="step">analyze · BA</span><span class="arrow">→</span>
+    <span class="step">design</span><span class="arrow">→</span>
+    <span class="step">implement · Dev</span><span class="arrow">→</span>
+    <span class="step">test · QC</span><span class="arrow">→</span>
+    <span class="step">review</span><span class="arrow">→</span>
+    <span class="step">pr</span>
+  </div>
+  <p class="sub"><b>Profiles</b> (tập con có thứ tự): <code>full</code> · <code>dev</code>=[implement,review,pr] ·
+     <code>ba</code>=[analyze] · <code>qc</code>=[test] · <code>review</code> · <code>design</code> — mở rộng qua <code>sdlc_profiles</code>.</p>
+
+  <!-- ===== CÁCH DÙNG KHÁC BIỆT ===== -->
+  <h2>3 · Cách sử dụng khác biệt</h2>
+
+  <div class="grid g2">
+    <div class="card">
+      <h3>① Bật per-máy (knob chính)</h3>
+      <p class="sub">Mỗi người 1 máy, mỗi máy 1 vai trò — cấu hình trong <code>config.yaml</code> của máy đó:</p>
+<pre>sdlc_loop_enabled: true
+sdlc_profile: dev        # máy này chỉ chạy Dev
+sdlc_max_iterations: 3</pre>
+    </div>
+    <div class="card">
+      <h3>② Ghi đè theo item (tuỳ chọn)</h3>
+      <p class="sub">Gắn tag <code>sdlc:&lt;profile&gt;</code> lên work item để ép 1 luồng riêng, thắng cấu hình máy:</p>
+<pre>gắn tag  sdlc:ba   → chỉ chạy giai đoạn BA
+gắn tag  sdlc:qc   → chỉ chạy giai đoạn QC</pre>
+    </div>
+  </div>
+
+  <h3>③ Chuỗi bàn giao giữa các máy (coordinate qua trạng thái ADO)</h3>
+  <table>
+    <tr><th>Máy</th><th>sdlc_profile</th><th>trigger_states (nhận việc)</th><th>hoàn tất → set state</th></tr>
+    <tr><td>BA</td><td><code>ba</code></td><td>New, Proposed</td><td>Ready for Dev</td></tr>
+    <tr><td>Dev</td><td><code>dev</code></td><td>Ready for Dev</td><td>Ready to Test</td></tr>
+    <tr><td>Tester</td><td><code>qc</code></td><td>Ready to Test</td><td>Ready to Deploy</td></tr>
+  </table>
+  <p class="sub">→ Không coupling trực tiếp giữa các máy; vòng lặp SDLC “nổi lên” hoàn toàn qua
+     <code>System.State</code>. Khởi động có <b>guard</b> chặn nếu 1 máy set state trùng chính
+     <code>trigger_states</code> của nó (tránh loop vô hạn).</p>
+
+  <h3>Thứ tự ưu tiên chọn profile</h3>
+  <div class="flow">
+    <span class="step">tag <code>sdlc:*</code></span><span class="arrow">›</span>
+    <span class="step">máy: sdlc_stages</span><span class="arrow">›</span>
+    <span class="step">máy: sdlc_profile</span><span class="arrow">›</span>
+    <span class="step">map theo type</span><span class="arrow">›</span>
+    <span class="step">default</span>
+  </div>
+
+  <!-- ===== BEFORE / AFTER ===== -->
+  <h2>4 · Khác nhau so với ban đầu</h2>
+
+  <div class="grid g2">
+    <div class="card">
+      <h3><span class="badge b-old">BAN ĐẦU</span> one-shot</h3>
+      <div class="flow">
+        <span class="step">tag → 1 Claude run</span><span class="arrow">→</span>
+        <span class="step">PR</span><span class="arrow">→</span>
+        <span class="step">score 1 lần</span><span class="arrow">→</span>
+        <span class="step">DỪNG</span>
+      </div>
+      <ul>
+        <li>1 lần chạy = 1 chuỗi skill mờ = 1 PR</li>
+        <li>Không có stage rõ ràng, không gate từng bước</li>
+        <li>Không tự lặp lại khi review/CI fail</li>
+        <li>Không chia vai trò theo máy</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3><span class="badge b-new">SAU</span> closed-loop</h3>
+      <div class="flow">
+        <span class="step">profile</span><span class="arrow">→</span>
+        <span class="step">stage → gate</span><span class="arrow">↺</span>
+        <span class="step">revise (budget)</span><span class="arrow">→</span>
+        <span class="step">handoff máy kế</span>
+      </div>
+      <ul>
+        <li>Chuỗi stage <b>tường minh</b>, chọn theo profile/máy/tag</li>
+        <li>Gate mỗi stage, <b>revise</b> theo budget chung, <b>escalate</b> khi hết</li>
+        <li><b>Resumable</b>: crash giữa loop → chạy tiếp đúng chỗ</li>
+        <li>Chia BA/Dev/QC theo máy, bàn giao qua state</li>
+      </ul>
+    </div>
+  </div>
+
+  <table style="margin-top:14px">
+    <tr><th>Khía cạnh</th><th class="bad">Ban đầu</th><th class="ok">Sau (v2)</th></tr>
+    <tr><td>Đơn vị chạy</td><td>1 run / item</td><td>N stage / item, có state machine</td></tr>
+    <tr><td>Chọn phạm vi</td><td>luôn full (model tự quyết)</td><td>profile chỉ định (ba/dev/qc/full/custom)</td></tr>
+    <tr><td>Khi lỗi</td><td>retry lại từ đầu</td><td>revise đúng stage, budget chung, rồi escalate</td></tr>
+    <tr><td>Đa máy / team</td><td>không</td><td>role-per-machine + handoff qua ADO state</td></tr>
+    <tr><td>Chống mất tiến độ</td><td>không</td><td>bảng <code>sdlc_loop_states</code>, resume</td></tr>
+    <tr><td>Bật/tắt</td><td>—</td><td><code>sdlc_loop_enabled</code> (mặc định off → không đổi hành vi)</td></tr>
+  </table>
+
+  <!-- ===== SDLC AUDIT ===== -->
+  <h2>5 · Tự đánh giá quy trình SDLC (khi làm feature này)</h2>
+  <p class="sub">Feature này được làm <b>đúng SDLC</b> hơn hẳn P1 trước đó (mà tôi đã thừa nhận cắt bớt):</p>
+  <table>
+    <tr><th>Giai đoạn</th><th>Cho feature v2 này</th></tr>
+    <tr><td>Requirement</td><td><span class="chk">✓</span> Làm rõ + chốt scope qua hỏi–đáp với bạn</td></tr>
+    <tr><td>Design</td><td><span class="chk">✓</span> Plan mode: 3 Explore agent + 2 vòng Plan agent → plan duyệt</td></tr>
+    <tr><td>Implement</td><td><span class="chk">✓</span> Theo đúng convention repo (PURE/IMPURE tách bạch)</td></tr>
+    <tr><td>Test</td><td><span class="chk">✓</span> 27 test (thuần + tích hợp), 213 pass toàn suite</td></tr>
+    <tr><td>Docs</td><td><span class="chk">✓</span> README + config.example.yaml + báo cáo này</td></tr>
+    <tr><td>Review / PR / Deploy</td><td class="warn">◻ Chưa: chưa chạy code-review skill, chưa commit/PR, chưa deploy (chờ bạn quyết)</td></tr>
+  </table>
+
+  <h2>6 · Bước tiếp theo (đề xuất)</h2>
+  <ul>
+    <li><b>Phase 2</b>: artifact HTML mỗi stage (đính kèm ADO — đã chốt Option A) + profiles ba/qc đầy đủ.</li>
+    <li><b>Phase 3</b>: đọc CI build-status của nhánh PR → gate <code>ci_passed</code> thật.</li>
+    <li><b>Phase 4</b>: verify sau deploy (skill <code>post-deploy-verify</code>) + rollback.</li>
+    <li><b>Governance</b>: chạy <code>/code-review</code>, tạo branch + PR cho chính thay đổi này.</li>
+  </ul>
+
+  <div class="foot">
+    AI Autopilot · Closed-loop SDLC v2 (Phase 1) — báo cáo tự sinh. Engine mặc định <b>tắt</b>
+    (<code>sdlc_loop_enabled: false</code>) nên không ảnh hưởng hành vi hiện tại cho tới khi bạn bật.
+  </div>
+
+</div>
+</body>
+</html>

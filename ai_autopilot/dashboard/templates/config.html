@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro flag(v) %}{% if v %}<span class="cfg-yes">✓ on</span>{% else %}<span class="cfg-no">✗ off</span>{% endif %}{% endmacro %}
+{% macro secret(v) %}{% if v %}<span class="cfg-yes">✓ set</span>{% else %}<span class="cfg-no">— not set</span>{% endif %}{% endmacro %}
+{% macro val(v) %}{% if v is none or v == '' %}<span class="cfg-dim">—</span>{% else %}{{ v }}{% endif %}{% endmacro %}
+{% macro chips(items) %}{% if items %}{% for x in items %}<span class="cfg-chip">{{ x }}</span>{% endfor %}{% else %}<span class="cfg-dim">—</span>{% endif %}{% endmacro %}
+<style>
+  .main { max-width: none; }
+  .cfg-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .cfg-card { background:var(--bg-card); border:1px solid var(--border); border-radius:14px; overflow:hidden; box-shadow:var(--shadow-sm); }
+  .cfg-card h3 { font-size:13.5px; font-weight:650; padding:13px 18px; border-bottom:1px solid var(--border-soft); display:flex; align-items:center; gap:8px; }
+  .cfg-body { padding:6px 18px 14px; }
+  .cfg-row { display:grid; grid-template-columns:minmax(130px,44%) 1fr; gap:12px; padding:8px 0; border-bottom:1px solid var(--border-soft); font-size:13px; align-items:baseline; }
+  .cfg-row:last-child { border-bottom:none; }
+  .cfg-row .k { color:var(--text-muted); }
+  .cfg-row .v { color:var(--text); word-break:break-word; font-variant-numeric:tabular-nums; }
+  .cfg-row .v.mono { font-family:var(--mono); font-size:12px; }
+  .cfg-yes { color:var(--green); font-weight:650; font-size:12.5px; }
+  .cfg-no { color:var(--text-dim); font-size:12.5px; }
+  .cfg-dim { color:var(--text-dim); }
+  .cfg-chip { display:inline-block; background:var(--bg-hover); border:1px solid var(--border); color:var(--text-muted);
+    border-radius:20px; padding:2px 10px; font-size:11.5px; font-weight:600; margin:2px 4px 2px 0; }
+  .cfg-note { color:var(--text-dim); font-size:12px; margin-top:2px; }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+    <div>
+        <h2>Configuration</h2>
+        <p>Current live settings (read-only) · secrets shown as set/not-set only · edit in <a href="/dashboard/settings" class="table-link">Settings</a></p>
+    </div>
+</div>
+
+<div class="cfg-grid">
+
+  <div class="cfg-card">
+    <h3>🔗 Azure DevOps</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Organization</span><span class="v mono">{{ val(cfg.ado_organization) }}</span></div>
+      <div class="cfg-row"><span class="k">Project (work items)</span><span class="v">{{ val(cfg.ado_project) }}</span></div>
+      <div class="cfg-row"><span class="k">Code project</span><span class="v">{{ val(cfg.code_project) }}</span></div>
+      <div class="cfg-row"><span class="k">PAT</span><span class="v">{{ secret(cfg.ado_pat) }}</span></div>
+      <div class="cfg-row"><span class="k">OAuth app</span><span class="v">{{ secret(cfg.oauth_app_id) }}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>🏷️ Triggering</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Trigger tag</span><span class="v mono">{{ val(cfg.trigger_tag) }}</span></div>
+      <div class="cfg-row"><span class="k">Assignee trigger tag</span><span class="v mono">{{ val(cfg.assignee_trigger_tag) }}</span></div>
+      <div class="cfg-row"><span class="k">↳ handled by</span><span class="v">{{ val(cfg.assignee_trigger_user or cfg.auto_transition_assignee) }}</span></div>
+      <div class="cfg-row"><span class="k">Trigger states</span><span class="v">{{ chips(cfg.trigger_states) }}</span></div>
+      <div class="cfg-row"><span class="k">Done states</span><span class="v">{{ chips(cfg.done_states) }}</span></div>
+      <div class="cfg-row"><span class="k">Poll interval</span><span class="v">{{ cfg.poll_interval_seconds }}s</span></div>
+      <div class="cfg-row"><span class="k">Reprocess on reopen</span><span class="v">{{ flag(cfg.reprocess_on_reopen) }}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>🔖 Outcomes → tag + state</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">In progress</span><span class="v">{{ val(cfg.state_in_progress) }}</span></div>
+      <div class="cfg-row"><span class="k">Review</span><span class="v"><span class="cfg-chip">{{ cfg.review_tag }}</span> {{ val(cfg.state_in_review) }}</span></div>
+      <div class="cfg-row"><span class="k">Done</span><span class="v"><span class="cfg-chip">{{ cfg.processed_tag }}</span> {{ val(cfg.resolved_state) }}</span></div>
+      <div class="cfg-row"><span class="k">Needs human</span><span class="v"><span class="cfg-chip">{{ cfg.escalation_tag }}</span> {{ val(cfg.state_needs_human) }}</span></div>
+      <div class="cfg-row"><span class="k">Failed</span><span class="v"><span class="cfg-chip">{{ cfg.failed_tag or cfg.processed_tag }}</span> {{ val(cfg.state_failed) }}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>⚙️ Execution & autonomy</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Execution mode</span><span class="v">{{ val(cfg.execution_mode) }}</span></div>
+      <div class="cfg-row"><span class="k">Autonomy level</span><span class="v">{{ val(cfg.autonomy_level) }}</span></div>
+      <div class="cfg-row"><span class="k">Worktrees</span><span class="v">{{ flag(cfg.use_worktrees) }}</span></div>
+      <div class="cfg-row"><span class="k">Max concurrent</span><span class="v">{{ cfg.max_concurrent }}</span></div>
+      <div class="cfg-row"><span class="k">Task timeout</span><span class="v">{{ cfg.task_timeout_minutes }} min</span></div>
+      <div class="cfg-row"><span class="k">Max retries</span><span class="v">{{ cfg.max_retries }}</span></div>
+      <div class="cfg-row"><span class="k">Claude model</span><span class="v mono">{{ cfg.claude_model or 'SDK default' }}</span></div>
+      <div class="cfg-row"><span class="k">Auto review</span><span class="v">{{ flag(cfg.auto_review_enabled) }} <span class="cfg-dim">({{ cfg.block_on_severity }})</span></span></div>
+      <div class="cfg-row"><span class="k">Auto decompose</span><span class="v">{{ flag(cfg.auto_decompose) }}</span></div>
+      <div class="cfg-row"><span class="k">Dry run</span><span class="v">{{ flag(cfg.dry_run) }}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>🔀 Dependency scheduling</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Enabled</span><span class="v">{{ flag(cfg.dependency_scheduling_enabled) }}</span></div>
+      <div class="cfg-row"><span class="k">Sibling conflict</span><span class="v">{{ flag(cfg.sibling_conflict_scheduling) }}</span></div>
+      <div class="cfg-row"><span class="k">Max dispatch / cycle</span><span class="v">{{ cfg.scheduler_max_dispatch or 'no cap' }}</span></div>
+      <div class="cfg-row"><span class="k">Use AI conflicts</span><span class="v">{{ flag(cfg.scheduler_use_ai_conflicts) }} <span class="cfg-dim">(≥{{ cfg.scheduler_ai_conflict_min_score }})</span></span></div>
+      <div class="cfg-row"><span class="k">History keep</span><span class="v">{{ cfg.scheduler_history_limit }}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>🔁 Closed-loop SDLC (v2)</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Enabled</span><span class="v">{{ flag(cfg.sdlc_loop_enabled) }}</span></div>
+      <div class="cfg-row"><span class="k">This machine profile</span><span class="v">{{ val(cfg.sdlc_profile) }}</span></div>
+      <div class="cfg-row"><span class="k">Default profile</span><span class="v">{{ val(cfg.sdlc_default_profile) }}</span></div>
+      <div class="cfg-row"><span class="k">Max iterations</span><span class="v">{{ cfg.sdlc_max_iterations }}</span></div>
+      <div class="cfg-row"><span class="k">Advance on draft</span><span class="v">{{ flag(cfg.sdlc_advance_on_draft) }}</span></div>
+      <div class="cfg-row"><span class="k">Type → profile</span><span class="v">{% if cfg.sdlc_type_profiles %}{% for k, v in cfg.sdlc_type_profiles.items() %}<span class="cfg-chip">{{ k }}→{{ v }}</span>{% endfor %}{% else %}<span class="cfg-dim">—</span>{% endif %}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>🧭 Planning & scoring</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">AI analysis</span><span class="v">{{ flag(cfg.planning_ai_analysis) }} <span class="cfg-dim">(≤{{ cfg.planning_ai_max_pairs }} pairs, ≥{{ cfg.planning_ai_min_score }})</span></span></div>
+      <div class="cfg-row"><span class="k">Live refresh</span><span class="v">{{ cfg.planning_live_refresh_seconds }}s</span></div>
+      <div class="cfg-row"><span class="k">Load limit</span><span class="v">{{ cfg.planning_load_limit }}</span></div>
+      <div class="cfg-row"><span class="k">PR scoring</span><span class="v">{{ flag(cfg.pr_scoring_enabled) }} <span class="cfg-dim">(auto≥{{ cfg.pr_score_auto_min }}, review≥{{ cfg.pr_score_review_min }})</span></span></div>
+      <div class="cfg-row"><span class="k">Board max / column</span><span class="v">{{ cfg.board_max_per_column or 'all' }}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>🚀 Auto-transitions & deploy</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Enabled</span><span class="v">{{ flag(cfg.auto_transition_enabled) }}</span></div>
+      <div class="cfg-row"><span class="k">Only for assignee</span><span class="v">{{ val(cfg.auto_transition_assignee) }}</span></div>
+      <div class="cfg-row"><span class="k">On PR merged</span><span class="v">{{ val(cfg.on_merge_state) }}</span></div>
+      <div class="cfg-row"><span class="k">On deploy success</span><span class="v">{{ val(cfg.on_deploy_state) }}</span></div>
+      <div class="cfg-row"><span class="k">Deploy pipeline</span><span class="v">{{ cfg.deploy_pipeline_id or 'any build' }}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>📅 Schedule · budget · workspace</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Window</span><span class="v">{% if cfg.schedule_start or cfg.schedule_end %}{{ cfg.schedule_start }}–{{ cfg.schedule_end }} ({{ cfg.schedule_days }}){% else %}<span class="cfg-dim">always</span>{% endif %}</span></div>
+      <div class="cfg-row"><span class="k">Daily budget</span><span class="v">{{ '{:,} tokens'.format(cfg.daily_budget_tokens) if cfg.daily_budget_tokens > 0 else 'unlimited' }}</span></div>
+      <div class="cfg-row"><span class="k">Workspace</span><span class="v mono">{{ val(cfg.workspace_directory) }}</span></div>
+      <div class="cfg-row"><span class="k">Base branch</span><span class="v mono">{{ val(cfg.base_branch) }}</span></div>
+      <div class="cfg-row"><span class="k">Allowed repos</span><span class="v">{{ chips(cfg.allowed_repos) }}</span></div>
+      <div class="cfg-row"><span class="k">Health</span><span class="v mono">{{ cfg.health_host }}:{{ cfg.health_port }}</span></div>
+    </div>
+  </div>
+
+  <div class="cfg-card">
+    <h3>🔔 Notifications</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">MS Teams</span><span class="v">{{ secret(cfg.teams_webhook_url) }}</span></div>
+      <div class="cfg-row"><span class="k">Zalo OA</span><span class="v">{{ secret(cfg.zalo_oa_access_token) }}</span></div>
+      <div class="cfg-row"><span class="k">Email (SMTP)</span><span class="v">{{ secret(cfg.smtp_host) }}</span></div>
+      <div class="cfg-row"><span class="k">Cost alerts</span><span class="v">{{ flag(cfg.cost_alert_enabled) }}</span></div>
+    </div>
+  </div>
+
+  {% if cfg.tenants %}
+  <div class="cfg-card">
+    <h3>🏢 Tenants</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Configured</span><span class="v">{{ chips(cfg.tenants | map(attribute='name') | list) }}</span></div>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

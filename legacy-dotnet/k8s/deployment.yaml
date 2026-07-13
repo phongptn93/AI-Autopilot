@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ado-autopilot
+  labels:
+    app: ado-autopilot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ado-autopilot
+  template:
+    metadata:
+      labels:
+        app: ado-autopilot
+    spec:
+      containers:
+        - name: autopilot
+          image: ado-autopilot:latest
+          ports:
+            - containerPort: 5080
+          envFrom:
+            - configMapRef:
+                name: autopilot-config
+            - secretRef:
+                name: autopilot-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: autopilot-data

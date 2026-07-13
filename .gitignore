@@ -1,2 +1,42 @@
-bin/
-obj/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data (anchored to repo root so the ai_autopilot/data package is NOT ignored)
+*.db
+*.db-journal
+/logs/
+/data/
+.ado-autopilot-token.json
+
+# Legacy .NET build output
+legacy-dotnet/bin/
+legacy-dotnet/obj/
+
+# Local config (may contain secrets)
+config.local.yaml
+config.yaml
+config.yaml.*
+config.*.bak
+
+# IDE
+.idea/
+.vscode/
+.claude
+
+# Office lock files
+~$*

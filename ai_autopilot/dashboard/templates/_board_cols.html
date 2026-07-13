@@ -1,0 +1,51 @@
+{# Board columns only — rendered standalone for the auto-refresh fetch. #}
+<div class="board-cols" style="grid-template-columns: repeat({{ columns|length }}, minmax(0,1fr))">
+    {% for col in columns %}
+    <div class="board-col col-accent-{{ col|lower|replace(' ', '-') }}" data-column="{{ col }}">
+        <div class="board-col-head">
+            <span class="board-col-name">{{ col }}</span>
+            <span class="board-col-count">{{ board[col]|length }}</span>
+        </div>
+        <div class="board-col-body">
+            {% set full = board[col] %}
+            {% set shown = full if not board_limit else full[:board_limit] %}
+            {% for card in shown %}
+            {% set label, css = category_badge(card.category) %}
+            <div class="board-card {{ css }}" draggable="true" data-id="{{ card.id }}">
+                <div class="board-card-head">
+                    {% if card.category %}<span class="cat-badge {{ css }}">{{ label }}</span>{% endif %}
+                    {% if ado_item_base %}
+                    <a class="board-card-id" href="{{ ado_item_base }}/{{ card.id }}" target="_blank" rel="noopener" title="Open #{{ card.id }} in Azure DevOps">#{{ card.id }} ↗</a>
+                    {% else %}
+                    <span class="board-card-id">#{{ card.id }}</span>
+                    {% endif %}
+                    <span class="board-card-state">{{ card.ado_state }}</span>
+                </div>
+                <div class="board-card-title">{{ card.title }}</div>
+                <div class="board-card-foot">
+                    <a class="board-card-act" href="/dashboard/activity/{{ card.id }}">👁 activity</a>
+                    {% if card.pr_urls %}
+                    <span class="board-card-pr">
+                        {% if card.pr_urls|length == 1 %}
+                        <a href="{{ card.pr_urls[0] }}" target="_blank" rel="noopener">PR ↗</a>
+                        {% else %}
+                        {% for u in card.pr_urls %}<a href="{{ u }}" target="_blank" rel="noopener" title="{{ u }}">PR{{ loop.index }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+                        {% endif %}
+                    </span>
+                    {% endif %}
+                </div>
+                {% if interactive and card.column == 'In progress' %}
+                <div class="board-card-rc">🎮 <code>/rc autopilot-{{ card.id }}</code></div>
+                {% endif %}
+                {% if card.assigned_to %}<div class="board-card-who">👤 {{ card.assigned_to }}</div>{% endif %}
+            </div>
+            {% else %}
+            <div class="board-col-empty">No items</div>
+            {% endfor %}
+            {% if board_limit and full|length > board_limit %}
+            <a class="board-more" href="{{ more_url }}">＋ Load more ({{ full|length - board_limit }} more of {{ full|length }})</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>

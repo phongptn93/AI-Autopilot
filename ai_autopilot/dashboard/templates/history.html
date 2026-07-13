@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .hist-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0; }
+  .hf-input { background:var(--bg-input,#0c0d12); color:var(--text); border:1px solid var(--border,#23232b);
+    border-radius:8px; padding:6px 10px; font-size:13px; font-family:inherit; }
+  .hf-input:focus { outline:none; border-color:var(--accent,#6366f1); }
+  .hist-pager { display:flex; align-items:center; justify-content:space-between; gap:14px;
+    padding:14px 22px; border-top:1px solid var(--border-soft); flex-wrap:wrap; }
+  .hist-pager .pginfo { color:var(--text-muted); font-size:13px; }
+  .hist-pager .pgnav { display:flex; align-items:center; gap:10px; }
+  .pgbtn { border:1px solid var(--border); color:var(--text); border-radius:8px; padding:6px 14px;
+    font-size:13px; font-weight:600; text-decoration:none; }
+  .pgbtn:hover { border-color:var(--accent,#6366f1); background:var(--accent-bg,rgba(99,102,241,.13)); }
+  .pgbtn.disabled { opacity:.35; pointer-events:none; }
+</style>
+
+<div class="page-header">
+    <h2>Execution History</h2>
+    <p>Detailed log of all automated work item executions</p>
+</div>
+
+<div class="card">
+    <div class="card-header" style="flex-wrap:wrap; gap:12px;">
+        <h3>All Executions</h3>
+        <form method="get" action="/dashboard/history" class="hist-filters">
+            <input type="text" name="q" value="{{ q }}" placeholder="🔍 id or title" class="hf-input" style="width:150px"/>
+            <select name="status" class="hf-input">
+                {% for v, lbl in [('','All status'),('Success','Success'),('Failed','Failed'),('Running','Running'),('Retrying','Retrying'),('Pending','Pending')] %}
+                <option value="{{ v }}" {% if status == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select>
+            <select name="cat" class="hf-input">
+                {% for v, lbl in [('','All types'),('BackendTask','BE'),('FrontendTask','FE'),('DatabaseTask','DB'),('TestTask','QC'),('Bug','Bug'),('Requirement','Req')] %}
+                <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+            </select>
+            <input type="date" name="from" value="{{ date_from }}" class="hf-input" title="Started from"/>
+            <input type="date" name="to" value="{{ date_to }}" class="hf-input" title="Started to"/>
+            <button type="submit" class="btn-ghost">Apply</button>
+            {% if q or status or cat or date_from or date_to %}
+            <a href="/dashboard/history" class="btn-ghost" style="text-decoration:none">Reset</a>{% endif %}
+            {% if records %}
+            <form method="post" action="/dashboard/history/clear"
+                  onsubmit="return confirm('Xoá TẤT CẢ lịch sử execution? Không thể hoàn tác.');" style="margin:0;">
+                <button type="submit" class="btn-ghost" style="border-color:var(--red,#e5484d);color:var(--red,#e5484d)">🗑 Clear all</button>
+            </form>
+            {% endif %}
+        </form>
+    </div>
+    <div class="card-body">
+        {% if records %}
+        <table>
+            <thead><tr>
+                <th>ID</th><th>Title</th><th>Category</th><th>Skill</th><th>Status</th>
+                <th>Branch</th><th>PR</th><th>Duration</th><th>Retries</th><th>Tokens</th><th>Started</th><th></th>
+            </tr></thead>
+            <tbody>
+                {% for e in records %}
+                {% set label, css = category_badge(e.category) %}
+                <tr>
+                    <td class="id-col">#{{ e.work_item_id }}</td>
+                    <td class="title-col">{{ e.title }}</td>
+                    <td><span class="cat-badge {{ css }}">{{ label }}</span></td>
+                    <td class="mono">{{ e.skill_used or '—' }}</td>
+                    <td><span class="badge {{ status_class(e.status.value) }}"><span class="badge-dot"></span>{{ e.status.value }}</span></td>
+                    <td class="mono">{{ e.branch_name or '—' }}</td>
+                    <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank" class="table-link">View PR</a>{% else %}<span style="color:var(--text-dim)">—</span>{% endif %}</td>
+                    <td class="mono">{{ mmss(e.duration_seconds) }}</td>
+                    <td style="text-align:center">{{ e.retry_count }}</td>
+                    <td class="mono">{{ '{:,}'.format(e.cost_tokens) }}</td>
+                    <td>{{ e.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        <form method="post" action="/dashboard/history/{{ e.id }}/delete"
+                              onsubmit="return confirm('Xoá record #{{ e.work_item_id }}?');" style="margin:0;">
+                            <button type="submit" title="Xoá dòng này"
+                                    style="background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:15px;">✕</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="hist-pager">
+            <span class="pginfo">Showing <b>{{ start_idx }}–{{ end_idx }}</b> of <b>{{ total }}</b></span>
+            <div class="pgnav">
+                <a class="pgbtn {{ 'disabled' if not prev_url }}" href="{{ prev_url or '#' }}">← Prev</a>
+                <span class="pginfo">Page {{ page }} / {{ pages }}</span>
+                <a class="pgbtn {{ 'disabled' if not next_url }}" href="{{ next_url or '#' }}">Next →</a>
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state"><p>{% if q or status or cat or date_from or date_to %}No executions match the filter.{% else %}No execution history yet.{% endif %}</p></div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

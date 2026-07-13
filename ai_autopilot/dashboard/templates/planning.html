@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }   /* use the full width on this page */
+  .pf-toolbar { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; padding:16px 20px; }
+  .pf-field { display:flex; flex-direction:column; gap:6px; }
+  .pf-field > span { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); }
+  .pf-input { background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:8px 11px; font-size:13.5px; font-family:inherit; min-height:36px; }
+  .pf-input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-bg); }
+  .btn-primary { background:var(--accent); color:#fff; border:none; border-radius:var(--radius-sm);
+    padding:9px 16px; font-size:13px; font-weight:650; cursor:pointer; font-family:inherit; min-height:36px; }
+  .btn-primary:hover { background:var(--accent-hover); }
+  .btn-go { background:var(--green); color:#04140b; border:none; border-radius:var(--radius-sm);
+    padding:9px 18px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit; min-height:36px; }
+  .btn-go:hover { filter:brightness(1.08); }
+  .btn-go:disabled { opacity:.45; cursor:not-allowed; filter:none; }
+  .flash { padding:11px 16px; border-radius:var(--radius-sm); font-size:13px; margin-bottom:18px; font-weight:600; }
+  .flash-ok { background:var(--green-bg); color:var(--green); }
+  .flash-info { background:var(--blue-bg); color:var(--blue); }
+  .actionbar { display:flex; flex-wrap:wrap; gap:14px; align-items:center;
+    padding:14px 20px; border-top:1px solid var(--border-soft); background:var(--bg-elev); }
+  .seg { display:inline-flex; background:var(--bg-input); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; }
+  .seg label { font-size:12.5px; color:var(--text-muted); padding:7px 13px; cursor:pointer; user-select:none; }
+  .seg label.on { background:var(--accent-bg); color:var(--accent-hover); font-weight:650; }
+  .seg input { display:none; }
+  .cell-chk { width:17px; height:17px; accent-color:var(--accent); cursor:pointer; vertical-align:middle; }
+  .grp-line { padding:6px 20px; font-size:13px; border-bottom:1px solid var(--border-soft); }
+  .grp-line:last-child { border-bottom:none; }
+  .grp-line .k { color:var(--text-dim); font-weight:600; margin-right:8px; text-transform:uppercase; font-size:10.5px; letter-spacing:.05em; }
+  .ai-card { background:var(--bg-input); border:1px solid var(--border); border-left:2px solid var(--amber);
+    border-radius:var(--radius-sm); padding:10px 13px; margin:8px 20px; font-size:13px; }
+  .ai-score { font-weight:750; color:var(--amber); font-family:var(--mono); }
+  .sched-row { display:flex; align-items:center; gap:12px; padding:11px 20px; border-bottom:1px solid var(--border-soft); }
+  .sched-row:last-child { border-bottom:none; }
+  .sel-count { color:var(--accent-hover); font-weight:700; }
+  .muted { color:var(--text-muted); } .dim { color:var(--text-dim); }
+  .rowlink { color:var(--text); text-decoration:none; } .rowlink:hover { color:var(--accent-hover); }
+</style>
+
+<div class="page-header">
+  <h2>🧭 Planning workbench</h2>
+  <p>Load your assigned work, let AI group &amp; check conflicts, then start now or schedule a run.</p>
+</div>
+
+{% if started %}<div class="flash flash-ok">▶️ Started {{ started }} item(s) — now in the pipeline.</div>{% endif %}
+{% if scheduled_n %}<div class="flash flash-info">🕒 Scheduled {{ scheduled_n }} item(s) to run at the chosen time.</div>{% endif %}
+
+<!-- ── Filter / load ── -->
+<div class="card">
+  <div class="card-header"><h3>🔎 Filter</h3></div>
+  <form method="get" action="/dashboard/planning">
+    <div class="pf-toolbar">
+      <div class="pf-field" style="flex:1; min-width:240px">
+        <span>Assignee</span>
+        <input class="pf-input" name="assignee" value="{{ assignee }}"
+               placeholder="email / name — comma-separate for a team"/>
+      </div>
+      <div class="pf-field" style="min-width:150px">
+        <span>State</span>
+        <select class="pf-input" name="state">
+          <option value="all" {% if state_filter=='all' %}selected{% endif %}>All states</option>
+          {% for s in states %}<option value="{{ s }}" {% if state_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="pf-field" style="min-width:150px">
+        <span>Work item type</span>
+        <select class="pf-input" name="type">
+          <option value="all" {% if type_filter=='all' %}selected{% endif %}>All types</option>
+          {% for t in wtypes %}<option value="{{ t }}" {% if type_filter==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <button class="btn-primary" type="submit">Load</button>
+    </div>
+  </form>
+</div>
+
+<!-- ── Work items + actions ── -->
+<form method="post" id="wb">
+  <input type="hidden" name="assignee" value="{{ assignee }}"/>
+  <input type="hidden" name="state" value="{{ state_filter }}"/>
+  <input type="hidden" name="type" value="{{ type_filter }}"/>
+  <div class="card">
+    <div class="card-header">
+      <h3>📋 Work items</h3>
+      {% if loaded %}<span class="dim" style="font-size:12.5px">{{ loaded|length }} loaded ·
+        <span class="sel-count" id="selcount">0</span> selected</span>{% endif %}
+    </div>
+    {% if loaded %}
+    <div class="card-body">
+      <table>
+        <thead><tr>
+          <th style="width:40px"><input class="cell-chk" type="checkbox"
+            onclick="document.querySelectorAll('.wbchk').forEach(c=>c.checked=this.checked);_sel()"></th>
+          <th>Item</th><th style="width:120px">Type</th><th style="width:150px">State</th><th style="width:120px">In pipeline</th>
+        </tr></thead>
+        <tbody>
+          {% for it in loaded %}
+          <tr>
+            <td><input class="cell-chk wbchk" type="checkbox" name="ids" value="{{ it.id }}" onclick="_sel()" {% if it.id in selected %}checked{% endif %}></td>
+            <td>
+              <span class="id-col">#{{ it.id }}</span>&nbsp;
+              {% if ado_item_base %}<a class="rowlink" href="{{ ado_item_base }}/{{ it.id }}" target="_blank">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %}
+            </td>
+            <td><span class="chip">{{ it.work_item_type }}</span></td>
+            <td class="muted">{{ it.state }}</td>
+            <td>
+              {% set intag = it.tags | map('lower') | select('in', trigger_tags) | list %}
+              {% if intag %}<span class="chip chip-accent">⚑ queued</span>{% else %}<span class="dim">—</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="actionbar">
+      <button class="btn-ghost" type="submit" formaction="/dashboard/planning/analyze">🔬 Analyze &amp; group</button>
+      <span style="flex:1"></span>
+      <div class="seg">
+        <label id="lbl-now" class="on"><input type="radio" name="mode" value="now" checked onchange="_mode()"> Start now</label>
+        <label id="lbl-sch"><input type="radio" name="mode" value="schedule" onchange="_mode()"> Schedule</label>
+      </div>
+      <input class="pf-input" id="whenat" type="datetime-local" name="when_at" value="{{ default_when }}" disabled/>
+      <button class="btn-go" type="submit" formaction="/dashboard/planning/start">▶ Start</button>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      {% if assignee %}No work items for <b>{{ assignee }}</b>{% if state_filter!='all' %} · state “{{ state_filter }}”{% endif %}{% if type_filter!='all' %} · type “{{ type_filter }}”{% endif %}.
+      {% else %}Enter an assignee and press <b>Load</b> to list work items.{% endif %}
+    </div>
+    {% endif %}
+  </div>
+</form>
+
+<script>
+  function _sel() {
+    var n = document.querySelectorAll('.wbchk:checked').length;
+    var el = document.getElementById('selcount'); if (el) el.textContent = n;
+  }
+  function _mode() {
+    var r = document.querySelector('input[name=mode]:checked');
+    var sched = r && r.value === 'schedule';
+    var f = document.getElementById('whenat');
+    if (f) { f.disabled = !sched; f.required = sched; if (sched && !f.value) f.focus(); }
+    var ln = document.getElementById('lbl-now'), ls = document.getElementById('lbl-sch');
+    if (ln && ls) { ln.className = sched ? '' : 'on'; ls.className = sched ? 'on' : ''; }
+  }
+  _sel(); _mode();
+</script>
+
+<!-- ── Analysis ── -->
+{% if analysis %}
+<div class="card">
+  <div class="card-header"><h3>🔬 Analysis — {{ analysis.items|length }} selected</h3></div>
+  <div class="card-body">
+    {% for chain in analysis.groups.serial %}
+      <div class="grp-line"><span class="k">Serial</span>
+        {% for id in chain %}{% if not loop.first %} <span class="dim">→</span> {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}
+        <span class="dim">— Predecessor, run in order</span></div>
+    {% endfor %}
+    {% for cl in analysis.groups.conflicts %}
+      <div class="grp-line"><span class="k">Conflict</span>
+        {% for id in cl %}{% if not loop.first %} <span class="dim">~</span> {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}
+        <span class="dim">— Related, don't run together</span></div>
+    {% endfor %}
+    {% if analysis.groups.parallel %}
+      <div class="grp-line"><span class="k">Parallel</span>
+        {% for id in analysis.groups.parallel %}{% if not loop.first %}, {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}
+        <span class="dim">— independent</span></div>
+    {% endif %}
+    <div class="grp-line"><span class="k">Wave</span>
+      run now: {% for id in analysis.wave.ready %}{% if not loop.first %}, {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}{% if not analysis.wave.ready %}<span class="dim">none</span>{% endif %}
+      {% if analysis.wave.deferred %}<span class="dim"> · defer:</span> {% for id in analysis.wave.deferred %}<span class="id-col">#{{ id }}</span> {% endfor %}{% endif %}</div>
+
+    {% if analysis.ai %}
+      {% for f in analysis.ai %}
+        <div class="ai-card">🤖 <span class="ai-score">{{ f.score }}</span>/100 ·
+          <span class="id-col">#{{ f.a }}</span> ↔ <span class="id-col">#{{ f.b }}</span>
+          {% if f.modules %}· <span class="muted">modules:</span> {{ f.modules|join(', ') }}{% endif %}
+          <div class="dim" style="margin-top:3px">{{ f.reason }}</div>
+        </div>
+      {% endfor %}
+    {% else %}
+      <div class="grp-line dim">🤖 No hidden conflicts flagged by AI (or AI analysis is off).</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Scheduled runs ── -->
+{% if scheduled %}
+<div class="card">
+  <div class="card-header"><h3>🕒 Scheduled runs</h3></div>
+  <div class="card-body">
+    {% for run in scheduled %}
+    <div class="sched-row">
+      <span class="chip chip-amber">{{ run.run_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      <span class="muted">{{ run.note }}</span>
+      <span style="flex:1"></span>
+      <form method="post" action="/dashboard/planning/cancel">
+        <input type="hidden" name="run_id" value="{{ run.id }}"/>
+        <input type="hidden" name="assignee" value="{{ assignee }}"/>
+        <input type="hidden" name="state" value="{{ state_filter }}"/>
+        <input type="hidden" name="type" value="{{ type_filter }}"/>
+        <button class="btn-ghost" type="submit">Cancel</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Live schedule (read-only, auto-refreshing partial) ── -->
+<div id="live-wrap">{% include "planning_live.html" %}</div>
+<script>
+  (function(){
+    var every = {{ live_refresh|default(0)|int }};
+    if (every > 0) {
+      setInterval(function(){
+        fetch('/dashboard/planning/live-partial', {headers:{'X-Requested-With':'fetch'}})
+          .then(function(r){ return r.text(); })
+          .then(function(html){ var w=document.getElementById('live-wrap'); if(w) w.innerHTML=html; })
+          .catch(function(){});
+      }, every*1000);
+    }
+  })();
+</script>
+{% endblock %}

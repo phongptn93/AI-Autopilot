@@ -1,0 +1,163 @@
+# AI Autopilot configuration example.
+#
+# Copy to config.yaml and edit. Any value can be overridden by an environment
+# variable named AUTOPILOT_<KEY> (nested keys use "__"), e.g. AUTOPILOT_ADO_PAT.
+#
+# SECRETS (ado_pat, oauth_app_secret, smtp_password, zalo_oa_access_token) should
+# be provided via environment variables, NOT committed here.
+
+# ── Azure DevOps connection ──
+ado_organization: "https://dev.azure.com/your-org"
+ado_project: "YourProject"
+# ado_pat: ""                # prefer env: AUTOPILOT_ADO_PAT
+# oauth_app_id: ""           # alternative to PAT
+# oauth_app_secret: ""       # prefer env: AUTOPILOT_OAUTH_APP_SECRET
+
+# ── Triggering ──
+trigger_tag: "autopilot"
+processed_tag: "autopilot-done"
+review_tag: "autopilot-review"
+poll_interval_seconds: 30
+# Work-item states eligible for processing. MUST match your ADO board's states,
+# otherwise tagged items are never picked up. Check your board column names.
+trigger_states: ["New", "To Do", "Proposed", "Active"]
+
+# ── Repository / execution ──
+repo_working_directory: "/path/to/your/git/repo"
+base_branch: "development"
+max_concurrent: 1
+task_timeout_minutes: 30
+dry_run: false
+# Run each execution in its own git worktree (safe parallel execution).
+# Required if you raise max_concurrent above 1 on a shared repo.
+use_worktrees: true
+worktrees_dir: ""            # empty → <system temp>/ai-autopilot-worktrees
+
+# Multi-repo: route categories to different repos (overrides repo_working_directory)
+repos: []
+#   - name: backend
+#     path: /repos/backend
+#     base_branch: develop
+#     categories: [BackendTask, DatabaseTask]
+#   - name: frontend
+#     path: /repos/frontend
+#     base_branch: main
+#     categories: [FrontendTask]
+
+# ── Claude execution ──
+claude_model: ""             # empty → SDK default
+claude_max_turns: 0          # 0 → unbounded
+# Permission mode for autonomous runs:
+#   "acceptEdits"       – autonomous, works when running as root (default)
+#   "bypassPermissions" – fully autonomous, but the CLI refuses it under root;
+#                          only use when the service runs as a non-root user
+claude_permission_mode: "acceptEdits"
+claude_allowed_tools: []     # empty = all tools available
+
+# ── Retry & recovery ──
+max_retries: 3
+retry_backoff_seconds: 60
+
+# ── Autonomy (loop-engineering L1/L2/L3) ──
+#   report     – classify + comment what it would do, no code changes
+#   assisted   – execute and open a DRAFT PR for human review (default)
+#   unattended – execute and open a normal PR, auto-resolving the item
+autonomy_level: "assisted"
+require_approval: true        # legacy flag, superseded by autonomy_level
+approval_timeout_minutes: 120
+
+# ── RBAC (empty list = no restriction) ──
+allowed_users: []
+approver_users: []
+allowed_skills: []
+
+# ── Decomposition / feedback / review ──
+auto_decompose: true
+feedback_loop_enabled: false
+max_revisions: 3
+auto_review_enabled: true
+block_on_severity: "Critical,High"
+
+# ── Dependency-aware scheduling (P1) ──
+# Order work by the ADO link graph instead of dispatching every pending item at
+# once. An item waits for its Predecessor links (Dependency-Reverse) to be done;
+# two Related items never run concurrently (they likely touch the same code).
+# Deferred items are re-evaluated next poll — waves emerge across cycles. Reads
+# links only, calls no model (0 tokens). Set false to keep plain priority order.
+dependency_scheduling_enabled: true
+# Heuristic: treat sibling candidates (same Parent + same category, e.g. two [BE]
+# tasks under one Requirement) as a Related soft-conflict even without an explicit
+# link. Off by default — enable if siblings often collide.
+sibling_conflict_scheduling: false
+
+# ── Closed-loop SDLC engine (v2, Phase 1) — opt-in, PER-MACHINE ──
+# When enabled, items route through the SdlcLoopEngine: a PROFILE-selected ordered
+# list of SDLC stages, each gated (revise under one shared budget, escalate on
+# exhaustion), then handed off to the next machine's role via an ADO state. Off by
+# default → behaviour is unchanged. sdlc_profile is the PRIMARY per-machine knob.
+#
+# Example team split (each person's machine sets its own profile + trigger_states):
+#   BA machine:     sdlc_profile: ba    trigger_states: [New, Proposed]
+#                   sdlc_profile_states: { ba: "Ready for Dev" }
+#   Dev machine:    sdlc_profile: dev   trigger_states: ["Ready for Dev"]
+#                   sdlc_profile_states: { dev: "Ready to Test" }
+#   Tester machine: sdlc_profile: qc    trigger_states: ["Ready to Test"]
+#                   sdlc_profile_states: { qc: "Ready to Deploy" }
+sdlc_loop_enabled: false
+sdlc_max_iterations: 3
+sdlc_profile: ""                # "ba" | "dev" | "qc" | "review" | "design" | "full"
+sdlc_default_profile: "full"
+sdlc_profile_tag_prefix: "sdlc:"   # per-item override, e.g. tag "sdlc:dev"
+sdlc_advance_on_draft: false
+sdlc_type_profiles: {}          # { Bug: dev, "User Story": full }
+sdlc_profiles: {}               # extra/override profiles: { mini: [implement, pr] }
+sdlc_profile_states: {}         # profile → handoff ADO state
+sdlc_stages: []                 # explicit ordered stage override (wins over profile)
+
+# ── Scheduling (empty start/end = always on) ──
+schedule_start: ""           # "08:00"
+schedule_end: ""             # "18:00"
+schedule_days: "Mon,Tue,Wed,Thu,Fri"
+
+# ── Web / health ──
+health_host: "0.0.0.0"
+health_port: 5080
+
+# ── Persistence ──
+database_url: "sqlite+aiosqlite:///autopilot.db"
+
+# ── Cost tracking ──
+daily_budget_tokens: 0       # 0 = unlimited
+cost_alert_enabled: false
+
+# ── Multi-tenant (empty = single tenant from the config above) ──
+tenants: []
+
+# ── Scheduled loops (loop-engineering production patterns) ──
+# Each runs a skill on a cadence (cron OR interval_minutes) and opens a PR.
+scheduled_loops: []
+#   - name: dependency-sweeper
+#     prompt: "/update-deps"
+#     cron: "0 6 * * 1"          # Mondays 06:00
+#     draft_pr: true
+#   - name: changelog-drafter
+#     prompt: "/draft-changelog"
+#     interval_minutes: 1440      # daily
+#   - name: ci-sweeper
+#     prompt: "Find and fix the most recent failing CI check on the base branch."
+#     interval_minutes: 360       # every 6h
+#     base_branch: development
+
+# ── Plugins ──
+plugins_directory: "plugins"
+
+# ── Notifications ──
+teams_webhook_url: ""        # MS Teams Workflows webhook URL
+# zalo_oa_access_token: ""   # prefer env
+zalo_recipient_user_id: ""
+smtp_host: ""
+smtp_port: 587
+smtp_user: ""
+# smtp_password: ""          # prefer env
+email_to: ""
+email_from: ""

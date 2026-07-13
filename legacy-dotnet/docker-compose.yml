@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+  autopilot:
+    build: .
+    container_name: ado-autopilot
+    ports:
+      - "5080:5080"
+    volumes:
+      - autopilot-data:/data
+      - autopilot-logs:/logs
+      - ./appsettings.json:/app/appsettings.json:ro
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: autopilot-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - autopilot
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: autopilot-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+volumes:
+  autopilot-data:
+  autopilot-logs:

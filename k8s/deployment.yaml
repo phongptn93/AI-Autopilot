@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ado-autopilot
+  name: ai-autopilot
   labels:
-    app: ado-autopilot
+    app: ai-autopilot
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ado-autopilot
+      app: ai-autopilot
   template:
     metadata:
       labels:
-        app: ado-autopilot
+        app: ai-autopilot
     spec:
       containers:
         - name: autopilot
-          image: ado-autopilot:latest
+          image: ai-autopilot:latest
           ports:
             - containerPort: 5080
           envFrom:

@@ -45,8 +45,10 @@ class FakeExecutor:
     async def push_stage_branch(self, scratch, repos, branch):
         self.calls.append(("push", branch))
 
-    async def _run_claude(self, prompt, run_dir):
+    async def _run_claude(self, prompt, run_dir, on_event=None):
         self.calls.append(("run", prompt))
+        if on_event:                       # exercise the activity-stream callback
+            on_event("… working")
         return self._runs.pop(0) if self._runs else FakeRun()
 
     def run_prompts(self):

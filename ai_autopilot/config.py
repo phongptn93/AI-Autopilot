@@ -26,6 +26,16 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+# ── Bot comment identity ──────────────────────────────────────────────────────
+# The autopilot posts ADO comments under the OPERATOR'S OWN identity (its PAT /
+# OAuth app), so a bot comment's author is indistinguishable from a human's. To
+# still tell them apart, every bot-authored comment carries this fixed signature in
+# its CONTENT; detection checks for the signature, never the author. It is a module
+# constant on purpose — NOT a Settings field — because if an operator could edit it,
+# a stale value would silently break human-vs-bot comment detection.
+BOT_DISPLAY_NAME = "🤖 AI-Autopilot"
+BOT_COMMENT_SIGNATURE = f"<sub>{BOT_DISPLAY_NAME}</sub>"
+
 
 class RepoConfig(BaseModel):
     """A source repository, optionally bound to specific task categories."""
@@ -156,6 +166,11 @@ class Settings(BaseSettings):
     # Tag added when the autopilot gives up after exhausting retries. Blank = reuse
     # processed_tag (so the item is still marked handled and not re-polled).
     failed_tag: str = ""
+    # Human control: tag an item with this to force a CLEAN re-run — wipe its saved
+    # SDLC loop progress and reprocess from stage 0 (from ANY state), reading the
+    # item's latest comments as fresh intent. The deliberate counterpart to reopen,
+    # which *resumes* mid-loop. Blank = feature off.
+    restart_tag: str = "autopilot-restart"
     # ADO ``System.State`` set at each pipeline stage. Blank = leave the work
     # item's ADO state unchanged for that stage (only tags/board move). These apply
     # in every execution mode (interactive / assisted / unattended). Match your
@@ -319,6 +334,16 @@ class Settings(BaseSettings):
     # ── Feedback loop / PR babysitter ──
     feedback_loop_enabled: bool = False
     max_revisions: int = 3
+
+    # ── Comment reaction loop (steer the autopilot by just commenting) ──
+    # When a NEW human comment appears on an autopilot-owned item (one that still
+    # carries a trigger tag), re-enter it and act on the comment — covering held /
+    # needs_human, in-review and done items uniformly, without any manual restart tag.
+    # Loop-safe: the bot signs its own comments (BOT_DISPLAY_NAME) so they never
+    # re-trigger, and a per-item baseline stops the same comment being handled twice.
+    comment_reprocess_enabled: bool = True
+    # Cap on human↔bot comment rounds per item, so a back-and-forth can't run away.
+    max_comment_rounds: int = 5
 
     # ── Closed-loop SDLC engine (v2, Phase 1) ──
     # Opt-in. When true, items route to the SdlcLoopEngine which drives them through

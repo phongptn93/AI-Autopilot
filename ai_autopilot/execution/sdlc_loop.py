@@ -243,7 +243,18 @@ class SdlcLoopEngine:
                 f" Goal: {goal} Choose and run the most appropriate skill(s) in this "
                 f"workspace for this stage — do not assume one.{draft}"
             )
-        return (head + body).strip()
+        # A human steered this item via a comment (poller's comment-reaction loop) —
+        # carry that guidance into EVERY stage as the top-priority instruction, so a
+        # resumed loop acts on the latest direction rather than its original plan.
+        guidance = ""
+        if item.pending_comment:
+            guidance = (
+                "\n\n## ⚠️ Latest human guidance (highest priority — respond to THIS)\n"
+                "A human left this comment as the most recent direction. Treat it as the "
+                "top-priority instruction for this stage, overriding earlier assumptions "
+                f"where they conflict:\n\n{item.pending_comment}"
+            )
+        return (head + body).strip() + guidance
 
     # ── helpers ──────────────────────────────────────────────────────────────
 

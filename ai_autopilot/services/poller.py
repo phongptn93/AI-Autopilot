@@ -107,6 +107,13 @@ class AdoPollerService:
         # Dependency scheduling: ids we've already told the human are deferred, so we
         # comment "waiting for #X" once per episode rather than every poll cycle.
         self._deferred_notified: set[int] = set()
+        # Comment-reaction loop: last human comment id handled per item (baseline), a
+        # per-item round cap, comments to apply after an in-flight run finishes, and the
+        # ids with a run currently in flight (so we defer rather than interrupt).
+        self._comment_seen: dict[int, int] = {}
+        self._comment_rounds: dict[int, int] = {}
+        self._pending_comment: dict[int, str] = {}
+        self._inflight: set[int] = set()
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
 
@@ -183,6 +190,14 @@ class AdoPollerService:
         # Reopen items a human dragged back to a trigger state (clears skip tags),
         # so the pending query below picks them up again this cycle.
         await self._reconcile_reopened()
+
+        # Force a clean re-run for items a human tagged for restart: wipe SDLC
+        # progress and dispatch immediately (from any state) — see method docstring.
+        await self._reconcile_restart_requests()
+
+        # React to a NEW human comment on any autopilot-owned item ("steer by
+        # commenting") — covers held / in-review / done uniformly, no tag needed.
+        await self._reconcile_human_replies()
 
         self._log.debug("polling ADO for pending work items")
         items = await c.ado.get_pending_work_items()
@@ -369,29 +384,170 @@ class AdoPollerService:
             )
             self._log.info("reopened item", id=item.id, state=item.state, cleared=held)
 
+    async def _reconcile_restart_requests(self) -> None:
+        """Force a CLEAN re-run for items a human tagged with ``restart_tag``.
+
+        Reopen (above) *resumes* an item mid-loop — right when a human fixed a
+        blocker and wants it to carry on. Restart is the opposite intent: the run
+        went wrong and the human wants it redone from scratch. So this wipes the
+        item's saved SDLC progress (→ starts at stage 0), clears any skip tags,
+        resets the retry budget, and dispatches it immediately — from ANY state
+        (Done, in review, held...), not only trigger states. The fresh run reads the
+        item's latest comments, which is where the human writes what to do differently.
+
+        Loop-safe: the restart tag is removed before dispatch, and the item is marked
+        processed for this cycle so the pending query below can't double-dispatch it.
+        """
+        c, cfg = self._c, self._config
+        tag = cfg.restart_tag
+        if cfg.dry_run or not tag:
+            return
+        try:
+            tagged = await c.ado.get_all_tagged_work_items()
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("restart reconcile: fetch failed", error=str(exc))
+            return
+        tag_l = tag.lower()
+        skip_tags = {t.lower() for t in (
+            cfg.processed_tag, cfg.review_tag, cfg.escalation_tag, cfg.failed_tag, cfg.live_tag,
+        ) if t}
+        for item in tagged:
+            if tag_l not in {t.lower() for t in item.tags} or item.id in self._live:
+                continue  # not requested, or a live session — don't yank it
+            await c.ado.remove_tag(item.id, tag)
+            for held in [t for t in item.tags if t.lower() in skip_tags]:
+                await c.ado.remove_tag(item.id, held)
+            # Wipe SDLC progress → a true restart, not a resume. Best-effort: a
+            # missing/absent row (non-SDLC item) is fine.
+            with contextlib.suppress(Exception):
+                await c.sdlc_state_repo.clear(item.id)
+            c.retry_policy.record_success(item.id)  # fresh retry budget
+            await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
+            self._processed[item.id] = datetime.now(UTC)  # block same-cycle re-pick
+            await c.ado.add_comment(
+                item.id,
+                "<div><b>♻️ Restart requested</b> — cleared SDLC progress; reprocessing "
+                "from scratch using your latest comments.</div>",
+            )
+            self._log.info("restart requested", id=item.id, state=item.state)
+            asyncio.create_task(self._process(item))
+
+    async def _reconcile_human_replies(self) -> None:
+        """React to a new *human* comment on any autopilot-owned item — the single
+        "steer by commenting" mechanism.
+
+        Ownership = the item still carries a trigger tag (the bot never removes it).
+        When the newest comment on such an item is human-authored (no BOT_DISPLAY_NAME
+        signature) and newer than the one we last handled, treat it as fresh intent:
+        clear skip tags, re-queue and dispatch with the comment fed into the agent brief.
+        Covers held / needs_human, in-review and done items uniformly — no restart tag.
+
+        Loop-safe by construction: the bot signs its own comments so they never
+        re-trigger; a per-item ``_comment_seen`` baseline stops the same comment being
+        handled twice; on FIRST sight of an item we adopt its latest comment as baseline
+        WITHOUT acting, so a restart never reprocesses the whole backlog; an in-flight
+        run is never interrupted — its follow-up is deferred (see ``_process``); and
+        ``max_comment_rounds`` caps a runaway human↔bot exchange.
+        """
+        c, cfg = self._c, self._config
+        if cfg.dry_run or not cfg.comment_reprocess_enabled:
+            return
+        trigger = {t.lower() for t in cfg.effective_trigger_tags}
+        if not trigger:
+            return
+        try:
+            tagged = await c.ado.get_all_tagged_work_items()
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("comment reconcile: fetch failed", error=str(exc))
+            return
+        for item in tagged:
+            if item.id in self._live:
+                continue  # an interactive session owns it — steer there, not by comment
+            if not (trigger & {t.lower() for t in item.tags}):
+                continue  # not autopilot-owned
+            try:
+                comments = await c.ado.get_work_item_comments(item.id)
+            except Exception as exc:  # noqa: BLE001
+                self._log.warning(
+                    "comment reconcile: comments fetch failed", id=item.id, error=str(exc)
+                )
+                continue
+            human = [cm for cm in comments if not cm.get("is_bot")]
+            if not human:
+                continue
+            newest = human[-1]
+            baseline = self._comment_seen.get(item.id)
+            self._comment_seen[item.id] = newest["id"]
+            if baseline is None or newest["id"] <= baseline:
+                continue  # first sight (adopt baseline, don't act) or nothing new
+            rounds = self._comment_rounds.get(item.id, 0) + 1
+            if rounds > cfg.max_comment_rounds:
+                self._log.info("comment reconcile: max rounds reached", id=item.id, rounds=rounds)
+                continue
+            self._comment_rounds[item.id] = rounds
+            if item.id in self._inflight:
+                # Don't interrupt a run in flight — apply this once it completes.
+                self._pending_comment[item.id] = newest["text"]
+                self._log.info("human comment queued (item in flight)", id=item.id)
+                continue
+            await self._dispatch_with_comment(item, newest["text"])
+
+    async def _dispatch_with_comment(self, item: WorkItemInfo, comment: str) -> None:
+        """Re-enter an autopilot-owned item to act on a fresh human comment: clear its
+        skip tags (keep the trigger tag → still owned), re-queue, and dispatch with the
+        comment injected into the agent brief."""
+        c, cfg = self._c, self._config
+        skip_tags = {t.lower() for t in (
+            cfg.processed_tag, cfg.review_tag, cfg.escalation_tag, cfg.failed_tag,
+        ) if t}
+        for held in [t for t in item.tags if t.lower() in skip_tags]:
+            await c.ado.remove_tag(item.id, held)
+        item.tags = [t for t in item.tags if t.lower() not in skip_tags]
+        c.retry_policy.record_success(item.id)  # fresh retry budget for the follow-up
+        await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
+        self._processed.pop(item.id, None)
+        item.pending_comment = comment
+        await c.ado.add_comment(
+            item.id,
+            "<div><b>💬 Got your comment</b> — reprocessing with your latest guidance.</div>",
+        )
+        self._log.info("reprocessing on human comment", id=item.id)
+        asyncio.create_task(self._process(item))
+
     async def _process(self, item: WorkItemInfo) -> None:
         c, cfg = self._c, self._config
-        async with self._gate:
-            try:
-                self._processed[item.id] = datetime.now(UTC)
+        self._inflight.add(item.id)
+        try:
+            async with self._gate:
+                try:
+                    self._processed[item.id] = datetime.now(UTC)
 
-                classified = c.router.classify(item)
-                classified = await c.plugins.run_pre_processors(classified)
-                self._log.info("processing", item=str(item), category=str(classified.category))
+                    classified = c.router.classify(item)
+                    classified = await c.plugins.run_pre_processors(classified)
+                    self._log.info(
+                        "processing", item=str(item), category=str(classified.category)
+                    )
 
-                if not c.rbac.is_user_allowed(item):
-                    self._log.warning("rbac denied user", id=item.id, user=item.created_by)
-                    return
+                    if not c.rbac.is_user_allowed(item):
+                        self._log.warning("rbac denied user", id=item.id, user=item.created_by)
+                        return
 
-                # AI-native: hand the item to the agent and let it reason end-to-end.
-                # Legacy (hardcoded classify→skill→git): only when no workspace is set.
-                if cfg.workspace_directory:
-                    await self._process_agent(item, classified)
-                else:
-                    await self._process_legacy(item, classified)
-            except Exception as exc:  # noqa: BLE001
-                self._log.error("error processing", id=item.id, error=str(exc))
-                await c.notifier.notify_error(item, str(exc))
+                    # AI-native: hand the item to the agent and let it reason end-to-end.
+                    # Legacy (hardcoded classify→skill→git): only when no workspace is set.
+                    if cfg.workspace_directory:
+                        await self._process_agent(item, classified)
+                    else:
+                        await self._process_legacy(item, classified)
+                except Exception as exc:  # noqa: BLE001
+                    self._log.error("error processing", id=item.id, error=str(exc))
+                    await c.notifier.notify_error(item, str(exc))
+        finally:
+            self._inflight.discard(item.id)
+        # A human commented while this run was in flight — apply it now as a follow-up
+        # pass (on top of what just ran) rather than interrupting mid-run.
+        follow = self._pending_comment.pop(item.id, None)
+        if follow is not None and not cfg.dry_run:
+            await self._dispatch_with_comment(item, follow)
 
     async def _process_agent(self, item: WorkItemInfo, classified: WorkItemInfo) -> None:
         """Control plane around the agent: track, run, read structured result, react."""

@@ -16,7 +16,7 @@ from urllib.parse import quote
 import httpx
 
 from ai_autopilot.ado.auth import AdoAuthService
-from ai_autopilot.config import Settings
+from ai_autopilot.config import BOT_COMMENT_SIGNATURE, BOT_DISPLAY_NAME, Settings
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import TaskCategory, WorkItemInfo
 
@@ -32,6 +32,15 @@ _FIELDS = (
 _REL_PREDECESSOR = "System.LinkTypes.Dependency-Reverse"  # this item depends on target
 _REL_SUCCESSOR = "System.LinkTypes.Dependency-Forward"    # target depends on this item
 _REL_RELATED = "System.LinkTypes.Related"                 # soft conflict (touch same area)
+
+
+def is_bot_comment(text: str | None) -> bool:
+    """True if a work-item comment was authored by the autopilot.
+
+    Decided by the BOT_DISPLAY_NAME signature in the CONTENT, never by the comment's
+    author — the bot posts under the operator's own ADO identity, so the author field
+    is identical for bot and human (see config.BOT_DISPLAY_NAME)."""
+    return BOT_DISPLAY_NAME in (text or "")
 
 
 class AdoClient:
@@ -225,14 +234,47 @@ class AdoClient:
         return items[0] if items else None
 
     async def add_comment(self, work_item_id: int, comment: str) -> bool:
+        # Stamp the bot signature so this comment is later recognisable as ours — the
+        # comment-reaction loop skips it (see config.BOT_COMMENT_SIGNATURE).
         resp = await self._http.post(
             self._url(f"wit/workitems/{work_item_id}/comments?api-version=7.1-preview.4"),
-            json={"text": comment},
+            json={"text": comment + BOT_COMMENT_SIGNATURE},
             headers=await self._headers(),
         )
         if resp.status_code >= 400:
             self._log.warning("add_comment failed", id=work_item_id, status=resp.status_code)
         return resp.status_code < 400
+
+    async def get_work_item_comments(self, work_item_id: int) -> list[dict[str, Any]]:
+        """A work item's discussion comments, oldest→newest.
+
+        Each dict: ``{"id", "text", "is_bot", "created_by"}``. ``is_bot`` is decided by
+        the BOT_DISPLAY_NAME signature in the content (the author is same-account, so it
+        cannot distinguish bot from human)."""
+        url = self._url(f"wit/workItems/{work_item_id}/comments?api-version=7.1-preview.4")
+        try:
+            resp = await self._http.get(url, headers=await self._headers())
+        except httpx.HTTPError as exc:
+            self._log.warning("get_work_item_comments error", id=work_item_id, error=str(exc))
+            return []
+        if resp.status_code >= 400:
+            self._log.warning(
+                "get_work_item_comments failed", id=work_item_id, status=resp.status_code
+            )
+            return []
+        raw = resp.json().get("comments") or []
+        out = [
+            {
+                "id": c.get("id"),
+                "text": c.get("text") or "",
+                "is_bot": is_bot_comment(c.get("text")),
+                "created_by": _identity(c.get("createdBy")),
+            }
+            for c in raw
+            if c.get("id") is not None
+        ]
+        out.sort(key=lambda c: c["id"])
+        return out
 
     async def update_state(self, work_item_id: int, new_state: str) -> bool:
         patch = [{"op": "replace", "path": "/fields/System.State", "value": new_state}]

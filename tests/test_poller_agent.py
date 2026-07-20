@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from ai_autopilot.config import Settings
@@ -17,6 +18,7 @@ class _FakeAdo:
         self.states: list[tuple[int, str]] = []
         self.removed: list[tuple[int, str]] = []
         self.tagged_items: list = []
+        self.comments_by_item: dict[int, list[dict]] = {}
 
     async def add_tag(self, work_item_id, tag):
         self.tags.append((work_item_id, tag))
@@ -35,6 +37,9 @@ class _FakeAdo:
 
     async def get_work_item(self, work_item_id):
         return WorkItemInfo(id=work_item_id, title="t", work_item_type="Task")
+
+    async def get_work_item_comments(self, work_item_id):
+        return self.comments_by_item.get(work_item_id, [])
 
 
 class _FakeExec:
@@ -110,11 +115,20 @@ class _FakeState:
         self.calls.append((work_item_id, state))
 
 
+class _FakeSdlcState:
+    def __init__(self):
+        self.cleared: list[int] = []
+
+    async def clear(self, work_item_id):
+        self.cleared.append(work_item_id)
+
+
 def _poller(autonomy="assisted", exhausted=False) -> tuple[AdoPollerService, SimpleNamespace]:
     cfg = Settings(workspace_directory=r"C:\ws", autonomy_level=autonomy)
     c = SimpleNamespace(
         config=cfg, ado=_FakeAdo(), notifier=_FakeNotifier(),
         retry_policy=_FakeRetry(exhausted), state_repo=_FakeState(),
+        sdlc_state_repo=_FakeSdlcState(),
         executor=_FakeExec(), execution_repo=_FakeExecRepo(), cost_tracker=_FakeCost(),
     )
     return AdoPollerService(c), c
@@ -149,6 +163,48 @@ async def test_reconcile_reopened_respects_toggle_off():
     c.ado.tagged_items = [_tagged(7, "New", ["autopilot", c.config.processed_tag])]
     await p._reconcile_reopened()
     assert c.ado.removed == []
+
+
+async def test_restart_wipes_sdlc_and_dispatches_from_any_state():
+    p, c = _poller()
+    restart, done = c.config.restart_tag, c.config.processed_tag
+    c.ado.tagged_items = [
+        _tagged(7, "Resolved", ["autopilot", done, restart]),  # restart from a DONE state
+        _tagged(8, "Active", ["autopilot"]),                    # no restart tag → ignored
+    ]
+    dispatched: list[int] = []
+
+    async def _fake_process(item):
+        dispatched.append(item.id)
+
+    p._process = _fake_process
+    await p._reconcile_restart_requests()
+    await asyncio.sleep(0)  # let the create_task run
+
+    assert c.sdlc_state_repo.cleared == [7]            # progress wiped → true restart
+    assert (7, restart) in c.ado.removed               # restart signal consumed
+    assert (7, done) in c.ado.removed                  # skip tag cleared
+    assert (7, PipelineState.QUEUED) in c.state_repo.calls
+    assert dispatched == [7]                           # dispatched even from Resolved
+    assert 8 not in c.sdlc_state_repo.cleared
+
+
+async def test_restart_noop_when_tag_blank():
+    p, c = _poller()
+    c.config.restart_tag = ""
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", "autopilot-restart"])]
+    await p._reconcile_restart_requests()
+    assert c.ado.removed == []
+    assert c.sdlc_state_repo.cleared == []
+
+
+async def test_restart_skips_live_session():
+    p, c = _poller()
+    p._live[7] = 99  # an in-flight interactive session
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", c.config.restart_tag])]
+    await p._reconcile_restart_requests()
+    assert c.ado.removed == []
+    assert c.sdlc_state_repo.cleared == []
 
 
 def test_outcome_policy_maps_tag_and_state():
@@ -302,3 +358,91 @@ async def test_finalize_skips_while_session_running():
     p._live = {7: 99}
     await p._finalize_live_sessions()
     assert p._live == {7: 99}                                  # still live, not finalised
+
+
+# ── Comment-reaction loop (steer the autopilot by just commenting) ──────────────
+
+def _cmt(cid, text, *, is_bot):
+    return {"id": cid, "text": text, "is_bot": is_bot, "created_by": "user"}
+
+
+def test_is_bot_comment_detects_signature_not_author():
+    from ai_autopilot.ado.client import is_bot_comment
+    from ai_autopilot.config import BOT_COMMENT_SIGNATURE
+
+    assert is_bot_comment("all done" + BOT_COMMENT_SIGNATURE) is True   # bot's own comment
+    assert is_bot_comment("please also handle Y") is False              # human comment
+    assert is_bot_comment(None) is False
+
+
+async def test_comment_reply_dispatches_and_injects_guidance():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"                 # so the tagged item is "owned"
+    done = c.config.processed_tag
+    item = _tagged(7, "Resolved", ["autopilot", done])  # a finished item
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(1, "PR opened", is_bot=True),
+        _cmt(2, "please also handle Y", is_bot=False),   # newest = human → fresh intent
+    ]}
+    p._comment_seen[7] = 1                             # we'd handled up to comment #1
+    dispatched: list[int] = []
+
+    async def _fake_process(it):
+        dispatched.append(it.id)
+
+    p._process = _fake_process
+    await p._reconcile_human_replies()
+    await asyncio.sleep(0)                             # let the create_task run
+
+    assert (7, done) in c.ado.removed                 # skip tag cleared (still owned via trigger)
+    assert (7, PipelineState.QUEUED) in c.state_repo.calls
+    assert item.pending_comment == "please also handle Y"   # fed into the agent brief
+    assert dispatched == [7]
+    assert p._comment_seen[7] == 2                     # baseline advanced
+
+
+async def test_comment_reply_first_sight_adopts_baseline_without_acting():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    c.ado.tagged_items = [_tagged(7, "Resolved", ["autopilot", c.config.processed_tag])]
+    c.ado.comments_by_item = {7: [_cmt(5, "old note", is_bot=False)]}
+    await p._reconcile_human_replies()
+    assert p._comment_seen[7] == 5                     # baseline adopted...
+    assert c.ado.removed == []                         # ...but never reprocesses on first sight
+
+
+async def test_comment_reply_skips_when_newest_is_bot():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", c.config.review_tag])]
+    c.ado.comments_by_item = {7: [
+        _cmt(1, "human asked", is_bot=False),
+        _cmt(2, "bot replied", is_bot=True),           # newest is the bot → no new human intent
+    ]}
+    p._comment_seen[7] = 1
+    await p._reconcile_human_replies()
+    assert c.ado.removed == []                          # newest human == baseline → nothing to do
+
+
+async def test_comment_reply_defers_when_item_in_flight():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot"])]
+    c.ado.comments_by_item = {7: [_cmt(9, "new info mid-run", is_bot=False)]}
+    p._comment_seen[7] = 1
+    p._inflight.add(7)                                 # a run is currently in flight
+    await p._reconcile_human_replies()
+    assert c.ado.removed == []                          # the running item is not interrupted
+    assert p._pending_comment[7] == "new info mid-run"  # queued for after the run finishes
+
+
+async def test_comment_reply_respects_toggle_off():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    c.config.comment_reprocess_enabled = False
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot"])]
+    c.ado.comments_by_item = {7: [_cmt(9, "x", is_bot=False)]}
+    p._comment_seen[7] = 1
+    await p._reconcile_human_replies()
+    assert p._comment_seen.get(7) == 1                  # returned early, untouched

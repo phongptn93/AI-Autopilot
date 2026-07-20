@@ -60,6 +60,10 @@ FIELDS: tuple[Field, ...] = (
     Field("reprocess_on_reopen", "Reprocess when reopened", "bool", "Tags & Trigger",
           "When a handled item is dragged back to a trigger state, clear its autopilot "
           "tags so it runs again. (Only trigger states the autopilot doesn't set itself.)"),
+    Field("restart_tag", "♻️ Restart tag (force clean re-run)", "text", "Tags & Trigger",
+          "Tag an item with this to WIPE its SDLC progress and reprocess from scratch, "
+          "from any state, using your latest comments. Reopen resumes mid-loop; restart "
+          "redoes from stage 0. Blank = off."),
     Field("poll_interval_seconds", "Poll interval (seconds)", "int", "Tags & Trigger"),
     # ── Outcomes → tag + state ──
     # The policy table: for each outcome, the ADO tag to add and the ADO state to

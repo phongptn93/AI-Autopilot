@@ -520,6 +520,13 @@ class ClaudeExecutor:
             lines.append(f"\n## Description\n{item.description}")
         if item.acceptance_criteria:
             lines.append(f"\n## Acceptance criteria\n{item.acceptance_criteria}")
+        if item.pending_comment:
+            lines.append(
+                "\n## ⚠️ Latest human guidance (highest priority — respond to THIS)\n"
+                "A human left this comment as the most recent direction. Treat it as the "
+                "top-priority instruction and let it override earlier assumptions where "
+                f"they conflict:\n\n{item.pending_comment}"
+            )
         lines += [
             "",
             "# Repositories you may edit (subfolders of this workspace)",

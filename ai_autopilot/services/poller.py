@@ -13,38 +13,16 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 
 from ai_autopilot import metrics
+from ai_autopilot.config import match_command, matches_user
 from ai_autopilot.container import Container
 from ai_autopilot.data import PipelineState
 from ai_autopilot.execution.pr_scorer import RunScore, ScoreInput, score_badge_html, score_run
 from ai_autopilot.execution.sdlc_plan import handoff_state, resolve_profile_name
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
+from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.routing import plan_schedule, sort_by_priority
 from ai_autopilot.services.planning_analyzer import run_due_plans
-
-
-def outcome_policy(cfg: object, outcome: str) -> tuple[str, str]:
-    """The single, configurable source of truth for tag + ADO state per outcome.
-
-    Returns ``(tag_to_add, ado_state_to_set)`` — either may be blank (= skip). Edit
-    the underlying fields in Settings ("Outcomes → tag + state").
-
-    Outcomes:
-      in_progress  – the autopilot starts working the item
-      review       – a draft PR opened, awaiting human review
-      done         – completed with a (real) PR
-      report       – a plan was commented, no code change (report mode)
-      needs_human  – the agent escalated and held the item
-      failed       – gave up after exhausting retries
-    """
-    return {
-        "in_progress": ("", cfg.state_in_progress),
-        "review": (cfg.review_tag, cfg.state_in_review),
-        "done": (cfg.processed_tag, cfg.resolved_state),
-        "report": (cfg.processed_tag, cfg.state_report),
-        "needs_human": (cfg.escalation_tag, cfg.state_needs_human),
-        "failed": (cfg.failed_tag or cfg.processed_tag, cfg.state_failed),
-    }.get(outcome, ("", ""))
 
 
 def _scheduler_snapshot(items: list[WorkItemInfo], plan: object, at: datetime) -> dict:
@@ -112,19 +90,39 @@ class AdoPollerService:
         # ids with a run currently in flight (so we defer rather than interrupt).
         self._comment_seen: dict[int, int] = {}
         self._comment_rounds: dict[int, int] = {}
+        self._comment_capped: set[int] = set()   # items we've told the human hit the cap
         self._pending_comment: dict[int, str] = {}
         self._inflight: set[int] = set()
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
+        self._comment_task: asyncio.Task | None = None
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="ado-poller")
+        self._comment_task = asyncio.create_task(self._comment_run(), name="ado-comment-loop")
 
     async def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+        for task in (self._task, self._comment_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    async def _comment_run(self) -> None:
+        """Dedicated loop for ``/command`` comments — its own fast cadence, decoupled from
+        the heavier work-item poll so commands are picked up within
+        ``comment_poll_interval_seconds`` regardless of ``poll_interval_seconds``."""
+        cfg = self._config
+        if not cfg.has_auth:
+            return
+        while True:
+            try:
+                await asyncio.sleep(cfg.comment_poll_interval_seconds or 15)
+                await self._reconcile_human_replies()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                self._log.error("comment loop failed", error=str(exc))
 
     async def _run(self) -> None:
         cfg = self._config
@@ -194,10 +192,6 @@ class AdoPollerService:
         # Force a clean re-run for items a human tagged for restart: wipe SDLC
         # progress and dispatch immediately (from any state) — see method docstring.
         await self._reconcile_restart_requests()
-
-        # React to a NEW human comment on any autopilot-owned item ("steer by
-        # commenting") — covers held / in-review / done uniformly, no tag needed.
-        await self._reconcile_human_replies()
 
         self._log.debug("polling ADO for pending work items")
         items = await c.ado.get_pending_work_items()
@@ -329,19 +323,10 @@ class AdoPollerService:
         return None
 
     async def _apply_outcome(self, item_id: int, outcome: str) -> None:
-        """Apply the configured ADO tag + state for a pipeline outcome.
-
-        Single place that mutates ADO tags/state — see ``outcome_policy``. Applies
-        in every execution mode. Blank tag/state or ``dry_run`` → skipped.
-        Best-effort: ADO-client failures are logged and never block the pipeline.
-        """
-        tag, state = outcome_policy(self._config, outcome)
-        if self._config.dry_run:
-            return
-        if tag:
-            await self._c.ado.add_tag(item_id, tag)
-        if state:
-            await self._c.ado.update_state(item_id, state)
+        """Apply the configured ADO tag + state for a pipeline outcome — clearing any other
+        outcome tag first so the board never shows a stale one (see ``apply_outcome``).
+        Applies in every execution mode; blank tag/state or ``dry_run`` → skipped."""
+        await apply_outcome(self._c.ado, self._config, item_id, outcome)
 
     async def _reconcile_reopened(self) -> None:
         """Reopen items a human dragged back to a trigger state: clear their skip
@@ -432,28 +417,41 @@ class AdoPollerService:
             self._log.info("restart requested", id=item.id, state=item.state)
             asyncio.create_task(self._process(item))
 
+    def _is_my_user(self, email: str | None, name: str | None) -> bool:
+        """True if the identity is the user THIS machine acts for — so on a multi-machine
+        setup each person's own machine handles only their own commands."""
+        cfg = self._config
+        return matches_user(email, name, cfg.assignee_trigger_user or cfg.auto_transition_assignee)
+
+    def _owns_item(self, item: WorkItemInfo) -> bool:
+        """True if this machine's stream owns the item — mirrors the main poll's candidate
+        rule: it carries one of this machine's trigger tags, OR the shared assignee-trigger
+        tag AND is assigned to this machine's user."""
+        cfg = self._config
+        tags = {t.lower() for t in item.tags}
+        if {t.lower() for t in cfg.effective_trigger_tags} & tags:
+            return True
+        atag = (cfg.assignee_trigger_tag or "").strip().lower()
+        return bool(
+            atag and atag in tags and self._is_my_user(item.assigned_to_email, item.assigned_to)
+        )
+
     async def _reconcile_human_replies(self) -> None:
-        """React to a new *human* comment on any autopilot-owned item — the single
-        "steer by commenting" mechanism.
+        """Pick up ``/ai`` command comments on this machine's items and act on them.
 
-        Ownership = the item still carries a trigger tag (the bot never removes it).
-        When the newest comment on such an item is human-authored (no BOT_DISPLAY_NAME
-        signature) and newer than the one we last handled, treat it as fresh intent:
-        clear skip tags, re-queue and dispatch with the comment fed into the agent brief.
-        Covers held / needs_human, in-review and done items uniformly — no restart tag.
-
-        Loop-safe by construction: the bot signs its own comments so they never
-        re-trigger; a per-item ``_comment_seen`` baseline stops the same comment being
-        handled twice; on FIRST sight of an item we adopt its latest comment as baseline
-        WITHOUT acting, so a restart never reprocesses the whole backlog; an in-flight
-        run is never interrupted — its follow-up is deferred (see ``_process``); and
-        ``max_comment_rounds`` caps a runaway human↔bot exchange.
+        Trigger = an explicit ``comment_command`` (e.g. ``/ai fix the null check``), NOT any
+        comment — intentional and light. Scoping is multi-machine safe:
+          • per-machine   — only items this machine's stream OWNS (``_owns_item``);
+          • per-commenter — only commands from the user this machine acts for (``_is_my_user``);
+          • idempotent    — the watermark is the id of the item's last BOT comment, so once
+            the bot has replied a command is never re-run (durable across restarts);
+          • bounded       — ``max_comment_rounds`` caps a runaway exchange (one-time notice);
+          • cheap         — a cadence gate plus the ownership filter keep the fetch off the
+            whole board.
+        An in-flight run is never interrupted; its follow-up is deferred (see ``_process``).
         """
         c, cfg = self._c, self._config
-        if cfg.dry_run or not cfg.comment_reprocess_enabled:
-            return
-        trigger = {t.lower() for t in cfg.effective_trigger_tags}
-        if not trigger:
+        if cfg.dry_run or not cfg.comment_reprocess_enabled or not cfg.comment_commands:
             return
         try:
             tagged = await c.ado.get_all_tagged_work_items()
@@ -461,10 +459,8 @@ class AdoPollerService:
             self._log.warning("comment reconcile: fetch failed", error=str(exc))
             return
         for item in tagged:
-            if item.id in self._live:
-                continue  # an interactive session owns it — steer there, not by comment
-            if not (trigger & {t.lower() for t in item.tags}):
-                continue  # not autopilot-owned
+            if item.id in self._live or not self._owns_item(item):
+                continue  # not this machine's stream — or a live session steers it directly
             try:
                 comments = await c.ado.get_work_item_comments(item.id)
             except Exception as exc:  # noqa: BLE001
@@ -472,25 +468,44 @@ class AdoPollerService:
                     "comment reconcile: comments fetch failed", id=item.id, error=str(exc)
                 )
                 continue
-            human = [cm for cm in comments if not cm.get("is_bot")]
-            if not human:
+            # Watermark = last BOT comment id → a command is "handled" once the bot has
+            # replied after it (durable across restarts). _comment_seen dedups per session.
+            bot_ids = [cm["id"] for cm in comments if cm.get("is_bot")]
+            baseline = self._comment_seen.get(item.id, max(bot_ids) if bot_ids else 0)
+            # Unhandled /ai commands from THIS machine's user, oldest→newest.
+            cmds = [
+                (cm["id"], instr)
+                for cm in comments
+                if cm["id"] > baseline
+                and not cm.get("is_bot")
+                and self._is_my_user(cm.get("created_by_email"), cm.get("created_by"))
+                and (instr := match_command(cm["text"], cfg.comment_commands)) is not None
+            ]
+            if not cmds:
                 continue
-            newest = human[-1]
-            baseline = self._comment_seen.get(item.id)
-            self._comment_seen[item.id] = newest["id"]
-            if baseline is None or newest["id"] <= baseline:
-                continue  # first sight (adopt baseline, don't act) or nothing new
+            self._comment_seen[item.id] = cmds[-1][0]
+            instruction = "\n\n".join(instr for _, instr in cmds)
             rounds = self._comment_rounds.get(item.id, 0) + 1
             if rounds > cfg.max_comment_rounds:
+                # Tell the human ONCE that we've stopped, and how to force a fresh run.
+                if item.id not in self._comment_capped and cfg.restart_tag:
+                    self._comment_capped.add(item.id)
+                    with contextlib.suppress(Exception):
+                        await c.ado.add_comment(
+                            item.id,
+                            f"<div>⏸️ <b>Autopilot đã đạt {cfg.max_comment_rounds} vòng xử lý "
+                            f"lệnh</b> cho item này. Gắn tag <code>{cfg.restart_tag}</code> để "
+                            "buộc chạy lại từ đầu.</div>",
+                        )
                 self._log.info("comment reconcile: max rounds reached", id=item.id, rounds=rounds)
                 continue
             self._comment_rounds[item.id] = rounds
             if item.id in self._inflight:
                 # Don't interrupt a run in flight — apply this once it completes.
-                self._pending_comment[item.id] = newest["text"]
-                self._log.info("human comment queued (item in flight)", id=item.id)
+                self._pending_comment[item.id] = instruction
+                self._log.info("/ai command queued (item in flight)", id=item.id)
                 continue
-            await self._dispatch_with_comment(item, newest["text"])
+            await self._dispatch_with_comment(item, instruction)
 
     async def _dispatch_with_comment(self, item: WorkItemInfo, comment: str) -> None:
         """Re-enter an autopilot-owned item to act on a fresh human comment: clear its
@@ -505,7 +520,11 @@ class AdoPollerService:
         item.tags = [t for t in item.tags if t.lower() not in skip_tags]
         c.retry_policy.record_success(item.id)  # fresh retry budget for the follow-up
         await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
-        self._processed.pop(item.id, None)
+        # Mark processed for THIS cycle so the pending query later in _poll_and_process
+        # can't ALSO dispatch it (a concurrent double-run) — which happens when the
+        # item's ADO state is itself a trigger state (e.g. a held needs_human item whose
+        # state is "Active"). _process overwrites this stamp when it starts.
+        self._processed[item.id] = datetime.now(UTC)
         item.pending_comment = comment
         await c.ado.add_comment(
             item.id,
@@ -516,6 +535,8 @@ class AdoPollerService:
 
     async def _process(self, item: WorkItemInfo) -> None:
         c, cfg = self._c, self._config
+        if item.id in self._inflight:
+            return  # already running — guard against a concurrent dispatch (double-run)
         self._inflight.add(item.id)
         try:
             async with self._gate:

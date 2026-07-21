@@ -145,6 +145,16 @@ FIELDS: tuple[Field, ...] = (
           "Only at unattended autonomy. Default 85."),
     Field("pr_score_review_min", "Score < this → escalate", "int", "Execution & Autonomy",
           "Below this the run is held for a human instead of review/done. Default 60."),
+    Field("feedback_loop_enabled", "🔁 PR feedback loop", "bool", "Execution & Autonomy",
+          "Watch open autopilot PRs for new human review comments and auto-revise the branch to "
+          "address them. Restart required to take effect."),
+    Field("max_revisions", "↳ Max PR revisions / item", "int", "Execution & Autonomy",
+          "Cap auto-revisions per work item so a review back-and-forth can't run away. Default 3."),
+    Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "Execution & Autonomy",
+          "A new human comment on an autopilot-owned item (held / in review / done) re-runs it "
+          "with your comment as top-priority guidance — no restart tag needed."),
+    Field("max_comment_rounds", "↳ Max comment rounds / item", "int", "Execution & Autonomy",
+          "Cap human↔bot comment rounds per item so a back-and-forth can't run away. Default 5."),
     Field("dry_run", "Dry run", "bool", "Execution & Autonomy",
           "Log only — never execute or write to ADO."),
     # ── Dependency scheduling ──

@@ -128,6 +128,30 @@ class MergedPr(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class PrCommandState(Base):
+    """PR babysitter memory per work item: how much of the revision budget /ai
+    commands have spent — persisted so a restart neither resets the cap (runaway
+    churn) nor blocks items that had headroom left."""
+
+    __tablename__ = "pr_command_states"
+
+    work_item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    revisions: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class HandledPrComment(Base):
+    """PR comment ids the babysitter already dispatched — the restart-proof twin of
+    its in-memory set, closing the gap where a command was dispatched but the
+    bot-signed reply (the other durable mark) never got posted."""
+
+    __tablename__ = "handled_pr_comments"
+
+    pr_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    comment_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class ExecutionRecord(Base):
     __tablename__ = "executions"
     __table_args__ = (

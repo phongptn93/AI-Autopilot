@@ -16,7 +16,7 @@ from urllib.parse import quote
 import httpx
 
 from ai_autopilot.ado.auth import AdoAuthService
-from ai_autopilot.config import BOT_COMMENT_SIGNATURE, BOT_DISPLAY_NAME, Settings
+from ai_autopilot.config import BOT_COMMENT_PREFIX, Settings, is_bot_signed
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import TaskCategory, WorkItemInfo
 
@@ -35,12 +35,11 @@ _REL_RELATED = "System.LinkTypes.Related"                 # soft conflict (touch
 
 
 def is_bot_comment(text: str | None) -> bool:
-    """True if a work-item comment was authored by the autopilot.
-
-    Decided by the BOT_DISPLAY_NAME signature in the CONTENT, never by the comment's
-    author — the bot posts under the operator's own ADO identity, so the author field
-    is identical for bot and human (see config.BOT_DISPLAY_NAME)."""
-    return BOT_DISPLAY_NAME in (text or "")
+    """True if a comment was authored by the autopilot — decided by the signature in the
+    CONTENT (author is useless: the bot posts under the operator's own identity).
+    Delegates to ``config.is_bot_signed``, which HTML-unescapes before matching (ADO
+    stores the 🤖 emoji as an entity)."""
+    return is_bot_signed(text)
 
 
 class AdoClient:
@@ -234,11 +233,11 @@ class AdoClient:
         return items[0] if items else None
 
     async def add_comment(self, work_item_id: int, comment: str) -> bool:
-        # Stamp the bot signature so this comment is later recognisable as ours — the
-        # comment-reaction loop skips it (see config.BOT_COMMENT_SIGNATURE).
+        # Lead with the bot icon so this comment is recognisable as ours at a glance —
+        # the comment-reaction loop skips it (see config.BOT_COMMENT_PREFIX).
         resp = await self._http.post(
             self._url(f"wit/workitems/{work_item_id}/comments?api-version=7.1-preview.4"),
-            json={"text": comment + BOT_COMMENT_SIGNATURE},
+            json={"text": BOT_COMMENT_PREFIX + comment},
             headers=await self._headers(),
         )
         if resp.status_code >= 400:
@@ -249,8 +248,8 @@ class AdoClient:
         """A work item's discussion comments, oldest→newest.
 
         Each dict: ``{"id", "text", "is_bot", "created_by"}``. ``is_bot`` is decided by
-        the BOT_DISPLAY_NAME signature in the content (the author is same-account, so it
-        cannot distinguish bot from human)."""
+        the bot icon in the content (the author is same-account, so it cannot
+        distinguish bot from human)."""
         url = self._url(f"wit/workItems/{work_item_id}/comments?api-version=7.1-preview.4")
         try:
             resp = await self._http.get(url, headers=await self._headers())
@@ -269,6 +268,7 @@ class AdoClient:
                 "text": c.get("text") or "",
                 "is_bot": is_bot_comment(c.get("text")),
                 "created_by": _identity(c.get("createdBy")),
+                "created_by_email": _identity_email(c.get("createdBy")),
             }
             for c in raw
             if c.get("id") is not None
@@ -359,6 +359,9 @@ class AdoClient:
 
     async def get_completed_pull_requests(self, repo_id: str) -> list[dict[str, Any]]:
         return await self._pull_requests_by_status(repo_id, "completed")
+
+    async def get_abandoned_pull_requests(self, repo_id: str) -> list[dict[str, Any]]:
+        return await self._pull_requests_by_status(repo_id, "abandoned")
 
     async def _pull_requests_by_status(self, repo_id: str, status: str) -> list[dict[str, Any]]:
         url = self._git_url(
@@ -460,6 +463,74 @@ class AdoClient:
             self._log.warning("get_pull_request_threads failed", status=resp.status_code)
             return []
         return resp.json().get("value") or []
+
+    async def add_pull_request_comment(
+        self, repo_id: str, pr_id: int, text: str, *, active: bool = False
+    ) -> bool:
+        """Post a comment on a PR as a new thread (stamped with the bot signature).
+
+        Defaults to a CLOSED (informational) thread so status updates don't pile up as
+        unresolved comments — and so the babysitter's ``actionable_comments`` skips them
+        (resolved threads are ignored), keeping the bot's own PR comments from
+        re-triggering a revision."""
+        url = self._git_url(f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads?{_API}")
+        body = {
+            "comments": [
+                {"parentCommentId": 0, "content": BOT_COMMENT_PREFIX + text, "commentType": 1}
+            ],
+            "status": "active" if active else "closed",
+        }
+        try:
+            resp = await self._http.post(url, json=body, headers=await self._headers())
+        except httpx.HTTPError as exc:
+            self._log.warning("add_pull_request_comment error", pr=pr_id, error=str(exc))
+            return False
+        if resp.status_code >= 400:
+            self._log.warning("add_pull_request_comment failed", pr=pr_id, status=resp.status_code)
+            return False
+        return True
+
+    async def reply_to_pull_request_thread(
+        self, repo_id: str, pr_id: int, thread_id: int, text: str
+    ) -> bool:
+        """Reply to an EXISTING PR thread (keeps the conversation on the human's own
+        comment instead of scattering new threads). Stamped with the bot signature."""
+        url = self._git_url(
+            f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads/{thread_id}/comments?{_API}"
+        )
+        body = {"content": BOT_COMMENT_PREFIX + text, "commentType": 1}
+        try:
+            resp = await self._http.post(url, json=body, headers=await self._headers())
+        except httpx.HTTPError as exc:
+            self._log.warning("reply_to_pr_thread error", pr=pr_id, error=str(exc))
+            return False
+        if resp.status_code >= 400:
+            self._log.warning(
+                "reply_to_pr_thread failed", pr=pr_id, thread=thread_id, status=resp.status_code
+            )
+            return False
+        return True
+
+    async def set_pull_request_thread_status(
+        self, repo_id: str, pr_id: int, thread_id: int, status: str
+    ) -> bool:
+        """Set a PR thread's status (e.g. ``"fixed"`` to resolve it once addressed)."""
+        url = self._git_url(
+            f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads/{thread_id}?{_API}"
+        )
+        try:
+            resp = await self._http.patch(
+                url, json={"status": status}, headers=await self._headers()
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("set_pr_thread_status error", pr=pr_id, error=str(exc))
+            return False
+        if resp.status_code >= 400:
+            self._log.warning(
+                "set_pr_thread_status failed", pr=pr_id, thread=thread_id, status=resp.status_code
+            )
+            return False
+        return True
 
     # ── Work-item states (for the Settings picker) ──────────────────────────
 

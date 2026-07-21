@@ -304,6 +304,14 @@ def test_planning_schedule_creates_a_run(tmp_path):
         assert "Scheduled runs" in page.text
 
 
+def test_overview_shows_efficiency_cards(client: TestClient):
+    resp = client.get("/dashboard")
+    assert resp.status_code == 200
+    assert "Merge Rate" in resp.text
+    assert "Tokens / Merged PR" in resp.text
+    assert "Runs / Item" in resp.text
+
+
 def test_health_reports_checks(client: TestClient):
     resp = client.get("/health")
     body = resp.json()
@@ -320,3 +328,47 @@ def test_webhook_enqueues(client: TestClient):
 def test_webhook_rejects_missing_id(client: TestClient):
     resp = client.post("/api/webhook/ado", json={"resource": {}})
     assert resp.json() == {"error": "No workItemId in payload"}
+
+
+class _FakeMonitor:
+    def __init__(self):
+        self.kicks = []
+
+    def kick(self, repo_id, repo_name, pr):
+        self.kicks.append((repo_id, repo_name, pr.get("pullRequestId")))
+
+
+def _pr_comment_event(content: str) -> dict:
+    return {
+        "eventType": "ms.vss-code.git-pullrequest-comment-event",
+        "resource": {
+            "comment": {"content": content},
+            "pullRequest": {
+                "pullRequestId": 7,
+                "sourceRefName": "refs/heads/feature/be/42-x",
+                "repository": {"id": "repo-guid", "name": "repo-a"},
+            },
+        },
+    }
+
+
+def test_webhook_pr_command_kicks_monitor(client: TestClient):
+    fake = _FakeMonitor()
+    client.app.state.pr_monitor = fake
+    resp = client.post("/api/webhook/ado", json=_pr_comment_event("/ai fix issue 2"))
+    assert resp.json() == {"kicked": 7}
+    assert fake.kicks == [("repo-guid", "repo-a", 7)]
+
+
+def test_webhook_ignores_bot_and_chatter(client: TestClient):
+    from ai_autopilot.config import BOT_COMMENT_PREFIX
+
+    fake = _FakeMonitor()
+    client.app.state.pr_monitor = fake
+    # The bot's own reply fires the hook too — must never self-trigger.
+    r1 = client.post("/api/webhook/ado", json=_pr_comment_event(BOT_COMMENT_PREFIX + "done"))
+    # Human chatter without a /command → the regular poll ignores it anyway.
+    r2 = client.post("/api/webhook/ado", json=_pr_comment_event("nice work!"))
+    assert r1.json() == {"ignored": "bot comment"}
+    assert r2.json() == {"ignored": "not a command"}
+    assert fake.kicks == []

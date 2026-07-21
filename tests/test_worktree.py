@@ -204,6 +204,154 @@ async def test_concurrent_scratch_same_repo_no_collision(agent_workspace: Path):
         await ex.release_scratch(b)
 
 
+async def test_run_in_workspace_serialises_same_repo(agent_workspace: Path, monkeypatch):
+    # Workspace mode checks out IN-PLACE in the shared repo, so two concurrent runs on the
+    # SAME repo must be serialised (per-repo lock) — otherwise they corrupt the git index.
+    import asyncio
+    from types import SimpleNamespace
+
+    from ai_autopilot.models import WorkItemInfo
+
+    ex = _executor(
+        workspace_directory=str(agent_workspace), use_worktrees=True,
+        worktrees_dir=str(agent_workspace.parent / "wts"),
+    )
+    active = max_active = 0
+
+    async def fake_acquire(repo_, branch, base, item_id, existing=False):
+        return SimpleNamespace(path=repo_, claude_cwd=repo_)
+
+    async def fake_release(ws):
+        pass
+
+    async def fake_claude(prompt, cwd, repo=None, on_event=None):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.05)
+        active -= 1
+        return SimpleNamespace(text="done", total_tokens=0, cost_usd=None, is_error=False)
+
+    async def fake_has_changes(work_dir):
+        return False  # → run returns right after _run_claude (where overlap is measured)
+
+    monkeypatch.setattr(ex, "_acquire_workspace", fake_acquire)
+    monkeypatch.setattr(ex, "_release_workspace", fake_release)
+    monkeypatch.setattr(ex, "_run_claude", fake_claude)
+    monkeypatch.setattr(ex, "_has_changes", fake_has_changes)
+
+    item = WorkItemInfo(id=1, title="t")
+    await asyncio.gather(
+        ex.revise(item, "b1", "p", repo="repo-a"),
+        ex.revise(item, "b2", "p", repo="repo-a"),  # SAME repo
+    )
+    assert max_active == 1  # never overlapped — the per-repo lock serialised them
+
+
+async def test_revise_read_only_skips_workspace(repo: Path, monkeypatch):
+    # Advisory commands (/review) change nothing, so revise(read_only=True) must
+    # never pay the worktree add/remove lifecycle — no workspace is acquired and
+    # the run succeeds purely on Claude's comment.
+    from types import SimpleNamespace
+
+    from ai_autopilot.models import WorkItemInfo
+
+    ex = _executor(use_worktrees=True, worktrees_dir=str(repo.parent / "wts"),
+                   repo_working_directory=str(repo))
+
+    async def fail_acquire(*args, **kwargs):
+        raise AssertionError("read-only revise must not acquire a workspace")
+
+    ran = {}
+
+    async def fake_claude(prompt, cwd, repo=None, on_event=None):
+        ran["cwd"] = cwd
+        return SimpleNamespace(text="findings posted", total_tokens=7, cost_usd=0.01,
+                               is_error=False)
+
+    monkeypatch.setattr(ex, "_acquire_workspace", fail_acquire)
+    monkeypatch.setattr(ex, "_run_claude", fake_claude)
+
+    item = WorkItemInfo(id=42, title="t")
+    result = await ex.revise(item, "feature/be/42-thing", "review it", read_only=True)
+
+    assert result.success is True
+    assert result.branch_name == "feature/be/42-thing"
+    assert result.cost_tokens == 7
+    assert ran["cwd"] == str(repo)          # ran in place, no worktree dir
+    assert not (repo.parent / "wts").exists()  # no worktree was ever created
+
+
+@pytest.fixture
+def repo_with_pr_branch(repo: Path) -> Path:
+    """The clone plus a pushed PR branch (what a /ai revise operates on)."""
+    _git(repo, "checkout", "-b", "feature/be/42-x")
+    (repo / "f.txt").write_text("x\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "wip")
+    _git(repo, "push", "-u", "origin", "feature/be/42-x")
+    _git(repo, "checkout", "development")
+    return repo
+
+
+async def test_revise_worktree_reused_across_rounds(repo_with_pr_branch: Path, tmp_path: Path):
+    # /ai round 1 creates the worktree; round 2 must find the SAME checkout (no fresh
+    # materialisation) with stray files from the previous round cleaned away.
+    repo = repo_with_pr_branch
+    ex = _executor(use_worktrees=True, worktrees_dir=str(tmp_path / "wts"))
+
+    ws1 = await ex._acquire_workspace(
+        str(repo), "feature/be/42-x", "development", 42, existing_branch=True
+    )
+    (Path(ws1.path) / "junk.txt").write_text("stray\n")   # leftovers from a run
+    await ex._release_workspace(ws1)
+    assert Path(ws1.path).is_dir()                         # kept, not torn down
+
+    ws2 = await ex._acquire_workspace(
+        str(repo), "feature/be/42-x", "development", 42, existing_branch=True
+    )
+    assert ws2.path == ws1.path                            # same cached checkout
+    assert not (Path(ws2.path) / "junk.txt").exists()      # reset hard each round
+    assert (Path(ws2.path) / "f.txt").exists()             # at the PR head
+    await ex._release_workspace(ws2)
+
+
+async def test_fresh_execution_evicts_cached_revise_worktree(
+    repo_with_pr_branch: Path, tmp_path: Path
+):
+    # A fresh execute rebuilds the branch from base with `worktree add -B` — the cached
+    # revise worktree still holds that branch checked out, so it must be evicted first.
+    repo = repo_with_pr_branch
+    ex = _executor(use_worktrees=True, worktrees_dir=str(tmp_path / "wts"))
+
+    cached = await ex._acquire_workspace(
+        str(repo), "feature/be/42-x", "development", 42, existing_branch=True
+    )
+    await ex._release_workspace(cached)                    # kept in the cache
+
+    fresh = await ex._acquire_workspace(str(repo), "feature/be/42-x", "development", 42)
+    assert fresh.path != cached.path
+    assert not Path(cached.path).exists()                  # evicted, no branch conflict
+    await ex._release_workspace(fresh)
+
+
+async def test_stale_revise_worktrees_swept(repo_with_pr_branch: Path, tmp_path: Path):
+    import os
+
+    repo = repo_with_pr_branch
+    wts = tmp_path / "wts"
+    ex = _executor(use_worktrees=True, worktrees_dir=str(wts), revise_worktree_ttl_hours=1)
+    stale = wts / "r99-deadbeef"
+    stale.mkdir(parents=True)
+    os.utime(stale, (1, 1))                                # idle far past the TTL
+
+    ws = await ex._acquire_workspace(
+        str(repo), "feature/be/42-x", "development", 42, existing_branch=True
+    )
+    await ex._release_workspace(ws)
+    assert not stale.exists()                              # swept on acquire
+
+
 async def test_resolve_base_ref_falls_back_to_default(repo: Path):
     ex = _executor()  # base_branch="development" is set by the helper
     # the configured base branch exists → used directly

@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from ai_autopilot.config import Settings
 from ai_autopilot.data import PipelineState
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
-from ai_autopilot.services.poller import AdoPollerService, outcome_policy
+from ai_autopilot.outcomes import outcome_policy
+from ai_autopilot.services.poller import AdoPollerService
 
 
 class _FakeAdo:
@@ -360,22 +361,39 @@ async def test_finalize_skips_while_session_running():
     assert p._live == {7: 99}                                  # still live, not finalised
 
 
-# ── Comment-reaction loop (steer the autopilot by just commenting) ──────────────
+# ── /ai command loop (steer the autopilot with /ai … comments) ──────────────────
 
-def _cmt(cid, text, *, is_bot):
-    return {"id": cid, "text": text, "is_bot": is_bot, "created_by": "user"}
+def _cmt(cid, text, *, is_bot, email="user@x"):
+    return {
+        "id": cid, "text": text, "is_bot": is_bot,
+        "created_by": "user", "created_by_email": email,
+    }
 
 
 def test_is_bot_comment_detects_signature_not_author():
     from ai_autopilot.ado.client import is_bot_comment
-    from ai_autopilot.config import BOT_COMMENT_SIGNATURE
+    from ai_autopilot.config import BOT_COMMENT_PREFIX
 
-    assert is_bot_comment("all done" + BOT_COMMENT_SIGNATURE) is True   # bot's own comment
+    assert is_bot_comment(BOT_COMMENT_PREFIX + "all done") is True      # bot's own comment
+    # ADO stores the 🤖 emoji HTML-encoded — detection must unescape and still match.
+    assert is_bot_comment("done &#129302; more") is True
     assert is_bot_comment("please also handle Y") is False              # human comment
     assert is_bot_comment(None) is False
 
 
-async def test_comment_reply_dispatches_and_injects_guidance():
+def test_match_command_recognises_prefixes_and_keeps_intent():
+    from ai_autopilot.config import match_command
+
+    cmds = ["/ai", "/review", "dxfactory@nois.vn"]
+    addr = "dxfactory@nois.vn dùng size 2048"
+    assert match_command("/ai fix the null check", cmds) == "/ai fix the null check"
+    assert match_command("<div>/review this endpoint</div>", cmds) == "/review this endpoint"
+    assert match_command(addr, cmds) == addr                     # address the account directly
+    assert match_command("just a normal comment", cmds) is None
+    assert match_command(None, cmds) is None
+
+
+async def test_ai_command_dispatches_and_injects_guidance():
     p, c = _poller()
     c.config.trigger_tag = "autopilot"                 # so the tagged item is "owned"
     done = c.config.processed_tag
@@ -383,9 +401,9 @@ async def test_comment_reply_dispatches_and_injects_guidance():
     c.ado.tagged_items = [item]
     c.ado.comments_by_item = {7: [
         _cmt(1, "PR opened", is_bot=True),
-        _cmt(2, "please also handle Y", is_bot=False),   # newest = human → fresh intent
+        _cmt(2, "/ai also handle Y", is_bot=False),     # /ai command → act
     ]}
-    p._comment_seen[7] = 1                             # we'd handled up to comment #1
+    p._comment_seen[7] = 1
     dispatched: list[int] = []
 
     async def _fake_process(it):
@@ -397,52 +415,134 @@ async def test_comment_reply_dispatches_and_injects_guidance():
 
     assert (7, done) in c.ado.removed                 # skip tag cleared (still owned via trigger)
     assert (7, PipelineState.QUEUED) in c.state_repo.calls
-    assert item.pending_comment == "please also handle Y"   # fed into the agent brief
+    assert item.pending_comment == "/ai also handle Y"     # full command fed to the brief
     assert dispatched == [7]
-    assert p._comment_seen[7] == 2                     # baseline advanced
 
 
-async def test_comment_reply_first_sight_adopts_baseline_without_acting():
-    p, c = _poller()
-    c.config.trigger_tag = "autopilot"
-    c.ado.tagged_items = [_tagged(7, "Resolved", ["autopilot", c.config.processed_tag])]
-    c.ado.comments_by_item = {7: [_cmt(5, "old note", is_bot=False)]}
-    await p._reconcile_human_replies()
-    assert p._comment_seen[7] == 5                     # baseline adopted...
-    assert c.ado.removed == []                         # ...but never reprocesses on first sight
-
-
-async def test_comment_reply_skips_when_newest_is_bot():
+async def test_ai_command_ignores_non_command_comments():
     p, c = _poller()
     c.config.trigger_tag = "autopilot"
     c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", c.config.review_tag])]
     c.ado.comments_by_item = {7: [
-        _cmt(1, "human asked", is_bot=False),
-        _cmt(2, "bot replied", is_bot=True),           # newest is the bot → no new human intent
+        _cmt(5, "bot", is_bot=True),
+        _cmt(6, "please also handle Y", is_bot=False),   # a plain comment, NOT a /command
+    ]}
+    p._comment_seen[7] = 5
+    await p._reconcile_human_replies()
+    assert c.ado.removed == []                            # no /ai → nothing happens
+
+
+async def test_ai_command_feeds_all_unhandled_and_blocks_double_dispatch():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    item = _tagged(7, "Active", ["autopilot", c.config.review_tag])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(1, "/ai handled earlier", is_bot=False),
+        _cmt(2, "/ai do X", is_bot=False),
+        _cmt(3, "/ai also do Y", is_bot=False),   # 2 and 3 are new since baseline
     ]}
     p._comment_seen[7] = 1
+
+    async def _fake_process(it):
+        pass
+
+    p._process = _fake_process
     await p._reconcile_human_replies()
-    assert c.ado.removed == []                          # newest human == baseline → nothing to do
+
+    assert item.pending_comment == "/ai do X\n\n/ai also do Y"   # both fed, oldest→newest
+    assert 7 in p._processed                                     # blocks pending double-dispatch
 
 
-async def test_comment_reply_defers_when_item_in_flight():
+async def test_ai_command_durable_baseline_from_last_bot_comment():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    item = _tagged(7, "Active", ["autopilot", c.config.escalation_tag])  # held / needs_human
+    c.ado.tagged_items = [item]
+    # Fresh session (after restart): no _comment_seen. Bot's last action = #5; the /ai at
+    # #6 came AFTER it → picked up despite the restart; the older #3 is not.
+    c.ado.comments_by_item = {7: [
+        _cmt(3, "/ai old, already answered", is_bot=False),
+        _cmt(5, "bot escalation", is_bot=True),
+        _cmt(6, "/ai here is the missing info", is_bot=False),
+    ]}
+    dispatched: list[int] = []
+
+    async def _fake_process(it):
+        dispatched.append(it.id)
+
+    p._process = _fake_process
+    await p._reconcile_human_replies()
+    await asyncio.sleep(0)
+    assert item.pending_comment == "/ai here is the missing info"   # only the post-bot command
+    assert dispatched == [7]
+    assert (7, c.config.escalation_tag) in c.ado.removed           # un-held (needs_human resumed)
+
+
+async def test_ai_command_only_from_this_machines_user():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"     # this machine acts for Phong
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", c.config.review_tag])]
+    c.ado.comments_by_item = {7: [
+        _cmt(5, "bot", is_bot=True),
+        _cmt(6, "/ai đổi size", is_bot=False, email="someone.else@nois.vn"),  # not my user
+    ]}
+    p._comment_seen[7] = 5
+    await p._reconcile_human_replies()
+    assert c.ado.removed == []                            # another person's /ai → ignored here
+
+
+async def test_ai_command_matches_this_machines_user():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot", c.config.review_tag])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(5, "bot", is_bot=True),
+        _cmt(6, "/ai đổi size", is_bot=False, email="phong.pham@nois.vn"),
+    ]}
+    p._comment_seen[7] = 5
+
+    async def _fake_process(it):
+        pass
+
+    p._process = _fake_process
+    await p._reconcile_human_replies()
+    assert item.pending_comment == "/ai đổi size"
+
+
+async def test_ai_command_caps_and_notifies_once():
+    p, c = _poller()
+    c.config.trigger_tag = "autopilot"
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", c.config.review_tag])]
+    c.ado.comments_by_item = {7: [_cmt(5, "bot", is_bot=True), _cmt(9, "/ai again", is_bot=False)]}
+    p._comment_seen[7] = 5
+    p._comment_rounds[7] = c.config.max_comment_rounds     # already at the cap
+    await p._reconcile_human_replies()
+    assert 7 in p._comment_capped
+    assert any("vòng" in t for _, t in c.ado.comments)     # told the human to use restart tag
+    assert c.ado.removed == []                             # capped → not reprocessed
+
+
+async def test_ai_command_defers_when_item_in_flight():
     p, c = _poller()
     c.config.trigger_tag = "autopilot"
     c.ado.tagged_items = [_tagged(7, "Active", ["autopilot"])]
-    c.ado.comments_by_item = {7: [_cmt(9, "new info mid-run", is_bot=False)]}
+    c.ado.comments_by_item = {7: [_cmt(9, "/ai new info mid-run", is_bot=False)]}
     p._comment_seen[7] = 1
     p._inflight.add(7)                                 # a run is currently in flight
     await p._reconcile_human_replies()
-    assert c.ado.removed == []                          # the running item is not interrupted
-    assert p._pending_comment[7] == "new info mid-run"  # queued for after the run finishes
+    assert c.ado.removed == []                             # the running item is not interrupted
+    assert p._pending_comment[7] == "/ai new info mid-run"  # queued for after the run finishes
 
 
-async def test_comment_reply_respects_toggle_off():
+async def test_ai_command_respects_toggle_off():
     p, c = _poller()
     c.config.trigger_tag = "autopilot"
     c.config.comment_reprocess_enabled = False
     c.ado.tagged_items = [_tagged(7, "Active", ["autopilot"])]
-    c.ado.comments_by_item = {7: [_cmt(9, "x", is_bot=False)]}
-    p._comment_seen[7] = 1
+    c.ado.comments_by_item = {7: [_cmt(9, "/ai x", is_bot=False)]}
     await p._reconcile_human_replies()
-    assert p._comment_seen.get(7) == 1                  # returned early, untouched
+    assert c.ado.removed == []                          # returned early, nothing touched

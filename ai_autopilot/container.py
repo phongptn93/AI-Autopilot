@@ -16,6 +16,7 @@ from ai_autopilot.data import (
     Database,
     ExecutionRepository,
     PlannedRunRepository,
+    PrCommandRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
     StateRepository,
@@ -64,6 +65,7 @@ class Container:
         self.planned_run_repo = PlannedRunRepository(self.database)
         self.ai_conflict_repo = AiConflictRepository(self.database)
         self.scheduler_history_repo = SchedulerHistoryRepository(self.database)
+        self.pr_command_repo = PrCommandRepository(self.database)
 
         # ADO.
         self.auth = AdoAuthService(config)

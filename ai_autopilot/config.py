@@ -14,7 +14,9 @@ YAML file is strongly recommended — see ``config.example.yaml``.
 
 from __future__ import annotations
 
+import html
 import os
+import re
 import socket
 from pathlib import Path
 
@@ -33,8 +35,62 @@ from pydantic_settings import (
 # its CONTENT; detection checks for the signature, never the author. It is a module
 # constant on purpose — NOT a Settings field — because if an operator could edit it,
 # a stale value would silently break human-vs-bot comment detection.
-BOT_DISPLAY_NAME = "🤖 AI-Autopilot"
-BOT_COMMENT_SIGNATURE = f"<sub>{BOT_DISPLAY_NAME}</sub>"
+BOT_ICON = "🤖"
+# Bold badge stamped at the START of every bot comment, so a reader knows it's the autopilot
+# at a glance. The 🤖 is the REQUIRED part — detection (is_bot_signed) keys off it, which is
+# how the bot tells its own comments from a human's despite sharing the operator's identity.
+# The bold wrapper + name are cosmetic (detection ignores tags via html.unescape).
+BOT_COMMENT_PREFIX = f"<b>{BOT_ICON} AI-Autopilot</b> · "
+# Handed to the agent so any comment IT posts (directly, via the ADO MCP) also carries the
+# 🤖 marker — otherwise the poller/babysitter would read the agent's own review/RCA comment
+# as a HUMAN comment, and if it happened to start with a command prefix it would re-trigger.
+BOT_COMMENT_INSTRUCTION = (
+    f"IMPORTANT: prefix EVERY comment you post on a work item or pull request with "
+    f"'{BOT_ICON} AI-Autopilot · ' so the autopilot recognises it as automated — never as a "
+    "human command. Do not start any comment with a slash command like /ai or /review."
+)
+
+
+def is_bot_signed(text: str | None) -> bool:
+    """True if ``text`` was authored by the autopilot (leads with the bot icon).
+
+    Detection is by CONTENT, never author — the bot posts under the operator's own ADO
+    identity, so the author field is identical for bot and human. Matches ``BOT_ICON``
+    after ``html.unescape`` (ADO stores comments HTML-encoded, so 🤖 comes back as
+    ``&#129302;`` — this also keeps recognising older signed comments). The only rare
+    false positive is a human typing the robot emoji into a comment."""
+    return BOT_ICON in html.unescape(text or "")
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def match_command(text: str | None, commands: list[str] | tuple[str, ...]) -> str | None:
+    """If a comment is addressed to the autopilot, return its PLAIN text; otherwise ``None``.
+
+    ``commands`` are the accepted trigger prefixes — e.g. ``["/ai", "/review",
+    "dxfactory@nois.vn"]`` — so a user can type ``/ai <instruction>``, ``/review <what>``,
+    or naturally address the bot's account (``phong.pham@nois.vn: <instruction>``). A
+    comment matches when its plain text starts with any prefix (case-insensitive). The
+    WHOLE plain text (command + note) is returned — kept intact so the agent can interpret
+    the intent (``/ai`` vs ``/review`` …) itself. HTML tags/entities are stripped first,
+    since ADO stores comments as HTML. No prefix matches → ``None``."""
+    plain = html.unescape(_HTML_TAG_RE.sub(" ", text or "")).strip()
+    low = plain.lower()
+    for cmd in commands or ():
+        cmd = (cmd or "").strip()
+        if cmd and low.startswith(cmd.lower()):
+            return plain
+    return None
+
+
+def matches_user(email: str | None, name: str | None, claimed: str) -> bool:
+    """True if the identity (email/display name) matches the ``claimed`` user — used so, on
+    a multi-machine setup, each person's own machine handles only their own commands. A
+    blank ``claimed`` (single machine / unrestricted) matches everyone. Case-insensitive
+    substring so an email or a name fragment both work."""
+    c = (claimed or "").strip().lower()
+    return not c or c in f"{email or ''} {name or ''}".lower()
 
 
 class RepoConfig(BaseModel):
@@ -334,16 +390,52 @@ class Settings(BaseSettings):
     # ── Feedback loop / PR babysitter ──
     feedback_loop_enabled: bool = False
     max_revisions: int = 3
+    # After a /command changes the PR it was left on (e.g. the BE PR), also review the work
+    # item's OTHER open DRAFT PRs (e.g. the FE PR) and adjust each only where the agent
+    # judges it must stay consistent with that change. Draft-only = safe (never touches a
+    # PR that's ready/merged). Off = handle only the PR the command was on.
+    pr_adjust_related_drafts: bool = True
+    # How often (seconds) the PR babysitter scans open PRs for new /command comments.
+    pr_poll_interval_seconds: int = 15
+    # Local-friendly fast lane (no webhook needed): once the bot engages a PR (a /command
+    # was handled there), THAT PR alone is re-polled at this cadence, so follow-up replies
+    # ("/ai fix issue 2" under the bot's review) are picked up chat-fast. The global scan
+    # keeps its slower interval.
+    pr_hot_poll_interval_seconds: int = 3
+    # ...and stays on the fast lane this long after its last activity, then cools down.
+    pr_hot_window_minutes: int = 10
+    # Reuse ONE worktree per (item, branch) across /ai revise rounds instead of
+    # materialising + tearing down a fresh checkout every command. Follow-ups start in
+    # seconds and ignored build artefacts (node_modules, bin/obj) stay warm. The cached
+    # worktree is reset hard to the PR head each round, and swept after the TTL.
+    revise_worktree_reuse: bool = True
+    revise_worktree_ttl_hours: int = 24
 
     # ── Comment reaction loop (steer the autopilot by just commenting) ──
     # When a NEW human comment appears on an autopilot-owned item (one that still
     # carries a trigger tag), re-enter it and act on the comment — covering held /
     # needs_human, in-review and done items uniformly, without any manual restart tag.
-    # Loop-safe: the bot signs its own comments (BOT_DISPLAY_NAME) so they never
-    # re-trigger, and a per-item baseline stops the same comment being handled twice.
+    # Loop-safe: the bot's own comments lead with the bot icon so they never re-trigger,
+    # and a per-item baseline stops the same comment being handled twice.
     comment_reprocess_enabled: bool = True
+    # Comma-separated command prefixes that address the autopilot in a comment, e.g.
+    # "/ai fix the null check", "/review this endpoint", or the bot's own account
+    # ("phong.pham@nois.vn: ..."). The full comment is fed to the agent, which interprets
+    # the intent (/ai = do it, /review = review & report, …) — add commands freely with no
+    # code change. Only commands from the user THIS machine acts for count (see
+    # assignee_trigger_user / auto_transition_assignee). Blank = command trigger off.
+    comment_command: str = "/ai, /review"
+    # Of the commands above, which are ADVISORY (review-only): the agent reviews and posts
+    # findings but makes NO code change, and "no file changes" counts as success. Everything
+    # else (e.g. /ai) is an ACTION command that revises the branch. Comma-separated.
+    comment_advisory_commands: str = "/review"
     # Cap on human↔bot comment rounds per item, so a back-and-forth can't run away.
     max_comment_rounds: int = 5
+    # Seconds between comment scans — the /command loop runs on its OWN cadence, decoupled
+    # from the heavier main work-item poll, so commands are picked up fast (default 15s)
+    # without speeding up that poll. Raise it only if a very large board makes the per-item
+    # comment fetch too heavy.
+    comment_poll_interval_seconds: int = 15
 
     # ── Closed-loop SDLC engine (v2, Phase 1) ──
     # Opt-in. When true, items route to the SdlcLoopEngine which drives them through
@@ -453,6 +545,17 @@ class Settings(BaseSettings):
             if t and t not in out:
                 out.append(t)
         return out
+
+    @property
+    def comment_commands(self) -> list[str]:
+        """Accepted comment trigger prefixes (``comment_command`` split on commas), blanks
+        dropped — e.g. ``"/ai, dxfactory@nois.vn"`` → ``["/ai", "dxfactory@nois.vn"]``."""
+        return [t.strip() for t in (self.comment_command or "").split(",") if t.strip()]
+
+    @property
+    def advisory_commands(self) -> list[str]:
+        """Review-only command prefixes (``comment_advisory_commands`` split on commas)."""
+        return [t.strip() for t in (self.comment_advisory_commands or "").split(",") if t.strip()]
 
     @property
     def report_only(self) -> bool:

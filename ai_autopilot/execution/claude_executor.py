@@ -9,7 +9,9 @@ from the SDK's structured ``ResultMessage``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -22,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ai_autopilot import activity
-from ai_autopilot.config import Settings
+from ai_autopilot.config import BOT_COMMENT_INSTRUCTION, Settings
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
 from ai_autopilot.execution.claude_client import ClaudeRun, run_claude
 from ai_autopilot.execution.result_contract import clear_result, read_result
@@ -51,6 +53,7 @@ class _Workspace:
     base_branch: str
     is_worktree: bool
     claude_cwd: str = ""  # dir Claude runs in (workspace root); "" → same as path
+    keep: bool = False  # cached revise worktree: survive release, reused next round
 
 
 class ClaudeExecutor:
@@ -546,6 +549,7 @@ class ClaudeExecutor:
             "- Run a self-review (e.g. security-review / review-pr skill) before opening the PR.",
             "- If the acceptance criteria are ambiguous or you lack the information to proceed "
             "safely, do NOT guess — stop and report needs_human.",
+            f"- {BOT_COMMENT_INSTRUCTION}",
             "",
             "# Required output (the control plane reads ONLY this — you MUST write it)",
             f"When finished, write a JSON file at `{result_rel}` (relative to this workspace):",
@@ -559,13 +563,24 @@ class ClaudeExecutor:
         return "\n".join(lines)
 
     async def revise(
-        self, item: WorkItemInfo, branch: str, prompt: str, draft_pr: bool = False
+        self, item: WorkItemInfo, branch: str, prompt: str,
+        draft_pr: bool = False, repo: str = "", allow_no_changes: bool = False,
+        read_only: bool = False,
     ) -> ExecutionResult:
-        """Address PR feedback on an EXISTING branch (push updates the open PR)."""
-        repo, base_branch = self._resolve_repo(item)
+        """Address PR feedback on an EXISTING branch (push updates the open PR).
+
+        ``repo`` is the repo the PR lives in (supplied by the babysitter). In workspace mode
+        the checkout is ``<workspace>/<repo>``; without it we fall back to the legacy category
+        mapping — see ``_revise_repo``. ``allow_no_changes`` (review-only commands) makes a
+        run that produced no file changes count as SUCCESS — the agent reported via comment.
+        ``read_only`` (advisory commands like /review) skips the checkout/worktree lifecycle
+        entirely — the agent inspects ``origin/<branch>`` and comments, changing nothing."""
+        repo_path, base_branch = self._revise_repo(item, repo)
+        if read_only:
+            return await self._run_read_only(item.id, repo_path, branch, prompt)
         return await self._run_in_workspace(
             item_id=item.id,
-            repo=repo,
+            repo=repo_path,
             branch=branch,
             base_branch=base_branch,
             prompt=prompt,
@@ -573,7 +588,54 @@ class ClaudeExecutor:
             draft_pr=draft_pr,
             existing_branch=True,
             create_pr=False,
+            allow_no_changes=allow_no_changes,
         )
+
+    async def _run_read_only(
+        self, item_id: int, repo: str, branch: str, prompt: str
+    ) -> ExecutionResult:
+        """Run an advisory command (e.g. /review) with no checkout at all.
+
+        The full revise pipeline pays fetch → worktree add (materialise the whole
+        tree) → run → worktree remove/prune for a run that by contract changes
+        nothing — most of the feedback latency for /review. Instead: fetch the PR
+        branch so ``origin/<branch>`` is diffable, run Claude in place, done. The
+        working tree stays on whatever it was; the prompt directs the agent to
+        inspect the fetched ref / ADO PR tools, never the files on disk.
+        """
+        started = time.monotonic()
+        # Only the fetch touches .git — serialise it against worktree bookkeeping,
+        # then run Claude outside the lock so reviews don't queue behind long runs.
+        async with self._repo_lock(repo):
+            await self._git(["fetch", "origin", branch], repo, check=False)
+        claude_cwd = self._config.workspace_directory or repo
+        dirty_before = await self._git("status --porcelain", repo, check=False)
+        self._log.info(
+            "running claude (read-only, no checkout)", id=item_id, branch=branch, cwd=claude_cwd
+        )
+        try:
+            claude_run = await self._run_claude(prompt, claude_cwd, repo=repo)
+            result = ExecutionResult.ok(item_id, prompt, claude_run.text)
+            result.cost_tokens = claude_run.total_tokens
+            result.cost_usd = claude_run.cost_usd
+        except TimeoutError:
+            minutes = self._config.task_timeout_minutes
+            self._log.error("read-only run timed out", id=item_id, minutes=minutes)
+            result = ExecutionResult.fail(item_id, prompt, f"Timed out after {minutes} minutes")
+        except Exception as exc:  # noqa: BLE001
+            self._log.error("read-only run failed", id=item_id, error=str(exc))
+            result = ExecutionResult.fail(item_id, prompt, str(exc))
+        # There's no isolation to throw away here, so a run that ignored the
+        # "change nothing" contract would silently dirty the checkout — surface it.
+        dirty_after = await self._git("status --porcelain", repo, check=False)
+        if dirty_after.strip() != dirty_before.strip():
+            self._log.warning(
+                "read-only run modified the checkout — leaving files untouched",
+                id=item_id, repo=repo,
+            )
+        result.branch_name = branch
+        result.duration_seconds = time.monotonic() - started
+        return result
 
     async def run_loop(
         self, name: str, prompt: str, repo: str, base_branch: str, branch: str, draft_pr: bool
@@ -605,7 +667,16 @@ class ClaudeExecutor:
         draft_pr: bool,
         existing_branch: bool,
         create_pr: bool,
+        allow_no_changes: bool = False,
     ) -> ExecutionResult:
+        # Workspace mode checks the branch out IN-PLACE in the shared repo working tree, so
+        # two concurrent runs on the SAME repo would stomp each other and corrupt the index
+        # ("fatal: unable to write new index file"). Serialise the whole run per-repo — the
+        # same lock the worktree bookkeeping uses. Worktree mode already isolates each run in
+        # its own worktree (own index) and needs no lock (lock stays None).
+        lock = self._repo_lock(repo) if self._config.workspace_directory else None
+        if lock is not None:
+            await lock.acquire()
         started = time.monotonic()
         workspace: _Workspace | None = None
         try:
@@ -619,8 +690,13 @@ class ClaudeExecutor:
             claude_run = await self._run_claude(prompt, claude_cwd, repo=work_dir)
 
             if not await self._has_changes(work_dir):
-                self._log.warning("no file changes after run", id=item_id, branch=branch)
-                result = ExecutionResult.fail(item_id, prompt, "No file changes produced")
+                if allow_no_changes:
+                    # Review-only: the agent reported its findings via a comment; making no
+                    # code change is the expected, successful outcome.
+                    result = ExecutionResult.ok(item_id, prompt, claude_run.text)
+                else:
+                    self._log.warning("no file changes after run", id=item_id, branch=branch)
+                    result = ExecutionResult.fail(item_id, prompt, "No file changes produced")
                 result.branch_name = branch
                 result.duration_seconds = time.monotonic() - started
                 result.cost_tokens = claude_run.total_tokens
@@ -687,6 +763,8 @@ class ClaudeExecutor:
         finally:
             if workspace is not None:
                 await self._release_workspace(workspace)
+            if lock is not None:
+                lock.release()
 
     # ── workspace lifecycle ─────────────────────────────────────────────────
 
@@ -732,6 +810,13 @@ class ClaudeExecutor:
                 Path(tempfile.gettempdir()) / "ai-autopilot-worktrees"
             )
             Path(base_dir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 - fast local mkdir
+            if existing_branch and self._config.revise_worktree_reuse:
+                return await self._acquire_revise_worktree(
+                    repo, branch, base_branch, item_id, base_dir, from_ref
+                )
+            # A cached revise worktree may still hold this branch checked out — a fresh
+            # `worktree add -B` would then fail ("already checked out"). Evict it first.
+            await self._evict_revise_worktree(repo, branch, item_id, base_dir)
             # Name the worktree dir by a short GUID (not the branch) to keep the
             # path short — long branch names otherwise blow past Windows MAX_PATH.
             # The real branch is still created via ``-B branch`` below.
@@ -744,9 +829,86 @@ class ClaudeExecutor:
         await self._git(["checkout", "-B", branch, from_ref], repo)
         return _Workspace(repo, repo, branch, base_branch, is_worktree=False)
 
+    def _revise_worktree_path(self, base_dir: str, item_id: int, repo: str, branch: str) -> str:
+        """Deterministic cache path for one (item, branch) revise worktree — a follow-up
+        command (or a restarted process) finds the previous checkout by recomputing it.
+        Short hash name, not the branch, to stay inside Windows MAX_PATH."""
+        digest = hashlib.sha1(f"{repo}|{branch}".encode()).hexdigest()[:8]
+        return str(Path(base_dir) / f"r{item_id}-{digest}")
+
+    async def _acquire_revise_worktree(
+        self, repo: str, branch: str, base_branch: str, item_id: int,
+        base_dir: str, from_ref: str,
+    ) -> _Workspace:
+        """Reuse ONE cached worktree per (item, branch) across /ai rounds.
+
+        The full add→materialise→remove cycle is most of a follow-up's latency; the
+        cache skips it and keeps ignored build artefacts (node_modules, bin/obj) warm.
+        Each round hard-resets to the freshly fetched PR head and `clean -fd`s stray
+        untracked files (ignored ones survive), so state never leaks between rounds."""
+        await self._sweep_stale_revise_worktrees(base_dir, repo)
+        path = self._revise_worktree_path(base_dir, item_id, repo, branch)
+        if Path(path).is_dir():
+            try:
+                await self._git(["checkout", "-B", branch, from_ref], path)
+                await self._git(["clean", "-fd"], path, check=False)
+                self._log.info("reusing revise worktree", id=item_id, branch=branch, path=path)
+                return _Workspace(repo, path, branch, base_branch, is_worktree=True, keep=True)
+            except GitError:
+                # Stale/corrupt (pruned registration, half-deleted dir…) → rebuild.
+                self._log.warning("cached worktree unusable — recreating", id=item_id, path=path)
+                await self._evict_revise_worktree(repo, branch, item_id, base_dir)
+        self._log.info("creating revise worktree", id=item_id, branch=branch, path=path)
+        async with self._repo_lock(repo):
+            await self._git(["worktree", "prune"], repo, check=False)  # heal stale registrations
+            await self._git(["worktree", "add", "-B", branch, path, from_ref], repo)
+        return _Workspace(repo, path, branch, base_branch, is_worktree=True, keep=True)
+
+    async def _evict_revise_worktree(
+        self, repo: str, branch: str, item_id: int, base_dir: str
+    ) -> None:
+        """Drop the cached worktree for (item, branch) if present (best-effort)."""
+        path = self._revise_worktree_path(base_dir, item_id, repo, branch)
+        if not Path(path).exists():
+            return
+        async with self._repo_lock(repo):
+            await self._git(["worktree", "remove", "--force", path], repo, check=False)
+            shutil.rmtree(path, ignore_errors=True)
+            await self._git(["worktree", "prune"], repo, check=False)
+
+    async def _sweep_stale_revise_worktrees(self, base_dir: str, repo: str) -> None:
+        """Remove cached revise worktrees idle past the TTL (best-effort).
+
+        Cached dirs are ``r<item>-<hash>`` (touched on every release); fresh-execution
+        worktrees are ``<item>-<uuid>`` and never linger, so only ``r*`` is swept."""
+        cutoff = time.time() - self._config.revise_worktree_ttl_hours * 3600
+        try:
+            stale = [
+                p for p in Path(base_dir).iterdir()
+                if p.is_dir() and p.name.startswith("r") and p.stat().st_mtime < cutoff
+            ]
+        except OSError:
+            return
+        for p in stale:
+            self._log.info("sweeping stale revise worktree", path=str(p))
+            async with self._repo_lock(repo):
+                await self._git(["worktree", "remove", "--force", str(p)], repo, check=False)
+            shutil.rmtree(p, ignore_errors=True)
+        if stale:
+            async with self._repo_lock(repo):
+                await self._git(["worktree", "prune"], repo, check=False)
+
     async def _release_workspace(self, ws: _Workspace) -> None:
         """Tear down a workspace (best-effort; never raises)."""
         if ws.is_worktree:
+            if ws.keep:
+                # Cached for the next /ai round on this branch; the branch stays
+                # checked out here. Touch the dir so the TTL sweep sees it as live.
+                try:
+                    os.utime(ws.path)
+                except OSError:
+                    pass
+                return
             await self._git(["worktree", "remove", "--force", ws.path], ws.repo, check=False)
             shutil.rmtree(ws.path, ignore_errors=True)
             # The pushed branch lives on origin for the PR; drop the local copy.
@@ -822,6 +984,26 @@ class ClaudeExecutor:
                 if any(c.lower() == category.lower() for c in repo.categories):
                     return repo.path, repo.base_branch
         return self._config.repo_working_directory, self._config.base_branch
+
+    def _revise_repo(self, item: WorkItemInfo, repo_name: str) -> tuple[str, str]:
+        """Resolve the checkout dir for a PR-feedback revise.
+
+        In workspace mode (multi-repo) the PR's repo lives at ``<workspace>/<repo_name>``
+        — use it directly. This is what makes revise work when several repos share one
+        workspace; the legacy ``_resolve_repo`` can't tell which repo a PR belongs to and
+        falls back to the single (often unset) ``repo_working_directory``, crashing git
+        with a bad cwd. Fall back to the legacy mapping only when no repo name is given
+        or its folder is missing."""
+        ws = self._config.workspace_directory
+        if ws and repo_name:
+            path = Path(ws) / repo_name
+            if path.is_dir():
+                return str(path), self._config.base_branch
+            self._log.warning(
+                "revise: repo folder not found in workspace — falling back",
+                repo=repo_name, workspace=ws,
+            )
+        return self._resolve_repo(item)
 
 
 # Cap the title slug so branch names (and thus the Windows worktree path) stay

@@ -87,7 +87,18 @@ The service listens on **`:5080`** by default:
 | `/dashboard` | Overview · Board · Planning · History · Settings · Config · Capabilities |
 | `/health` | Readiness checks (ado / claude / disk) as JSON |
 | `/metrics` | Prometheus metrics |
-| `/api/webhook/ado` | ADO Service Hook → instant pickup |
+| `/api/webhook/ado` | ADO Service Hook → instant pickup (work items **and** PR comments) |
+
+**⚡ How fast are `/ai` / `/review` replies picked up?** Three lanes, fastest wins:
+
+| Lane | Latency | Setup |
+|------|---------|-------|
+| **Hot lane** (built-in) | ~`pr_hot_poll_interval_seconds` (3s) | None. Once the bot engages a PR, that PR is re-polled fast for `pr_hot_window_minutes` — follow-up replies feel chat-like **even on localhost**. |
+| **Webhook** | ~1s, incl. the *first* command | Reachable URL required. *Project Settings → Service Hooks → Web Hooks* → event **“Pull request commented on”** → `http://<autopilot-host>:5080/api/webhook/ado`. On a local machine, expose the port first (`devtunnel host -p 5080` or `ngrok http 5080`) and use that public URL. |
+| **Global poll** (fallback) | ≤ `pr_poll_interval_seconds` (15s) | None — always on, so a missed webhook or a cooled-down PR is only ever slow, never lost. |
+
+The webhook endpoint filters bot-signed comments and plain chatter — only real
+`/commands` trigger an inspection.
 
 ---
 

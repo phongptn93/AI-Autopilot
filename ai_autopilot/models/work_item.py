@@ -48,6 +48,10 @@ class WorkItemInfo:
     # ADO Priority field (1=Critical, 2=High, 3=Normal, 4=Low)
     priority: int = 3
     category: TaskCategory = TaskCategory.UNKNOWN
+    # A human "discussion" comment picked up by the poller's comment-reaction loop
+    # (AdoPollerService._reconcile_human_replies) and injected into the agent brief as
+    # the top-priority instruction. None outside that path — not populated by _map.
+    pending_comment: str | None = None
 
     def __str__(self) -> str:
         return f"#{self.id} [{self.work_item_type}] {self.title}"

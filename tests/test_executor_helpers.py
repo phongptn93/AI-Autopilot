@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from ai_autopilot.config import Settings
 from ai_autopilot.execution.claude_executor import (
+    ClaudeExecutor,
     _branch_name,
     _extract_pr_url,
     _slugify,
@@ -42,3 +44,33 @@ def test_notification_titles():
     assert started.title == "🤖 Processing #5"
     err = NotificationMessage(work_item=item, type=NotificationType.ERROR, error="bad")
     assert err.title == "⚠️ Error #5"
+
+
+# ── PR-feedback revise: resolve the PR's repo in workspace mode ─────────────────
+
+def test_revise_repo_uses_workspace_subfolder(tmp_path):
+    # In workspace mode the PR's repo lives at <workspace>/<repo_name>.
+    (tmp_path / "Backend-Fresh").mkdir()
+    cfg = Settings(
+        workspace_directory=str(tmp_path), base_branch="dxfac/development",
+        repo_working_directory="/nonexistent/placeholder",  # the legacy trap
+    )
+    ex = ClaudeExecutor(cfg, None)
+    path, base = ex._revise_repo(WorkItemInfo(id=1, title="t"), "Backend-Fresh")
+    assert path == str(tmp_path / "Backend-Fresh")           # NOT the placeholder
+    assert base == "dxfac/development"
+
+
+def test_revise_repo_falls_back_when_folder_missing(tmp_path):
+    cfg = Settings(workspace_directory=str(tmp_path), repo_working_directory="/legacy/repo")
+    ex = ClaudeExecutor(cfg, None)
+    # No "Micro-Frontend" subfolder created → fall back to legacy mapping.
+    path, _ = ex._revise_repo(WorkItemInfo(id=1, title="t"), "Micro-Frontend")
+    assert path == "/legacy/repo"
+
+
+def test_revise_repo_falls_back_without_repo_name(tmp_path):
+    cfg = Settings(workspace_directory=str(tmp_path), repo_working_directory="/legacy/repo")
+    ex = ClaudeExecutor(cfg, None)
+    path, _ = ex._revise_repo(WorkItemInfo(id=1, title="t"), "")   # no repo name given
+    assert path == "/legacy/repo"

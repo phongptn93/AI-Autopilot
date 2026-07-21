@@ -14,9 +14,11 @@ from ai_autopilot.data.entities import (
     AiConflict,
     ExecutionRecord,
     ExecutionStatus,
+    HandledPrComment,
     MergedPr,
     PipelineState,
     PlannedRun,
+    PrCommandState,
     SchedulerDecision,
     SdlcLoopState,
     WorkItemState,
@@ -30,6 +32,19 @@ class ExecutionStats:
     success: int = 0
     failed: int = 0
     avg_duration: float = 0.0
+
+
+@dataclass
+class EfficiencyStats:
+    """Effort spent per unit of work — the denominator for "is this worth it"."""
+
+    distinct_items: int = 0     # work items that got at least one run
+    total_runs: int = 0
+    total_tokens: int = 0
+
+    @property
+    def avg_runs_per_item(self) -> float:
+        return self.total_runs / self.distinct_items if self.distinct_items else 0.0
 
 
 class ExecutionRepository:
@@ -238,6 +253,25 @@ class ExecutionRepository:
 
             return ExecutionStats(
                 total=total, success=success, failed=failed, avg_duration=float(avg)
+            )
+
+    async def get_efficiency(self, trigger_tag: str | None = None) -> EfficiencyStats:
+        """Aggregate effort figures for the Overview's efficiency cards."""
+        conds = []
+        if trigger_tag:
+            conds.append(ExecutionRecord.trigger_tag == trigger_tag)
+        async with self._db.session() as session:
+            row = (
+                await session.execute(
+                    select(
+                        func.count(func.distinct(ExecutionRecord.work_item_id)),
+                        func.count(),
+                        func.coalesce(func.sum(ExecutionRecord.cost_tokens), 0),
+                    ).where(*conds)
+                )
+            ).one()
+            return EfficiencyStats(
+                distinct_items=int(row[0]), total_runs=int(row[1]), total_tokens=int(row[2])
             )
 
 
@@ -490,6 +524,44 @@ class AiConflictRepository:
                 edges.setdefault(row.a_id, set()).add(row.b_id)
                 edges.setdefault(row.b_id, set()).add(row.a_id)
         return edges
+
+
+class PrCommandRepository:
+    """Restart-proof memory for the PR babysitter: revision budget spent per work
+    item, and PR comment ids already dispatched."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def revision_count(self, work_item_id: int) -> int:
+        async with self._db.session() as session:
+            row = await session.get(PrCommandState, work_item_id)
+            return row.revisions if row is not None else 0
+
+    async def set_revision_count(self, work_item_id: int, revisions: int) -> None:
+        async with self._db.session() as session:
+            row = await session.get(PrCommandState, work_item_id)
+            if row is None:
+                row = PrCommandState(work_item_id=work_item_id)
+                session.add(row)
+            row.revisions = revisions
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def handled_comments(self, pr_id: int) -> set[int]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(HandledPrComment.comment_id).where(HandledPrComment.pr_id == pr_id)
+            )
+            return set(rows.scalars().all())
+
+    async def mark_handled(self, pr_id: int, comment_id: int) -> None:
+        async with self._db.session() as session:
+            if await session.get(HandledPrComment, (pr_id, comment_id)) is None:
+                session.add(HandledPrComment(
+                    pr_id=pr_id, comment_id=comment_id, created_at=datetime.now(UTC)
+                ))
+                await session.commit()
 
 
 class SyncStateRepository:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
@@ -19,6 +20,7 @@ from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services import planning_analyzer
+from ai_autopilot.services.pr_feedback import is_bot_branch
 from ai_autopilot.skills_catalog import discover_skills
 from ai_autopilot.workspace import discover_repos
 
@@ -68,6 +70,41 @@ def _fmt_duration(seconds: float) -> str:
     return f"{seconds / 3600:.1f}h"
 
 
+# PR-outcome figures are an ADO round-trip per repo per status — cache them briefly
+# so Overview refreshes don't hammer the API. Module-level: one cache per process.
+_PR_OUTCOME_CACHE: dict = {"at": 0.0, "data": None}
+_PR_OUTCOME_TTL = 60.0
+
+
+async def _pr_outcomes(c: Container) -> dict:
+    """Merged / active / abandoned counts of AUTOPILOT PRs (bot branch prefixes),
+    across every repo — the numerator for "is this actually shipping work"."""
+    now = time.monotonic()
+    if _PR_OUTCOME_CACHE["data"] is not None and now - _PR_OUTCOME_CACHE["at"] < _PR_OUTCOME_TTL:
+        return _PR_OUTCOME_CACHE["data"]
+    counts = {"merged": 0, "active": 0, "abandoned": 0}
+    prefixes = tuple(c.config.bot_branch_prefixes)
+    try:
+        for repo in await c.ado.get_repositories():
+            rid = repo.get("id")
+            if not rid:
+                continue
+            for key, fetch in (
+                ("merged", c.ado.get_completed_pull_requests),
+                ("active", c.ado.get_active_pull_requests),
+                ("abandoned", c.ado.get_abandoned_pull_requests),
+            ):
+                for pr in await fetch(rid):
+                    if is_bot_branch(pr.get("sourceRefName", ""), prefixes):
+                        counts[key] += 1
+    except Exception as exc:  # noqa: BLE001 — metrics must never break the page
+        _log.warning("pr outcome scan failed", error=str(exc))
+    decided = counts["merged"] + counts["abandoned"]
+    counts["merge_rate"] = round(100 * counts["merged"] / decided) if decided else None
+    _PR_OUTCOME_CACHE.update(at=now, data=counts)
+    return counts
+
+
 def create_dashboard_router() -> APIRouter:
     router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -90,6 +127,11 @@ def create_dashboard_router() -> APIRouter:
         tag_filter = None if selected_tag == "all" else selected_tag
         stats = await c.execution_repo.get_stats(trigger_tag=tag_filter)
         recent = await c.execution_repo.get_recent(20, trigger_tag=tag_filter)
+        efficiency = await c.execution_repo.get_efficiency(trigger_tag=tag_filter)
+        prs = await _pr_outcomes(c)
+        tokens_per_merged = (
+            efficiency.total_tokens // prs["merged"] if prs["merged"] else None
+        )
         return _TEMPLATES.TemplateResponse(
             request,
             "overview.html",
@@ -98,6 +140,9 @@ def create_dashboard_router() -> APIRouter:
                 "overview",
                 stats=stats,
                 recent=recent,
+                efficiency=efficiency,
+                prs=prs,
+                tokens_per_merged=tokens_per_merged,
                 tags=c.config.effective_trigger_tags,
                 selected_tag=selected_tag,
             ),

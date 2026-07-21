@@ -34,6 +34,30 @@
     </div>
 </div>
 
+{# Efficiency: outcome-level figures — is the autopilot actually shipping work? #}
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">PRs Merged</span><div class="stat-card-icon">🚢</div></div>
+        <div class="stat-card-value success-val">{{ prs.merged }}</div>
+        <div style="font-size:12px;color:var(--text-muted)">{{ prs.active }} open · {{ prs.abandoned }} abandoned</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Merge Rate</span><div class="stat-card-icon">🎯</div></div>
+        <div class="stat-card-value">{% if prs.merge_rate is not none %}{{ prs.merge_rate }}%{% else %}—{% endif %}</div>
+        <div style="font-size:12px;color:var(--text-muted)">merged / (merged + abandoned)</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Runs / Item</span><div class="stat-card-icon">🔁</div></div>
+        <div class="stat-card-value">{{ '%.1f' % efficiency.avg_runs_per_item }}</div>
+        <div style="font-size:12px;color:var(--text-muted)">{{ efficiency.total_runs }} runs · {{ efficiency.distinct_items }} items</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Tokens / Merged PR</span><div class="stat-card-icon">💰</div></div>
+        <div class="stat-card-value">{% if tokens_per_merged is not none %}{{ '{:,}'.format(tokens_per_merged) }}{% else %}—{% endif %}</div>
+        <div style="font-size:12px;color:var(--text-muted)">{{ '{:,}'.format(efficiency.total_tokens) }} tokens total</div>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-header"><h3>Recent Executions</h3><span style="font-size:13px;color:var(--text-muted)">Last {{ recent|length }} items</span></div>
     <div class="card-body">

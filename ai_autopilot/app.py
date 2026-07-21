@@ -33,6 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         poller = AdoPollerService(container)
         pr_monitor = PrMonitorService(container)
+        app.state.pr_monitor = pr_monitor  # webhook fast-path targets it directly
         state_sync = StateSyncService(container)
         loops = LoopScheduler(container)
         poller.start()
@@ -83,13 +84,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/webhook/ado")
     async def ado_webhook(request: Request) -> dict:
-        """ADO Service Hook → enqueue work item ID for the poller to drain."""
+        """ADO Service Hook receiver.
+
+        Two event families:
+        - PR comment (``ms.vss-code.git-pullrequest-comment-event``) → kick the PR
+          babysitter to inspect that PR NOW, so a ``/command`` reply is acked in ~1s
+          instead of waiting out the poll interval. Polling stays on as the fallback
+          for missed/undelivered hooks.
+        - Work-item events → enqueue the id for the poller to drain (as before).
+        """
         c: Container = app.state.container
         try:
             payload = await request.json()
         except Exception:  # noqa: BLE001
             return {"error": "Invalid JSON"}
-        resource = payload.get("resource", {}) if isinstance(payload, dict) else {}
+        if not isinstance(payload, dict):
+            return {"error": "Invalid JSON"}
+        resource = payload.get("resource", {}) or {}
+
+        if payload.get("eventType") == "ms.vss-code.git-pullrequest-comment-event":
+            from ai_autopilot.config import is_bot_signed, match_command
+
+            pr = resource.get("pullRequest") or {}
+            repo = pr.get("repository") or {}
+            repo_id, pr_id = repo.get("id"), pr.get("pullRequestId")
+            monitor = getattr(app.state, "pr_monitor", None)
+            if not (repo_id and pr_id and monitor):
+                return {"error": "No pullRequest in payload"}
+            content = (resource.get("comment") or {}).get("content") or ""
+            if is_bot_signed(content):
+                return {"ignored": "bot comment"}  # our own reply — never self-trigger
+            # Only a /command warrants an immediate inspection; plain chatter waits
+            # for the regular poll (which ignores it anyway).
+            if content and match_command(content, c.config.comment_commands) is None:
+                return {"ignored": "not a command"}
+            monitor.kick(repo_id, repo.get("name") or "", pr)
+            log.info("webhook kicked PR inspection", pr=pr_id)
+            return {"kicked": pr_id}
+
         work_item_id = resource.get("workItemId") or resource.get("id")
         if work_item_id is None:
             log.warning("webhook received but no workItemId found")

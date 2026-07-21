@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from ai_autopilot.config import Settings
@@ -48,8 +49,15 @@ class AutoReviewer:
 
     async def _run_review(self, work_dir: str) -> str:
         prompt = (
-            "Review this branch for security issues. List each issue with severity: "
-            "Critical, High, Medium, or Low."
+            "Review the changes on this branch for security issues. Output EACH real "
+            "finding on its own line, starting with a bracketed severity tag, exactly like:\n"
+            "  - [Critical] <description>\n"
+            "  - [High] <description>\n"
+            "  - [Medium] <description>\n"
+            "  - [Low] <description>\n"
+            "Use the bracketed [severity] tag ONLY at the START of an actual finding line — "
+            "never inside prose, summaries or negations. If there are no issues at all, "
+            "output the single line: - [None] no issues found."
         )
         try:
             run = await run_claude(
@@ -65,10 +73,19 @@ class AutoReviewer:
             return ""
 
 
+# A finding line MUST lead with a bracketed severity tag (after an optional bullet), e.g.
+# "- [High] …". Anchored at line start so prose like "no [Critical]/High issues" or "has no
+# Critical/High vulnerabilities" is NOT mistaken for a finding — the false positive that
+# used to block legitimate fixes.
+_FINDING_RE = re.compile(r"^[\s\-*•>]*\[\s*(critical|high|medium|low)\s*\]", re.IGNORECASE)
+
+
 def _parse_issues(output: str, result: ReviewResult, blocked: set[str]) -> None:
     for line in output.splitlines():
-        upper = line.upper()
-        if any(sev in upper for sev in blocked):
-            result.critical_issues.append(line.strip())
-        elif "MEDIUM" in upper or "LOW" in upper:
-            result.warnings.append(line.strip())
+        m = _FINDING_RE.match(line)
+        if not m:
+            continue  # prose / summary / negation — not a finding
+        if m.group(1).upper() in blocked:
+            result.critical_issues.append(line.strip())  # blocks the PR
+        else:
+            result.warnings.append(line.strip())          # advisory only

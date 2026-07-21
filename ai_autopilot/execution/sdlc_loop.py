@@ -30,6 +30,7 @@ from ai_autopilot.execution.sdlc_plan import (
     resolve_stages,
     stage_score_input,
 )
+from ai_autopilot import activity
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 
@@ -83,6 +84,13 @@ class SdlcLoopEngine:
         pr_url: str | None = None
         try:
             clear_result(run_dir, item.id)
+            # Stream what each stage does to the dashboard's Live activity feed
+            # (kept in the real workspace, where the dashboard reads it).
+            activity.clear(workspace, item.id)
+            activity.append(
+                workspace, item.id,
+                f"🔁 SDLC start · profile '{profile}' · {len(stages)} stage(s)",
+            )
             if scratch:
                 await self._exec.prepare_stage_branch(scratch, repos, branch)
 
@@ -142,6 +150,7 @@ class SdlcLoopEngine:
             # All stages passed.
             signals.completed = True
             await self._repo.clear(item.id)
+            activity.append(workspace, item.id, f"✅ SDLC completed · profile '{profile}'")
             self._log.info("sdlc completed", id=item.id, profile=profile, tokens=total_tokens)
             res = ExecutionResult.ok(
                 item.id, f"sdlc:{profile}", f"SDLC profile '{profile}' completed"
@@ -174,11 +183,14 @@ class SdlcLoopEngine:
         """Run one stage; return (output text, is_error, tokens). Commits changes,
         runs AutoReviewer for the review gate, and pushes + parses the PR for the
         pr stage."""
+        ws = self._config.workspace_directory
+        activity.append(ws, item.id, f"▶ stage: {stage.name} ({stage.role})")
         # Review stage: AutoReviewer is the structured gate signal (no separate skill run).
         if stage.role == "review":
             primary = self._primary_dir(run_dir, scratch, touched, repos)
             review = await self._reviewer.review(primary)
             self._pending_review = review  # consumed in _absorb
+            activity.append(ws, item.id, "🔍 auto-review " + ("passed" if review.passed else "found issues"))
             return review.raw_output, False, 0
 
         # For the pr stage, make sure the branch is on origin before /pr-create.
@@ -186,7 +198,9 @@ class SdlcLoopEngine:
             await self._exec.push_stage_branch(scratch, sorted(touched), branch)
 
         prompt = self._stage_prompt(item, stage, branch)
-        run = await self._exec._run_claude(prompt, run_dir)
+        run = await self._exec._run_claude(
+            prompt, run_dir, on_event=lambda line: activity.append(ws, item.id, line)
+        )
         if scratch and not stage.produces_pr:
             msg = f"sdlc({stage.name}): #{item.id}"
             committed = await self._exec.stage_commit(scratch, repos, msg)
@@ -229,7 +243,18 @@ class SdlcLoopEngine:
                 f" Goal: {goal} Choose and run the most appropriate skill(s) in this "
                 f"workspace for this stage — do not assume one.{draft}"
             )
-        return (head + body).strip()
+        # A human steered this item via a comment (poller's comment-reaction loop) —
+        # carry that guidance into EVERY stage as the top-priority instruction, so a
+        # resumed loop acts on the latest direction rather than its original plan.
+        guidance = ""
+        if item.pending_comment:
+            guidance = (
+                "\n\n## ⚠️ Latest human guidance (highest priority — respond to THIS)\n"
+                "A human left this comment as the most recent direction. Treat it as the "
+                "top-priority instruction for this stage, overriding earlier assumptions "
+                f"where they conflict:\n\n{item.pending_comment}"
+            )
+        return (head + body).strip() + guidance
 
     # ── helpers ──────────────────────────────────────────────────────────────
 

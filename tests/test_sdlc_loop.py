@@ -45,8 +45,10 @@ class FakeExecutor:
     async def push_stage_branch(self, scratch, repos, branch):
         self.calls.append(("push", branch))
 
-    async def _run_claude(self, prompt, run_dir):
+    async def _run_claude(self, prompt, run_dir, on_event=None):
         self.calls.append(("run", prompt))
+        if on_event:                       # exercise the activity-stream callback
+            on_event("… working")
         return self._runs.pop(0) if self._runs else FakeRun()
 
     def run_prompts(self):
@@ -174,3 +176,30 @@ async def test_dev_profile_handoff_state_configured():
         ex, FakeReviewer([ReviewResult(passed=True)]), FakeAdo(), FakeRepo(),
     ).run(_item())
     assert res.success and res.skill_used == "sdlc:dev"
+
+
+async def test_stage_prompt_injects_human_guidance():
+    eng = _engine(_cfg(), FakeExecutor(), FakeReviewer(), FakeAdo(), FakeRepo())
+    item = _item()
+    item.pending_comment = "use the CMMS repo, not DxFac"       # human steered via a comment
+    p = eng._stage_prompt(item, CATALOG["implement"], "feature/1-x")
+    assert "use the CMMS repo, not DxFac" in p
+    assert "highest priority" in p.lower()
+
+
+async def test_stage_prompt_no_guidance_without_comment():
+    eng = _engine(_cfg(), FakeExecutor(), FakeReviewer(), FakeAdo(), FakeRepo())
+    p = eng._stage_prompt(_item(), CATALOG["implement"], "feature/1-x")  # no pending_comment
+    assert "human guidance" not in p.lower()
+
+
+async def test_human_guidance_reaches_the_stage_run_prompt():
+    # End-to-end: a comment the poller attached to the item must surface in the actual
+    # prompt handed to Claude for a resumed/continued SDLC stage.
+    ex = FakeExecutor(runs=[FakeRun("implemented"), FakeRun(f"opened {_PR}")])
+    engine = _engine(_cfg(), ex, FakeReviewer([ReviewResult(passed=True)]), FakeAdo(), FakeRepo())
+    item = _item()
+    item.pending_comment = "focus on input validation only"
+    res = await engine.run(item)
+    assert res.success
+    assert any("focus on input validation only" in pr for pr in ex.run_prompts())

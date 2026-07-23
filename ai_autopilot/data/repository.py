@@ -12,6 +12,7 @@ from sqlalchemy import delete, func, select
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
     AiConflict,
+    ClaudeSession,
     ExecutionRecord,
     ExecutionStatus,
     HandledPrComment,
@@ -19,6 +20,7 @@ from ai_autopilot.data.entities import (
     PipelineState,
     PlannedRun,
     PrCommandState,
+    PrReviewerState,
     SchedulerDecision,
     SdlcLoopState,
     WorkItemState,
@@ -562,6 +564,148 @@ class PrCommandRepository:
                     pr_id=pr_id, comment_id=comment_id, created_at=datetime.now(UTC)
                 ))
                 await session.commit()
+
+
+@dataclass
+class ReviewerSnapshot:
+    """Detached view of one ``PrReviewerState`` row (safe to use outside a session)."""
+
+    pr_id: int
+    reviewer_id: str
+    repo_id: str = ""
+    display_name: str = ""
+    unique_name: str = ""
+    is_bot: bool = False
+    vote: int = 0
+    added_at: datetime | None = None
+    last_vote_at: datetime | None = None
+    reminded_at: datetime | None = None
+    reviewed_commit: str = ""
+
+
+def _snapshot(row: PrReviewerState) -> ReviewerSnapshot:
+    return ReviewerSnapshot(
+        pr_id=row.pr_id,
+        reviewer_id=row.reviewer_id,
+        repo_id=row.repo_id,
+        display_name=row.display_name,
+        unique_name=row.unique_name,
+        is_bot=row.is_bot,
+        vote=row.vote,
+        added_at=row.added_at,
+        last_vote_at=row.last_vote_at,
+        reminded_at=row.reminded_at,
+        reviewed_commit=row.reviewed_commit,
+    )
+
+
+class PrReviewerRepository:
+    """Restart-proof memory for the reviewer tracker: who reviews which PR, their
+    last-seen vote, and which reminders / auto-reviews already happened."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def reviewers_for_pr(self, pr_id: int) -> dict[str, ReviewerSnapshot]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(PrReviewerState).where(PrReviewerState.pr_id == pr_id)
+            )
+            return {r.reviewer_id: _snapshot(r) for r in rows.scalars().all()}
+
+    async def all_reviewers(self) -> list[ReviewerSnapshot]:
+        async with self._db.session() as session:
+            rows = await session.execute(select(PrReviewerState))
+            return [_snapshot(r) for r in rows.scalars().all()]
+
+    async def upsert(
+        self, pr_id: int, reviewer_id: str, *, repo_id: str = "", display_name: str = "",
+        unique_name: str = "", is_bot: bool = False, vote: int = 0,
+    ) -> ReviewerSnapshot:
+        """Insert a newly-seen reviewer, or refresh vote/name fields of a known one.
+        ``added_at`` is set only on insert; ``last_vote_at`` moves when the vote does."""
+        now = datetime.now(UTC)
+        async with self._db.session() as session:
+            row = await session.get(PrReviewerState, (pr_id, reviewer_id))
+            if row is None:
+                row = PrReviewerState(
+                    pr_id=pr_id, reviewer_id=reviewer_id, added_at=now
+                )
+                session.add(row)
+            if vote != row.vote:
+                row.last_vote_at = now
+            row.repo_id = repo_id or row.repo_id
+            row.display_name = display_name or row.display_name
+            row.unique_name = unique_name or row.unique_name
+            row.is_bot = is_bot
+            row.vote = vote
+            row.updated_at = now
+            await session.commit()
+            return _snapshot(row)
+
+    async def mark_reminded(self, pr_id: int, reviewer_id: str) -> None:
+        async with self._db.session() as session:
+            row = await session.get(PrReviewerState, (pr_id, reviewer_id))
+            if row is not None:
+                row.reminded_at = datetime.now(UTC)
+                row.updated_at = row.reminded_at
+                await session.commit()
+
+    async def set_reviewed_commit(self, pr_id: int, reviewer_id: str, commit: str) -> None:
+        async with self._db.session() as session:
+            row = await session.get(PrReviewerState, (pr_id, reviewer_id))
+            if row is not None:
+                row.reviewed_commit = commit
+                row.updated_at = datetime.now(UTC)
+                await session.commit()
+
+    async def remove_absent(self, pr_id: int, keep_reviewer_ids: set[str]) -> None:
+        """Drop rows for reviewers no longer on the PR (removed by a human)."""
+        async with self._db.session() as session:
+            stmt = delete(PrReviewerState).where(PrReviewerState.pr_id == pr_id)
+            if keep_reviewer_ids:
+                stmt = stmt.where(PrReviewerState.reviewer_id.not_in(keep_reviewer_ids))
+            await session.execute(stmt)
+            await session.commit()
+
+    async def delete_pr(self, pr_id: int) -> None:
+        """Forget a PR entirely (it completed / was abandoned)."""
+        async with self._db.session() as session:
+            await session.execute(delete(PrReviewerState).where(PrReviewerState.pr_id == pr_id))
+            await session.commit()
+
+
+class ClaudeSessionRepository:
+    """Per-branch Claude session ids for resume, with TTL-bounded reads."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def get(self, repo: str, branch: str, ttl_hours: int) -> str | None:
+        """The stored session id for ``(repo, branch)`` if still within ``ttl_hours``;
+        otherwise None (too old / unknown → the caller starts a fresh session)."""
+        async with self._db.session() as session:
+            row = await session.get(ClaudeSession, (repo, branch))
+            if row is None or not row.session_id:
+                return None
+            updated = row.updated_at
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=UTC)
+            if ttl_hours and (datetime.now(UTC) - updated).total_seconds() > ttl_hours * 3600:
+                return None
+            return row.session_id
+
+    async def save(self, repo: str, branch: str, session_id: str) -> None:
+        if not session_id:
+            return
+        async with self._db.session() as session:
+            row = await session.get(ClaudeSession, (repo, branch))
+            if row is None:
+                row = ClaudeSession(repo=repo, branch=branch)
+                session.add(row)
+            row.session_id = session_id
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
 
 
 class SyncStateRepository:

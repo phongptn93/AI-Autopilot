@@ -20,7 +20,7 @@ from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services import planning_analyzer
-from ai_autopilot.services.pr_feedback import is_bot_branch
+from ai_autopilot.services.pr_feedback import is_bot_branch, parse_work_item_id
 from ai_autopilot.skills_catalog import discover_skills
 from ai_autopilot.workspace import discover_repos
 
@@ -44,6 +44,39 @@ _STATUS_CLASS = {
 # Baseline work-item types offered in the Planning filter (merged with whatever
 # types the loaded items actually have, so custom process types show up too).
 _COMMON_WI_TYPES = ("Bug", "Task", "User Story", "Requirement", "Feature", "Test Case")
+
+
+def _pr_age(created: str | None) -> str:
+    """Human-readable age of a PR from its ISO creationDate (best-effort)."""
+    if not created:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    from datetime import timezone
+    delta = datetime.now(timezone.utc) - dt
+    days, secs = delta.days, delta.seconds
+    if days >= 1:
+        return f"{days}d"
+    if secs >= 3600:
+        return f"{secs // 3600}h"
+    return f"{max(1, secs // 60)}m"
+
+
+def _pr_status(pr: dict, approved: int, blocked: int, pending: int, conflicts: bool) -> str:
+    """A single overall status token for the board badge."""
+    if pr.get("isDraft"):
+        return "draft"
+    if conflicts:
+        return "conflicts"
+    if blocked:
+        return "blocked"
+    if approved and not pending:
+        return "approved"
+    if approved:
+        return "partial"
+    return "awaiting"
 
 
 def _category_badge(category: str) -> tuple[str, str]:
@@ -74,6 +107,12 @@ def _fmt_duration(seconds: float) -> str:
 # so Overview refreshes don't hammer the API. Module-level: one cache per process.
 _PR_OUTCOME_CACHE: dict = {"at": 0.0, "data": None}
 _PR_OUTCOME_TTL = 60.0
+
+# The Reviews board scans every repo × active PR × reviewers on each load — cache the
+# assembled view briefly so refreshes don't hammer ADO (the tracker updates state on its
+# own 30s cadence anyway).
+_REVIEWS_CACHE: dict = {"at": 0.0, "data": None}
+_REVIEWS_TTL = 30.0
 
 
 async def _pr_outcomes(c: Container) -> dict:
@@ -248,6 +287,124 @@ def create_dashboard_router() -> APIRouter:
     @router.get("/board", response_class=HTMLResponse)
     async def board(request: Request):
         return _TEMPLATES.TemplateResponse(request, "board.html", await _board_ctx(request))
+
+    @router.get("/reviews", response_class=HTMLResponse)
+    async def reviews(request: Request):
+        """PR reviewer tracking: every active PR with its reviewers, votes, and
+        reminder status — live ADO data joined with the tracker's memory."""
+        from ai_autopilot.services.reviewer_tracker import VOTE_LABELS
+
+        c: Container = request.app.state.container
+        cfg = c.config
+        now = time.monotonic()
+        if (
+            _REVIEWS_CACHE["data"] is not None
+            and now - _REVIEWS_CACHE["at"] < _REVIEWS_TTL
+        ):
+            grouped, summary = _REVIEWS_CACHE["data"]
+            return _TEMPLATES.TemplateResponse(
+                request,
+                "reviews.html",
+                _ctx(
+                    request, "reviews", grouped=grouped, summary=summary,
+                    targets=cfg.reviewer_target_branches,
+                    tracking_enabled=cfg.pr_reviewer_tracking_enabled,
+                    auto_review=cfg.pr_auto_review_on_added,
+                    reminder_hours=cfg.pr_reviewer_reminder_hours,
+                ),
+            )
+        org = cfg.ado_organization.rstrip("/")
+        project = quote(cfg.code_project or cfg.ado_project, safe="")
+        tracked: dict = {}
+        try:
+            for snap in await c.pr_reviewer_repo.all_reviewers():
+                tracked[(snap.pr_id, snap.reviewer_id)] = snap
+        except Exception as exc:  # noqa: BLE001 — page must render without the DB
+            _log.warning("reviewer state load failed", error=str(exc))
+        prs: list[dict] = []
+        try:
+            for repo in await c.ado.get_repositories():
+                rid = repo.get("id")
+                if not rid:
+                    continue
+                rname = repo.get("name") or ""
+                for pr in await c.ado.get_active_pull_requests(rid):
+                    target = (pr.get("targetRefName") or "").removeprefix("refs/heads/")
+                    if not cfg.target_in_scope(pr.get("targetRefName", "")):
+                        continue
+                    pr_id = pr.get("pullRequestId")
+                    reviewers = []
+                    bot_reviewed = False
+                    for r in pr.get("reviewers") or []:
+                        if not r.get("id") or r.get("isContainer"):
+                            continue
+                        snap = tracked.get((pr_id, str(r["id"])))
+                        vote = int(r.get("vote") or 0)
+                        is_bot = bool(snap.is_bot) if snap else False
+                        if is_bot and snap and snap.reviewed_commit:
+                            bot_reviewed = True
+                        reviewers.append({
+                            "name": r.get("displayName") or r.get("uniqueName") or "?",
+                            "vote": vote,
+                            "vote_label": VOTE_LABELS.get(vote, str(vote)),
+                            "is_bot": is_bot,
+                            "required": bool(r.get("isRequired")),
+                            "added_at": snap.added_at if snap else None,
+                            "reminded": bool(snap.reminded_at) if snap else False,
+                        })
+                    approved = sum(1 for r in reviewers if r["vote"] >= 5)
+                    blocked = sum(1 for r in reviewers if r["vote"] < 0)
+                    pending = sum(1 for r in reviewers if r["vote"] == 0)
+                    # mergeStatus: 3 = succeeded; 2 = conflicts; else queued/unknown.
+                    ms = pr.get("mergeStatus")
+                    conflicts = ms == "conflicts" or ms == 2
+                    prs.append({
+                        "id": pr_id,
+                        "title": pr.get("title") or "",
+                        "repo": rname,
+                        "target": target,
+                        "source": (pr.get("sourceRefName") or "").removeprefix("refs/heads/"),
+                        "author": (pr.get("createdBy") or {}).get("displayName") or "",
+                        "is_draft": bool(pr.get("isDraft")),
+                        "created": pr.get("creationDate") or "",
+                        "age": _pr_age(pr.get("creationDate")),
+                        "conflicts": conflicts,
+                        "work_item": parse_work_item_id(pr.get("sourceRefName", "")),
+                        "url": f"{org}/{project}/_git/{quote(rname, safe='')}"
+                               f"/pullrequest/{pr_id}",
+                        "reviewers": reviewers,
+                        "approved": approved,
+                        "pending": pending,
+                        "blocked": blocked,
+                        "bot_reviewed": bot_reviewed,
+                        "status": _pr_status(pr, approved, blocked, pending, conflicts),
+                    })
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("reviews page PR scan failed", error=str(exc))
+        # Group by target (merge-into) branch — most PRs first, target name A→Z.
+        groups: dict[str, list[dict]] = {}
+        for pr in prs:
+            groups.setdefault(pr["target"] or "(unknown)", []).append(pr)
+        grouped = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        summary = {
+            "total": len(prs),
+            "approved": sum(1 for p in prs if p["status"] == "approved"),
+            "awaiting": sum(1 for p in prs if p["status"] == "awaiting"),
+            "blocked": sum(1 for p in prs if p["status"] in ("blocked", "conflicts")),
+            "drafts": sum(1 for p in prs if p["is_draft"]),
+        }
+        _REVIEWS_CACHE.update(at=now, data=(grouped, summary))
+        return _TEMPLATES.TemplateResponse(
+            request,
+            "reviews.html",
+            _ctx(
+                request, "reviews", grouped=grouped, summary=summary,
+                targets=cfg.reviewer_target_branches,
+                tracking_enabled=cfg.pr_reviewer_tracking_enabled,
+                auto_review=cfg.pr_auto_review_on_added,
+                reminder_hours=cfg.pr_reviewer_reminder_hours,
+            ),
+        )
 
     async def _planning_ctx(request: Request, **over) -> dict:
         """Common context for the Planning workbench page (+ its POST re-renders)."""
@@ -573,6 +730,10 @@ def create_dashboard_router() -> APIRouter:
             if f.key not in settings_form.SECRET_KEYS
         }
         has_pat = bool(getattr(c.config, "ado_pat", ""))
+        secrets_set = {
+            key: bool(getattr(c.config, key, ""))
+            for key in settings_form.SECRET_KEYS
+        }
         cfg = c.config
         # Read-only overview of every ADO tag the autopilot writes/reads — so the
         # whole tag vocabulary is visible in one place (not scattered across fields).
@@ -606,6 +767,7 @@ def create_dashboard_router() -> APIRouter:
                 sections=settings_form.sections(),
                 current=current,
                 has_pat=has_pat,
+                secrets_set=secrets_set,
                 restart_keys=settings_form.RESTART_REQUIRED,
                 saved=bool(saved),
                 reloaded=bool(reloaded),

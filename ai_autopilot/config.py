@@ -410,6 +410,52 @@ class Settings(BaseSettings):
     # worktree is reset hard to the PR head each round, and swept after the TTL.
     revise_worktree_reuse: bool = True
     revise_worktree_ttl_hours: int = 24
+    # Resume the Claude Agent session per (repo, branch) across revise rounds so a
+    # follow-up (/ai fix issue 2) keeps the context of the earlier run instead of
+    # starting cold — cheaper (warm cache) and more consistent. Best-effort: if the
+    # stored session can't be resumed (expired / not on this host) the run silently
+    # falls back to a fresh session. Off by default.
+    reuse_claude_session: bool = False
+    # Only resume a stored session this fresh; older → start clean (stale context hurts
+    # more than it helps once the branch has moved on).
+    claude_session_ttl_hours: int = 24
+
+    # ── PR reviewer tracking (all active PRs in the configured repos) ──
+    # Watch every active PR's reviewer list: detect newly-added reviewers, track their
+    # votes for the dashboard, auto-review when the BOT is the added reviewer, and
+    # politely remind human reviewers who haven't voted.
+    pr_reviewer_tracking_enabled: bool = False
+    # When the bot's own identity is added as a reviewer → run an AI code review on the
+    # PR, post structured findings, and cast a vote. Re-arms when new commits land.
+    pr_auto_review_on_added: bool = True
+    # Seconds between reviewer-list scans (independent of the babysitter cadence).
+    pr_reviewer_poll_interval_seconds: int = 30
+    # Hours a human reviewer may sit vote-less before ONE polite reminder is posted on
+    # the PR (ADO then emails the thread participants). 0 = reminders off.
+    pr_reviewer_reminder_hours: int = 24
+    # Bot identity override (email / uniqueName / display name). Empty = auto-detect
+    # the account behind this client's PAT via connectionData — usually right.
+    pr_bot_identity: str = ""
+    # Only track / review / show PRs whose TARGET (merge-into) branch is in this list —
+    # names with or without the ``refs/heads/`` prefix. Empty = every target branch.
+    pr_reviewer_target_branches: list[str] = Field(default_factory=list)
+
+    # ── Two-way Microsoft Teams bot (approve/reject buttons + chat commands) ──
+    # Opt-in and additive to the existing one-way Teams webhook (notifications/teams.py,
+    # teams_webhook_url) — that keeps working unchanged. This registers /api/messages so
+    # the bot can reply and act on button clicks. Requires the "teams-bot" extra
+    # (pip install .[teams-bot]) — the route silently stays unmounted if the packages or
+    # these three values aren't all present.
+    teams_agent_enabled: bool = False
+    teams_agent_app_id: str = ""       # "Agent ID" — the Azure Bot's Application (client) ID
+    teams_agent_app_secret: str = ""
+    teams_agent_tenant_id: str = ""
+    # Free-text understanding for READ-ONLY queries (e.g. "PR nào của tôi đang bị
+    # block?") — routed through Claude ONLY to classify into {items, prs, status, help,
+    # unknown} + a filter, never to execute anything itself. Structurally cannot reach
+    # any code-mutating action (no such intent exists) — see teams_agent.py. Costs one
+    # Claude call per unmatched message; toggle off to keep structured /commands only.
+    teams_agent_nlu_enabled: bool = True
 
     # ── Comment reaction loop (steer the autopilot by just commenting) ──
     # When a NEW human comment appears on an autopilot-owned item (one that still
@@ -424,11 +470,27 @@ class Settings(BaseSettings):
     # the intent (/ai = do it, /review = review & report, …) — add commands freely with no
     # code change. Only commands from the user THIS machine acts for count (see
     # assignee_trigger_user / auto_transition_assignee). Blank = command trigger off.
-    comment_command: str = "/ai, /review"
+    # Role-aware command set (BA / QC / DEV). ACTION commands change code/spec on the
+    # branch; ADVISORY ones only post findings (see comment_advisory_commands). The full
+    # comment text is passed to the agent, which follows the per-command guidance in
+    # FeedbackHandler to pick the right skill.
+    #   /ai      DEV  — interpret & make the change              (action)
+    #   /spec    BA   — refresh spec files + sync ADO work item  (action, update-spec)
+    #   /test    DEV  — write/adjust automated tests             (action, write-tests)
+    #   /review  DEV  — general code review                      (advisory)
+    #   /qc      QC   — analyse test scope, propose test cases   (advisory)
+    #   /security SA  — OWASP review of the diff                 (advisory, security-review)
+    #   /impact  BA   — impact / blast-radius analysis           (advisory)
+    #   /summary all  — plain-language PR summary                (advisory)
+    # Route each role command to its purpose-built subagent (.claude/agents) instead of a
+    # generic run — expert, consistent results. Degrades gracefully: if the subagent isn't
+    # present the run does the task directly with the mapped skill.
+    use_specialized_agents: bool = True
+    comment_command: str = "/ai, /review, /spec, /test, /qc, /security, /impact, /summary"
     # Of the commands above, which are ADVISORY (review-only): the agent reviews and posts
     # findings but makes NO code change, and "no file changes" counts as success. Everything
-    # else (e.g. /ai) is an ACTION command that revises the branch. Comma-separated.
-    comment_advisory_commands: str = "/review"
+    # else (e.g. /ai, /spec, /test) is an ACTION command that revises the branch. Comma-separated.
+    comment_advisory_commands: str = "/review, /qc, /security, /impact, /summary"
     # Cap on human↔bot comment rounds per item, so a back-and-forth can't run away.
     max_comment_rounds: int = 5
     # Seconds between comment scans — the /command loop runs on its OWN cadence, decoupled
@@ -545,6 +607,23 @@ class Settings(BaseSettings):
             if t and t not in out:
                 out.append(t)
         return out
+
+    @property
+    def reviewer_target_branches(self) -> list[str]:
+        """Configured target-branch filter, short names (``refs/heads/`` stripped)."""
+        return [
+            b.strip().removeprefix("refs/heads/")
+            for b in (self.pr_reviewer_target_branches or [])
+            if b.strip()
+        ]
+
+    def target_in_scope(self, target_ref: str) -> bool:
+        """True if a PR targeting ``target_ref`` should be tracked/shown. When the filter
+        is empty every target is in scope; otherwise the short target name must match."""
+        allowed = self.reviewer_target_branches
+        if not allowed:
+            return True
+        return (target_ref or "").removeprefix("refs/heads/") in allowed
 
     @property
     def comment_commands(self) -> list[str]:

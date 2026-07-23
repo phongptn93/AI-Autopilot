@@ -33,6 +33,14 @@ dev = [
     "ruff>=0.7.0",
     "mypy>=1.13.0",
 ]
+# Two-way Microsoft Teams bot (approve/reject buttons, chat commands). Optional —
+# ai_autopilot/teams_agent.py degrades to a no-op if these aren't installed or
+# teams_agent_enabled is off, so the base install is unaffected.
+teams-bot = [
+    "microsoft-agents-hosting-fastapi>=1.2.0",
+    "microsoft-agents-hosting-teams>=1.2.0",
+    "microsoft-agents-authentication-msal>=1.2.0",
+]
 
 [project.scripts]
 ai-autopilot = "ai_autopilot.__main__:main"

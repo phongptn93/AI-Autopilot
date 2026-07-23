@@ -1,0 +1,47 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.19",
+  "version": "1.0.0",
+  "id": "<TEAMS_AGENT_APP_ID>",
+  "developer": {
+    "name": "AI Autopilot",
+    "websiteUrl": "https://dev.azure.com/newoceanis",
+    "privacyUrl": "https://dev.azure.com/newoceanis",
+    "termsOfUseUrl": "https://dev.azure.com/newoceanis"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "AI Autopilot",
+    "full": "AI Autopilot — PR Reviewer Bot"
+  },
+  "description": {
+    "short": "Theo dõi PR, tự review và trả lời trong Teams.",
+    "full": "AI Autopilot theo dõi reviewer trên các PR Azure DevOps, tự động review + vote khi được thêm làm reviewer, nhắc reviewer quá hạn, và trả lời lệnh /status, /review <repo> <pr-id> ngay trong Teams."
+  },
+  "accentColor": "#2563EB",
+  "bots": [
+    {
+      "botId": "<TEAMS_AGENT_APP_ID>",
+      "scopes": ["team", "personal", "groupChat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["team", "personal", "groupChat"],
+          "commands": [
+            { "title": "help", "description": "Xem bảng lệnh" },
+            { "title": "items", "description": "Work item của bạn" },
+            { "title": "prs", "description": "PR bạn là author hoặc reviewer" },
+            { "title": "review <repo> <pr-id>", "description": "Yêu cầu bot review lại một PR ngay" },
+            { "title": "status", "description": "Xem tình trạng hoạt động" }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": []
+}

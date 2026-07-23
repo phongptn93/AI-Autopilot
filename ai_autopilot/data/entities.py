@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -150,6 +150,46 @@ class HandledPrComment(Base):
     pr_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     comment_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class PrReviewerState(Base):
+    """One reviewer on one active PR, as last seen by the reviewer tracker.
+
+    The tracker diffs the live ADO reviewer list against these rows each poll to
+    detect *added* reviewers (→ auto-review when it's the bot), vote changes, and
+    stale reviewers due a reminder. Persisted so a restart neither re-reviews a PR
+    the bot already voted on nor re-sends reminders."""
+
+    __tablename__ = "pr_reviewer_states"
+
+    pr_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reviewer_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    repo_id: Mapped[str] = mapped_column(String(64), default="")
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    unique_name: Mapped[str] = mapped_column(String(200), default="")
+    is_bot: Mapped[bool] = mapped_column(Boolean, default=False)
+    vote: Mapped[int] = mapped_column(Integer, default=0)  # ADO scale: -10..10
+    added_at: Mapped[datetime] = mapped_column(DateTime)   # when the tracker first saw them
+    last_vote_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reminded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Bot only: the PR source commit the last auto-review covered — a new commit
+    # re-arms the auto-review (fresh iteration → fresh look).
+    reviewed_commit: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class ClaudeSession(Base):
+    """The Claude Agent SDK ``session_id`` last used for a branch, so a follow-up
+    revise can RESUME that conversation instead of starting cold — the agent keeps
+    the files it read and decisions it made across ``/ai`` rounds. Keyed by
+    ``(repo, branch)``; refreshed each run and honoured only within a TTL."""
+
+    __tablename__ = "claude_sessions"
+
+    repo: Mapped[str] = mapped_column(String(200), primary_key=True)
+    branch: Mapped[str] = mapped_column(String(200), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(100), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 
 class ExecutionRecord(Base):

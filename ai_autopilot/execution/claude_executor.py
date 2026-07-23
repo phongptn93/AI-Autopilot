@@ -9,6 +9,7 @@ from the SDK's structured ``ResultMessage``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -57,9 +58,12 @@ class _Workspace:
 
 
 class ClaudeExecutor:
-    def __init__(self, config: Settings, reviewer: AutoReviewer) -> None:
+    def __init__(
+        self, config: Settings, reviewer: AutoReviewer, session_repo=None
+    ) -> None:
         self._config = config
         self._reviewer = reviewer
+        self._session_repo = session_repo  # ClaudeSessionRepository | None
         self._log = get_logger("execution.claude_executor")
         # Serialise git worktree bookkeeping per source repo: two concurrent tasks
         # touching the SAME repo must not run `worktree add`/`prune` at once (they
@@ -614,7 +618,9 @@ class ClaudeExecutor:
             "running claude (read-only, no checkout)", id=item_id, branch=branch, cwd=claude_cwd
         )
         try:
-            claude_run = await self._run_claude(prompt, claude_cwd, repo=repo)
+            resume = await self._resume_for(repo, branch)
+            claude_run = await self._run_claude(prompt, claude_cwd, repo=repo, resume=resume)
+            await self._save_session(repo, branch, claude_run)
             result = ExecutionResult.ok(item_id, prompt, claude_run.text)
             result.cost_tokens = claude_run.total_tokens
             result.cost_usd = claude_run.cost_usd
@@ -687,7 +693,11 @@ class ClaudeExecutor:
             claude_cwd = workspace.claude_cwd or work_dir  # Claude runs here
 
             self._log.info("running claude", id=item_id, branch=branch, cwd=claude_cwd)
-            claude_run = await self._run_claude(prompt, claude_cwd, repo=work_dir)
+            resume = await self._resume_for(repo, branch)
+            claude_run = await self._run_claude(
+                prompt, claude_cwd, repo=work_dir, resume=resume
+            )
+            await self._save_session(repo, branch, claude_run)
 
             if not await self._has_changes(work_dir):
                 if allow_no_changes:
@@ -919,7 +929,8 @@ class ClaudeExecutor:
             await self._git(f"checkout {ws.base_branch}", ws.repo, check=False)
 
     async def _run_claude(
-        self, prompt: str, work_dir: str, repo: str | None = None, on_event=None
+        self, prompt: str, work_dir: str, repo: str | None = None, on_event=None,
+        resume: str | None = None,
     ) -> ClaudeRun:
         setting_sources: list[str] | None = None
         mcp_servers: dict | None = None
@@ -942,8 +953,33 @@ class ClaudeExecutor:
             setting_sources=setting_sources,
             mcp_servers=mcp_servers,
             add_dirs=add_dirs,
+            resume=resume,
             on_event=on_event,
         )
+
+    async def _resume_for(self, repo: str, branch: str) -> str | None:
+        """Stored session id to resume for this branch, or None (fresh). Best-effort —
+        gated by config, TTL-bounded, and never raises into the run."""
+        if not self._config.reuse_claude_session or self._session_repo is None or not branch:
+            return None
+        try:
+            return await self._session_repo.get(
+                repo or "", branch, self._config.claude_session_ttl_hours
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("session lookup failed", branch=branch, error=str(exc))
+            return None
+
+    async def _save_session(self, repo: str, branch: str, run: ClaudeRun) -> None:
+        if (
+            not self._config.reuse_claude_session
+            or self._session_repo is None
+            or not branch
+            or not run.session_id
+        ):
+            return
+        with contextlib.suppress(Exception):
+            await self._session_repo.save(repo or "", branch, run.session_id)
 
     # ── git helpers ─────────────────────────────────────────────────────────
 

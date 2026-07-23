@@ -16,8 +16,10 @@ from ai_autopilot.services import (
     AdoPollerService,
     LoopScheduler,
     PrMonitorService,
+    ReviewerTrackerService,
     StateSyncService,
 )
+from ai_autopilot.teams_agent import build_agent as build_teams_agent
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -35,11 +37,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pr_monitor = PrMonitorService(container)
         app.state.pr_monitor = pr_monitor  # webhook fast-path targets it directly
         state_sync = StateSyncService(container)
+        reviewer_tracker = ReviewerTrackerService(container)
         loops = LoopScheduler(container)
         poller.start()
         pr_monitor.start()
         state_sync.start()
+        reviewer_tracker.start()
         loops.start()
+
+        teams_agent = build_teams_agent(config, container, reviewer_tracker)
+        if teams_agent is not None:
+            app.state.teams_agent, app.state.teams_adapter = teams_agent
+            log.info("Teams bot enabled — /api/messages live")
+        else:
+            app.state.teams_agent = None
+
         log.info("autopilot online", health_port=config.health_port)
         try:
             yield
@@ -47,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await poller.stop()
             await pr_monitor.stop()
             await state_sync.stop()
+            await reviewer_tracker.stop()
             await loops.stop()
             await container.shutdown()
             log.info("autopilot stopped")
@@ -81,6 +94,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/metrics")
     async def metrics_endpoint() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    @app.post("/api/messages")
+    async def teams_messages(request: Request) -> Response:
+        """Microsoft Teams bot endpoint (Azure Bot Service messaging endpoint).
+
+        No-op (404) unless the Teams bot is configured — see
+        ``ai_autopilot/teams_agent.py`` for the enable conditions."""
+        teams_agent = getattr(request.app.state, "teams_agent", None)
+        if teams_agent is None:
+            return Response(status_code=404)
+        from microsoft_agents.hosting.fastapi import start_agent_process
+
+        adapter = request.app.state.teams_adapter
+        result = await start_agent_process(request, teams_agent, adapter)
+        return result if result is not None else Response(status_code=200)
 
     @app.post("/api/webhook/ado")
     async def ado_webhook(request: Request) -> dict:

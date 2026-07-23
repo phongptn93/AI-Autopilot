@@ -37,7 +37,7 @@ class AdoNotifier:
     async def notify_started(self, item: WorkItemInfo, skill: str) -> None:
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         comment = (
-            "<div><b>🤖 ADO Autopilot — Processing</b><br/><ul>"
+            "<div><b>▶️ Đã nhận việc — bắt đầu xử lý tự động</b><br/><ul>"
             f"<li><b>Skill:</b> <code>{skill}</code></li>"
             f"<li><b>Category:</b> {item.category}</li>"
             f"<li><b>Started:</b> {now} UTC</li>"
@@ -75,7 +75,7 @@ class AdoNotifier:
             else:
                 pr_html = ""
             comment = (
-                "<div><b>✅ ADO Autopilot — Completed</b><br/><ul>"
+                "<div><b>✅ Hoàn tất</b><br/><ul>"
                 f"<li><b>Skill:</b> <code>{result.skill_used}</code></li>"
                 f"<li><b>Duration:</b> {_mmss(result.duration_seconds)}</li>"
                 f"<li><b>Branch:</b> <code>{result.branch_name}</code></li>"
@@ -83,7 +83,7 @@ class AdoNotifier:
             )
         else:
             comment = (
-                "<div><b>❌ ADO Autopilot — Failed</b><br/><ul>"
+                "<div><b>❌ Chưa hoàn tất</b><br/><ul>"
                 f"<li><b>Skill:</b> <code>{result.skill_used}</code></li>"
                 f"<li><b>Duration:</b> {_mmss(result.duration_seconds)}</li>"
                 f"<li><b>Error:</b> {result.error}</li>"
@@ -106,7 +106,7 @@ class AdoNotifier:
         )
 
     async def notify_error(self, item: WorkItemInfo, error: str) -> None:
-        comment = f"<div><b>⚠️ ADO Autopilot — Error</b><br/><p>{error}</p></div>"
+        comment = f"<div><b>⚠️ Gặp lỗi khi xử lý</b><br/><p>{error}</p></div>"
         if self._config.dry_run:
             self._log.info("[DRY-RUN] would comment: error", id=item.id, error=error)
             return

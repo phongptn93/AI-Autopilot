@@ -3,6 +3,7 @@
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
     AiConflict,
+    ClaudeSession,
     ExecutionRecord,
     ExecutionStatus,
     HandledPrComment,
@@ -10,17 +11,21 @@ from ai_autopilot.data.entities import (
     PipelineState,
     PlannedRun,
     PrCommandState,
+    PrReviewerState,
     SchedulerDecision,
     SdlcLoopState,
     WorkItemState,
 )
 from ai_autopilot.data.repository import (
     AiConflictRepository,
+    ClaudeSessionRepository,
     EfficiencyStats,
     ExecutionRepository,
     ExecutionStats,
     PlannedRunRepository,
     PrCommandRepository,
+    PrReviewerRepository,
+    ReviewerSnapshot,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
     StateRepository,
@@ -30,6 +35,8 @@ from ai_autopilot.data.repository import (
 __all__ = [
     "AiConflict",
     "AiConflictRepository",
+    "ClaudeSession",
+    "ClaudeSessionRepository",
     "Database",
     "EfficiencyStats",
     "ExecutionRecord",
@@ -43,6 +50,9 @@ __all__ = [
     "PlannedRunRepository",
     "PrCommandRepository",
     "PrCommandState",
+    "PrReviewerRepository",
+    "PrReviewerState",
+    "ReviewerSnapshot",
     "SchedulerDecision",
     "SchedulerHistoryRepository",
     "SdlcLoopState",

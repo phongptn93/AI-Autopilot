@@ -132,6 +132,11 @@ FIELDS: tuple[Field, ...] = (
     Field("autonomy_level", "Autonomy level", "select", "Execution & Autonomy",
           "report = comment only, assisted = draft PR, unattended = auto PR.",
           ("report", "assisted", "unattended")),
+    Field("claude_model", "Claude model", "select", "Execution & Autonomy",
+          "Model the CLI runs each task with. Blank = the bundled CLI's own default — NOT "
+          "guaranteed to stay the same across CLI updates. Pick one explicitly for "
+          "predictable cost/speed/quality.",
+          ("", "sonnet", "opus", "fable", "haiku")),
     Field("use_worktrees", "Isolate tasks (git worktree)", "bool", "Execution & Autonomy",
           "Run each task in its own git worktree so concurrent tasks never touch your main "
           "checkout. Turn off to run in-place in the shared workspace."),
@@ -150,6 +155,43 @@ FIELDS: tuple[Field, ...] = (
           "address them. Restart required to take effect."),
     Field("max_revisions", "↳ Max PR revisions / item", "int", "Execution & Autonomy",
           "Cap auto-revisions per work item so a review back-and-forth can't run away. Default 3."),
+    Field("use_specialized_agents", "🧩 Route commands to specialist agents", "bool",
+          "Execution & Autonomy",
+          "Send /spec /qc /security /review /test /impact to their purpose-built subagents "
+          "(.claude/agents) for expert results. Degrades to the generic skill if missing."),
+    Field("reuse_claude_session", "🧠 Reuse Claude session / branch", "bool",
+          "Execution & Autonomy",
+          "Resume the agent's conversation per branch across revise rounds — follow-ups keep "
+          "prior context (cheaper, more consistent). Falls back to fresh if resume fails."),
+    Field("claude_session_ttl_hours", "↳ Session reuse TTL (hours)", "int",
+          "Execution & Autonomy",
+          "Only resume a session this fresh; older → start clean. Default 24."),
+    Field("pr_reviewer_tracking_enabled", "👀 Track PR reviewers", "bool",
+          "Execution & Autonomy",
+          "Watch reviewer lists on ALL active PRs: dashboard status, auto-review when the bot "
+          "is added as reviewer, polite overdue reminders. Restart required."),
+    Field("pr_auto_review_on_added", "↳ Auto-review when bot added", "bool",
+          "Execution & Autonomy",
+          "Bot added as PR reviewer → structured AI review + vote. Re-arms on new commits."),
+    Field("pr_reviewer_reminder_hours", "↳ Remind reviewers after (hours)", "int",
+          "Execution & Autonomy",
+          "A reviewer with no vote after this many hours gets one polite PR reminder. 0 = off."),
+    Field("pr_bot_identity", "↳ Bot identity override", "text", "Execution & Autonomy",
+          "Email / uniqueName of the bot reviewer account. Blank = auto-detect the PAT's own "
+          "identity via connectionData."),
+    Field("pr_reviewer_target_branches", "↳ Only these target branches", "list",
+          "Execution & Autonomy",
+          "One branch per line (e.g. dxfac/development). Only PRs merging INTO these branches "
+          "are tracked / reviewed / shown. Empty = all targets."),
+    Field("teams_agent_enabled", "💬 Two-way Teams bot", "bool", "Execution & Autonomy",
+          "Reply and act on button clicks in Teams (approve/reject, chat commands) via a "
+          "registered Azure Bot / Agent ID. Requires `pip install .[teams-bot]` and the App "
+          "ID/secret/tenant set in config.yaml or .env — never here. Restart required."),
+    Field("teams_agent_nlu_enabled", "↳ Understand free-text (read-only)", "bool",
+          "Execution & Autonomy",
+          "Free-text Teams messages that don't match a /command are classified by Claude "
+          "into items/prs/status/help — never an action. Costs one Claude call per "
+          "unmatched message. Off = unmatched text just gets the command list."),
     Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "Execution & Autonomy",
           "A new human comment on an autopilot-owned item (held / in review / done) re-runs it "
           "with your comment as top-priority guidance — no restart tag needed."),
@@ -219,13 +261,30 @@ FIELDS: tuple[Field, ...] = (
     Field("planning_start_state", "Start → state", "stateone", "Planning workbench",
           "State the Start action moves an item to (so the poller picks it up) if it isn't "
           "already in a trigger state. Blank = the first trigger state."),
+    # ── Notifications ──
+    Field("teams_webhook_url", "MS Teams webhook URL", "password", "Notifications",
+          "One-way channel: Teams Workflows \"Post to a channel when a webhook request is "
+          "received\" URL. Started/completed/error notices and reviewer reminders post here. "
+          "Blank = Teams notifications off."),
+    Field("smtp_host", "SMTP host", "text", "Notifications", "Blank = email off."),
+    Field("smtp_port", "SMTP port", "int", "Notifications", "Default 587 (STARTTLS)."),
+    Field("smtp_user", "SMTP user", "text", "Notifications"),
+    Field("smtp_password", "SMTP password", "password", "Notifications"),
+    Field("email_from", "Email from", "text", "Notifications"),
+    Field("email_to", "Email to", "text", "Notifications", "Recipient address(es)."),
+    Field("zalo_oa_access_token", "Zalo OA access token", "password", "Notifications",
+          "Blank = Zalo off."),
+    Field("zalo_recipient_user_id", "Zalo recipient user id", "text", "Notifications"),
 )
 
 # Fields that only take effect after a restart (the value is captured at startup).
 RESTART_REQUIRED = frozenset({"max_concurrent"})
 
 # Never echo these values back into the form.
-SECRET_KEYS = frozenset({"ado_pat"})
+SECRET_KEYS = frozenset({
+    "ado_pat", "teams_agent_app_secret",
+    "teams_webhook_url", "smtp_password", "zalo_oa_access_token",
+})
 
 # Keys excluded from an exported/shared config. Everything else in the Settings
 # model IS exported, so new config knobs are shared automatically. Two groups:
@@ -238,6 +297,7 @@ EXPORT_EXCLUDE = frozenset({
     "smtp_host", "smtp_port", "smtp_user", "smtp_password",
     "zalo_oa_access_token", "zalo_recipient_user_id",
     "teams_webhook_url", "email_to", "email_from",
+    "teams_agent_app_id", "teams_agent_app_secret", "teams_agent_tenant_id",
     "tenants",              # each tenant embeds its own ado_pat
     # ── machine / host specific ──
     "workspace_directory", "repo_working_directory", "worktrees_dir",

@@ -456,6 +456,68 @@ class AdoClient:
                 related[wid] = r
         return preds, related
 
+    async def get_connection_data(self) -> dict[str, Any] | None:
+        """The identity behind this client's credentials (PAT/OAuth) — used by the
+        reviewer tracker to recognise "the bot was added as a reviewer" without any
+        configuration. Returns ``{"id", "display_name", "unique_name"}`` or ``None``
+        on any error (the tracker then falls back to ``pr_bot_identity``)."""
+        url = f"{self._base}/_apis/connectionData"
+        try:
+            resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        except httpx.HTTPError as exc:
+            self._log.warning("get_connection_data error", error=str(exc))
+            return None
+        if resp.status_code >= 400 or not resp.text.lstrip().startswith("{"):
+            self._log.warning("get_connection_data failed", status=resp.status_code)
+            return None
+        user = resp.json().get("authenticatedUser") or {}
+        props = user.get("properties") or {}
+        unique = (props.get("Account") or {}).get("$value") or user.get("providerDisplayName")
+        return {
+            "id": user.get("id") or "",
+            "display_name": user.get("customDisplayName") or user.get("providerDisplayName") or "",
+            "unique_name": unique or "",
+        }
+
+    async def get_pull_request_reviewers(
+        self, repo_id: str, pr_id: int
+    ) -> list[dict[str, Any]]:
+        """Current reviewers of a PR (fresh — the PR-list payload can lag a vote)."""
+        url = self._git_url(f"git/repositories/{repo_id}/pullRequests/{pr_id}/reviewers?{_API}")
+        try:
+            resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        except httpx.HTTPError as exc:
+            self._log.warning("get_pr_reviewers error", pr=pr_id, error=str(exc))
+            return []
+        if resp.status_code >= 400:
+            self._log.warning("get_pr_reviewers failed", pr=pr_id, status=resp.status_code)
+            return []
+        return resp.json().get("value") or []
+
+    async def cast_pull_request_vote(
+        self, repo_id: str, pr_id: int, reviewer_id: str, vote: int
+    ) -> bool:
+        """Cast the authenticated identity's vote on a PR (it must already be — or is
+        implicitly added as — a reviewer). ADO scale: 10 approved, 5 approved with
+        suggestions, 0 no vote, -5 waiting for author, -10 rejected."""
+        url = self._git_url(
+            f"git/repositories/{repo_id}/pullRequests/{pr_id}/reviewers/{reviewer_id}?{_API}"
+        )
+        try:
+            resp = await self._http.put(
+                url, json={"vote": vote}, headers=await self._headers()
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("cast_pr_vote error", pr=pr_id, error=str(exc))
+            return False
+        if resp.status_code >= 400:
+            self._log.warning(
+                "cast_pr_vote failed", pr=pr_id, vote=vote, status=resp.status_code,
+                body=resp.text[:200],
+            )
+            return False
+        return True
+
     async def get_pull_request_threads(self, repo_id: str, pr_id: int) -> list[dict[str, Any]]:
         url = self._git_url(f"git/repositories/{repo_id}/pullRequests/{pr_id}/threads?{_API}")
         resp = await self._http.get(url, headers=await self._auth.get_auth_header())

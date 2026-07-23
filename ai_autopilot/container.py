@@ -13,10 +13,12 @@ from ai_autopilot.ado import AdoAuthService, AdoClient, AdoNotifier
 from ai_autopilot.config import Settings
 from ai_autopilot.data import (
     AiConflictRepository,
+    ClaudeSessionRepository,
     Database,
     ExecutionRepository,
     PlannedRunRepository,
     PrCommandRepository,
+    PrReviewerRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
     StateRepository,
@@ -66,6 +68,8 @@ class Container:
         self.ai_conflict_repo = AiConflictRepository(self.database)
         self.scheduler_history_repo = SchedulerHistoryRepository(self.database)
         self.pr_command_repo = PrCommandRepository(self.database)
+        self.pr_reviewer_repo = PrReviewerRepository(self.database)
+        self.claude_session_repo = ClaudeSessionRepository(self.database)
 
         # ADO.
         self.auth = AdoAuthService(config)
@@ -81,7 +85,7 @@ class Container:
 
         # Execution.
         self.reviewer = AutoReviewer(config)
-        self.executor = ClaudeExecutor(config, self.reviewer)
+        self.executor = ClaudeExecutor(config, self.reviewer, self.claude_session_repo)
         self.feedback = FeedbackHandler(self.executor, config)
         self.retry_policy = RetryPolicy(config.max_retries, config.retry_backoff_seconds)
 

@@ -77,6 +77,27 @@ feedback_loop_enabled: false
 max_revisions: 3
 auto_review_enabled: true
 block_on_severity: "Critical,High"
+# Resume the Claude Agent session per (repo, branch) across revise rounds — follow-ups
+# keep prior context (cheaper, more consistent). Falls back to a fresh session if resume
+# fails (e.g. not on this host). Off by default.
+reuse_claude_session: false
+claude_session_ttl_hours: 24
+# Route role commands (/spec /qc /security /review /test /impact) to their purpose-built
+# subagents in .claude/agents for expert results. Falls back to the generic skill if the
+# subagent isn't present.
+use_specialized_agents: true
+
+# ── PR reviewer tracking ──
+# Watch the reviewer list of EVERY active PR (any author): dashboard status,
+# auto AI-review + vote when the bot account is added as a reviewer, and one
+# polite reminder for reviewers who sit vote-less past the deadline.
+pr_reviewer_tracking_enabled: false
+pr_auto_review_on_added: true        # bot added as reviewer → structured review + vote
+pr_reviewer_poll_interval_seconds: 30
+pr_reviewer_reminder_hours: 24       # 0 = reminders off
+pr_bot_identity: ""                  # blank = auto-detect the PAT's own identity
+# Only track/review/show PRs merging INTO these target branches. Empty = all targets.
+pr_reviewer_target_branches: []      # e.g. ["dxfac/development", "main"]
 
 # ── Dependency-aware scheduling (P1) ──
 # Order work by the ADO link graph instead of dispatching every pending item at

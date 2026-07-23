@@ -182,6 +182,11 @@ FIELDS: tuple[Field, ...] = (
           "Reply and act on button clicks in Teams (approve/reject, chat commands) via a "
           "registered Azure Bot / Agent ID. Requires `pip install .[teams-bot]` and the App "
           "ID/secret/tenant set in config.yaml or .env — never here. Restart required."),
+    Field("teams_agent_nlu_enabled", "↳ Understand free-text (read-only)", "bool",
+          "Execution & Autonomy",
+          "Free-text Teams messages that don't match a /command are classified by Claude "
+          "into items/prs/status/help — never an action. Costs one Claude call per "
+          "unmatched message. Off = unmatched text just gets the command list."),
     Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "Execution & Autonomy",
           "A new human comment on an autopilot-owned item (held / in review / done) re-runs it "
           "with your comment as top-priority guidance — no restart tag needed."),

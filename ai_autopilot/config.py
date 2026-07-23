@@ -450,6 +450,12 @@ class Settings(BaseSettings):
     teams_agent_app_id: str = ""       # "Agent ID" — the Azure Bot's Application (client) ID
     teams_agent_app_secret: str = ""
     teams_agent_tenant_id: str = ""
+    # Free-text understanding for READ-ONLY queries (e.g. "PR nào của tôi đang bị
+    # block?") — routed through Claude ONLY to classify into {items, prs, status, help,
+    # unknown} + a filter, never to execute anything itself. Structurally cannot reach
+    # any code-mutating action (no such intent exists) — see teams_agent.py. Costs one
+    # Claude call per unmatched message; toggle off to keep structured /commands only.
+    teams_agent_nlu_enabled: bool = True
 
     # ── Comment reaction loop (steer the autopilot by just commenting) ──
     # When a NEW human comment appears on an autopilot-owned item (one that still

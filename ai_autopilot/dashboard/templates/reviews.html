@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+    <div>
+        <h2>PR Reviews</h2>
+        <p>Reviewer status of every active PR — grouped by the branch it merges into.</p>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);text-align:right">
+        {% if tracking_enabled %}
+            <span class="live-dot"></span> tracking on
+            {% if auto_review %} · 🤖 auto-review{% endif %}
+            {% if reminder_hours %} · ⏰ remind {{ reminder_hours }}h{% endif %}
+        {% else %}
+            ⚪ tracking off — enable <b>Track PR reviewers</b> in Settings
+        {% endif %}
+        {% if targets %}<br/>🎯 targets: {% for t in targets %}<code>{{ t }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+    </div>
+</div>
+
+<style>
+  /* Full-width board — override the global .main max-width just for this page. */
+  .main { max-width: none !important; }
+  .cmd-help { margin-bottom:16px; background:var(--bg-card,#101218); border:1px solid var(--border);
+    border-radius:12px; padding:10px 16px; }
+  .cmd-help summary { cursor:pointer; font-size:13px; font-weight:600; }
+  .cmd-table { width:100%; margin-top:10px; border-collapse:collapse; font-size:12.5px; }
+  .cmd-table td { padding:5px 8px; border-top:1px solid var(--border); }
+  .cmd-table td:first-child { width:170px; font-family:var(--mono); }
+  .cmd-table td:nth-child(2) { width:70px; color:var(--text-muted); }
+  .cmd-table code { background:var(--bg-hover); padding:1px 6px; border-radius:6px; }
+  .rev-stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+  .stat { flex:1; min-width:110px; background:var(--bg-card,#101218); border:1px solid var(--border);
+    border-radius:12px; padding:12px 16px; }
+  .stat .n { font-size:22px; font-weight:700; } .stat .l { font-size:11.5px; color:var(--text-muted); }
+  .rev-card { background: var(--bg-card, #101218); border: 1px solid var(--border);
+    border-radius: 12px; padding: 13px 17px; margin-bottom: 11px; }
+  .rev-card.blocked, .rev-card.conflicts { border-left: 3px solid #f87171; }
+  .rev-card.approved { border-left: 3px solid #4ade80; }
+  .rev-card.awaiting, .rev-card.partial { border-left: 3px solid #fbbf24; }
+  .rev-card.draft { border-left: 3px solid var(--text-dim, #667); }
+  .rev-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .rev-title { font-weight: 600; font-size: 14px; }
+  .rev-meta { color: var(--text-muted); font-size: 12px; }
+  .rev-meta code { font-family: var(--mono); background: var(--bg-hover); padding: 1px 6px; border-radius: 6px; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .chip { font-size:11px; padding:2px 9px; border-radius:99px; border:1px solid var(--border); white-space:nowrap; }
+  .st-approved { background:rgba(74,222,128,.12); color:#4ade80; border-color:transparent; }
+  .st-awaiting, .st-partial { background:rgba(251,191,36,.12); color:#fbbf24; border-color:transparent; }
+  .st-blocked, .st-conflicts { background:rgba(248,113,113,.12); color:#f87171; border-color:transparent; }
+  .st-draft { background:var(--bg-hover); color:var(--text-muted); border-color:transparent; }
+  .rev-table { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 12.5px; }
+  .rev-table td { padding: 5px 8px; border-top: 1px solid var(--border); }
+  .vote-10 { color: #4ade80; } .vote-5 { color: #a3e635; }
+  .vote-0 { color: var(--text-muted); } .vote--5 { color: #fbbf24; } .vote--10 { color: #f87171; }
+  .bot-chip { font-size: 10.5px; padding: 1px 7px; border-radius: 99px;
+    background: var(--accent-bg); color: var(--accent-hover); margin-left: 6px; }
+  .req-star { color: #fbbf24; font-size: 11px; }
+  .target-group { margin: 22px 0 10px; display: flex; align-items: center; gap: 10px; }
+  .target-name { font-weight: 700; font-size: 13.5px; }
+  .target-name code { font-family: var(--mono); background: var(--bg-hover); padding: 2px 8px; border-radius: 7px; }
+  .target-count { color: var(--text-muted); font-size: 12px; }
+  .target-line { flex: 1; height: 1px; background: var(--border); }
+</style>
+
+<details class="cmd-help">
+    <summary>💬 Commands — reply on any PR the bot reviews</summary>
+    <table class="cmd-table">
+        <tr><td><code>/ai</code> &lt;yêu cầu&gt;</td><td>DEV</td><td>Sửa code theo yêu cầu → commit &amp; push</td></tr>
+        <tr><td><code>/spec</code></td><td>BA</td><td>Cập nhật spec file + đồng bộ ADO work item</td></tr>
+        <tr><td><code>/test</code></td><td>DEV/QC</td><td>Viết/chỉnh test tự động → push</td></tr>
+        <tr><td><code>/review</code></td><td>DEV</td><td>Review code (read-only)</td></tr>
+        <tr><td><code>/qc</code></td><td>QC</td><td>Phân tích test scope, đề xuất test case</td></tr>
+        <tr><td><code>/security</code></td><td>SA</td><td>Rà OWASP trên diff</td></tr>
+        <tr><td><code>/impact</code></td><td>BA</td><td>Phân tích ảnh hưởng / blast-radius</td></tr>
+        <tr><td><code>/summary</code></td><td>All</td><td>Tóm tắt PR dễ hiểu</td></tr>
+    </table>
+</details>
+
+<div class="rev-stats">
+    <div class="stat"><div class="n">{{ summary.total }}</div><div class="l">Active PRs</div></div>
+    <div class="stat"><div class="n" style="color:#4ade80">{{ summary.approved }}</div><div class="l">✅ Approved</div></div>
+    <div class="stat"><div class="n" style="color:#fbbf24">{{ summary.awaiting }}</div><div class="l">⏳ Awaiting review</div></div>
+    <div class="stat"><div class="n" style="color:#f87171">{{ summary.blocked }}</div><div class="l">⛔ Blocked / conflicts</div></div>
+    <div class="stat"><div class="n" style="color:var(--text-muted)">{{ summary.drafts }}</div><div class="l">📝 Drafts</div></div>
+</div>
+
+{% if not grouped %}
+<div class="rev-card rev-meta">No active pull requests in scope.</div>
+{% endif %}
+
+{% set status_label = {"approved":"✅ Approved","partial":"✅ Partial","awaiting":"⏳ Awaiting review","blocked":"⛔ Blocked","conflicts":"⛔ Conflicts","draft":"📝 Draft"} %}
+
+{% for target, prs in grouped %}
+<div class="target-group">
+    <span class="target-name">🎯 merge into <code>{{ target }}</code></span>
+    <span class="target-count">{{ prs|length }} PR{{ 's' if prs|length != 1 else '' }}</span>
+    <span class="target-line"></span>
+</div>
+{% for pr in prs %}
+<div class="rev-card {{ pr.status }}">
+    <div class="rev-head">
+        <div>
+            <div class="rev-title">
+                <a class="table-link" href="{{ pr.url }}" target="_blank">!{{ pr.id }}</a>
+                {{ pr.title }}
+            </div>
+            <div class="rev-meta">
+                {{ pr.repo }} · <code>{{ pr.source }}</code>
+                · by {{ pr.author }}{% if pr.age %} · {{ pr.age }} ago{% endif %}
+                {% if pr.work_item %} · WI #{{ pr.work_item }}{% endif %}
+            </div>
+        </div>
+        <div class="chips">
+            <span class="chip st-{{ pr.status }}">{{ status_label.get(pr.status, pr.status) }}</span>
+            {% if pr.bot_reviewed %}<span class="chip"><span class="bot-chip">🤖</span> reviewed</span>{% endif %}
+            <span class="chip" title="approved / pending / blocked">
+                ✅ {{ pr.approved }} · ⏳ {{ pr.pending }} · ⛔ {{ pr.blocked }}
+            </span>
+        </div>
+    </div>
+    {% if pr.reviewers %}
+    <table class="rev-table">
+        {% for r in pr.reviewers %}
+        <tr>
+            <td style="width:40%">
+                {{ r.name }}
+                {% if r.required %}<span class="req-star" title="required">★</span>{% endif %}
+                {% if r.is_bot %}<span class="bot-chip">🤖 bot</span>{% endif %}
+            </td>
+            <td style="width:30%" class="vote-{{ r.vote }}">{{ r.vote_label }}</td>
+            <td class="rev-meta">
+                {% if r.added_at %}added {{ r.added_at.strftime("%d/%m %H:%M") }}{% endif %}
+                {% if r.reminded %} · 🔔 reminded{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <div class="rev-meta" style="margin-top:8px">No reviewers added yet.</div>
+    {% endif %}
+</div>
+{% endfor %}
+{% endfor %}
+{% endblock %}

@@ -150,6 +150,34 @@ FIELDS: tuple[Field, ...] = (
           "address them. Restart required to take effect."),
     Field("max_revisions", "↳ Max PR revisions / item", "int", "Execution & Autonomy",
           "Cap auto-revisions per work item so a review back-and-forth can't run away. Default 3."),
+    Field("use_specialized_agents", "🧩 Route commands to specialist agents", "bool",
+          "Execution & Autonomy",
+          "Send /spec /qc /security /review /test /impact to their purpose-built subagents "
+          "(.claude/agents) for expert results. Degrades to the generic skill if missing."),
+    Field("reuse_claude_session", "🧠 Reuse Claude session / branch", "bool",
+          "Execution & Autonomy",
+          "Resume the agent's conversation per branch across revise rounds — follow-ups keep "
+          "prior context (cheaper, more consistent). Falls back to fresh if resume fails."),
+    Field("claude_session_ttl_hours", "↳ Session reuse TTL (hours)", "int",
+          "Execution & Autonomy",
+          "Only resume a session this fresh; older → start clean. Default 24."),
+    Field("pr_reviewer_tracking_enabled", "👀 Track PR reviewers", "bool",
+          "Execution & Autonomy",
+          "Watch reviewer lists on ALL active PRs: dashboard status, auto-review when the bot "
+          "is added as reviewer, polite overdue reminders. Restart required."),
+    Field("pr_auto_review_on_added", "↳ Auto-review when bot added", "bool",
+          "Execution & Autonomy",
+          "Bot added as PR reviewer → structured AI review + vote. Re-arms on new commits."),
+    Field("pr_reviewer_reminder_hours", "↳ Remind reviewers after (hours)", "int",
+          "Execution & Autonomy",
+          "A reviewer with no vote after this many hours gets one polite PR reminder. 0 = off."),
+    Field("pr_bot_identity", "↳ Bot identity override", "text", "Execution & Autonomy",
+          "Email / uniqueName of the bot reviewer account. Blank = auto-detect the PAT's own "
+          "identity via connectionData."),
+    Field("pr_reviewer_target_branches", "↳ Only these target branches", "list",
+          "Execution & Autonomy",
+          "One branch per line (e.g. dxfac/development). Only PRs merging INTO these branches "
+          "are tracked / reviewed / shown. Empty = all targets."),
     Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "Execution & Autonomy",
           "A new human comment on an autopilot-owned item (held / in review / done) re-runs it "
           "with your comment as top-priority guidance — no restart tag needed."),

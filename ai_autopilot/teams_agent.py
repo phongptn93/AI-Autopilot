@@ -40,6 +40,7 @@ _HELP_TEXT = (
     "reviewer trên PR đó)\n"
     "- `/pr <repo> <pr-id>` — xem chi tiết BẤT KỲ PR nào (không chỉ của bạn)\n"
     "- `/item <id>` — xem chi tiết BẤT KỲ work item nào\n"
+    "- `/team` — tổng quan PR của cả team, cũ nhất trước\n"
     "- `/log <mô tả>` — tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)\n"
     "- `/status` — tình trạng hoạt động\n"
     "- `/help` — bảng lệnh này\n\n"
@@ -204,6 +205,20 @@ _PR_LOOKUP_RE = re.compile(r"^/pr\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _ITEM_LOOKUP_RE = re.compile(r"^/item\s+(\d+)\s*$", re.IGNORECASE)
 
 
+def _format_team_overview(prs: list[dict]) -> str:
+    if not prs:
+        return "(không có PR active nào)"
+    lines = []
+    for pr in prs:
+        age = f"{pr['age_days']}d" if pr["age_days"] is not None else "?"
+        draft = " (draft)" if pr["is_draft"] else ""
+        lines.append(
+            f"- !{pr['id']} {pr['repo']}{draft} — {pr['title']} · {pr['author']} · "
+            f"{age} tuổi · ✅{pr['approved']} ⏳{pr['pending']} ⛔{pr['blocked']}"
+        )
+    return "\n".join(lines)
+
+
 def _format_pr_detail(detail: dict) -> str:
     draft = " (draft)" if detail["is_draft"] else ""
     lines = [
@@ -239,6 +254,13 @@ async def _handle_command(
         return
     if low.startswith("/prs"):
         await _reply_prs(context, reviewer_tracker)
+        return
+    if low.startswith("/team"):
+        prs = await reviewer_tracker.team_overview()
+        bullets = _format_team_overview(prs)
+        await context.send_activity(
+            f"👥 **Team overview — PR active, cũ nhất trước** ({len(prs)})\n{bullets}"
+        )
         return
     m = _REVIEW_RE.match(text.strip())
     if m:
@@ -427,8 +449,8 @@ không có khả năng và không được phép sửa code, vote, merge hay tha
 
 Phân loại tin nhắn của người dùng vào ĐÚNG MỘT trong các intent sau, và trả về \
 CHÍNH XÁC một dòng JSON, không kèm giải thích, không markdown:
-{{"intent": "items|prs|pr_lookup|item_lookup|status|help|unknown", "filter": null \
-hoặc giá trị tương ứng bên dưới}}
+{{"intent": "items|prs|pr_lookup|item_lookup|team_overview|status|help|unknown", \
+"filter": null hoặc giá trị tương ứng bên dưới}}
 
 - "items": người dùng muốn xem WORK ITEM CỦA CHÍNH HỌ. filter = null hoặc từ khoá \
 trạng thái.
@@ -439,6 +461,8 @@ hoặc null.
 rồi"), không phân biệt của ai. filter = số PR đó dạng chuỗi (vd "2261").
 - "item_lookup": người dùng hỏi về MỘT work item CỤ THỂ theo số (vd "work item #6753", \
 "ticket 6753"), không phân biệt của ai. filter = số đó dạng chuỗi.
+- "team_overview": người dùng hỏi về TÌNH TRẠNG CỦA CẢ TEAM/dự án, không riêng của họ \
+(vd "PR nào bị treo lâu nhất", "PR nào của team đang chờ review lâu"). filter = null.
 - "status": hỏi tình trạng hoạt động chung.
 - "help": muốn xem danh sách lệnh.
 - "unknown": MỌI yêu cầu khác — đặc biệt là bất kỳ yêu cầu THAY ĐỔI/SỬA/VOTE/MERGE/\
@@ -447,7 +471,9 @@ APPROVE/REJECT/COMMIT/PUSH nào — luôn phân vào "unknown", không tự bị
 Tin nhắn: {text}"""
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
-_ALLOWED_INTENTS = {"items", "prs", "pr_lookup", "item_lookup", "status", "help", "unknown"}
+_ALLOWED_INTENTS = {
+    "items", "prs", "pr_lookup", "item_lookup", "team_overview", "status", "help", "unknown",
+}
 
 
 async def _classify_intent(config: Settings, text: str) -> dict:
@@ -569,6 +595,10 @@ async def _handle_free_text(
             f"#{item.id} [{item.work_item_type}] {item.title} — {item.state}, "
             f"assigned to {item.assigned_to or '(chưa gán)'}"
         ) if item else f"(không tìm thấy work item #{wid})"
+        await context.send_activity(await _phrase_natural(config, text, bullets))
+    elif intent == "team_overview":
+        prs = await reviewer_tracker.team_overview()
+        bullets = _format_team_overview(prs)
         await context.send_activity(await _phrase_natural(config, text, bullets))
     elif intent == "status":
         await context.send_activity(

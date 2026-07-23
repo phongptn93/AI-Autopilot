@@ -195,6 +195,43 @@ class ReviewerTrackerService:
                 })
         return out
 
+    async def team_overview(self, limit: int = 10) -> list[dict]:
+        """Every active PR across configured repos, OLDEST first — "what's stuck"
+        for a team lead. Used by the Teams bot's ``/team`` command and NLU intent."""
+        out: list[dict] = []
+        for repo in await self._c.ado.get_repositories():
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+            repo_name = repo.get("name") or ""
+            for pr in await self._c.ado.get_active_pull_requests(repo_id):
+                if not self._config.target_in_scope(pr.get("targetRefName", "")):
+                    continue
+                age_days = None
+                created = pr.get("creationDate")
+                if created:
+                    with contextlib.suppress(ValueError):
+                        dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                        age_days = (datetime.now(UTC) - dt).days
+                reviewers = [
+                    r for r in (pr.get("reviewers") or [])
+                    if r.get("id") and not r.get("isContainer")
+                ]
+                votes = [int(r.get("vote") or 0) for r in reviewers]
+                out.append({
+                    "id": pr.get("pullRequestId"),
+                    "title": pr.get("title") or "",
+                    "repo": repo_name,
+                    "author": (pr.get("createdBy") or {}).get("displayName") or "",
+                    "age_days": age_days,
+                    "is_draft": bool(pr.get("isDraft")),
+                    "approved": sum(1 for v in votes if v >= 5),
+                    "pending": sum(1 for v in votes if v == 0),
+                    "blocked": sum(1 for v in votes if v < 0),
+                })
+        out.sort(key=lambda p: p["age_days"] if p["age_days"] is not None else -1, reverse=True)
+        return out[:limit]
+
     async def find_pr_by_id(self, pr_id: int) -> dict | None:
         """Same as ``pr_detail`` but scans every configured repo for ``pr_id`` — for
         free-text lookups ("PR 2261 tình trạng sao rồi") that don't name a repo."""

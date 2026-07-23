@@ -777,6 +777,14 @@ _ALLOWED_INTENTS = {
 }
 
 
+def _fmt_exc(exc: Exception) -> str:
+    """``str(asyncio.TimeoutError())`` (and several other stdlib exceptions) is "" —
+    log the type name too, or a timeout is silently indistinguishable from any other
+    failure in the logs."""
+    text = str(exc)
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
 async def _classify_intent(config: Settings, text: str) -> dict:
     """Best-effort intent classification via a single, tool-less Claude call. Any
     failure (timeout, bad JSON, disallowed intent) safely falls back to "unknown"."""
@@ -788,7 +796,11 @@ async def _classify_intent(config: Settings, text: str) -> dict:
             tempfile.gettempdir(),  # no tool use below → cwd content is irrelevant,
                                      # just needs to exist (workspace_directory may not
                                      # on this host — see teams_agent module notes)
-            timeout_seconds=20,
+            timeout_seconds=45,  # a plain "text only" call still measured 8-11s under
+                                  # light load — 20s left little headroom under real
+                                  # concurrency, and asyncio.TimeoutError's str() is ""
+                                  # (empty), which made timeouts indistinguishable from
+                                  # other failures in the log until _fmt_exc below.
             model=config.claude_model or None,
             max_turns=1,
             allowed_tools=[],  # no tool use — pure text classification
@@ -800,7 +812,7 @@ async def _classify_intent(config: Settings, text: str) -> dict:
         intent = data.get("intent") if data.get("intent") in _ALLOWED_INTENTS else "unknown"
         return {"intent": intent, "filter": data.get("filter")}
     except Exception as exc:  # noqa: BLE001 — classification failure must not crash the turn
-        _log.warning("intent classification failed", error=str(exc))
+        _log.warning("intent classification failed", error=_fmt_exc(exc))
         return {"intent": "unknown", "filter": None}
 
 
@@ -832,14 +844,14 @@ async def _phrase_natural(config: Settings, question: str, bullets: str) -> str:
             tempfile.gettempdir(),  # no tool use below → cwd content is irrelevant,
                                      # just needs to exist (workspace_directory may not
                                      # on this host — see teams_agent module notes)
-            timeout_seconds=20,
+            timeout_seconds=45,  # see _classify_intent — same headroom reasoning
             model=config.claude_model or None,
             max_turns=1,
             allowed_tools=[],
         )
         return (run.text or "").strip() or bullets
     except Exception as exc:  # noqa: BLE001 — phrasing failure must not crash the turn
-        _log.warning("reply phrasing failed — falling back to plain list", error=str(exc))
+        _log.warning("reply phrasing failed — falling back to plain list", error=_fmt_exc(exc))
         return bullets
 
 

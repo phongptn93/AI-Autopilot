@@ -151,6 +151,7 @@ def create_dashboard_router() -> APIRouter:
         return {
             "request": request,
             "active": active,
+            "version": request.app.version,  # single source of truth: FastAPI(version=...)
             "mmss": _mmss,
             "fmt_duration": _fmt_duration,
             "category_badge": _category_badge,

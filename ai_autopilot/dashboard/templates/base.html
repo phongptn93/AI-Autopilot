@@ -163,7 +163,7 @@
             <a class="nav-link {{ 'active' if active == 'settings' else '' }}" href="/dashboard/settings"><span class="ico">🛠️</span> Settings</a>
             <a class="nav-link {{ 'active' if active == 'capabilities' else '' }}" href="/dashboard/capabilities"><span class="ico">✨</span> Capabilities</a>
         </nav>
-        <div class="sidebar-foot"><span class="live-dot"></span> autopilot online</div>
+        <div class="sidebar-foot"><span class="live-dot"></span> autopilot online · v{{ version }}</div>
     </aside>
     <main class="main">
         {% block content %}{% endblock %}

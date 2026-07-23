@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
@@ -45,9 +47,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         reviewer_tracker.start()
         loops.start()
 
-        teams_agent = build_teams_agent(config, container, reviewer_tracker)
-        if teams_agent is not None:
-            app.state.teams_agent, app.state.teams_adapter = teams_agent
+        teams_bot = build_teams_agent(config, container, reviewer_tracker)
+        teams_digest_task = None
+        if teams_bot is not None:
+            app.state.teams_agent, app.state.teams_adapter, teams_digest_task = teams_bot
             log.info("Teams bot enabled — /api/messages live")
         else:
             app.state.teams_agent = None
@@ -61,6 +64,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await state_sync.stop()
             await reviewer_tracker.stop()
             await loops.stop()
+            if teams_digest_task is not None:
+                teams_digest_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await teams_digest_task
             await container.shutdown()
             log.info("autopilot stopped")
 

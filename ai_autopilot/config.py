@@ -460,6 +460,12 @@ class Settings(BaseSettings):
     # any code-mutating action (no such intent exists) — see teams_agent.py. Costs one
     # Claude call per unmatched message; toggle off to keep structured /commands only.
     teams_agent_nlu_enabled: bool = True
+    # Proactively post a team-overview digest to every channel/chat the bot has been
+    # added to, every N hours (e.g. 24 = once daily). 0 = off (default) — this pushes
+    # unsolicited messages into a shared channel, so it's opt-in. Requires the bot to
+    # have been @mentioned or added at least once so its conversation gets stored
+    # (survives restarts — the reference is persisted, not kept only in memory).
+    teams_agent_digest_interval_hours: int = 0
 
     # ── Comment reaction loop (steer the autopilot by just commenting) ──
     # When a NEW human comment appears on an autopilot-owned item (one that still

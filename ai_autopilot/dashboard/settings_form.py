@@ -192,6 +192,11 @@ FIELDS: tuple[Field, ...] = (
           "Free-text Teams messages that don't match a /command are classified by Claude "
           "into items/prs/status/help — never an action. Costs one Claude call per "
           "unmatched message. Off = unmatched text just gets the command list."),
+    Field("teams_agent_digest_interval_hours", "↳ Daily digest every (hours)", "int",
+          "Execution & Autonomy",
+          "Proactively post a team PR overview to every channel/chat the bot has been "
+          "added to. 0 = off. Requires the bot to have been messaged/added at least once "
+          "so its conversation is stored (persists across restarts)."),
     Field("teams_agent_app_id", "↳ Agent (App) ID", "text", "Execution & Autonomy",
           "Azure Bot's Application (client) ID. Also requires `pip install .[teams-bot]`."),
     Field("teams_agent_tenant_id", "↳ Tenant ID", "text", "Execution & Autonomy",

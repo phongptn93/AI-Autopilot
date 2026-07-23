@@ -14,6 +14,7 @@ from ai_autopilot.data.entities import (
     PrReviewerState,
     SchedulerDecision,
     SdlcLoopState,
+    TeamsConversation,
     WorkItemState,
 )
 from ai_autopilot.data.repository import (
@@ -59,5 +60,6 @@ __all__ = [
     "SdlcLoopStateRepository",
     "StateRepository",
     "SyncStateRepository",
+    "TeamsConversation",
     "WorkItemState",
 ]

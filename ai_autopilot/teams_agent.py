@@ -19,10 +19,12 @@ implement. Buttons are scoped to actions the bot can honestly perform as itself.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import re
 import tempfile
+from datetime import UTC, datetime
 from typing import Any
 
 from ai_autopilot.config import Settings
@@ -31,6 +33,67 @@ from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
 
 _log = get_logger("teams_agent")
+
+
+class _DbConversationStorage:
+    """Persistent ``Storage`` backend (SDK protocol: read/write/delete) for the
+    proactive-conversation store, backed by the same async DB as everything else.
+
+    ``MemoryStorage`` (the SDK default) forgets every conversation on restart —
+    fine for per-turn state, but it would silently break a DAILY digest the moment
+    the process restarts. ``all_keys`` is our own addition (not part of the SDK
+    protocol) so the digest loop can enumerate every channel to broadcast to."""
+
+    def __init__(self, database) -> None:
+        self._db = database
+
+    async def read(self, keys: list[str], *, target_cls=None, **kwargs) -> dict:
+        from ai_autopilot.data.entities import TeamsConversation
+
+        out: dict = {}
+        async with self._db.session() as session:
+            for key in keys:
+                row = await session.get(TeamsConversation, key)
+                if row is None:
+                    continue
+                data = json.loads(row.value_json)
+                out[key] = target_cls.from_json_to_store_item(data) if target_cls else data
+        return out
+
+    async def write(self, changes: dict) -> None:
+        from ai_autopilot.data.entities import TeamsConversation
+
+        async with self._db.session() as session:
+            for key, item in changes.items():
+                data = (
+                    item.store_item_to_json() if hasattr(item, "store_item_to_json") else item
+                )
+                row = await session.get(TeamsConversation, key)
+                if row is None:
+                    row = TeamsConversation(key=key)
+                    session.add(row)
+                row.value_json = json.dumps(data)
+                row.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def delete(self, keys: list[str]) -> None:
+        from ai_autopilot.data.entities import TeamsConversation
+
+        async with self._db.session() as session:
+            for key in keys:
+                row = await session.get(TeamsConversation, key)
+                if row is not None:
+                    await session.delete(row)
+            await session.commit()
+
+    async def all_keys(self) -> list[str]:
+        from sqlalchemy import select
+
+        from ai_autopilot.data.entities import TeamsConversation
+
+        async with self._db.session() as session:
+            rows = await session.execute(select(TeamsConversation.key))
+            return list(rows.scalars().all())
 
 _HELP_TEXT = (
     "🤖 **AI Autopilot**\n\n"
@@ -55,9 +118,12 @@ _VOTE_SHORT = {10: "✅ approved", 5: "✅ suggestions", 0: "⏳ chưa vote", -5
 
 
 def build_agent(config: Settings, container: Container, reviewer_tracker: ReviewerTrackerService):
-    """Build the (agent_application, adapter) pair for ``/api/messages``, or ``None``
-    if the Teams bot isn't configured/installed — the caller then skips the route
-    entirely, leaving the rest of the app unaffected."""
+    """Build ``(agent_application, adapter, digest_task)`` for ``/api/messages``, or
+    ``None`` if the Teams bot isn't configured/installed — the caller then skips the
+    route entirely, leaving the rest of the app unaffected. ``digest_task`` is the
+    background asyncio task for the proactive daily digest, or ``None`` if
+    ``teams_agent_digest_interval_hours`` is 0 (off) — the caller cancels it on
+    shutdown alongside every other background service."""
     if not (
         config.teams_agent_enabled
         and config.teams_agent_app_id
@@ -66,7 +132,7 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
     ):
         return None
     try:
-        from microsoft_agents.activity import ActivityTypes
+        from microsoft_agents.activity import ActivityTypes, ConversationUpdateTypes
         from microsoft_agents.authentication.msal import MsalConnectionManager
         from microsoft_agents.hosting.core import (
             AgentApplication,
@@ -74,7 +140,11 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
             ApplicationOptions,
             AuthTypes,
             MemoryStorage,
+            MessageFactory,
             TurnContext,
+        )
+        from microsoft_agents.hosting.core.app.proactive.proactive_options import (
+            ProactiveOptions,
         )
         from microsoft_agents.hosting.fastapi import CloudAdapter
     except ImportError as exc:
@@ -95,9 +165,11 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
         connections_configurations={"SERVICE_CONNECTION": auth_config}
     )
     adapter = CloudAdapter(connection_manager=connections)
+    conversation_storage = _DbConversationStorage(container.database)
     app = AgentApplication(
         options=ApplicationOptions(
-            adapter=adapter, bot_app_id=config.teams_agent_app_id, storage=MemoryStorage()
+            adapter=adapter, bot_app_id=config.teams_agent_app_id, storage=MemoryStorage(),
+            proactive=ProactiveOptions(storage=conversation_storage),
         ),
         connection_manager=connections,
     )
@@ -111,8 +183,70 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
             with contextlib.suppress(Exception):
                 await context.send_activity("⚠️ Có lỗi khi xử lý — thử lại giúp mình nhé.")
 
+    @app.conversation_update(ConversationUpdateTypes.MEMBERS_ADDED)
+    async def on_members_added(context: TurnContext, _state) -> None:
+        """Remember this conversation ONLY when the BOT ITSELF was the member added
+        (not some other user joining a channel it's already in) — that's the moment
+        we can first proactively message it later."""
+        try:
+            bot_id = getattr(context.activity.recipient, "id", None)
+            added = getattr(context.activity, "members_added", None) or []
+            if bot_id and any(str(getattr(m, "id", "")) == str(bot_id) for m in added):
+                await app.proactive.store_conversation(context)
+                _log.info("Teams conversation stored for proactive digest")
+        except Exception as exc:  # noqa: BLE001 — must not crash the turn
+            _log.warning("storing conversation for digest failed", error=str(exc))
+
+    digest_task = None
+    if config.teams_agent_digest_interval_hours > 0:
+        digest_task = asyncio.create_task(
+            _digest_loop(config, app, adapter, reviewer_tracker, conversation_storage,
+                         MessageFactory),
+            name="teams-digest",
+        )
+
     _log.info("Teams bot configured", app_id=config.teams_agent_app_id)
-    return app, adapter
+    return app, adapter, digest_task
+
+
+async def _digest_loop(
+    config: Settings, app, adapter, reviewer_tracker: ReviewerTrackerService,
+    storage: _DbConversationStorage, message_factory,
+) -> None:
+    interval = config.teams_agent_digest_interval_hours
+    while True:
+        try:
+            await asyncio.sleep(interval * 3600)
+            await _send_digest(app, adapter, reviewer_tracker, storage, message_factory)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — one bad cycle must not kill the loop
+            _log.error("Teams digest cycle failed", error=str(exc))
+
+
+async def _send_digest(
+    app, adapter, reviewer_tracker: ReviewerTrackerService,
+    storage: _DbConversationStorage, message_factory,
+) -> None:
+    prs = await reviewer_tracker.team_overview(limit=10)
+    bullets = _format_team_overview(prs)
+    text = (
+        f"📊 **Digest hàng ngày — PR active, cũ nhất trước** ({len(prs)})\n{bullets}"
+        if prs else "📊 Digest hàng ngày — không có PR active nào."
+    )
+    keys = await storage.all_keys()
+    sent, failed = 0, 0
+    for key in keys:
+        try:
+            conversation = await app.proactive.get_conversation(key)
+            if conversation is None:
+                continue
+            await app.proactive.send_activity(adapter, conversation, message_factory.text(text))
+            sent += 1
+        except Exception as exc:  # noqa: BLE001 — one bad conversation must not stop the rest
+            failed += 1
+            _log.warning("digest send failed for one conversation", error=str(exc))
+    _log.info("Teams digest sent", sent=sent, failed=failed, total=len(keys))
 
 
 async def _handle_turn(

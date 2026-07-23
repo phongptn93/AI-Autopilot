@@ -192,6 +192,20 @@ class ClaudeSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class TeamsConversation(Base):
+    """A Teams conversation (channel/chat) the bot has been added to, serialized as
+    the Agents SDK's own ``Conversation`` JSON — persisted so the bot can proactively
+    message it later (e.g. the daily digest) even after a restart. ``MemoryStorage``
+    (the SDK's default) would lose every entry on restart, defeating the point of a
+    recurring digest."""
+
+    __tablename__ = "teams_conversations"
+
+    key: Mapped[str] = mapped_column(String(300), primary_key=True)
+    value_json: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class ExecutionRecord(Base):
     __tablename__ = "executions"
     __table_args__ = (

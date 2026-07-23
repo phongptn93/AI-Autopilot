@@ -195,6 +195,46 @@ class ReviewerTrackerService:
                 })
         return out
 
+    async def find_pr_by_id(self, pr_id: int) -> dict | None:
+        """Same as ``pr_detail`` but scans every configured repo for ``pr_id`` — for
+        free-text lookups ("PR 2261 tình trạng sao rồi") that don't name a repo."""
+        for repo in await self._c.ado.get_repositories():
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+            detail = await self.pr_detail(repo_id, pr_id)
+            if detail is not None:
+                return detail
+        return None
+
+    async def pr_detail(self, repo_id: str, pr_id: int) -> dict | None:
+        """Full detail of ONE active PR — any PR, not filtered to a person. Used by
+        the Teams bot's ``/pr <repo> <pr-id>`` lookup. None if not found/not active."""
+        target = None
+        for pr in await self._c.ado.get_active_pull_requests(repo_id):
+            if pr.get("pullRequestId") == pr_id:
+                target = pr
+                break
+        if target is None:
+            return None
+        reviewers = [
+            {
+                "name": r.get("displayName") or r.get("uniqueName") or "?",
+                "vote": int(r.get("vote") or 0),
+            }
+            for r in (target.get("reviewers") or [])
+            if r.get("id") and not r.get("isContainer")
+        ]
+        return {
+            "id": pr_id,
+            "title": target.get("title") or "",
+            "author": (target.get("createdBy") or {}).get("displayName") or "",
+            "source": (target.get("sourceRefName") or "").removeprefix("refs/heads/"),
+            "target": (target.get("targetRefName") or "").removeprefix("refs/heads/"),
+            "is_draft": bool(target.get("isDraft")),
+            "reviewers": reviewers,
+        }
+
     async def _run(self) -> None:
         self._log.info("reviewer tracker started — watching PR reviewer lists")
         while True:

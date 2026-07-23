@@ -38,6 +38,8 @@ _HELP_TEXT = (
     "- `/prs` — PR bạn là author hoặc reviewer, kèm tình trạng vote\n"
     "- `/review <repo> <pr-id>` — yêu cầu bot review lại PR ngay (bot phải đã là "
     "reviewer trên PR đó)\n"
+    "- `/pr <repo> <pr-id>` — xem chi tiết BẤT KỲ PR nào (không chỉ của bạn)\n"
+    "- `/item <id>` — xem chi tiết BẤT KỲ work item nào\n"
     "- `/log <mô tả>` — tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)\n"
     "- `/status` — tình trạng hoạt động\n"
     "- `/help` — bảng lệnh này\n\n"
@@ -198,6 +200,25 @@ async def _send_log_confirm_card(context, title: str) -> None:
 
 _REVIEW_RE = re.compile(r"^/review\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _LOG_RE = re.compile(r"^/log\s+(.+)$", re.IGNORECASE | re.DOTALL)
+_PR_LOOKUP_RE = re.compile(r"^/pr\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
+_ITEM_LOOKUP_RE = re.compile(r"^/item\s+(\d+)\s*$", re.IGNORECASE)
+
+
+def _format_pr_detail(detail: dict) -> str:
+    draft = " (draft)" if detail["is_draft"] else ""
+    lines = [
+        f"🔀 **PR !{detail['id']}{draft}** — {detail['title']}",
+        f"Author: {detail['author']} · `{detail['source']}` → `{detail['target']}`",
+    ]
+    if detail["reviewers"]:
+        lines.append("Reviewers:")
+        lines.extend(
+            f"- {r['name']}: {_VOTE_SHORT.get(r['vote'], str(r['vote']))}"
+            for r in detail["reviewers"]
+        )
+    else:
+        lines.append("Chưa có reviewer nào.")
+    return "\n".join(lines)
 
 
 async def _handle_command(
@@ -233,7 +254,44 @@ async def _handle_command(
     if m:
         await _send_log_confirm_card(context, m.group(1).strip())
         return
+    m = _PR_LOOKUP_RE.match(text.strip())
+    if m:
+        repo_name, pr_id = m.group(1), int(m.group(2))
+        repo_id = await _resolve_repo_id(container, repo_name)
+        if repo_id is None:
+            await context.send_activity(f"Không tìm thấy repo `{repo_name}`.")
+            return
+        detail = await reviewer_tracker.pr_detail(repo_id, pr_id)
+        if detail is None:
+            await context.send_activity(
+                f"PR !{pr_id} không tìm thấy hoặc không còn active trong `{repo_name}`."
+            )
+            return
+        await context.send_activity(_format_pr_detail(detail))
+        return
+    m = _ITEM_LOOKUP_RE.match(text.strip())
+    if m:
+        wid = int(m.group(1))
+        item = await container.ado.get_work_item(wid)
+        if item is None:
+            await context.send_activity(f"Không tìm thấy work item #{wid}.")
+            return
+        await context.send_activity(
+            f"#{item.id} [{item.work_item_type}] {item.title}\n"
+            f"- Trạng thái: **{item.state}**\n"
+            f"- Assigned to: {item.assigned_to or '(chưa gán)'}"
+        )
+        return
     await _handle_free_text(context, config, container, reviewer_tracker, text)
+
+
+def _as_int(value: Any) -> int | None:
+    """Best-effort int parse of the classifier's ``filter`` value (a string like
+    "2261", occasionally already a number) — None on anything unparseable."""
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 async def _resolve_repo_id(container: Container, repo_name: str) -> str | None:
@@ -369,11 +427,18 @@ không có khả năng và không được phép sửa code, vote, merge hay tha
 
 Phân loại tin nhắn của người dùng vào ĐÚNG MỘT trong các intent sau, và trả về \
 CHÍNH XÁC một dòng JSON, không kèm giải thích, không markdown:
-{{"intent": "items|prs|status|help|unknown", "filter": null hoặc "blocked"|"pending"|"approved" (cho prs) hoặc một từ khoá trạng thái (cho items)}}
+{{"intent": "items|prs|pr_lookup|item_lookup|status|help|unknown", "filter": null \
+hoặc giá trị tương ứng bên dưới}}
 
-- "items": người dùng muốn xem WORK ITEM của chính họ trong Azure DevOps.
-- "prs": người dùng muốn xem PULL REQUEST họ là author hoặc reviewer. filter là \
-"blocked" (bị từ chối/waiting), "pending" (chưa vote), "approved", hoặc null.
+- "items": người dùng muốn xem WORK ITEM CỦA CHÍNH HỌ. filter = null hoặc từ khoá \
+trạng thái.
+- "prs": người dùng muốn xem PULL REQUEST họ là author/reviewer (KHÔNG chỉ định số PR \
+cụ thể). filter = "blocked" (bị từ chối/waiting), "pending" (chưa vote), "approved", \
+hoặc null.
+- "pr_lookup": người dùng hỏi về MỘT PR CỤ THỂ theo số (vd "PR 2261", "PR !2261 sao \
+rồi"), không phân biệt của ai. filter = số PR đó dạng chuỗi (vd "2261").
+- "item_lookup": người dùng hỏi về MỘT work item CỤ THỂ theo số (vd "work item #6753", \
+"ticket 6753"), không phân biệt của ai. filter = số đó dạng chuỗi.
 - "status": hỏi tình trạng hoạt động chung.
 - "help": muốn xem danh sách lệnh.
 - "unknown": MỌI yêu cầu khác — đặc biệt là bất kỳ yêu cầu THAY ĐỔI/SỬA/VOTE/MERGE/\
@@ -382,7 +447,7 @@ APPROVE/REJECT/COMMIT/PUSH nào — luôn phân vào "unknown", không tự bị
 Tin nhắn: {text}"""
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
-_ALLOWED_INTENTS = {"items", "prs", "status", "help", "unknown"}
+_ALLOWED_INTENTS = {"items", "prs", "pr_lookup", "item_lookup", "status", "help", "unknown"}
 
 
 async def _classify_intent(config: Settings, text: str) -> dict:
@@ -485,6 +550,25 @@ async def _handle_free_text(
             return
         vf = flt if flt in ("blocked", "pending", "approved") else None
         _, bullets = _format_prs(prs, vf)
+        await context.send_activity(await _phrase_natural(config, text, bullets))
+    elif intent == "pr_lookup":
+        pr_id = _as_int(flt)
+        if pr_id is None:
+            await context.send_activity("Không nhận diện được số PR — gõ rõ hơn nhé.")
+            return
+        detail = await reviewer_tracker.find_pr_by_id(pr_id)
+        bullets = _format_pr_detail(detail) if detail else f"(không tìm thấy PR !{pr_id} đang active)"
+        await context.send_activity(await _phrase_natural(config, text, bullets))
+    elif intent == "item_lookup":
+        wid = _as_int(flt)
+        if wid is None:
+            await context.send_activity("Không nhận diện được số work item — gõ rõ hơn nhé.")
+            return
+        item = await container.ado.get_work_item(wid)
+        bullets = (
+            f"#{item.id} [{item.work_item_type}] {item.title} — {item.state}, "
+            f"assigned to {item.assigned_to or '(chưa gán)'}"
+        ) if item else f"(không tìm thấy work item #{wid})"
         await context.send_activity(await _phrase_natural(config, text, bullets))
     elif intent == "status":
         await context.send_activity(

@@ -234,28 +234,54 @@ def _fmt_wi_list(items: list, limit: int = 5) -> str:
     return text + (f" (+{extra} nữa)" if extra > 0 else "")
 
 
-async def _team_standup(container: Container) -> dict[str, dict[str, list]]:
-    """Every work item in the project, grouped by assignee and bucketed by ADO state
-    category: done-in-the-last-2-days / in-progress / not-started. Best-effort —
-    returns {} on any fetch failure so the digest degrades to its other sections."""
+async def _active_pr_work_item_map(container: Container) -> dict[int, dict]:
+    """work_item_id → its (non-draft) active PR, for every PR whose branch encodes a
+    work item id — the signal for "code done, waiting on PR merge" that a work item's
+    own ADO state can't reliably tell you (the poller may not have moved it yet)."""
+    from ai_autopilot.services.pr_feedback import parse_work_item_id
+
+    mapping: dict[int, dict] = {}
+    for repo in await container.ado.get_repositories():
+        repo_id = repo.get("id")
+        if not repo_id:
+            continue
+        for pr in await container.ado.get_active_pull_requests(repo_id):
+            if pr.get("isDraft"):
+                continue
+            wid = parse_work_item_id(pr.get("sourceRefName", ""))
+            if wid is not None:
+                mapping[wid] = pr
+    return mapping
+
+
+async def _team_standup(container: Container, cutoff: datetime) -> dict[str, dict[str, list]]:
+    """Every work item in the project changed within ``cutoff``, grouped by assignee
+    and bucketed: done / merge_pending (done but its PR hasn't merged yet) /
+    in-progress / not-started. Best-effort — returns {} on any fetch failure so the
+    digest degrades to its other sections."""
     try:
         items = await container.ado.get_all_active_work_items(top=300)
         categories = await container.ado.get_state_categories()
+        pr_map = await _active_pr_work_item_map(container)
     except Exception as exc:  # noqa: BLE001 — one failed section must not break the digest
         _log.warning("team standup fetch failed", error=str(exc))
         return {}
-    cutoff = datetime.now(UTC) - timedelta(days=2)
     by_person: dict[str, dict[str, list]] = {}
     for it in items:
-        person = it.assigned_to or "(chưa gán)"
-        bucket = by_person.setdefault(person, {"done": [], "active": [], "todo": []})
-        category = categories.get(it.state, "")
         changed = it.changed_date.replace(tzinfo=UTC) if (
             it.changed_date and it.changed_date.tzinfo is None
         ) else it.changed_date
-        if category in ("Resolved", "Completed"):
-            if changed is not None and changed >= cutoff:
-                bucket["done"].append(it)
+        if changed is None or changed < cutoff:
+            continue
+        person = it.assigned_to or "(chưa gán)"
+        bucket = by_person.setdefault(
+            person, {"done": [], "merge_pending": [], "active": [], "todo": []}
+        )
+        category = categories.get(it.state, "")
+        if it.id in pr_map:
+            bucket["merge_pending"].append(it)
+        elif category in ("Resolved", "Completed"):
+            bucket["done"].append(it)
         elif category == "InProgress":
             bucket["active"].append(it)
         elif category == "Proposed":
@@ -266,17 +292,21 @@ async def _team_standup(container: Container) -> dict[str, dict[str, list]]:
 def _format_standup(by_person: dict[str, dict[str, list]]) -> str:
     lines = []
     for person, buckets in sorted(by_person.items()):
-        done, active, todo = buckets["done"], buckets["active"], buckets["todo"]
-        if not (done or active or todo):
+        done = buckets["done"]
+        merge_pending = buckets["merge_pending"]
+        active, todo = buckets["active"], buckets["todo"]
+        if not (done or merge_pending or active or todo):
             continue
         lines.append(f"**{person}**")
         if done:
-            lines.append(f"  ✅ Hoàn thành gần đây: {_fmt_wi_list(done)}")
+            lines.append(f"  ✅ Hoàn thành: {_fmt_wi_list(done)}")
+        if merge_pending:
+            lines.append(f"  ⏳ Hoàn thành, chờ merge PR: {_fmt_wi_list(merge_pending)}")
         if active:
             lines.append(f"  🔧 Đang làm: {_fmt_wi_list(active)}")
         if todo:
             lines.append(f"  📋 Chưa làm: {_fmt_wi_list(todo)}")
-    return "\n".join(lines) if lines else "(không có dữ liệu work item)"
+    return "\n".join(lines) if lines else "(không có work item nào thay đổi trong 24h qua)"
 
 
 def _format_pr_stub_list(prs: list[dict]) -> str:
@@ -349,10 +379,11 @@ async def _send_digest(
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: team overview failed", error=str(exc))
 
-    # 7. Work items by person — done / active / todo (current snapshot).
+    # 7. Work items by person, changed in the last 24h — done / merge-pending /
+    #    active / todo. Same cutoff as every other 24h section above.
     try:
-        standup = await _team_standup(container)
-        parts.append(f"👤 **Work item theo người**\n{_format_standup(standup)}")
+        standup = await _team_standup(container, cutoff)
+        parts.append(f"👤 **Work item theo người (24h)**\n{_format_standup(standup)}")
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: standup failed", error=str(exc))
 

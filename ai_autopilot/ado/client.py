@@ -307,12 +307,17 @@ class AdoClient:
         return resp.status_code < 400
 
     async def create_work_item(
-        self, title: str, item_type: str, parent_id: int | None, tag: str
+        self, title: str, item_type: str, parent_id: int | None, tag: str,
+        description: str = "",
     ) -> int:
         patch: list[dict[str, Any]] = [
             {"op": "add", "path": "/fields/System.Title", "value": title},
             {"op": "add", "path": "/fields/System.Tags", "value": tag},
         ]
+        if description:
+            patch.append(
+                {"op": "add", "path": "/fields/System.Description", "value": description}
+            )
         if parent_id is not None:
             patch.append(
                 {

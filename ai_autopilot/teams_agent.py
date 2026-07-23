@@ -37,6 +37,7 @@ _HELP_TEXT = (
     "- `/prs` — PR bạn là author hoặc reviewer, kèm tình trạng vote\n"
     "- `/review <repo> <pr-id>` — yêu cầu bot review lại PR ngay (bot phải đã là "
     "reviewer trên PR đó)\n"
+    "- `/log <mô tả>` — tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)\n"
     "- `/status` — tình trạng hoạt động\n"
     "- `/help` — bảng lệnh này\n\n"
     "💬 Cũng có thể gõ tự nhiên để hỏi (chỉ tra cứu, KHÔNG sửa/vote/merge được qua "
@@ -116,25 +117,86 @@ async def _handle_turn(
     activity = context.activity
     payload: dict[str, Any] | None = getattr(activity, "value", None)
     if payload:
-        await _handle_action(context, reviewer_tracker, payload)
+        await _handle_action(context, container, reviewer_tracker, payload)
         return
     await _handle_command(context, config, container, reviewer_tracker, (activity.text or "").strip())
 
 
-async def _handle_action(context, reviewer_tracker: ReviewerTrackerService, payload: dict) -> None:
-    """An Adaptive Card ``Action.Submit`` — currently only ``reverify`` (re-run the
-    bot's own review on demand). See module docstring: never impersonates the human
-    who clicked."""
+async def _handle_action(
+    context, container: Container, reviewer_tracker: ReviewerTrackerService, payload: dict
+) -> None:
+    """An Adaptive Card ``Action.Submit`` — ``reverify`` (re-run the bot's own review
+    on demand) or ``log_confirm``/``log_cancel`` (the /log ticket confirmation card).
+    See module docstring: never impersonates the human who clicked — reverify votes as
+    the bot itself, and log_confirm creates an administrative record, not code/votes."""
     action = str(payload.get("action") or "").lower()
-    repo_id, pr_id = payload.get("repo_id"), payload.get("pr_id")
-    if action != "reverify" or not (repo_id and pr_id):
-        await context.send_activity("Không nhận diện được hành động trên card này.")
+    if action == "reverify":
+        repo_id, pr_id = payload.get("repo_id"), payload.get("pr_id")
+        if not (repo_id and pr_id):
+            await context.send_activity("Không nhận diện được hành động trên card này.")
+            return
+        status = await reviewer_tracker.trigger_review_now(str(repo_id), int(pr_id))
+        await context.send_activity(status)
         return
-    status = await reviewer_tracker.trigger_review_now(str(repo_id), int(pr_id))
-    await context.send_activity(status)
+    if action == "log_confirm":
+        await _create_logged_ticket(context, container, str(payload.get("title") or ""))
+        return
+    if action == "log_cancel":
+        await context.send_activity("Đã hủy — không tạo ticket.")
+        return
+    await context.send_activity("Không nhận diện được hành động trên card này.")
+
+
+async def _create_logged_ticket(context, container: Container, title: str) -> None:
+    title = title.strip()
+    if not title:
+        await context.send_activity("⚠️ Thiếu nội dung ticket.")
+        return
+    email = await _teams_email(context) or "Teams"
+    wid = await container.ado.create_work_item(
+        title=title, item_type="Requirement", parent_id=None, tag="teams-logged",
+        description=f"Logged via Microsoft Teams by {email}.",
+    )
+    if not wid:
+        await context.send_activity("⚠️ Không tạo được work item — kiểm tra log server.")
+        return
+    org = container.config.ado_organization.rstrip("/")
+    project = container.config.ado_project
+    await context.send_activity(
+        f"✅ Đã tạo **Requirement #{wid}** — {org}/{project}/_workitems/edit/{wid}"
+    )
+
+
+async def _send_log_confirm_card(context, title: str) -> None:
+    """Confirmation card before creating a work item — this IS a real reply within the
+    bot's own conversation (unlike the one-way Teams-webhook reminder card), so
+    Action.Submit on it correctly round-trips back to /api/messages."""
+    from microsoft_agents.hosting.core import CardFactory, MessageFactory
+
+    card = {
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "body": [
+            {
+                "type": "TextBlock", "weight": "Bolder", "wrap": True,
+                "text": "📝 Xác nhận tạo Requirement mới?",
+            },
+            {"type": "TextBlock", "wrap": True, "text": title},
+        ],
+        "actions": [
+            {
+                "type": "Action.Submit", "title": "✅ Xác nhận",
+                "data": {"action": "log_confirm", "title": title},
+            },
+            {"type": "Action.Submit", "title": "❌ Hủy", "data": {"action": "log_cancel"}},
+        ],
+    }
+    await context.send_activity(MessageFactory.attachment(CardFactory.adaptive_card(card)))
 
 
 _REVIEW_RE = re.compile(r"^/review\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
+_LOG_RE = re.compile(r"^/log\s+(.+)$", re.IGNORECASE | re.DOTALL)
 
 
 async def _handle_command(
@@ -165,6 +227,10 @@ async def _handle_command(
             return
         status = await reviewer_tracker.trigger_review_now(repo_id, pr_id)
         await context.send_activity(status)
+        return
+    m = _LOG_RE.match(text.strip())
+    if m:
+        await _send_log_confirm_card(context, m.group(1).strip())
         return
     await _handle_free_text(context, config, container, reviewer_tracker, text)
 

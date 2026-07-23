@@ -132,6 +132,11 @@ FIELDS: tuple[Field, ...] = (
     Field("autonomy_level", "Autonomy level", "select", "Execution & Autonomy",
           "report = comment only, assisted = draft PR, unattended = auto PR.",
           ("report", "assisted", "unattended")),
+    Field("claude_model", "Claude model", "select", "Execution & Autonomy",
+          "Model the CLI runs each task with. Blank = the bundled CLI's own default — NOT "
+          "guaranteed to stay the same across CLI updates. Pick one explicitly for "
+          "predictable cost/speed/quality.",
+          ("", "sonnet", "opus", "fable", "haiku")),
     Field("use_worktrees", "Isolate tasks (git worktree)", "bool", "Execution & Autonomy",
           "Run each task in its own git worktree so concurrent tasks never touch your main "
           "checkout. Turn off to run in-place in the shared workspace."),
@@ -256,13 +261,30 @@ FIELDS: tuple[Field, ...] = (
     Field("planning_start_state", "Start → state", "stateone", "Planning workbench",
           "State the Start action moves an item to (so the poller picks it up) if it isn't "
           "already in a trigger state. Blank = the first trigger state."),
+    # ── Notifications ──
+    Field("teams_webhook_url", "MS Teams webhook URL", "password", "Notifications",
+          "One-way channel: Teams Workflows \"Post to a channel when a webhook request is "
+          "received\" URL. Started/completed/error notices and reviewer reminders post here. "
+          "Blank = Teams notifications off."),
+    Field("smtp_host", "SMTP host", "text", "Notifications", "Blank = email off."),
+    Field("smtp_port", "SMTP port", "int", "Notifications", "Default 587 (STARTTLS)."),
+    Field("smtp_user", "SMTP user", "text", "Notifications"),
+    Field("smtp_password", "SMTP password", "password", "Notifications"),
+    Field("email_from", "Email from", "text", "Notifications"),
+    Field("email_to", "Email to", "text", "Notifications", "Recipient address(es)."),
+    Field("zalo_oa_access_token", "Zalo OA access token", "password", "Notifications",
+          "Blank = Zalo off."),
+    Field("zalo_recipient_user_id", "Zalo recipient user id", "text", "Notifications"),
 )
 
 # Fields that only take effect after a restart (the value is captured at startup).
 RESTART_REQUIRED = frozenset({"max_concurrent"})
 
 # Never echo these values back into the form.
-SECRET_KEYS = frozenset({"ado_pat", "teams_agent_app_secret"})
+SECRET_KEYS = frozenset({
+    "ado_pat", "teams_agent_app_secret",
+    "teams_webhook_url", "smtp_password", "zalo_oa_access_token",
+})
 
 # Keys excluded from an exported/shared config. Everything else in the Settings
 # model IS exported, so new config knobs are shared automatically. Two groups:

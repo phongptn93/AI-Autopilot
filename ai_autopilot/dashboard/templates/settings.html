@@ -141,7 +141,7 @@
             </select>
           {% elif f.kind == 'password' %}
             <input type="password" id="{{ f.key }}" name="{{ f.key }}"
-                   placeholder="{{ '•••••• set — leave blank to keep' if has_pat else 'not set' }}" autocomplete="off" />
+                   placeholder="{{ '•••••• set — leave blank to keep' if secrets_set.get(f.key) else 'not set' }}" autocomplete="off" />
           {% elif f.kind == 'int' %}
             <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
           {% elif f.kind == 'list' %}

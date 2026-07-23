@@ -730,6 +730,10 @@ def create_dashboard_router() -> APIRouter:
             if f.key not in settings_form.SECRET_KEYS
         }
         has_pat = bool(getattr(c.config, "ado_pat", ""))
+        secrets_set = {
+            key: bool(getattr(c.config, key, ""))
+            for key in settings_form.SECRET_KEYS
+        }
         cfg = c.config
         # Read-only overview of every ADO tag the autopilot writes/reads — so the
         # whole tag vocabulary is visible in one place (not scattered across fields).
@@ -763,6 +767,7 @@ def create_dashboard_router() -> APIRouter:
                 sections=settings_form.sections(),
                 current=current,
                 has_pat=has_pat,
+                secrets_set=secrets_set,
                 restart_keys=settings_form.RESTART_REQUIRED,
                 saved=bool(saved),
                 reloaded=bool(reloaded),

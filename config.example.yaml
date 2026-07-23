@@ -99,6 +99,13 @@ pr_bot_identity: ""                  # blank = auto-detect the PAT's own identit
 # Only track/review/show PRs merging INTO these target branches. Empty = all targets.
 pr_reviewer_target_branches: []      # e.g. ["dxfac/development", "main"]
 
+# ── Two-way Microsoft Teams bot (optional, `pip install .[teams-bot]`) ──
+# App ID / secret / tenant are NOT set here — see .env.example (secrets never in
+# config.yaml). This only toggles the feature; the bot stays off if those three
+# values aren't also present.
+teams_agent_enabled: false
+teams_agent_nlu_enabled: true         # free-text read-only queries when enabled above
+
 # ── Dependency-aware scheduling (P1) ──
 # Order work by the ADO link graph instead of dispatching every pending item at
 # once. An item waits for its Predecessor links (Dependency-Reverse) to be done;

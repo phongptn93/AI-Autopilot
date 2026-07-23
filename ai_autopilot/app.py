@@ -16,6 +16,7 @@ from ai_autopilot.services import (
     AdoPollerService,
     LoopScheduler,
     PrMonitorService,
+    ReviewerTrackerService,
     StateSyncService,
 )
 
@@ -35,10 +36,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pr_monitor = PrMonitorService(container)
         app.state.pr_monitor = pr_monitor  # webhook fast-path targets it directly
         state_sync = StateSyncService(container)
+        reviewer_tracker = ReviewerTrackerService(container)
         loops = LoopScheduler(container)
         poller.start()
         pr_monitor.start()
         state_sync.start()
+        reviewer_tracker.start()
         loops.start()
         log.info("autopilot online", health_port=config.health_port)
         try:
@@ -47,6 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await poller.stop()
             await pr_monitor.stop()
             await state_sync.stop()
+            await reviewer_tracker.stop()
             await loops.stop()
             await container.shutdown()
             log.info("autopilot stopped")

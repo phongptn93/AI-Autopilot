@@ -70,27 +70,39 @@ class TeamsNotifier(NotificationChannel):
         if message.error:
             facts.append({"title": "Error", "value": message.error})
 
+        # Call-to-action buttons — jump straight to the PR / dashboard from Teams.
+        # (Action.OpenUrl works from webhook-posted cards; POST-back actions would need
+        # a full Bot Framework bot, which this channel intentionally avoids.)
+        actions = [
+            {"type": "Action.OpenUrl", "title": label, "url": url}
+            for label, url in (message.actions or [])
+            if url
+        ]
+        content: dict = {
+            "type": "AdaptiveCard",
+            "body": [
+                {
+                    "type": "TextBlock",
+                    "size": "Medium",
+                    "weight": "Bolder",
+                    "text": message.title,
+                    "color": color,
+                    "wrap": True,
+                },
+                {"type": "FactSet", "facts": facts},
+            ],
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4",
+        }
+        if actions:
+            content["actions"] = actions
         return {
             "type": "message",
             "attachments": [
                 {
                     "contentType": "application/vnd.microsoft.card.adaptive",
                     "contentUrl": None,
-                    "content": {
-                        "type": "AdaptiveCard",
-                        "body": [
-                            {
-                                "type": "TextBlock",
-                                "size": "Medium",
-                                "weight": "Bolder",
-                                "text": message.title,
-                                "color": color,
-                            },
-                            {"type": "FactSet", "facts": facts},
-                        ],
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "version": "1.4",
-                    },
+                    "content": content,
                 }
             ],
         }

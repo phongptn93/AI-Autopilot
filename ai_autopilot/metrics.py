@@ -30,6 +30,37 @@ ACTIVE_EXECUTIONS = Gauge(
 RETRY_TOTAL = Counter("autopilot_retry_total", "Total retry attempts")
 COST_TOKENS_TOTAL = Counter("autopilot_cost_tokens_total", "Total tokens consumed")
 
+# ── PR reviewer tracking ──
+AUTO_REVIEWS_TOTAL = Counter(
+    "autopilot_auto_reviews_total", "PR auto-reviews run", ["outcome"]  # done|failed|skipped
+)
+VOTES_CAST_TOTAL = Counter(
+    "autopilot_pr_votes_total", "PR votes the bot cast", ["vote"]  # approved|suggestions|wait
+)
+REVIEWER_REMINDERS_TOTAL = Counter(
+    "autopilot_reviewer_reminders_total", "Overdue-reviewer reminders sent"
+)
+PR_COMMANDS_TOTAL = Counter(
+    "autopilot_pr_commands_total", "Interactive PR commands handled", ["command"]
+)
+
+
+def record_auto_review(outcome: str) -> None:
+    AUTO_REVIEWS_TOTAL.labels(outcome).inc()
+
+
+def record_vote(vote: str) -> None:
+    VOTES_CAST_TOTAL.labels(vote).inc()
+
+
+def record_reminder(n: int = 1) -> None:
+    if n:
+        REVIEWER_REMINDERS_TOTAL.inc(n)
+
+
+def record_pr_command(command: str) -> None:
+    PR_COMMANDS_TOTAL.labels(command or "unknown").inc()
+
 
 def record_task(status: str, category: str, skill: str) -> None:
     TASKS_TOTAL.labels(status, category, skill).inc()

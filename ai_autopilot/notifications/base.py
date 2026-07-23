@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 
@@ -13,6 +13,7 @@ class NotificationType(enum.Enum):
     STARTED = "Started"
     COMPLETED = "Completed"
     ERROR = "Error"
+    REMINDER = "Reminder"
 
 
 @dataclass
@@ -22,6 +23,9 @@ class NotificationMessage:
     skill: str = ""
     result: ExecutionResult | None = None
     error: str | None = None
+    # Optional call-to-action links (label, url) rendered as buttons on channels that
+    # support them (Teams Adaptive Card Action.OpenUrl). E.g. ("Open PR", "https://…").
+    actions: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def title(self) -> str:
@@ -36,6 +40,8 @@ class NotificationMessage:
             )
         if self.type is NotificationType.ERROR:
             return f"⚠️ Error #{wid}"
+        if self.type is NotificationType.REMINDER:
+            return f"👋 Review reminder — PR !{wid}"
         return f"📋 #{wid}"
 
     @property

@@ -24,7 +24,7 @@ import contextlib
 import json
 import re
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ai_autopilot.config import Settings
@@ -200,8 +200,8 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
     digest_task = None
     if config.teams_agent_digest_interval_hours > 0:
         digest_task = asyncio.create_task(
-            _digest_loop(config, app, adapter, reviewer_tracker, conversation_storage,
-                         MessageFactory),
+            _digest_loop(config, container, app, adapter, reviewer_tracker,
+                         conversation_storage, MessageFactory),
             name="teams-digest",
         )
 
@@ -210,30 +210,153 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
 
 
 async def _digest_loop(
-    config: Settings, app, adapter, reviewer_tracker: ReviewerTrackerService,
-    storage: _DbConversationStorage, message_factory,
+    config: Settings, container: Container, app, adapter,
+    reviewer_tracker: ReviewerTrackerService, storage: _DbConversationStorage,
+    message_factory,
 ) -> None:
     interval = config.teams_agent_digest_interval_hours
     while True:
         try:
             await asyncio.sleep(interval * 3600)
-            await _send_digest(app, adapter, reviewer_tracker, storage, message_factory)
+            await _send_digest(container, app, adapter, reviewer_tracker, storage, message_factory)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — one bad cycle must not kill the loop
             _log.error("Teams digest cycle failed", error=str(exc))
 
 
+# ── Full daily digest — activity stats + team standup + PR sections ──────────
+
+def _fmt_wi_list(items: list, limit: int = 5) -> str:
+    shown = items[:limit]
+    text = ", ".join(f"#{it.id} {it.title}" for it in shown)
+    extra = len(items) - limit
+    return text + (f" (+{extra} nữa)" if extra > 0 else "")
+
+
+async def _team_standup(container: Container) -> dict[str, dict[str, list]]:
+    """Every work item in the project, grouped by assignee and bucketed by ADO state
+    category: done-in-the-last-2-days / in-progress / not-started. Best-effort —
+    returns {} on any fetch failure so the digest degrades to its other sections."""
+    try:
+        items = await container.ado.get_all_active_work_items(top=300)
+        categories = await container.ado.get_state_categories()
+    except Exception as exc:  # noqa: BLE001 — one failed section must not break the digest
+        _log.warning("team standup fetch failed", error=str(exc))
+        return {}
+    cutoff = datetime.now(UTC) - timedelta(days=2)
+    by_person: dict[str, dict[str, list]] = {}
+    for it in items:
+        person = it.assigned_to or "(chưa gán)"
+        bucket = by_person.setdefault(person, {"done": [], "active": [], "todo": []})
+        category = categories.get(it.state, "")
+        changed = it.changed_date.replace(tzinfo=UTC) if (
+            it.changed_date and it.changed_date.tzinfo is None
+        ) else it.changed_date
+        if category in ("Resolved", "Completed"):
+            if changed is not None and changed >= cutoff:
+                bucket["done"].append(it)
+        elif category == "InProgress":
+            bucket["active"].append(it)
+        elif category == "Proposed":
+            bucket["todo"].append(it)
+    return by_person
+
+
+def _format_standup(by_person: dict[str, dict[str, list]]) -> str:
+    lines = []
+    for person, buckets in sorted(by_person.items()):
+        done, active, todo = buckets["done"], buckets["active"], buckets["todo"]
+        if not (done or active or todo):
+            continue
+        lines.append(f"**{person}**")
+        if done:
+            lines.append(f"  ✅ Hoàn thành gần đây: {_fmt_wi_list(done)}")
+        if active:
+            lines.append(f"  🔧 Đang làm: {_fmt_wi_list(active)}")
+        if todo:
+            lines.append(f"  📋 Chưa làm: {_fmt_wi_list(todo)}")
+    return "\n".join(lines) if lines else "(không có dữ liệu work item)"
+
+
+def _format_pr_stub_list(prs: list[dict]) -> str:
+    if not prs:
+        return "(không có)"
+    return "\n".join(f"- !{p['id']} {p['repo']} — {p['title']} · {p['author']}" for p in prs)
+
+
 async def _send_digest(
-    app, adapter, reviewer_tracker: ReviewerTrackerService,
+    container: Container, app, adapter, reviewer_tracker: ReviewerTrackerService,
     storage: _DbConversationStorage, message_factory,
 ) -> None:
-    prs = await reviewer_tracker.team_overview(limit=10)
-    bullets = _format_team_overview(prs)
-    text = (
-        f"📊 **Digest hàng ngày — PR active, cũ nhất trước** ({len(prs)})\n{bullets}"
-        if prs else "📊 Digest hàng ngày — không có PR active nào."
-    )
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
+    parts: list[str] = ["📊 **Digest hàng ngày — AI Autopilot**"]
+
+    # 1. Autopilot execution activity (24h).
+    try:
+        stats = await container.execution_repo.get_stats(since=cutoff)
+        parts.append(
+            f"🤖 **Hoạt động autopilot (24h)**: {stats.total} task · "
+            f"✅ {stats.success} thành công · ❌ {stats.failed} thất bại"
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("digest: execution stats failed", error=str(exc))
+
+    # 2. Auto-review + reminders sent (24h) — from the reviewer tracker's own records.
+    try:
+        reviewer_repo = getattr(container, "pr_reviewer_repo", None)
+        if reviewer_repo is not None:
+            reviewed_n = await reviewer_repo.count_reviewed_since(cutoff)
+            reminded_n = await reviewer_repo.count_reminded_since(cutoff)
+            parts.append(
+                f"🔍 **Reviewer tracking (24h)**: bot tự review {reviewed_n} PR · "
+                f"👋 nhắc {reminded_n} reviewer quá hạn"
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("digest: reviewer stats failed", error=str(exc))
+
+    # 3. New / merged PRs (24h).
+    try:
+        new_prs = await reviewer_tracker.new_prs_since(cutoff)
+        merged_prs = await reviewer_tracker.merged_prs_since(cutoff)
+        parts.append(
+            f"🔀 **PR (24h)**: {len(new_prs)} mới mở · {len(merged_prs)} đã merge"
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("digest: PR activity failed", error=str(exc))
+
+    # 4. Tickets logged via /log (24h).
+    try:
+        logged = await reviewer_tracker.tickets_logged_since(cutoff)
+        if logged:
+            parts.append(f"📝 **Ticket log qua Teams (24h)**: {_fmt_wi_list(logged, limit=10)}")
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("digest: logged tickets failed", error=str(exc))
+
+    # 5. PRs ready to merge (not time-boxed — this is a current snapshot).
+    try:
+        ready = await reviewer_tracker.prs_ready_to_merge()
+        parts.append(f"✅ **PR sẵn sàng merge** ({len(ready)})\n{_format_pr_stub_list(ready)}")
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("digest: ready-to-merge failed", error=str(exc))
+
+    # 6. Oldest active PRs (current snapshot — what's stuck).
+    try:
+        oldest = await reviewer_tracker.team_overview(limit=10)
+        parts.append(
+            f"🕰️ **PR active cũ nhất** ({len(oldest)})\n{_format_team_overview(oldest)}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("digest: team overview failed", error=str(exc))
+
+    # 7. Work items by person — done / active / todo (current snapshot).
+    try:
+        standup = await _team_standup(container)
+        parts.append(f"👤 **Work item theo người**\n{_format_standup(standup)}")
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("digest: standup failed", error=str(exc))
+
+    text = "\n\n".join(parts)
     keys = await storage.all_keys()
     sent, failed = 0, 0
     for key in keys:

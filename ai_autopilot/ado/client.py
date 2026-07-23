@@ -214,6 +214,67 @@ class AdoClient:
         ids = [r["id"] for r in (resp.json().get("workItems") or [])]
         return await self.get_work_items_by_ids(ids)
 
+    async def get_all_active_work_items(self, top: int = 300) -> list[WorkItemInfo]:
+        """Every work item in the project (ANY tag, ANY assignee), most-recently
+        changed first — unlike ``get_pending_work_items``/``get_all_tagged_work_items``
+        (both scoped to the trigger tag). Used by the Teams digest's team-standup
+        report. Client-side capped at ``top`` (WIQL has no LIMIT clause) — logs when
+        the true match count exceeds it so truncation is never silent."""
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems "
+            f"WHERE [System.TeamProject] = '{self._config.ado_project}' "
+            "ORDER BY [System.ChangedDate] DESC"
+        )
+        try:
+            resp = await self._http.post(
+                self._url(f"wit/wiql?{_API}"), json={"query": wiql}, headers=await self._headers()
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("get_all_active_work_items request error", error=str(exc))
+            return []
+        text = resp.text.lstrip()
+        if resp.status_code >= 400 or not text.startswith("{"):
+            self._log.warning("get_all_active_work_items failed", status=resp.status_code)
+            return []
+        all_ids = [r["id"] for r in (resp.json().get("workItems") or [])]
+        if len(all_ids) > top:
+            self._log.info(
+                "get_all_active_work_items truncated", matched=len(all_ids), returned=top,
+            )
+        return await self.get_work_items_by_ids(all_ids[:top])
+
+    async def get_state_categories(self) -> dict[str, str]:
+        """State name → ADO state category (``Proposed``/``InProgress``/``Resolved``/
+        ``Completed``/``Removed``). Best-effort — ``{}`` on any error."""
+        out: dict[str, str] = {}
+        try:
+            resp = await self._http.get(
+                self._url(f"wit/workitemtypes?{_API}"), headers=await self._auth.get_auth_header()
+            )
+            if resp.status_code >= 400:
+                self._log.warning("get_state_categories: list types failed", status=resp.status_code)
+                return {}
+            types = [
+                t["name"]
+                for t in (resp.json().get("value") or [])
+                if t.get("name") and not t.get("isDisabled")
+            ]
+            for type_name in types:
+                sresp = await self._http.get(
+                    self._url(f"wit/workitemtypes/{quote(type_name, safe='')}/states?{_API}"),
+                    headers=await self._auth.get_auth_header(),
+                )
+                if sresp.status_code >= 400:
+                    continue
+                for s in sresp.json().get("value") or []:
+                    name = s.get("name")
+                    if name and name not in out:
+                        out[name] = s.get("stateCategory", "")
+        except httpx.HTTPError as exc:
+            self._log.warning("get_state_categories request error", error=str(exc))
+            return {}
+        return out
+
     async def get_work_items_by_ids(self, ids: list[int]) -> list[WorkItemInfo]:
         if not ids:
             return []

@@ -88,6 +88,18 @@ def _as_utc(dt: datetime | None) -> datetime | None:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
+def _parse_dt(value: str | None) -> datetime | None:
+    """Parse an ADO ISO-8601 timestamp (e.g. ``creationDate``) into a UTC-aware
+    datetime. None on missing/unparseable input — callers then skip the item rather
+    than guess a date."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 class ReviewerTrackerService:
     def __init__(self, c: Container) -> None:
         self._c = c
@@ -194,6 +206,95 @@ class ReviewerTrackerService:
                     "is_draft": bool(pr.get("isDraft")),
                 })
         return out
+
+    async def prs_ready_to_merge(self) -> list[dict]:
+        """Active, non-draft PRs with at least one approval and NOTHING blocking or
+        still pending — i.e. genuinely ready, not just "has an approval". Used by the
+        Teams digest."""
+        out: list[dict] = []
+        for repo in await self._c.ado.get_repositories():
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+            repo_name = repo.get("name") or ""
+            for pr in await self._c.ado.get_active_pull_requests(repo_id):
+                if pr.get("isDraft") or not self._config.target_in_scope(
+                    pr.get("targetRefName", "")
+                ):
+                    continue
+                reviewers = [
+                    r for r in (pr.get("reviewers") or [])
+                    if r.get("id") and not r.get("isContainer")
+                ]
+                votes = [int(r.get("vote") or 0) for r in reviewers]
+                if not votes:
+                    continue
+                approved = sum(1 for v in votes if v >= 5)
+                blocked = sum(1 for v in votes if v < 0)
+                pending = sum(1 for v in votes if v == 0)
+                if approved >= 1 and blocked == 0 and pending == 0:
+                    out.append({
+                        "id": pr.get("pullRequestId"),
+                        "title": pr.get("title") or "",
+                        "repo": repo_name,
+                        "author": (pr.get("createdBy") or {}).get("displayName") or "",
+                    })
+        return out
+
+    async def new_prs_since(self, cutoff: datetime) -> list[dict]:
+        """Active PRs created since ``cutoff`` — for the Teams digest's 24h activity."""
+        out: list[dict] = []
+        for repo in await self._c.ado.get_repositories():
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+            repo_name = repo.get("name") or ""
+            for pr in await self._c.ado.get_active_pull_requests(repo_id):
+                if not self._config.target_in_scope(pr.get("targetRefName", "")):
+                    continue
+                created = _parse_dt(pr.get("creationDate"))
+                if created is not None and created >= cutoff:
+                    out.append({
+                        "id": pr.get("pullRequestId"),
+                        "title": pr.get("title") or "",
+                        "repo": repo_name,
+                        "author": (pr.get("createdBy") or {}).get("displayName") or "",
+                    })
+        return out
+
+    async def merged_prs_since(self, cutoff: datetime) -> list[dict]:
+        """Completed PRs merged since ``cutoff``. ADO's PR payload has no
+        ``closedDate`` field (verified) — ``lastMergeCommit.committer.date`` is used
+        as the merge timestamp instead, which IS present on a completed PR."""
+        out: list[dict] = []
+        for repo in await self._c.ado.get_repositories():
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+            repo_name = repo.get("name") or ""
+            for pr in await self._c.ado.get_completed_pull_requests(repo_id):
+                if not self._config.target_in_scope(pr.get("targetRefName", "")):
+                    continue
+                merge_commit = pr.get("lastMergeCommit") or {}
+                merged_at = _parse_dt((merge_commit.get("committer") or {}).get("date"))
+                if merged_at is not None and merged_at >= cutoff:
+                    out.append({
+                        "id": pr.get("pullRequestId"),
+                        "title": pr.get("title") or "",
+                        "repo": repo_name,
+                        "author": (pr.get("createdBy") or {}).get("displayName") or "",
+                    })
+        return out
+
+    async def tickets_logged_since(self, cutoff: datetime) -> list:
+        """Work items tagged ``teams-logged`` (created via the Teams ``/log`` command)
+        changed since ``cutoff`` — for the Teams digest's 24h activity."""
+        items = await self._c.ado.get_all_active_work_items(top=300)
+        return [
+            it for it in items
+            if "teams-logged" in [t.lower() for t in it.tags]
+            and it.changed_date is not None and _as_utc(it.changed_date) >= cutoff
+        ]
 
     async def team_overview(self, limit: int = 10) -> list[dict]:
         """Every active PR across configured repos, OLDEST first — "what's stuck"

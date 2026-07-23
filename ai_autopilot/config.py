@@ -440,6 +440,17 @@ class Settings(BaseSettings):
     # names with or without the ``refs/heads/`` prefix. Empty = every target branch.
     pr_reviewer_target_branches: list[str] = Field(default_factory=list)
 
+    # ── Two-way Microsoft Teams bot (approve/reject buttons + chat commands) ──
+    # Opt-in and additive to the existing one-way Teams webhook (notifications/teams.py,
+    # teams_webhook_url) — that keeps working unchanged. This registers /api/messages so
+    # the bot can reply and act on button clicks. Requires the "teams-bot" extra
+    # (pip install .[teams-bot]) — the route silently stays unmounted if the packages or
+    # these three values aren't all present.
+    teams_agent_enabled: bool = False
+    teams_agent_app_id: str = ""       # "Agent ID" — the Azure Bot's Application (client) ID
+    teams_agent_app_secret: str = ""
+    teams_agent_tenant_id: str = ""
+
     # ── Comment reaction loop (steer the autopilot by just commenting) ──
     # When a NEW human comment appears on an autopilot-owned item (one that still
     # carries a trigger tag), re-enter it and act on the comment — covering held /

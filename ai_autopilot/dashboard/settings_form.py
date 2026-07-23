@@ -178,6 +178,10 @@ FIELDS: tuple[Field, ...] = (
           "Execution & Autonomy",
           "One branch per line (e.g. dxfac/development). Only PRs merging INTO these branches "
           "are tracked / reviewed / shown. Empty = all targets."),
+    Field("teams_agent_enabled", "💬 Two-way Teams bot", "bool", "Execution & Autonomy",
+          "Reply and act on button clicks in Teams (approve/reject, chat commands) via a "
+          "registered Azure Bot / Agent ID. Requires `pip install .[teams-bot]` and the App "
+          "ID/secret/tenant set in config.yaml or .env — never here. Restart required."),
     Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "Execution & Autonomy",
           "A new human comment on an autopilot-owned item (held / in review / done) re-runs it "
           "with your comment as top-priority guidance — no restart tag needed."),
@@ -253,7 +257,7 @@ FIELDS: tuple[Field, ...] = (
 RESTART_REQUIRED = frozenset({"max_concurrent"})
 
 # Never echo these values back into the form.
-SECRET_KEYS = frozenset({"ado_pat"})
+SECRET_KEYS = frozenset({"ado_pat", "teams_agent_app_secret"})
 
 # Keys excluded from an exported/shared config. Everything else in the Settings
 # model IS exported, so new config knobs are shared automatically. Two groups:
@@ -266,6 +270,7 @@ EXPORT_EXCLUDE = frozenset({
     "smtp_host", "smtp_port", "smtp_user", "smtp_password",
     "zalo_oa_access_token", "zalo_recipient_user_id",
     "teams_webhook_url", "email_to", "email_from",
+    "teams_agent_app_id", "teams_agent_app_secret", "teams_agent_tenant_id",
     "tenants",              # each tenant embeds its own ado_pat
     # ── machine / host specific ──
     "workspace_directory", "repo_working_directory", "worktrees_dir",

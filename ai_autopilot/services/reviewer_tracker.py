@@ -127,6 +127,34 @@ class ReviewerTrackerService:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
 
+    async def trigger_review_now(self, repo_id: str, pr_id: int) -> str:
+        """On-demand re-review, called from the Teams bot's "🔍 Review lại ngay" button.
+
+        Requires the bot to already be a reviewer on the PR (it votes as ITSELF — with
+        only app-only credentials there's no per-human identity to vote as, so this never
+        pretends to be the clicking user). Returns a short status string for the reply."""
+        bot = await self._bot_identity()
+        if not bot.get("id"):
+            return "Không xác định được danh tính bot — kiểm tra cấu hình PAT."
+        repos = {r.get("id"): r.get("name") or "" for r in await self._c.ado.get_repositories()}
+        repo_name = repos.get(repo_id, "")
+        target_pr = None
+        for pr in await self._c.ado.get_active_pull_requests(repo_id):
+            if pr.get("pullRequestId") == pr_id:
+                target_pr = pr
+                break
+        if target_pr is None:
+            return f"PR !{pr_id} không còn active."
+        reviewers = target_pr.get("reviewers") or []
+        if not any(str(r.get("id")) == bot["id"] for r in reviewers):
+            return f"Bot chưa phải reviewer của PR !{pr_id} — add reviewer trước."
+        if pr_id in self._reviewing:
+            return f"PR !{pr_id} đang được review, chờ chút nhé."
+        commit = (target_pr.get("lastMergeSourceCommit") or {}).get("commitId") or ""
+        self._reviewing.add(pr_id)
+        self._spawn(self._auto_review(repo_id, repo_name, target_pr, bot["id"], commit))
+        return f"🔍 Đã kích hoạt review lại PR !{pr_id} — kết quả sẽ đăng trên PR trong giây lát."
+
     async def _run(self) -> None:
         self._log.info("reviewer tracker started — watching PR reviewer lists")
         while True:

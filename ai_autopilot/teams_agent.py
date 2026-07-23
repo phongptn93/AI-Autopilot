@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import tempfile
 from typing import Any
 
 from ai_autopilot.config import Settings
@@ -392,7 +393,9 @@ async def _classify_intent(config: Settings, text: str) -> dict:
     try:
         run = await run_claude(
             _INTENT_PROMPT.format(text=text[:500]),
-            config.workspace_directory or ".",
+            tempfile.gettempdir(),  # no tool use below → cwd content is irrelevant,
+                                     # just needs to exist (workspace_directory may not
+                                     # on this host — see teams_agent module notes)
             timeout_seconds=20,
             model=config.claude_model or None,
             max_turns=1,
@@ -434,7 +437,9 @@ async def _phrase_natural(config: Settings, question: str, bullets: str) -> str:
     try:
         run = await run_claude(
             _PHRASE_PROMPT.format(question=question[:300], bullets=bullets),
-            config.workspace_directory or ".",
+            tempfile.gettempdir(),  # no tool use below → cwd content is irrelevant,
+                                     # just needs to exist (workspace_directory may not
+                                     # on this host — see teams_agent module notes)
             timeout_seconds=20,
             model=config.claude_model or None,
             max_turns=1,

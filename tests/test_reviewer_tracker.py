@@ -130,8 +130,8 @@ async def test_bot_added_triggers_auto_review_and_vote():
     assert len(feedback.calls) == 1
     assert (BOT["id"], VOTE_APPROVED) in ado.votes
     # ack + completion comments were posted
-    assert any("đang review" in c for c in ado.comments)
-    assert any("Auto-review hoàn tất" in c for c in ado.comments)
+    assert any("Đã nhận vai trò reviewer" in c for c in ado.comments)
+    assert any("Review xong" in c for c in ado.comments)
     rows = await repo.reviewers_for_pr(7)
     assert rows[BOT["id"]].reviewed_commit == "c1"
 

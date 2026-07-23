@@ -224,7 +224,7 @@ async def test_run_in_workspace_serialises_same_repo(agent_workspace: Path, monk
     async def fake_release(ws):
         pass
 
-    async def fake_claude(prompt, cwd, repo=None, on_event=None):
+    async def fake_claude(prompt, cwd, repo=None, on_event=None, resume=None):
         nonlocal active, max_active
         active += 1
         max_active = max(max_active, active)
@@ -264,7 +264,7 @@ async def test_revise_read_only_skips_workspace(repo: Path, monkeypatch):
 
     ran = {}
 
-    async def fake_claude(prompt, cwd, repo=None, on_event=None):
+    async def fake_claude(prompt, cwd, repo=None, on_event=None, resume=None):
         ran["cwd"] = cwd
         return SimpleNamespace(text="findings posted", total_tokens=7, cost_usd=0.01,
                                is_error=False)

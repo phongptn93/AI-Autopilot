@@ -33,8 +33,10 @@
           "scopes": ["team", "personal", "groupChat"],
           "commands": [
             { "title": "help", "description": "Xem bảng lệnh" },
-            { "title": "status", "description": "Xem tình trạng hoạt động" },
-            { "title": "review <repo> <pr-id>", "description": "Yêu cầu bot review lại một PR ngay" }
+            { "title": "items", "description": "Work item của bạn" },
+            { "title": "prs", "description": "PR bạn là author hoặc reviewer" },
+            { "title": "review <repo> <pr-id>", "description": "Yêu cầu bot review lại một PR ngay" },
+            { "title": "status", "description": "Xem tình trạng hoạt động" }
           ]
         }
       ]

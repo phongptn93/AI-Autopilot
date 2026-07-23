@@ -155,6 +155,46 @@ class ReviewerTrackerService:
         self._spawn(self._auto_review(repo_id, repo_name, target_pr, bot["id"], commit))
         return f"🔍 Đã kích hoạt review lại PR !{pr_id} — kết quả sẽ đăng trên PR trong giây lát."
 
+    async def prs_for_person(self, identity: str) -> list[dict]:
+        """Active PRs where ``identity`` (email/uniqueName substring, case-insensitive)
+        is the author or a reviewer — across every configured repo. Used by the Teams
+        bot's ``/prs`` command; a live ADO scan (not cached) since it's a rare, on-demand
+        query, not a hot path like the tracker's own poll."""
+        needle = (identity or "").strip().lower()
+        if not needle:
+            return []
+        out: list[dict] = []
+        for repo in await self._c.ado.get_repositories():
+            repo_id = repo.get("id")
+            if not repo_id:
+                continue
+            repo_name = repo.get("name") or ""
+            for pr in await self._c.ado.get_active_pull_requests(repo_id):
+                if not self._config.target_in_scope(pr.get("targetRefName", "")):
+                    continue
+                author = pr.get("createdBy") or {}
+                is_author = needle in (author.get("uniqueName") or "").lower()
+                reviewers = pr.get("reviewers") or []
+                mine = next(
+                    (
+                        r for r in reviewers
+                        if needle in (r.get("uniqueName") or "").lower()
+                        or needle in (r.get("displayName") or "").lower()
+                    ),
+                    None,
+                )
+                if not (is_author or mine):
+                    continue
+                out.append({
+                    "id": pr.get("pullRequestId"),
+                    "title": pr.get("title") or "",
+                    "repo": repo_name,
+                    "role": "author" if is_author else "reviewer",
+                    "vote": int(mine.get("vote") or 0) if mine else None,
+                    "is_draft": bool(pr.get("isDraft")),
+                })
+        return out
+
     async def _run(self) -> None:
         self._log.info("reviewer tracker started — watching PR reviewer lists")
         while True:

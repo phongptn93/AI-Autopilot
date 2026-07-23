@@ -32,13 +32,18 @@ _log = get_logger("teams_agent")
 
 _HELP_TEXT = (
     "🤖 **AI Autopilot**\n\n"
-    "- `/status` — tình trạng hoạt động\n"
+    "- `/items` — work item của bạn (khớp theo email Teams ↔ ADO assignee)\n"
+    "- `/prs` — PR bạn là author hoặc reviewer, kèm tình trạng vote\n"
     "- `/review <repo> <pr-id>` — yêu cầu bot review lại PR ngay (bot phải đã là "
     "reviewer trên PR đó)\n"
+    "- `/status` — tình trạng hoạt động\n"
     "- `/help` — bảng lệnh này\n\n"
     "Muốn `/ai /spec /test /qc /security /impact /summary` trên một PR cụ thể — "
     "reply ngay trên PR đó trong Azure DevOps (bot review ở đâu, trả lời ở đó)."
 )
+
+# ADO reviewer vote → short label (mirrors reviewer_tracker.VOTE_LABELS, compact form).
+_VOTE_SHORT = {10: "✅ approved", 5: "✅ suggestions", 0: "⏳ chưa vote", -5: "⏸️ waiting", -10: "❌ rejected"}
 
 
 def build_agent(config: Settings, container: Container, reviewer_tracker: ReviewerTrackerService):
@@ -139,6 +144,12 @@ async def _handle_command(
             "📊 Đang hoạt động. Xem chi tiết trên dashboard `/dashboard/reviews`."
         )
         return
+    if low.startswith("/items"):
+        await _reply_items(context, container)
+        return
+    if low.startswith("/prs"):
+        await _reply_prs(context, reviewer_tracker)
+        return
     m = _REVIEW_RE.match(text.strip())
     if m:
         repo_name, pr_id = m.group(1), int(m.group(2))
@@ -161,3 +172,60 @@ async def _resolve_repo_id(container: Container, repo_name: str) -> str | None:
         if (repo.get("name") or "").lower() == repo_name.lower():
             return repo.get("id")
     return None
+
+
+async def _teams_email(context) -> str | None:
+    """The email/UPN of whoever sent this turn — resolved via the Teams-specific
+    member lookup (the base Activity only carries a Teams/AAD object id, not email).
+    None if the lookup fails (e.g. running outside a real Teams tenant) — callers
+    then report "identity chưa xác định" rather than silently showing everyone's data."""
+    user_id = getattr(context.activity.from_property, "id", None)
+    if not user_id:
+        return None
+    try:
+        from microsoft_agents.hosting.teams import TeamsInfo
+
+        member = await TeamsInfo.get_member(context, user_id)
+        return member.email or member.user_principal_name
+    except Exception as exc:  # noqa: BLE001 — identity lookup must not crash the turn
+        _log.warning("Teams identity lookup failed", error=str(exc))
+        return None
+
+
+async def _reply_items(context, container: Container) -> None:
+    email = await _teams_email(context)
+    if not email:
+        await context.send_activity(
+            "⚠️ Không xác định được email của bạn trong Teams — không thể lọc work "
+            "item riêng."
+        )
+        return
+    items = await container.ado.get_work_items_by_assignee(email, top=20)
+    if not items:
+        await context.send_activity(f"📋 Không có work item nào gán cho `{email}`.")
+        return
+    lines = [f"📋 **Work item của bạn** ({len(items)})"]
+    for it in items:
+        lines.append(f"- #{it.id} [{it.work_item_type}] {it.title} — **{it.state}**")
+    await context.send_activity("\n".join(lines))
+
+
+async def _reply_prs(context, reviewer_tracker: ReviewerTrackerService) -> None:
+    email = await _teams_email(context)
+    if not email:
+        await context.send_activity(
+            "⚠️ Không xác định được email của bạn trong Teams — không thể lọc PR riêng."
+        )
+        return
+    prs = await reviewer_tracker.prs_for_person(email)
+    if not prs:
+        await context.send_activity(f"🔀 Không có PR nào liên quan tới `{email}`.")
+        return
+    lines = [f"🔀 **PR của bạn** ({len(prs)})"]
+    for pr in prs:
+        draft = " (draft)" if pr["is_draft"] else ""
+        vote = _VOTE_SHORT.get(pr["vote"], "") if pr["role"] == "reviewer" else ""
+        role = "✍️ author" if pr["role"] == "author" else "👀 reviewer"
+        bits = " · ".join(x for x in (role, vote) if x)
+        lines.append(f"- !{pr['id']} {pr['repo']}{draft} — {pr['title']} — {bits}")
+    await context.send_activity("\n".join(lines))

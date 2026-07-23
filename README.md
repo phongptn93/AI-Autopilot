@@ -367,6 +367,30 @@ docker compose --profile monitoring up    # + Prometheus + Grafana
 
 Kubernetes manifests live in [`k8s/`](k8s/).
 
+## 🩺 Troubleshooting
+
+### `ValueError: the greenlet library is required` / `DLL load failed while importing _greenlet` (Windows)
+
+SQLAlchemy's async engine needs `greenlet`'s compiled extension to load. This almost
+always means the package was installed **into the system-wide Python** instead of an
+isolated virtual environment (a stale or mismatched `greenlet` from a previous install
+conflicts with the new one). Fix, in order:
+
+1. **Install into a fresh venv** — don't `pip install` straight into your system Python:
+   ```powershell
+   python -m venv .venv
+   .venv\Scripts\activate
+   pip install ai_autopilot-<version>-py3-none-any.whl
+   ```
+2. Already on system Python? Reinstall `greenlet` clean:
+   ```powershell
+   pip uninstall greenlet -y
+   pip install --no-cache-dir --force-reinstall greenlet
+   ```
+3. Confirm you're on 64‑bit Python: `python -c "import struct; print(struct.calcsize('P')*8)"` → must print `64`.
+4. Install the [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe) — the classic cause of "DLL load failed" for compiled Python extensions on Windows.
+5. Still stuck on a brand‑new Python release? Fall back to a more established minor version (`py -3.12 -m venv .venv`) — `requires-python >= 3.11` supports 3.11–3.13 with the widest wheel coverage across the whole dependency tree.
+
 ## 📚 Documentation
 
 | Doc | Contents |

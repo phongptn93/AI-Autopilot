@@ -778,11 +778,19 @@ _ALLOWED_INTENTS = {
 
 
 def _fmt_exc(exc: Exception) -> str:
-    """``str(asyncio.TimeoutError())`` (and several other stdlib exceptions) is "" —
-    log the type name too, or a timeout is silently indistinguishable from any other
-    failure in the logs."""
+    """``str(asyncio.TimeoutError())`` / ``str(asyncio.CancelledError())`` (and
+    several other stdlib exceptions) is "" — always include the type name, and any
+    of the SDK's own diagnostic attributes (exit_code/stderr/line), or a bare
+    cancellation is silently indistinguishable from a timeout or anything else."""
+    parts = [type(exc).__name__]
     text = str(exc)
-    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+    if text:
+        parts.append(text)
+    for attr in ("exit_code", "stderr", "line"):
+        value = getattr(exc, attr, None)
+        if value:
+            parts.append(f"{attr}={value!r}")
+    return " | ".join(parts)
 
 
 async def _classify_intent(config: Settings, text: str) -> dict:

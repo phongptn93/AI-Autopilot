@@ -94,7 +94,11 @@ async def run_claude(
     """
     def _build_options(resume_id: str | None) -> ClaudeAgentOptions:
         options = ClaudeAgentOptions(cwd=work_dir, permission_mode=permission_mode)
-        if allowed_tools:
+        if allowed_tools is not None:
+            # `[]` must mean "no tools" (e.g. pure-text classification callers) —
+            # `if allowed_tools:` treated an empty list as falsy and silently left the
+            # SDK default (all tools) in effect, which could burn the caller's single
+            # max_turns on a tool call instead of returning the expected text/JSON.
             options.allowed_tools = allowed_tools
         if model:
             options.model = model

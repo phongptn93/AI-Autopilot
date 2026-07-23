@@ -427,7 +427,9 @@ class Settings(BaseSettings):
     pr_reviewer_tracking_enabled: bool = False
     # When the bot's own identity is added as a reviewer → run an AI code review on the
     # PR, post structured findings, and cast a vote. Re-arms when new commits land.
-    pr_auto_review_on_added: bool = True
+    # Off by default — casting a vote is consequential enough to need its own explicit
+    # opt-in even after pr_reviewer_tracking_enabled is on.
+    pr_auto_review_on_added: bool = False
     # Seconds between reviewer-list scans (independent of the babysitter cadence).
     pr_reviewer_poll_interval_seconds: int = 30
     # Hours a human reviewer may sit vote-less before ONE polite reminder is posted on

@@ -92,7 +92,7 @@ use_specialized_agents: true
 # auto AI-review + vote when the bot account is added as a reviewer, and one
 # polite reminder for reviewers who sit vote-less past the deadline.
 pr_reviewer_tracking_enabled: false
-pr_auto_review_on_added: true        # bot added as reviewer → structured review + vote
+pr_auto_review_on_added: false        # bot added as reviewer → structured review + vote (opt-in)
 pr_reviewer_poll_interval_seconds: 30
 pr_reviewer_reminder_hours: 24       # 0 = reminders off
 pr_bot_identity: ""                  # blank = auto-detect the PAT's own identity

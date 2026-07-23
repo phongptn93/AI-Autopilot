@@ -194,53 +194,85 @@ async def _teams_email(context) -> str | None:
         return None
 
 
-async def _reply_items(context, container: Container, state_filter: str | None = None) -> None:
+async def _items_data(context, container: Container) -> tuple[str | None, list]:
+    """Resolve the caller's identity and fetch their raw (unfiltered) work items."""
     email = await _teams_email(context)
     if not email:
-        await context.send_activity(
-            "⚠️ Không xác định được email của bạn trong Teams — không thể lọc work "
-            "item riêng."
-        )
-        return
+        return None, []
     items = await container.ado.get_work_items_by_assignee(email, top=20)
-    if state_filter:
-        items = [it for it in items if state_filter.lower() in (it.state or "").lower()]
-    if not items:
-        await context.send_activity(f"📋 Không có work item nào khớp cho `{email}`.")
-        return
-    lines = [f"📋 **Work item của bạn** ({len(items)})"]
-    for it in items:
-        lines.append(f"- #{it.id} [{it.work_item_type}] {it.title} — **{it.state}**")
-    await context.send_activity("\n".join(lines))
+    return email, items
 
 
-async def _reply_prs(
-    context, reviewer_tracker: ReviewerTrackerService, vote_filter: str | None = None
-) -> None:
+def _format_items(items: list, state_filter: str | None = None) -> tuple[list, str]:
+    """Filter + render as bullets. Returns (filtered_items, bullet_text)."""
+    filtered = [
+        it for it in items
+        if not state_filter or state_filter.lower() in (it.state or "").lower()
+    ]
+    lines = [f"- #{it.id} [{it.work_item_type}] {it.title} — {it.state}" for it in filtered]
+    return filtered, "\n".join(lines) if lines else "(không có work item nào khớp)"
+
+
+async def _prs_data(context, reviewer_tracker: ReviewerTrackerService) -> tuple[str | None, list]:
+    """Resolve the caller's identity and fetch their raw (unfiltered) PRs."""
     email = await _teams_email(context)
     if not email:
-        await context.send_activity(
-            "⚠️ Không xác định được email của bạn trong Teams — không thể lọc PR riêng."
-        )
-        return
+        return None, []
     prs = await reviewer_tracker.prs_for_person(email)
+    return email, prs
+
+
+def _format_prs(prs: list, vote_filter: str | None = None) -> tuple[list, str]:
+    """Filter + render as bullets. Returns (filtered_prs, bullet_text)."""
+    filtered = prs
     if vote_filter == "blocked":
-        prs = [p for p in prs if p["vote"] is not None and p["vote"] < 0]
+        filtered = [p for p in prs if p["vote"] is not None and p["vote"] < 0]
     elif vote_filter == "pending":
-        prs = [p for p in prs if p["role"] == "reviewer" and p["vote"] == 0]
+        filtered = [p for p in prs if p["role"] == "reviewer" and p["vote"] == 0]
     elif vote_filter == "approved":
-        prs = [p for p in prs if p["vote"] is not None and p["vote"] >= 5]
-    if not prs:
-        await context.send_activity(f"🔀 Không có PR nào khớp cho `{email}`.")
-        return
-    lines = [f"🔀 **PR của bạn** ({len(prs)})"]
-    for pr in prs:
+        filtered = [p for p in prs if p["vote"] is not None and p["vote"] >= 5]
+    lines = []
+    for pr in filtered:
         draft = " (draft)" if pr["is_draft"] else ""
         vote = _VOTE_SHORT.get(pr["vote"], "") if pr["role"] == "reviewer" else ""
         role = "✍️ author" if pr["role"] == "author" else "👀 reviewer"
         bits = " · ".join(x for x in (role, vote) if x)
         lines.append(f"- !{pr['id']} {pr['repo']}{draft} — {pr['title']} — {bits}")
-    await context.send_activity("\n".join(lines))
+    return filtered, "\n".join(lines) if lines else "(không có PR nào khớp)"
+
+
+async def _reply_items(context, container: Container, state_filter: str | None = None) -> None:
+    """Plain, structured reply for the explicit ``/items`` command — a command
+    deserves a scannable list, not phrased prose (and costs no extra Claude call)."""
+    email, items = await _items_data(context, container)
+    if email is None:
+        await context.send_activity(
+            "⚠️ Không xác định được email của bạn trong Teams — không thể lọc work "
+            "item riêng."
+        )
+        return
+    filtered, bullets = _format_items(items, state_filter)
+    if not filtered:
+        await context.send_activity(f"📋 Không có work item nào khớp cho `{email}`.")
+        return
+    await context.send_activity(f"📋 **Work item của bạn** ({len(filtered)})\n{bullets}")
+
+
+async def _reply_prs(
+    context, reviewer_tracker: ReviewerTrackerService, vote_filter: str | None = None
+) -> None:
+    """Plain, structured reply for the explicit ``/prs`` command (see _reply_items)."""
+    email, prs = await _prs_data(context, reviewer_tracker)
+    if email is None:
+        await context.send_activity(
+            "⚠️ Không xác định được email của bạn trong Teams — không thể lọc PR riêng."
+        )
+        return
+    filtered, bullets = _format_prs(prs, vote_filter)
+    if not filtered:
+        await context.send_activity(f"🔀 Không có PR nào khớp cho `{email}`.")
+        return
+    await context.send_activity(f"🔀 **PR của bạn** ({len(filtered)})\n{bullets}")
 
 
 # ── Free-text understanding (read-only queries only) ─────────────────────────
@@ -311,6 +343,43 @@ async def _classify_intent(config: Settings, text: str) -> dict:
         return {"intent": "unknown", "filter": None}
 
 
+_PHRASE_PROMPT = """Người dùng vừa hỏi một bot Teams CHỈ ĐỌC dữ liệu (không sửa code, \
+không vote, không merge được qua chat):
+
+"{question}"
+
+Dưới đây là dữ liệu THẬT đã tra cứu sẵn — không được thêm, bớt, hay đổi bất kỳ mục \
+nào, chỉ diễn đạt lại thành một câu trả lời NGẮN GỌN, TỰ NHIÊN bằng tiếng Việt (giữ \
+markdown nhẹ như in đậm số PR/work item nếu hợp lý):
+
+{bullets}
+
+Nếu dữ liệu là "(không có ... nào khớp)", nói rõ ràng là không có gì phù hợp — đừng \
+bịa thêm. KHÔNG đề xuất sửa code / vote / merge hay bất kỳ thao tác nào khác."""
+
+
+async def _phrase_natural(config: Settings, question: str, bullets: str) -> str:
+    """Ask Claude to reword already-fetched, already-filtered data into a natural
+    reply. Tool-less — Claude only rewords what Python already looked up, it never
+    fetches more data or picks an action. Falls back to the plain bullets on any
+    failure so the user always gets an answer."""
+    from ai_autopilot.execution.claude_client import run_claude
+
+    try:
+        run = await run_claude(
+            _PHRASE_PROMPT.format(question=question[:300], bullets=bullets),
+            config.workspace_directory or ".",
+            timeout_seconds=20,
+            model=config.claude_model or None,
+            max_turns=1,
+            allowed_tools=[],
+        )
+        return (run.text or "").strip() or bullets
+    except Exception as exc:  # noqa: BLE001 — phrasing failure must not crash the turn
+        _log.warning("reply phrasing failed — falling back to plain list", error=str(exc))
+        return bullets
+
+
 async def _handle_free_text(
     context, config: Settings, container: Container,
     reviewer_tracker: ReviewerTrackerService, text: str,
@@ -326,9 +395,26 @@ async def _handle_free_text(
     result = await _classify_intent(config, text)
     intent, flt = result["intent"], result.get("filter")
     if intent == "items":
-        await _reply_items(context, container, state_filter=flt if isinstance(flt, str) else None)
+        email, items = await _items_data(context, container)
+        if email is None:
+            await context.send_activity(
+                "⚠️ Không xác định được email của bạn trong Teams — không thể lọc "
+                "work item riêng."
+            )
+            return
+        _, bullets = _format_items(items, flt if isinstance(flt, str) else None)
+        await context.send_activity(await _phrase_natural(config, text, bullets))
     elif intent == "prs":
-        await _reply_prs(context, reviewer_tracker, vote_filter=flt if flt in ("blocked", "pending", "approved") else None)
+        email, prs = await _prs_data(context, reviewer_tracker)
+        if email is None:
+            await context.send_activity(
+                "⚠️ Không xác định được email của bạn trong Teams — không thể lọc "
+                "PR riêng."
+            )
+            return
+        vf = flt if flt in ("blocked", "pending", "approved") else None
+        _, bullets = _format_prs(prs, vf)
+        await context.send_activity(await _phrase_natural(config, text, bullets))
     elif intent == "status":
         await context.send_activity(
             "📊 Đang hoạt động. Xem chi tiết trên dashboard `/dashboard/reviews`."

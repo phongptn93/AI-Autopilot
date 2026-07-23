@@ -185,13 +185,19 @@ FIELDS: tuple[Field, ...] = (
           "are tracked / reviewed / shown. Empty = all targets."),
     Field("teams_agent_enabled", "💬 Two-way Teams bot", "bool", "Execution & Autonomy",
           "Reply and act on button clicks in Teams (approve/reject, chat commands) via a "
-          "registered Azure Bot / Agent ID. Requires `pip install .[teams-bot]` and the App "
-          "ID/secret/tenant set in config.yaml or .env — never here. Restart required."),
+          "registered Azure Bot / Agent ID — fill in the App ID/tenant/secret fields below. "
+          "Also requires `pip install .[teams-bot]`. Restart required."),
     Field("teams_agent_nlu_enabled", "↳ Understand free-text (read-only)", "bool",
           "Execution & Autonomy",
           "Free-text Teams messages that don't match a /command are classified by Claude "
           "into items/prs/status/help — never an action. Costs one Claude call per "
           "unmatched message. Off = unmatched text just gets the command list."),
+    Field("teams_agent_app_id", "↳ Agent (App) ID", "text", "Execution & Autonomy",
+          "Azure Bot's Application (client) ID. Also requires `pip install .[teams-bot]`."),
+    Field("teams_agent_tenant_id", "↳ Tenant ID", "text", "Execution & Autonomy",
+          "Directory (tenant) ID the App registration lives in."),
+    Field("teams_agent_app_secret", "↳ Agent app secret", "password", "Execution & Autonomy",
+          "Client secret from Certificates & secrets on the App registration."),
     Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "Execution & Autonomy",
           "A new human comment on an autopilot-owned item (held / in review / done) re-runs it "
           "with your comment as top-priority guidance — no restart tag needed."),

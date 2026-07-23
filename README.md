@@ -26,8 +26,10 @@ Polls your ADO board, understands each tagged work item, and drives **Claude Cod
 | 🔀 **Dependency‑aware scheduling** | Orders work by the ADO link graph (0 tokens) and avoids running conflicting items concurrently — with an AI conflict feed‑back loop. |
 | 🔁 **Closed‑loop SDLC (v2)** | Optional multi‑stage engine (analyze → design → implement → test → review → PR) with per‑stage gating and multi‑machine handoff. |
 | 🛡️ **Safe by design** | Isolated git worktrees, auto security review, objective run scoring, and a single tag/state policy table. |
-| 📊 **Live dashboard** | Overview · Board · Planning · History · Settings · Config — full‑width, filterable, drag‑and‑drop. |
+| 📊 **Live dashboard** | Overview · Board · Planning · Reviews · History · Settings · Config — full‑width, filterable, drag‑and‑drop. |
 | 🔌 **Extensible** | Python plugins (pre/post/skill hooks), scheduled loops, multi‑tenant, and Teams/Zalo/Email notifications. |
+| 👀 **PR reviewer tracking** | Watches every active PR's reviewer list (any author) — auto‑reviews + votes when the bot is added as reviewer, reminds overdue human reviewers, and answers role commands (`/spec /qc /security /impact ...`) routed to specialist subagents. |
+| 💬 **Two‑way Teams bot** | Optional Azure Bot integration — `/items /prs /review /status` plus free‑text read‑only queries ("PR nào của tôi đang bị block?"), never code‑mutating from chat. |
 
 > **v2.0 — Python rewrite.** A from‑scratch port of the original .NET 8 worker
 > (kept under [`legacy-dotnet/`](legacy-dotnet/)). Claude is now driven through the
@@ -88,6 +90,7 @@ The service listens on **`:5080`** by default:
 | `/health` | Readiness checks (ado / claude / disk) as JSON |
 | `/metrics` | Prometheus metrics |
 | `/api/webhook/ado` | ADO Service Hook → instant pickup (work items **and** PR comments) |
+| `/api/messages` | Teams bot messaging endpoint (only mounted when `teams_agent_enabled` + Agent ID/secret/tenant are set) |
 
 **⚡ How fast are `/ai` / `/review` replies picked up?** Three lanes, fastest wins:
 
@@ -109,6 +112,7 @@ The webhook endpoint filters bot-signed comments and plain chatter — only real
 | **Overview** | Run metrics (success / failed / tokens) and recent activity. |
 | **Board** | Live Kanban of every autopilot item; drag‑and‑drop, search / type / date filters, per‑column cap + *Load more*, 15s auto‑refresh. |
 | **Planning** | Load your assigned work, run AI grouping & conflict analysis, then **Start now** or **Schedule**. Live scheduling view with history. |
+| **Reviews** | Every active PR grouped by target branch — status badge, reviewer votes, conflicts, age, linked work item. Command‑palette reference for the role commands. |
 | **History** | Paginated, filterable log of every execution (skill, PR, duration, tokens). |
 | **Settings** | Edit all configuration with grouped sections, an *Active tags* overview, live‑apply, and Export/Import (secrets excluded). |
 | **Configuration** | Read‑only snapshot of the live config (secrets shown as set / not‑set). |
@@ -141,6 +145,9 @@ Most‑used keys:
 | `dependency_scheduling_enabled` | `true` | Order work by the ADO link graph (0 tokens) |
 | `pr_scoring_enabled` | `true` | Grade each run; weak runs are held for a human |
 | `sdlc_loop_enabled` | `false` | Opt into the closed‑loop SDLC engine (below) |
+| `claude_model` | *(CLI default)* | `sonnet` / `opus` / `fable` / `haiku` — pin explicitly instead of trusting the bundled CLI's own default |
+| `pr_reviewer_tracking_enabled` | `false` | Watch reviewer lists on every active PR (see [PR reviewer tracking](#-pr-reviewer-tracking)) |
+| `teams_agent_enabled` | `false` | Two‑way Teams bot (see [Microsoft Teams bot](#-microsoft-teams-bot)) |
 | `dry_run` | `false` | Log only — never execute or write to ADO |
 
 ### Outcomes → tag + state
@@ -212,6 +219,74 @@ unresolved review comments and feed them back to Claude to revise (bounded by
 
 ---
 
+## 👀 PR reviewer tracking
+
+Enable `pr_reviewer_tracking_enabled` to watch the reviewer list of **every active PR**
+(any author, not just autopilot‑created ones) in the configured repos:
+
+- **Add the bot as a reviewer** on any PR → it runs a structured AI review (summary ·
+  findings by severity · checklist · verdict), posts it, and casts its own vote
+  (`pr_auto_review_on_added`, **off by default** — casting a vote is consequential enough
+  to need its own opt‑in). Re‑arms on new commits; never re‑reviews a failed attempt in a
+  loop.
+- **Human reviewers** are tracked for the **Reviews** dashboard page, and one polite
+  reminder is posted (PR comment + Teams/Email/Zalo) if a reviewer sits vote‑less past
+  `pr_reviewer_reminder_hours` (default 24h, `0` = off).
+- **`pr_reviewer_target_branches`** restricts tracking/review/dashboard to PRs merging
+  into specific branches — empty = every target.
+- **Role commands** — reply on any PR the bot reviews:
+
+  | Command | Role | Action | Type |
+  |---------|------|--------|------|
+  | `/ai <ask>` | DEV | Make the change, commit & push | action |
+  | `/spec` | BA | Refresh spec files + sync the ADO work item (`update-spec`) | action |
+  | `/test` | DEV/QC | Write/adjust automated tests | action |
+  | `/review` | DEV | Code review | read‑only |
+  | `/qc` | QC | Test‑scope analysis, proposed cases | read‑only |
+  | `/security` | SA | OWASP‑focused review of the diff | read‑only |
+  | `/impact` | BA | Blast‑radius / impact analysis | read‑only |
+  | `/summary` | all | Plain‑language PR summary | read‑only |
+
+  When `use_specialized_agents` is on (default), each routes to a purpose‑built subagent
+  (`agent-spec-updater`, `agent-qc-manual`, `agent-security-reviewer`, `agent-pr-reviewer`,
+  `agent-test-writer`, `agent-requirement-analyst`) for expert results, falling back to
+  the generic skill if that subagent isn't present.
+
+The bot's identity is auto‑detected from the ADO PAT (`connectionData`) — override with
+`pr_bot_identity` if needed. For clean audit trails, register a **dedicated ADO service
+account** for the bot rather than reusing a personal PAT.
+
+---
+
+## 💬 Microsoft Teams bot
+
+Optional two‑way bot (`pip install .[teams-bot]`), additive to the existing one‑way
+`teams_webhook_url` notifications — that keeps working unchanged either way. Registers
+`/api/messages` via the [Microsoft 365 Agents SDK](https://github.com/microsoft/Agents-for-python)
+once `teams_agent_enabled` + the Azure Bot's App ID / secret / tenant are all set. A
+sideload‑ready manifest template lives in [`teams-app/`](teams-app/README.md).
+
+**Commands** (chat 1:1 or @mention in a channel):
+
+| Command | Does |
+|---------|------|
+| `/help` | Command list |
+| `/status` | Quick health check |
+| `/items` | Your own ADO work items (Teams email ↔ ADO assignee) |
+| `/prs` | PRs you're author or reviewer on, with vote status |
+| `/review <repo> <pr-id>` | Ask the bot to re‑review a PR it's already a reviewer on |
+
+Unmatched free text is classified (read‑only intents only) by a single tool‑less Claude
+call — e.g. *"PR nào của tôi đang bị block?"* — toggle with `teams_agent_nlu_enabled`.
+
+**Deliberately not supported from Teams:** code‑mutating `/ai`, or casting a vote *as the
+human who clicked a button*. The bot only holds app‑only credentials (no per‑user
+delegated token), so it can act as itself but never impersonate the clicking user —
+code changes still require replying directly on the PR in ADO, where the full diff
+context is visible.
+
+---
+
 ## 🧩 Skill routing
 
 | Condition | Category | Skill |
@@ -258,16 +333,18 @@ ai_autopilot/
 ├── ado/                     # auth (PAT/OAuth), REST client, notifier
 ├── execution/               # Claude SDK wrapper, executor, reviewer, scorer, SDLC engine
 ├── routing/                 # classify → prioritise → schedule → route → decompose
-├── services/                # background poller, state-sync, scheduled loops
+├── services/                # background poller, PR babysitter, reviewer tracker, state-sync
 ├── data/                    # SQLAlchemy async engine, entities, repositories
 ├── dashboard/               # Jinja2 server-rendered dashboard + settings form
 ├── notifications/           # Teams, Zalo, Email channels
+├── teams_agent.py           # Two-way Microsoft Teams bot (optional, /api/messages)
 ├── plugins/                 # Python plugin loader (pre/post/skill hooks)
 ├── security.py · scheduling.py · tracking.py · multitenant.py · webhook.py
 └── health.py · metrics.py · logging_config.py
 
 tests/                       # pytest unit tests
 docs/                        # HTML guides (user guide, technical notes)
+teams-app/                   # Teams app manifest template (sideload package)
 legacy-dotnet/               # original .NET 8 implementation (reference)
 ```
 
@@ -303,4 +380,5 @@ Kubernetes manifests live in [`k8s/`](k8s/).
 ## 🧱 Tech stack
 
 Python 3.11 · FastAPI · uvicorn · Claude Agent SDK · httpx · SQLAlchemy (async) + aiosqlite ·
-pydantic‑settings · APScheduler · prometheus‑client · structlog · Jinja2 · pytest
+pydantic‑settings · APScheduler · prometheus‑client · structlog · Jinja2 · pytest ·
+Microsoft 365 Agents SDK (optional, `teams-bot` extra)

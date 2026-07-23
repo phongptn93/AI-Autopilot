@@ -71,7 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await container.shutdown()
             log.info("autopilot stopped")
 
-    app = FastAPI(title="AI Autopilot", version="2.1.1", lifespan=lifespan)
+    app = FastAPI(title="AI Autopilot", version="2.2.0", lifespan=lifespan)
 
     @app.get("/health")
     async def health_endpoint(response: Response) -> dict:

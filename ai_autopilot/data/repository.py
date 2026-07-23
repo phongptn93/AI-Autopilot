@@ -655,9 +655,32 @@ class PrReviewerRepository:
         async with self._db.session() as session:
             row = await session.get(PrReviewerState, (pr_id, reviewer_id))
             if row is not None:
+                now = datetime.now(UTC)
                 row.reviewed_commit = commit
-                row.updated_at = datetime.now(UTC)
+                row.reviewed_at = now
+                row.updated_at = now
                 await session.commit()
+
+    async def count_reviewed_since(self, cutoff: datetime) -> int:
+        """How many auto-review attempts (success or failure) completed since
+        ``cutoff`` — for the Teams digest's activity stats."""
+        async with self._db.session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(PrReviewerState)
+                .where(PrReviewerState.reviewed_at.is_not(None))
+                .where(PrReviewerState.reviewed_at >= cutoff)
+            )
+            return result.scalar_one()
+
+    async def count_reminded_since(self, cutoff: datetime) -> int:
+        """How many reviewer reminders were sent since ``cutoff``."""
+        async with self._db.session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(PrReviewerState)
+                .where(PrReviewerState.reminded_at.is_not(None))
+                .where(PrReviewerState.reminded_at >= cutoff)
+            )
+            return result.scalar_one()
 
     async def remove_absent(self, pr_id: int, keep_reviewer_ids: set[str]) -> None:
         """Drop rows for reviewers no longer on the PR (removed by a human)."""

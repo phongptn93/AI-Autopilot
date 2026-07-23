@@ -17,6 +17,7 @@ from ai_autopilot.logging_config import get_logger
 _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("executions", "trigger_tag", "VARCHAR(100)"),
     ("executions", "pr_urls", "TEXT"),
+    ("pr_reviewer_states", "reviewed_at", "DATETIME"),
 )
 
 

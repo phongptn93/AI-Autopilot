@@ -175,6 +175,10 @@ class PrReviewerState(Base):
     # Bot only: the PR source commit the last auto-review covered — a new commit
     # re-arms the auto-review (fresh iteration → fresh look).
     reviewed_commit: Mapped[str] = mapped_column(String(64), default="")
+    # When that auto-review attempt (success or failure) completed — distinct from
+    # updated_at, which also moves on every routine reviewer-list poll (every ~30s)
+    # and so can't answer "how many auto-reviews happened in the last 24h".
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 

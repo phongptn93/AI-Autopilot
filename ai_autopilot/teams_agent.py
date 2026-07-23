@@ -218,7 +218,13 @@ async def _digest_loop(
     while True:
         try:
             await asyncio.sleep(interval * 3600)
-            await _send_digest(container, app, adapter, reviewer_tracker, storage, message_factory)
+            # The stats window MUST equal the send interval — not a fixed 24h —
+            # otherwise a longer interval leaves a silent gap between digests, and a
+            # shorter one double-counts the overlap. Single source of truth: interval.
+            await _send_digest(
+                container, app, adapter, reviewer_tracker, storage, message_factory,
+                window_hours=interval,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — one bad cycle must not kill the loop
@@ -306,7 +312,7 @@ def _format_standup(by_person: dict[str, dict[str, list]]) -> str:
             lines.append(f"  🔧 Đang làm: {_fmt_wi_list(active)}")
         if todo:
             lines.append(f"  📋 Chưa làm: {_fmt_wi_list(todo)}")
-    return "\n".join(lines) if lines else "(không có work item nào thay đổi trong 24h qua)"
+    return "\n".join(lines) if lines else "(không có work item nào thay đổi trong khoảng này)"
 
 
 def _format_pr_stub_list(prs: list[dict]) -> str:
@@ -317,49 +323,56 @@ def _format_pr_stub_list(prs: list[dict]) -> str:
 
 async def _send_digest(
     container: Container, app, adapter, reviewer_tracker: ReviewerTrackerService,
-    storage: _DbConversationStorage, message_factory,
+    storage: _DbConversationStorage, message_factory, *, window_hours: int = 24,
 ) -> None:
-    cutoff = datetime.now(UTC) - timedelta(hours=24)
-    parts: list[str] = ["📊 **Digest hàng ngày — AI Autopilot**"]
+    """``window_hours`` MUST equal the actual send interval (the caller,
+    ``_digest_loop``, always passes it) — a fixed 24h window regardless of how often
+    the digest fires would leave a silent gap (interval > 24h) or double-count
+    (interval < 24h). The default here only covers direct/manual calls."""
+    cutoff = datetime.now(UTC) - timedelta(hours=window_hours)
+    window_label = f"{window_hours}h"
+    parts: list[str] = [f"📊 **Digest — AI Autopilot ({window_label} qua)**"]
 
-    # 1. Autopilot execution activity (24h).
+    # 1. Autopilot execution activity.
     try:
         stats = await container.execution_repo.get_stats(since=cutoff)
         parts.append(
-            f"🤖 **Hoạt động autopilot (24h)**: {stats.total} task · "
+            f"🤖 **Hoạt động autopilot ({window_label})**: {stats.total} task · "
             f"✅ {stats.success} thành công · ❌ {stats.failed} thất bại"
         )
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: execution stats failed", error=str(exc))
 
-    # 2. Auto-review + reminders sent (24h) — from the reviewer tracker's own records.
+    # 2. Auto-review + reminders sent — from the reviewer tracker's own records.
     try:
         reviewer_repo = getattr(container, "pr_reviewer_repo", None)
         if reviewer_repo is not None:
             reviewed_n = await reviewer_repo.count_reviewed_since(cutoff)
             reminded_n = await reviewer_repo.count_reminded_since(cutoff)
             parts.append(
-                f"🔍 **Reviewer tracking (24h)**: bot tự review {reviewed_n} PR · "
+                f"🔍 **Reviewer tracking ({window_label})**: bot tự review {reviewed_n} PR · "
                 f"👋 nhắc {reminded_n} reviewer quá hạn"
             )
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: reviewer stats failed", error=str(exc))
 
-    # 3. New / merged PRs (24h).
+    # 3. New / merged PRs.
     try:
         new_prs = await reviewer_tracker.new_prs_since(cutoff)
         merged_prs = await reviewer_tracker.merged_prs_since(cutoff)
         parts.append(
-            f"🔀 **PR (24h)**: {len(new_prs)} mới mở · {len(merged_prs)} đã merge"
+            f"🔀 **PR ({window_label})**: {len(new_prs)} mới mở · {len(merged_prs)} đã merge"
         )
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: PR activity failed", error=str(exc))
 
-    # 4. Tickets logged via /log (24h).
+    # 4. Tickets logged via /log.
     try:
         logged = await reviewer_tracker.tickets_logged_since(cutoff)
         if logged:
-            parts.append(f"📝 **Ticket log qua Teams (24h)**: {_fmt_wi_list(logged, limit=10)}")
+            parts.append(
+                f"📝 **Ticket log qua Teams ({window_label})**: {_fmt_wi_list(logged, limit=10)}"
+            )
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: logged tickets failed", error=str(exc))
 
@@ -379,11 +392,11 @@ async def _send_digest(
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: team overview failed", error=str(exc))
 
-    # 7. Work items by person, changed in the last 24h — done / merge-pending /
-    #    active / todo. Same cutoff as every other 24h section above.
+    # 7. Work items by person, changed within the window — done / merge-pending /
+    #    active / todo. Same cutoff as every other section above.
     try:
         standup = await _team_standup(container, cutoff)
-        parts.append(f"👤 **Work item theo người (24h)**\n{_format_standup(standup)}")
+        parts.append(f"👤 **Work item theo người ({window_label})**\n{_format_standup(standup)}")
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: standup failed", error=str(exc))
 

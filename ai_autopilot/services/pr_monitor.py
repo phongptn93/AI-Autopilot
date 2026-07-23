@@ -245,11 +245,17 @@ class PrMonitorService:
             )
             result = await c.executor.revise(item, branch2, prompt, draft_pr=True, repo=rname)
             if result.success:
-                note = "<div><b>🔁 Đã điều chỉnh PR liên quan cho khớp thay đổi.</b></div>"
+                note = (
+                    "<div><b>🔁 Đã tự đồng bộ PR liên quan này</b> theo thay đổi vừa rồi để "
+                    "hai PR không lệch nhau.</div>"
+                )
             elif result.error and "No file changes" in result.error:
-                note = "<div><b>✅ Đã đánh giá — PR liên quan không cần điều chỉnh.</b></div>"
+                note = (
+                    "<div><b>✅ Đã rà PR liên quan này</b> — không cần chỉnh gì để giữ "
+                    "đồng bộ.</div>"
+                )
             else:
-                note = f"<div><b>⚠️ Không đánh giá được PR liên quan:</b> {result.error}</div>"
+                note = f"<div><b>⚠️ Chưa rà được PR liên quan này:</b> {result.error}</div>"
             with contextlib.suppress(Exception):
                 await c.ado.add_pull_request_comment(rid, pr_id2, note)
             await c.ado.add_comment(work_item_id, note)
@@ -328,16 +334,17 @@ class PrMonitorService:
         with contextlib.suppress(Exception):
             await self._c.ado.reply_to_pull_request_thread(
                 repo_id, pr_id, thread_id,
-                f"<div>🔒 Autopilot này chỉ nhận lệnh từ <b>{claimed}</b> — "
-                "nhờ họ reply lệnh giúp nhé.</div>",
+                f"<div>🔒 Tôi chỉ nhận lệnh từ <b>{claimed}</b> trên máy này — nhờ đúng "
+                "người reply để tôi xử lý.</div>",
             )
 
     async def _reply_capped(self, repo_id: str, pr_id: int, thread_id: int) -> None:
         with contextlib.suppress(Exception):
             await self._c.ado.reply_to_pull_request_thread(
                 repo_id, pr_id, thread_id,
-                f"<div>⏸️ Đã đạt {self._config.max_revisions} lần sửa cho item này — hãy tạo "
-                "PR mới nếu cần thêm.</div>",
+                f"<div>⏸️ Đã đạt giới hạn {self._config.max_revisions} lần sửa tự động cho "
+                "item này. Tôi tạm dừng để tránh sửa lan man — tạo PR mới hoặc nới "
+                "<code>max_revisions</code> nếu cần tiếp.</div>",
             )
 
     async def _handle_command(
@@ -364,18 +371,18 @@ class PrMonitorService:
             # a silent queue reads as "the bot missed my comment".
             if advisory:
                 ack = (
-                    "<div><b>🔍 đang review</b>… sẽ đăng nhận xét ngay tại đây "
-                    "(không đổi code).</div>"
+                    "<div><b>🔍 Đang review</b> — tôi phân tích thay đổi và sẽ đăng nhận "
+                    "xét ngay tại đây. Không chỉnh code.</div>"
                 )
             elif lock.locked():
                 ack = (
-                    "<div><b>🕐 Đã nhận</b> — đang chờ lệnh trước trên branch "
-                    f"<code>{branch}</code> chạy xong, sẽ xử lý ngay sau đó.</div>"
+                    "<div><b>🕐 Đã nhận</b> — đang có một lệnh khác chạy trên "
+                    f"<code>{branch}</code>. Tôi xử lý tuần tự và tiếp nhận ngay sau đó.</div>"
                 )
             else:
                 ack = (
-                    "<div><b>🔧 đang xử lý</b>… sẽ cập nhật branch "
-                    f"<code>{branch}</code> và báo lại ngay tại đây.</div>"
+                    "<div><b>🔧 Đang xử lý</b> — tôi tự chỉnh trên <code>"
+                    f"{branch}</code>, commit &amp; push rồi báo kết quả tại đây.</div>"
                 )
             await c.ado.reply_to_pull_request_thread(repo_id, pr_id, tid, ack)
             # Mark the thread Pending while we work, so the PR shows it's in progress.
@@ -395,14 +402,16 @@ class PrMonitorService:
             # per-comment (see ``command_threads``), so a reply here re-activates
             # the thread. Say so — otherwise nobody knows replying works.
             hint = (
-                "<br/><sub>💬 Reply <code>/ai &lt;yêu cầu&gt;</code> tại đây để tôi sửa, "
-                "hoặc <code>/review</code> để review lại.</sub>"
+                "<br/><sub>💬 Reply để tôi làm tiếp: <code>/ai</code> sửa code · "
+                "<code>/spec</code> cập nhật spec · <code>/test</code> viết test · "
+                "<code>/review</code> · <code>/qc</code> · <code>/security</code> · "
+                "<code>/impact</code> · <code>/summary</code>.</sub>"
             )
             if result.success:
                 msg = (
-                    f"<div><b>🔍 Đã review</b> — nhận xét ở trên.{hint}</div>"
+                    f"<div><b>🔍 Đã review xong</b> — nhận xét chi tiết ở trên.{hint}</div>"
                     if advisory else
-                    f"<div><b>🔁 Đã xử lý.</b>{hint}</div>"
+                    f"<div><b>✅ Đã xử lý xong</b> — branch đã được cập nhật.{hint}</div>"
                 )
             else:
                 verb = "review" if advisory else "xử lý"

@@ -70,11 +70,17 @@ async def run_claude(
     setting_sources: list[str] | None = None,
     mcp_servers: dict | None = None,
     add_dirs: list[str] | None = None,
+    resume: str | None = None,
     on_event: Callable[[str], None] | None = None,
 ) -> ClaudeRun:
     """Run Claude Code once in ``work_dir`` and return a structured result.
 
     Raises ``asyncio.TimeoutError`` if the run exceeds ``timeout_seconds``.
+
+    ``resume`` continues a prior Agent session (its id from an earlier ``ClaudeRun``)
+    so the agent keeps that conversation's context. Best-effort: if resuming fails
+    (session gone / not on this host) the run retries once from a FRESH session, so a
+    stale id never blocks work. A timeout is never retried (it propagates).
 
     Note: ``permission_mode="bypassPermissions"`` maps to
     ``--dangerously-skip-permissions``, which the Claude CLI refuses to run under
@@ -86,24 +92,23 @@ async def run_claude(
     ``add_dirs`` let the run reach the workspace's MCP servers and extra repo
     directories.
     """
-    options = ClaudeAgentOptions(
-        cwd=work_dir,
-        permission_mode=permission_mode,
-    )
-    if allowed_tools:
-        options.allowed_tools = allowed_tools
-    if model:
-        options.model = model
-    if max_turns and max_turns > 0:
-        options.max_turns = max_turns
-    if setting_sources is not None:
-        options.setting_sources = setting_sources
-    if mcp_servers:
-        options.mcp_servers = mcp_servers
-    if add_dirs:
-        options.add_dirs = add_dirs
-
-    run = ClaudeRun()
+    def _build_options(resume_id: str | None) -> ClaudeAgentOptions:
+        options = ClaudeAgentOptions(cwd=work_dir, permission_mode=permission_mode)
+        if allowed_tools:
+            options.allowed_tools = allowed_tools
+        if model:
+            options.model = model
+        if max_turns and max_turns > 0:
+            options.max_turns = max_turns
+        if setting_sources is not None:
+            options.setting_sources = setting_sources
+        if mcp_servers:
+            options.mcp_servers = mcp_servers
+        if add_dirs:
+            options.add_dirs = add_dirs
+        if resume_id:
+            options.resume = resume_id
+        return options
 
     def _emit(line: str) -> None:
         if on_event and line.strip():
@@ -112,32 +117,49 @@ async def run_claude(
             except Exception:  # noqa: BLE001 — activity must never break the run
                 pass
 
-    async def _drive() -> None:
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock) and block.text:
-                        run.transcript.append(block.text)
-                        _emit("💬 " + block.text[:400])
-                    elif isinstance(block, ThinkingBlock):
-                        _emit("🤔 " + (getattr(block, "thinking", "") or "")[:200])
-                    elif isinstance(block, ToolUseBlock):
-                        _emit("🔧 " + activity.tool_summary(block.name, block.input))
-            elif isinstance(message, ResultMessage):
-                run.is_error = bool(message.is_error)
-                run.num_turns = message.num_turns
-                run.duration_ms = message.duration_ms
-                run.session_id = message.session_id
-                run.cost_usd = message.total_cost_usd
-                usage = message.usage or {}
-                run.input_tokens = int(usage.get("input_tokens", 0) or 0)
-                run.output_tokens = int(usage.get("output_tokens", 0) or 0)
-                run.cache_read_tokens = int(usage.get("cache_read_input_tokens", 0) or 0)
-                run.cache_creation_tokens = int(usage.get("cache_creation_input_tokens", 0) or 0)
-                if message.result:
-                    run.text = message.result
+    async def _attempt(resume_id: str | None) -> ClaudeRun:
+        run = ClaudeRun()
+        options = _build_options(resume_id)
 
-    await asyncio.wait_for(_drive(), timeout=timeout_seconds)
+        async def _drive() -> None:
+            async for message in query(prompt=prompt, options=options):
+                if isinstance(message, AssistantMessage):
+                    for block in message.content:
+                        if isinstance(block, TextBlock) and block.text:
+                            run.transcript.append(block.text)
+                            _emit("💬 " + block.text[:400])
+                        elif isinstance(block, ThinkingBlock):
+                            _emit("🤔 " + (getattr(block, "thinking", "") or "")[:200])
+                        elif isinstance(block, ToolUseBlock):
+                            _emit("🔧 " + activity.tool_summary(block.name, block.input))
+                elif isinstance(message, ResultMessage):
+                    run.is_error = bool(message.is_error)
+                    run.num_turns = message.num_turns
+                    run.duration_ms = message.duration_ms
+                    run.session_id = message.session_id
+                    run.cost_usd = message.total_cost_usd
+                    usage = message.usage or {}
+                    run.input_tokens = int(usage.get("input_tokens", 0) or 0)
+                    run.output_tokens = int(usage.get("output_tokens", 0) or 0)
+                    run.cache_read_tokens = int(usage.get("cache_read_input_tokens", 0) or 0)
+                    run.cache_creation_tokens = int(
+                        usage.get("cache_creation_input_tokens", 0) or 0
+                    )
+                    if message.result:
+                        run.text = message.result
+
+        await asyncio.wait_for(_drive(), timeout=timeout_seconds)
+        return run
+
+    try:
+        run = await _attempt(resume)
+    except (asyncio.TimeoutError, TimeoutError):
+        raise  # a timeout is a real failure — never silently re-run
+    except Exception as exc:  # noqa: BLE001
+        if not resume:
+            raise
+        _log.warning("resume failed — retrying from a fresh session", error=str(exc))
+        run = await _attempt(None)
 
     if not run.text and run.transcript:
         run.text = "\n".join(run.transcript)

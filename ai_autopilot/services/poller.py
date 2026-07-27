@@ -161,7 +161,28 @@ class AdoPollerService:
 
             cutoff = datetime.now(UTC) - timedelta(hours=1)
             self._processed = {k: v for k, v in self._processed.items() if v >= cutoff}
+            # Bound the comment-reaction bookkeeping. Unlike _processed these have no
+            # timestamp, and they only grow (one entry per distinct item ever seen),
+            # so cap them as a memory backstop — dropping the oldest-inserted keys
+            # once far past any realistic active-item count. Keeps a long-running
+            # poller from leaking over weeks.
+            self._bound_tracking()
             await asyncio.sleep(cfg.poll_interval_seconds)
+
+    def _bound_tracking(self, cap: int = 5000) -> None:
+        """Trim the per-item comment-loop caches to their most-recently-inserted
+        ``cap`` keys (insertion order). A no-op until a cache exceeds the cap."""
+        def trim_dict(d: dict) -> dict:
+            return dict(list(d.items())[-cap:]) if len(d) > cap else d
+
+        def trim_set(s: set) -> set:
+            return set(list(s)[-cap:]) if len(s) > cap else s
+
+        self._comment_seen = trim_dict(self._comment_seen)
+        self._comment_rounds = trim_dict(self._comment_rounds)
+        self._pending_comment = trim_dict(self._pending_comment)
+        self._comment_capped = trim_set(self._comment_capped)
+        self._deferred_notified = trim_set(self._deferred_notified)
 
     async def _poll_and_process(self) -> None:
         c, cfg = self._c, self._config

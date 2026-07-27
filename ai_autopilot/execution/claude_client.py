@@ -31,6 +31,39 @@ _log = get_logger("execution.claude_client")
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"]
 
+# Transient stream/connection failures a run can survive by simply re-running —
+# NOT real task failures. Windows periodically resets the Anthropic streaming
+# connection (``ConnectionResetError [WinError 10054]``); when that lands
+# mid-turn the CLI exits non-zero with a *paradoxical* result envelope
+# (``is_error=True`` but ``subtype="success"`` and no ``errors``), which the SDK
+# surfaces as a bare ``Exception("Claude Code returned an error result: success")``.
+# Absorbing these here means one network blip no longer burns a whole
+# poller-level retry — which re-runs the entire (often 10-30 min) stage from
+# scratch and throws the finished work away.
+_TRANSIENT_MARKERS = (
+    "error result: success",
+    "error result: error",
+    "10054",
+    "forcibly closed",
+    "connection reset",
+    "connection lost",
+    "connection aborted",
+    "peer closed",
+    "broken pipe",
+    "server disconnected",
+    "remote host",
+)
+_TRANSIENT_RETRIES = 2  # extra FRESH attempts after the first
+_TRANSIENT_BACKOFF = 3.0  # seconds, doubled per retry (3s, 6s)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """True for a network/stream drop that a re-run will likely survive."""
+    if isinstance(exc, (ConnectionResetError, ConnectionError, BrokenPipeError)):
+        return True
+    text = str(exc).lower()
+    return any(marker in text for marker in _TRANSIENT_MARKERS)
+
 
 @dataclass
 class ClaudeRun:
@@ -155,15 +188,39 @@ async def run_claude(
         await asyncio.wait_for(_drive(), timeout=timeout_seconds)
         return run
 
-    try:
-        run = await _attempt(resume)
-    except (asyncio.TimeoutError, TimeoutError):
-        raise  # a timeout is a real failure — never silently re-run
-    except Exception as exc:  # noqa: BLE001
-        if not resume:
+    # One run, but resilient to two recoverable failure modes:
+    #   • a stale ``resume`` id  → drop it, retry FRESH once (as before);
+    #   • a transient network drop (WinError 10054 / "error result: success")
+    #                             → back off and re-run the whole thing.
+    # A timeout is never retried here — it propagates as a real failure.
+    resume_id = resume
+    run: ClaudeRun | None = None
+    for attempt_no in range(_TRANSIENT_RETRIES + 1):
+        try:
+            run = await _attempt(resume_id)
+            break
+        except (asyncio.TimeoutError, TimeoutError):
+            raise  # a timeout is a real failure — never silently re-run
+        except Exception as exc:  # noqa: BLE001
+            if resume_id:
+                _log.warning(
+                    "resume failed — retrying from a fresh session", error=str(exc)
+                )
+                resume_id = None
+                continue
+            if attempt_no < _TRANSIENT_RETRIES and _is_transient(exc):
+                delay = _TRANSIENT_BACKOFF * (2**attempt_no)
+                _log.warning(
+                    "transient claude error — retrying run",
+                    attempt=attempt_no + 1,
+                    of=_TRANSIENT_RETRIES,
+                    delay=delay,
+                    error=str(exc),
+                )
+                await asyncio.sleep(delay)
+                continue
             raise
-        _log.warning("resume failed — retrying from a fresh session", error=str(exc))
-        run = await _attempt(None)
+    assert run is not None  # loop only exits via break (success) or raise
 
     if not run.text and run.transcript:
         run.text = "\n".join(run.transcript)

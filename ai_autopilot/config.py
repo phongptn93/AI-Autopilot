@@ -356,6 +356,10 @@ class Settings(BaseSettings):
     tenants: list[TenantConfig] = Field(default_factory=list)
 
     # ── Plugins ──
+    # Plugins are TRUSTED code: every .py in plugins_directory is imported and run
+    # with full access to the Container (ADO client + PAT, DB, executor). Loading is
+    # OPT-IN so a file dropped into ./plugins can't silently achieve code execution.
+    plugins_enabled: bool = False
     plugins_directory: str = "plugins"
 
     # ── Cost tracking ──
@@ -585,6 +589,17 @@ class Settings(BaseSettings):
     # ── Web / health ──
     health_port: int = 5080
     health_host: str = "0.0.0.0"
+    # Security for the web surface. Both are OPT-IN (empty → disabled, preserving
+    # current behaviour) but STRONGLY recommended because health_host defaults to
+    # 0.0.0.0 (all interfaces):
+    #   dashboard_auth_token – when set, the /dashboard/* UI requires HTTP Basic
+    #     auth (any username; password = this token). Protects config/PAT writes,
+    #     run triggers and record deletion from anyone on the network.
+    #   webhook_secret – when set, POST /api/webhook/* requires a matching
+    #     `X-Webhook-Secret` header (or `?secret=`), so the run/command trigger
+    #     can't be fired by an unauthenticated request.
+    dashboard_auth_token: str = ""
+    webhook_secret: str = ""
 
     # ── Persistence ──
     database_url: str = "sqlite+aiosqlite:///autopilot.db"

@@ -147,6 +147,18 @@ class StateSyncService:
         # C. deploy: a fresh successful deploy build → items awaiting deploy are deployed.
         if cfg.on_deploy_state and cfg.on_merge_state:
             await self._check_deploys()
+        # D. bound the merged-PR memory (in-RAM set + persisted table) so neither
+        # grows unbounded over the project's life. ADO only re-surfaces recent
+        # completed PRs, so keeping the newest _MERGED_CAP ids is safe.
+        await self._bound_merged()
+
+    _MERGED_CAP = 5000
+
+    async def _bound_merged(self) -> None:
+        if len(self._merged) > self._MERGED_CAP:
+            self._merged = set(sorted(self._merged)[-self._MERGED_CAP:])
+        with contextlib.suppress(Exception):  # best-effort — never block the loop
+            await self._sync_repo.prune_merged_prs(self._MERGED_CAP)
 
     async def _check_deploys(self) -> None:
         c, cfg = self._c, self._config

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
+import os
 import threading
 import uuid
 import webbrowser
@@ -191,6 +193,11 @@ class AdoAuthService:
 
     def _save_token(self, token: TokenInfo) -> None:
         self._token_file.write_text(token.to_json(), encoding="utf-8")
+        # The file holds the long-lived refresh + access token. Restrict it to the
+        # owner (0600) so other local users can't read it. Best-effort: on Windows
+        # POSIX chmod is a no-op for group/other bits, but harmless.
+        with contextlib.suppress(OSError):
+            os.chmod(self._token_file, 0o600)
         self._log.debug("token saved", path=str(self._token_file))
 
 

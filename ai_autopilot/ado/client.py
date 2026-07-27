@@ -7,6 +7,7 @@ Code, so it does not use MCP). Auth headers are injected per-request via
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from datetime import datetime
@@ -34,6 +35,18 @@ _REL_SUCCESSOR = "System.LinkTypes.Dependency-Forward"    # target depends on th
 _REL_RELATED = "System.LinkTypes.Related"                 # soft conflict (touch same area)
 
 
+def _wiql_lit(value: object) -> str:
+    """Escape a value for safe inclusion inside a single-quoted WIQL string literal.
+
+    ``ado_project``, ``trigger_states``, trigger tags, etc. are all editable at
+    runtime via the dashboard Settings form, so they are untrusted input, not
+    constants. A stray apostrophe would otherwise break out of the literal and
+    rewrite the WIQL predicate (or hard-fail every poll). WIQL escapes ``'`` by
+    doubling it.
+    """
+    return str(value).replace("'", "''")
+
+
 def is_bot_comment(text: str | None) -> bool:
     """True if a comment was authored by the autopilot — decided by the signature in the
     CONTENT (author is useless: the bot posts under the operator's own identity).
@@ -59,6 +72,28 @@ class AdoClient:
         headers["Content-Type"] = content_type
         return headers
 
+    async def _send(
+        self, method: str, url: str, *, retries: int = 2, **kwargs
+    ) -> httpx.Response:
+        """HTTP send with bounded backoff on ADO throttling (429) / transient 5xx.
+
+        Use ONLY for idempotent reads (GET, WIQL queries) — NEVER for mutations,
+        which must not be replayed. Without this a single 429 surfaces as an empty
+        result and the caller acts on a false 'nothing to do' (mis-scheduling)."""
+        resp = await self._http.request(method, url, **kwargs)
+        for attempt in range(retries):
+            if resp.status_code not in (429, 502, 503, 504):
+                return resp
+            ra = resp.headers.get("Retry-After", "")
+            delay = float(ra) if ra.replace(".", "", 1).isdigit() else min(2**attempt, 8)
+            self._log.warning(
+                "ADO throttled/5xx — backing off",
+                status=resp.status_code, attempt=attempt + 1, delay=delay,
+            )
+            await asyncio.sleep(delay)
+            resp = await self._http.request(method, url, **kwargs)
+        return resp
+
     def _url(self, path: str) -> str:
         """Work-item API URL (scoped to ado_project — where work items live)."""
         return f"{self._base}/{self._config.ado_project}/_apis/{path}"
@@ -73,7 +108,7 @@ class AdoClient:
         """WIQL predicate matching ANY configured trigger tag, e.g.
         ``([System.Tags] CONTAINS 'a' OR [System.Tags] CONTAINS 'b')``."""
         tags = self._config.effective_trigger_tags or ["autopilot"]
-        ors = " OR ".join(f"[System.Tags] CONTAINS '{t}'" for t in tags)
+        ors = " OR ".join(f"[System.Tags] CONTAINS '{_wiql_lit(t)}'" for t in tags)
         return f"({ors})"
 
     def _candidate_clause(self) -> str:
@@ -98,16 +133,17 @@ class AdoClient:
 
     async def get_pending_work_items(self) -> list[WorkItemInfo]:
         """Query work items tagged with any trigger tag in pending states."""
-        states = ", ".join(f"'{s}'" for s in self._config.trigger_states) or "'New'"
+        states = ", ".join(f"'{_wiql_lit(s)}'" for s in self._config.trigger_states) or "'New'"
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
             f"WHERE {self._candidate_clause()} "
             f"AND [System.State] IN ({states}) "
-            f"AND [System.TeamProject] = '{self._config.ado_project}' "
+            f"AND [System.TeamProject] = '{_wiql_lit(self._config.ado_project)}' "
             "ORDER BY [System.ChangedDate] DESC"
         )
         try:
-            resp = await self._http.post(
+            resp = await self._send(
+                "POST",
                 self._url(f"wit/wiql?{_API}"),
                 json={"query": wiql},
                 headers=await self._headers(),
@@ -159,13 +195,13 @@ class AdoClient:
             who_clause = f"[System.AssignedTo] IN ({who_list})"
         clauses = [
             who_clause,
-            f"[System.TeamProject] = '{self._config.ado_project}'",
+            f"[System.TeamProject] = '{_wiql_lit(self._config.ado_project)}'",
         ]
         if states:
-            state_list = ", ".join(f"'{s}'" for s in states)
+            state_list = ", ".join(f"'{_wiql_lit(s)}'" for s in states)
             clauses.append(f"[System.State] IN ({state_list})")
         if types:
-            type_list = ", ".join(f"'{t}'" for t in types)
+            type_list = ", ".join(f"'{_wiql_lit(t)}'" for t in types)
             clauses.append(f"[System.WorkItemType] IN ({type_list})")
         wiql = (
             "SELECT [System.Id] FROM WorkItems WHERE "
@@ -195,7 +231,7 @@ class AdoClient:
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
             f"WHERE {self._candidate_clause()} "
-            f"AND [System.TeamProject] = '{self._config.ado_project}' "
+            f"AND [System.TeamProject] = '{_wiql_lit(self._config.ado_project)}' "
             "ORDER BY [System.ChangedDate] DESC"
         )
         try:
@@ -222,7 +258,7 @@ class AdoClient:
         the true match count exceeds it so truncation is never silent."""
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
-            f"WHERE [System.TeamProject] = '{self._config.ado_project}' "
+            f"WHERE [System.TeamProject] = '{_wiql_lit(self._config.ado_project)}' "
             "ORDER BY [System.ChangedDate] DESC"
         )
         try:
@@ -344,28 +380,58 @@ class AdoClient:
             self._log.warning("update_state failed", id=work_item_id, status=resp.status_code)
         return resp.status_code < 400
 
-    async def add_tag(self, work_item_id: int, tag: str) -> bool:
-        item = await self.get_work_item(work_item_id)
-        if item is None:
+    async def _update_tags_atomic(self, work_item_id: int, mutate, *, what: str) -> bool:
+        """Read-modify-write ``System.Tags`` with optimistic concurrency.
+
+        ``mutate(current_tags) -> new_tags | None`` (None = no change). PATCH carries
+        a ``test`` op on ``/rev`` so a concurrent tag write (poller + reviewer tracker
+        + a human in ADO all touch tags) can't silently clobber the other side — on a
+        409/412 conflict we re-read the latest rev and retry, rather than overwriting
+        the whole field with a stale snapshot."""
+        for attempt in range(3):
+            resp = await self._send(
+                "GET", self._url(f"wit/workitems/{work_item_id}?{_API}"),
+                headers=await self._auth.get_auth_header(),
+            )
+            if resp.status_code >= 400:
+                self._log.warning(f"{what}: fetch failed", id=work_item_id, status=resp.status_code)
+                return False
+            data = resp.json()
+            rev = data.get("rev")
+            raw_tags = str((data.get("fields") or {}).get("System.Tags", ""))
+            current = [t.strip() for t in raw_tags.split(";") if t.strip()]
+            new_tags = mutate(current)
+            if new_tags is None:
+                return True  # nothing to change
+            patch = [
+                {"op": "test", "path": "/rev", "value": rev},
+                {"op": "replace", "path": "/fields/System.Tags", "value": "; ".join(new_tags)},
+            ]
+            presp = await self._patch(work_item_id, patch)
+            if presp.status_code < 400:
+                return True
+            if presp.status_code in (409, 412):  # someone else won the race — re-read + retry
+                self._log.info(f"{what}: tag conflict, retrying", id=work_item_id, attempt=attempt + 1)
+                continue
+            self._log.warning(f"{what} failed", id=work_item_id, status=presp.status_code)
             return False
-        current = "; ".join(item.tags)
-        new_tags = tag if not current else f"{current}; {tag}"
-        patch = [{"op": "replace", "path": "/fields/System.Tags", "value": new_tags}]
-        resp = await self._patch(work_item_id, patch)
-        return resp.status_code < 400
+        self._log.warning(f"{what}: gave up after repeated tag conflicts", id=work_item_id)
+        return False
+
+    async def add_tag(self, work_item_id: int, tag: str) -> bool:
+        def mutate(current: list[str]) -> list[str] | None:
+            if any(t.lower() == tag.lower() for t in current):
+                return None  # already present
+            return [*current, tag]
+
+        return await self._update_tags_atomic(work_item_id, mutate, what="add_tag")
 
     async def remove_tag(self, work_item_id: int, tag: str) -> bool:
-        item = await self.get_work_item(work_item_id)
-        if item is None:
-            return False
-        remaining = [t for t in item.tags if t.lower() != tag.lower()]
-        if len(remaining) == len(item.tags):
-            return True  # tag wasn't present — nothing to do
-        patch = [{"op": "replace", "path": "/fields/System.Tags", "value": "; ".join(remaining)}]
-        resp = await self._patch(work_item_id, patch)
-        if resp.status_code >= 400:
-            self._log.warning("remove_tag failed", id=work_item_id, status=resp.status_code)
-        return resp.status_code < 400
+        def mutate(current: list[str]) -> list[str] | None:
+            remaining = [t for t in current if t.lower() != tag.lower()]
+            return None if len(remaining) == len(current) else remaining
+
+        return await self._update_tags_atomic(work_item_id, mutate, what="remove_tag")
 
     async def create_work_item(
         self, title: str, item_type: str, parent_id: int | None, tag: str,
@@ -412,7 +478,8 @@ class AdoClient:
     # ── Git / Pull Request API (PR babysitter) ──────────────────────────────
 
     async def get_repositories(self) -> list[dict[str, Any]]:
-        resp = await self._http.get(
+        resp = await self._send(
+            "GET",
             self._git_url(f"git/repositories?{_API}"), headers=await self._auth.get_auth_header()
         )
         if resp.status_code >= 400:
@@ -433,7 +500,7 @@ class AdoClient:
         url = self._git_url(
             f"git/repositories/{repo_id}/pullrequests?searchCriteria.status={status}&{_API}"
         )
-        resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        resp = await self._send("GET", url, headers=await self._auth.get_auth_header())
         if resp.status_code >= 400:
             self._log.warning("get_pull_requests failed", status=resp.status_code, pr_status=status)
             return []
@@ -460,7 +527,7 @@ class AdoClient:
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
             f"WHERE [System.Parent] = {parent_id} "
-            f"AND [System.TeamProject] = '{self._config.ado_project}'"
+            f"AND [System.TeamProject] = '{_wiql_lit(self._config.ado_project)}'"
         )
         try:
             resp = await self._http.post(

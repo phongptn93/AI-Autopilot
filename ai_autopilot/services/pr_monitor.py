@@ -177,13 +177,46 @@ class PrMonitorService:
 
     async def _scan(self) -> None:
         c = self._c
-        for repo in await c.ado.get_repositories():
+        repos = await c.ado.get_repositories()
+        active_pr_ids: set[int] = set()
+        active_branches: set[tuple[str, str]] = set()
+        active_items: set[int] = set()
+        for repo in repos:
             repo_id = repo.get("id")
             if not repo_id:
                 continue
             repo_name = repo.get("name") or ""
             for pr in await c.ado.get_active_pull_requests(repo_id):
+                pid = pr.get("pullRequestId")
+                if pid is not None:
+                    active_pr_ids.add(pid)
+                ref = pr.get("sourceRefName", "")
+                active_branches.add((repo_id, ref.removeprefix("refs/heads/")))
+                wid = parse_work_item_id(ref)
+                if wid is not None:
+                    active_items.add(wid)
                 await self._inspect_pr(repo_id, repo_name, pr)
+        # Only prune when the scan actually saw repos — a transient empty result
+        # (e.g. an ADO error) must not wipe the caches.
+        if repos:
+            self._prune_caches(active_pr_ids, active_branches, active_items)
+
+    def _prune_caches(
+        self, active_pr_ids: set[int], active_branches: set[tuple[str, str]],
+        active_items: set[int],
+    ) -> None:
+        """Bound the in-memory caches to currently-open PRs. ``_handled`` and
+        ``_revision_counts`` are DB-backed (a dropped entry simply reloads on next
+        access), and only UNLOCKED branch locks are evicted, so this is safe even if
+        a scan is briefly incomplete."""
+        self._handled = {k: v for k, v in self._handled.items() if k in active_pr_ids}
+        self._revision_counts = {
+            k: v for k, v in self._revision_counts.items() if k in active_items
+        }
+        self._branch_locks = {
+            k: v for k, v in self._branch_locks.items()
+            if k in active_branches or v.locked()
+        }
 
     async def _apply_outcome(self, work_item_id: int, outcome: str) -> None:
         """Apply a pipeline outcome's tag + state to the work item (clearing stale outcome

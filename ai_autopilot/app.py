@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
@@ -24,6 +27,48 @@ from ai_autopilot.services import (
 from ai_autopilot.teams_agent import build_agent as build_teams_agent
 
 
+def _basic_auth_ok(header: str | None, token: str) -> bool:
+    """Validate an HTTP Basic ``Authorization`` header against the dashboard token.
+
+    Any username is accepted; the password must equal ``token`` (constant-time).
+    """
+    if not header or not header.lower().startswith("basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header.split(" ", 1)[1]).decode("utf-8", "replace")
+    except (binascii.Error, ValueError):
+        return False
+    _, _, password = decoded.partition(":")
+    return secrets.compare_digest(password, token)
+
+
+def _quiet_proactor_connection_reset(log) -> None:
+    """Downgrade the harmless Windows ``[WinError 10054]`` Proactor callback noise.
+
+    On Windows the Proactor event loop logs an *unhandled*
+    ``ConnectionResetError: [WinError 10054] An existing connection was forcibly
+    closed by the remote host`` from ``_ProactorBasePipeTransport._call_connection_lost``
+    whenever a subprocess pipe / TLS socket is torn down after the peer already
+    closed it. It does not affect the run (``claude_client`` retries the real
+    failure) — it just spams the log. Route only this one callback error to debug
+    and delegate everything else to the loop's default handler.
+    """
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+
+    def handler(loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
+            log.debug("ignored proactor connection reset (WinError 10054)")
+            return
+        if previous is not None:
+            previous(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or load_settings()
     configure_logging(level="INFO")
@@ -31,47 +76,91 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        _quiet_proactor_connection_reset(log)
         container = Container(config)
         app.state.container = container
-        await container.startup()
-
-        poller = AdoPollerService(container)
-        pr_monitor = PrMonitorService(container)
-        app.state.pr_monitor = pr_monitor  # webhook fast-path targets it directly
-        state_sync = StateSyncService(container)
-        reviewer_tracker = ReviewerTrackerService(container)
-        loops = LoopScheduler(container)
-        poller.start()
-        pr_monitor.start()
-        state_sync.start()
-        reviewer_tracker.start()
-        loops.start()
-
-        teams_bot = build_teams_agent(config, container, reviewer_tracker)
+        started: list = []  # services successfully .start()ed — torn down in reverse
         teams_digest_task = None
-        if teams_bot is not None:
-            app.state.teams_agent, app.state.teams_adapter, teams_digest_task = teams_bot
-            log.info("Teams bot enabled — /api/messages live")
-        else:
-            app.state.teams_agent = None
 
-        log.info("autopilot online", health_port=config.health_port)
-        try:
-            yield
-        finally:
-            await poller.stop()
-            await pr_monitor.stop()
-            await state_sync.stop()
-            await reviewer_tracker.stop()
-            await loops.stop()
+        async def _teardown() -> None:
+            for svc in reversed(started):
+                with contextlib.suppress(Exception):
+                    await svc.stop()
             if teams_digest_task is not None:
                 teams_digest_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await teams_digest_task
-            await container.shutdown()
+            with contextlib.suppress(Exception):
+                await container.shutdown()
+
+        # Startup is atomic: if anything below raises, tear down whatever already
+        # started (services + the container's http client / DB) before propagating,
+        # so a failed boot never leaks resources or leaves live background tasks.
+        try:
+            await container.startup()
+            reviewer_tracker = ReviewerTrackerService(container)
+            for svc in (
+                AdoPollerService(container),
+                PrMonitorService(container),
+                StateSyncService(container),
+                reviewer_tracker,
+                LoopScheduler(container),
+            ):
+                svc.start()
+                started.append(svc)
+                if isinstance(svc, PrMonitorService):
+                    app.state.pr_monitor = svc  # webhook fast-path targets it directly
+
+            teams_bot = build_teams_agent(config, container, reviewer_tracker)
+            if teams_bot is not None:
+                app.state.teams_agent, app.state.teams_adapter, teams_digest_task = teams_bot
+                log.info("Teams bot enabled — /api/messages live")
+            else:
+                app.state.teams_agent = None
+
+            if config.health_host not in ("127.0.0.1", "localhost", "::1") and not config.dashboard_auth_token:
+                log.warning(
+                    "dashboard is exposed on a non-loopback host with NO auth — anyone who "
+                    "can reach it can rewrite config (incl. the ADO PAT) and trigger runs. "
+                    "Set dashboard_auth_token (and webhook_secret), or bind health_host to 127.0.0.1.",
+                    health_host=config.health_host, health_port=config.health_port,
+                )
+            log.info("autopilot online", health_port=config.health_port)
+        except Exception:
+            log.error("startup failed — tearing down partially-started services")
+            await _teardown()
+            raise
+
+        try:
+            yield
+        finally:
+            await _teardown()
             log.info("autopilot stopped")
 
     app = FastAPI(title="AI Autopilot", version="2.2.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def _security_guard(request: Request, call_next):
+        """Opt-in auth for the network-exposed web surface.
+
+        Both gates are no-ops until configured, so existing setups are unchanged —
+        but once ``dashboard_auth_token`` / ``webhook_secret`` are set they are
+        enforced here, before any handler runs. ``/health`` and ``/metrics`` stay
+        open for probes.
+        """
+        path = request.url.path
+        if config.webhook_secret and path.startswith("/api/webhook"):
+            got = request.headers.get("x-webhook-secret") or request.query_params.get("secret", "")
+            if not secrets.compare_digest(got, config.webhook_secret):
+                return Response(status_code=401, content="unauthorized")
+        if config.dashboard_auth_token and path.startswith("/dashboard"):
+            if not _basic_auth_ok(request.headers.get("authorization"), config.dashboard_auth_token):
+                return Response(
+                    status_code=401,
+                    content="authentication required",
+                    headers={"WWW-Authenticate": 'Basic realm="AI Autopilot"'},
+                )
+        return await call_next(request)
 
     @app.get("/health")
     async def health_endpoint(response: Response) -> dict:
@@ -161,9 +250,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if work_item_id is None:
             log.warning("webhook received but no workItemId found")
             return {"error": "No workItemId in payload"}
-        c.webhook_queue.enqueue(int(work_item_id))
-        log.info("webhook queued work item", id=work_item_id)
-        return {"queued": int(work_item_id)}
+        # Never let a malformed payload (non-numeric id) raise a 500 — validate the cast.
+        if not str(work_item_id).strip().isdigit():
+            log.warning("webhook workItemId not numeric", value=str(work_item_id)[:64])
+            return {"error": "workItemId must be numeric"}
+        wid = int(work_item_id)
+        c.webhook_queue.enqueue(wid)
+        log.info("webhook queued work item", id=wid)
+        return {"queued": wid}
 
     app.include_router(create_dashboard_router())
     return app

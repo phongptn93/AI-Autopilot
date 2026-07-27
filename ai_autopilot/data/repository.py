@@ -753,3 +753,20 @@ class SyncStateRepository:
             row.state = state
             row.created_at = datetime.now(UTC)
             await session.commit()
+
+    async def prune_merged_prs(self, keep: int = 5000) -> int:
+        """Keep only the most-recent ``keep`` merged-PR rows (highest pr_id = newest),
+        deleting older ones so the table can't grow unbounded over the project's life.
+        Safe: ADO only re-surfaces recent completed PRs, far fewer than ``keep``, so a
+        pruned id is never re-seen. Returns the number of rows deleted."""
+        async with self._db.session() as session:
+            stale = (
+                await session.execute(
+                    select(MergedPr.pr_id).order_by(MergedPr.pr_id.desc()).offset(keep)
+                )
+            ).scalars().all()
+            if not stale:
+                return 0
+            await session.execute(delete(MergedPr).where(MergedPr.pr_id.in_(stale)))
+            await session.commit()
+            return len(stale)

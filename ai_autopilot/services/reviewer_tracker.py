@@ -426,7 +426,9 @@ class ReviewerTrackerService:
         c = self._c
         bot = await self._bot_identity()
         active_ids: set[int] = set()
-        for repo in await c.ado.get_repositories():
+        active_branches: set[tuple[str, str]] = set()
+        repos = await c.ado.get_repositories()
+        for repo in repos:
             repo_id = repo.get("id")
             if not repo_id:
                 continue
@@ -435,6 +437,9 @@ class ReviewerTrackerService:
                 pid = pr.get("pullRequestId")
                 if pid is not None:
                     active_ids.add(pid)
+                active_branches.add(
+                    (repo_id, pr.get("sourceRefName", "").removeprefix("refs/heads/"))
+                )
                 try:
                     await self._track_pr(repo_id, repo_name, pr, bot)
                 except Exception as exc:  # noqa: BLE001 — one bad PR must not stop the scan
@@ -443,6 +448,14 @@ class ReviewerTrackerService:
                         pr=pr.get("pullRequestId"), error=str(exc),
                     )
         await self._forget_closed_prs(active_ids)
+        # Bound in-memory caches to open PRs (skip when the scan saw no repos, so a
+        # transient empty result can't wipe them). Keep any lock currently held.
+        if repos:
+            self._branch_locks = {
+                k: v for k, v in self._branch_locks.items()
+                if k in active_branches or v.locked()
+            }
+            self._reviewing &= active_ids
 
     async def _forget_closed_prs(self, active_ids: set[int]) -> None:
         """Drop tracked rows for PRs no longer active (completed / abandoned) so the

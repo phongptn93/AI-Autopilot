@@ -33,6 +33,8 @@ from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.workspace import discover_repos, parse_repo_descriptions
 
+_log = get_logger("execution.claude_executor")
+
 _BRANCH_PREFIX = {
     TaskCategory.BUG: "fix",
     TaskCategory.FRONTEND_TASK: "feature/fe",
@@ -397,9 +399,19 @@ class ClaudeExecutor:
         # greedily swallows the prompt as one of its values. The interactive CLI
         # auto-discovers the workspace's .claude config from cwd, so MCP/skills load
         # without an explicit flag.
+        # Remote-Control sessions run locally as a normal (non-root) user and are
+        # meant to proceed UNATTENDED — the human *attaches* to steer when they want
+        # to, they shouldn't have to answer a permission prompt for every Bash/MCP
+        # tool call (which is what stalls a rework). So default this path to
+        # `bypassPermissions` (no prompts); only honour a different configured mode
+        # if the operator explicitly pinned one (i.e. changed it away from the
+        # `acceptEdits` default). The root-only restriction on bypassPermissions
+        # applies to headless container runs, not this local interactive path.
+        perm = self._config.claude_permission_mode
+        interactive_perm = "bypassPermissions" if perm == "acceptEdits" else perm
         cli_args = [
             "--remote-control", session,
-            "--permission-mode", self._config.claude_permission_mode,
+            "--permission-mode", interactive_perm,
             prompt,
         ]
 
@@ -516,6 +528,43 @@ class ClaudeExecutor:
         else:  # assisted
             action = "Implement it, then open a DRAFT PR for each repo you change (human review)."
 
+        # Autonomy directive — the single biggest cause of a stalled rework is the
+        # agent stopping to ask the human a clarifying question instead of deciding.
+        # Tell it explicitly to proceed. Report mode stays advisory (no code), so it
+        # only needs the "don't ask, state assumptions" half.
+        if autonomy == "report":
+            ambiguity = (
+                "- Work autonomously — do NOT ask the human clarifying questions. If something is "
+                "ambiguous, state your assumption in the plan and proceed with the most reasonable "
+                "interpretation."
+            )
+        else:
+            ambiguity = (
+                "- Work autonomously and DECISIVELY. Do NOT ask the human clarifying questions, and "
+                "do NOT wait for confirmation before acting — you will not get an answer. When "
+                "something is ambiguous, choose the most reasonable interpretation from the work "
+                "item, its acceptance criteria, the latest human comment, and the existing "
+                "code/conventions, note the assumption briefly in the commit/PR, and keep going.\n"
+                "- Report needs_human ONLY for a genuine HARD blocker you cannot resolve yourself: "
+                "missing credentials or repo access, or an irreversible destructive action that "
+                "needs sign-off. Ambiguity, naming/style choices, and minor gaps are NOT "
+                "blockers — decide and move on."
+            )
+
+        # Enforce the skill allowlist in the AI-native path too (the legacy router
+        # path checks RbacPolicy.is_skill_allowed, but here the agent picks skills
+        # itself, so the only place to constrain it is the brief).
+        if self._config.allowed_skills:
+            skill_rule = (
+                "- You may ONLY use these skills — a hard allowlist; do NOT run any other "
+                "skill under any circumstance: " + ", ".join(self._config.allowed_skills)
+            )
+        else:
+            skill_rule = (
+                "- Choose and run the most appropriate skill(s) in this workspace — "
+                "do not assume one."
+            )
+
         lines = [
             "You are an autonomous engineer working in this workspace. Handle the Azure DevOps "
             "work item below end-to-end.",
@@ -545,14 +594,17 @@ class ClaudeExecutor:
             "# How to proceed",
             "- Reason about what this needs. If it is a large requirement, use your planning / "
             "task-generation skill to break it down first.",
-            "- Choose and run the most appropriate skill(s) in this workspace — do not assume one.",
-            "- You may use the Azure DevOps MCP to fetch more detail on the work item.",
+            skill_rule,
+            "- Fetch work-item detail with the Azure DevOps MCP tool directly (e.g. "
+            "`wit_get_work_item`) — do NOT shell out to the `az` CLI (it mangles Vietnamese "
+            "to cp1252) and do NOT spawn a sub-agent just to look the item up.",
+            "- On Windows use PowerShell for shell commands; the Git Bash here is stripped-down "
+            "(no `head`/`grep`/`find`/`printenv`), so don't retry the same command across shells.",
             "- For EACH repo you change: start from a clean base branch, create a feature branch, "
             "commit, push, and open a pull request with the pr-create skill.",
             f"- {action}",
             "- Run a self-review (e.g. security-review / review-pr skill) before opening the PR.",
-            "- If the acceptance criteria are ambiguous or you lack the information to proceed "
-            "safely, do NOT guess — stop and report needs_human.",
+            ambiguity,
             f"- {BOT_COMMENT_INSTRUCTION}",
             "",
             "# Required output (the control plane reads ONLY this — you MUST write it)",
@@ -807,6 +859,18 @@ class ClaudeExecutor:
                 workspace=self._config.workspace_directory,
             )
             await self._git(["fetch", "origin", base_branch], repo, check=False)
+            # `reset --hard` + `clean -fd` wipe the shared checkout — irrecoverably
+            # discarding any uncommitted or untracked files a human may have left in
+            # this repo. Surface exactly what is being destroyed instead of doing it
+            # silently, so a lost edit is at least diagnosable from the log.
+            dirty = (await self._git(["status", "--porcelain"], repo, check=False)).strip()
+            if dirty:
+                self._log.warning(
+                    "workspace mode: discarding uncommitted changes in shared checkout",
+                    id=item_id, repo=repo,
+                    files=[ln[3:].strip() for ln in dirty.splitlines()][:50],
+                    count=len(dirty.splitlines()),
+                )
             await self._git(["reset", "--hard"], repo, check=False)
             await self._git(["clean", "-fd"], repo, check=False)
             await self._git(["checkout", "-B", branch, from_ref], repo)
@@ -1056,18 +1120,34 @@ def _repo_name(repo: str, workspace: str) -> str:
 
 
 def _load_mcp_servers(workspace: str) -> dict | None:
-    """Read MCP server config from ``<workspace>/.claude/mcp.json`` if present.
+    """Read MCP server config for the Agent SDK.
 
-    Returned as a dict the Agent SDK can consume. Best-effort: any error (missing
-    file, bad JSON) yields ``None`` and the run proceeds without MCP.
+    Checks ``<workspace>/.claude/mcp.json`` then falls back to the Claude Code
+    standard ``<workspace>/.mcp.json``. Returned as a dict the SDK can consume.
+
+    A MISSING file is fine (returns ``None`` silently). But a file that EXISTS and
+    fails to parse is logged as a WARNING rather than swallowed — a single JSON
+    typo otherwise strips every MCP tool (e.g. the Azure DevOps ``wit_*`` tools),
+    which sends the agent into minutes of blind fallback (az CLI / curl / spawning
+    sub-agents) with no signal as to why. Loud failure > silent degradation.
     """
-    path = Path(workspace) / ".claude" / "mcp.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    servers = data.get("mcpServers") if isinstance(data, dict) else None
-    return servers or None
+    for rel in (Path(".claude") / "mcp.json", Path(".mcp.json")):
+        path = Path(workspace) / rel
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            _log.warning(
+                "mcp config present but unreadable — NO MCP tools will load for this "
+                "run; agents lose ADO/DB tools and fall back blindly. Fix the file.",
+                path=str(path), error=str(exc),
+            )
+            continue
+        servers = data.get("mcpServers") if isinstance(data, dict) else None
+        if servers:
+            return servers
+    return None
 
 
 def _branch_name(item: WorkItemInfo) -> str:

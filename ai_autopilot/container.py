@@ -7,6 +7,8 @@ on ``app.state`` and the background services consume.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 
 from ai_autopilot.ado import AdoAuthService, AdoClient, AdoNotifier
@@ -110,7 +112,15 @@ class Container:
 
     async def startup(self) -> None:
         await self.database.create_all()
-        await self.plugins.load_and_init(self.config.plugins_directory, self)
+        # Plugins run as fully-trusted code with Container access — load only when
+        # explicitly enabled, so a file dropped into ./plugins can't silently run.
+        if self.config.plugins_enabled:
+            await self.plugins.load_and_init(self.config.plugins_directory, self)
+        elif self.config.plugins_directory and Path(self.config.plugins_directory).is_dir():
+            self.log.warning(
+                "plugins directory present but plugins_enabled=false — skipping load",
+                dir=self.config.plugins_directory,
+            )
         # Fail-fast guard: a machine that hands off to one of its OWN trigger states
         # would re-pick items it just finished (an infinite loop).
         if self.config.sdlc_loop_enabled and handoff_collides(self.config):

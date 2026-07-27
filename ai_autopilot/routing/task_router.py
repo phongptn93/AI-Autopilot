@@ -48,6 +48,14 @@ class TaskRouter:
         if item_type == "BUG":
             return TaskCategory.BUG
 
+        # Requirement-level items (User Story / Feature / Requirement) are classified
+        # by TYPE first — a big requirement is never a single migration/CRUD task, so
+        # a `[DB]`/`[BE]` TITLE PREFIX must NOT route it straight to a schema-mutating
+        # skill (/sql-migration, /crud-full-stack). It goes to analysis/decomposition;
+        # the child Tasks it produces then match the prefix rules below.
+        if item_type in ("USER STORY", "REQUIREMENT", "FEATURE"):
+            return TaskCategory.REQUIREMENT
+
         if _has_prefix(title, "[BE]") or _has_tag(tags, "BE") or _has_tag(tags, "BACKEND"):
             return TaskCategory.BACKEND_TASK
         if _has_prefix(title, "[FE]") or _has_tag(tags, "FE") or _has_tag(tags, "FRONTEND"):
@@ -61,9 +69,6 @@ class TaskRouter:
             or _has_tag(tags, "TEST")
         ):
             return TaskCategory.TEST_TASK
-
-        if item_type in ("USER STORY", "REQUIREMENT", "FEATURE"):
-            return TaskCategory.REQUIREMENT
 
         if item_type == "TASK":
             if any(k in title for k in _BACKEND_KW):

@@ -255,6 +255,49 @@ async def test_create_logged_ticket_falls_back_when_compose_fails(monkeypatch):
     assert "#4242" in ctx.sent[0] and "/_workitems/edit/4242" in ctx.sent[0]
 
 
+async def test_free_text_queue_intent_lists(monkeypatch):
+    async def fake_classify(config, text):
+        return {"intent": "queue", "filter": None}
+
+    called = []
+
+    async def fake_reply_queue(context, container):
+        called.append(True)
+
+    monkeypatch.setattr(teams_agent, "_classify_intent", fake_classify)
+    monkeypatch.setattr(teams_agent, "_reply_queue", fake_reply_queue)
+    await teams_agent._handle_free_text(
+        _FakeContext(), Settings(teams_agent_nlu_enabled=True), container=None,
+        reviewer_tracker=_FakeReviewerTracker(), text="còn việc nào đang chờ tôi không",
+    )
+    assert called == [True]
+
+
+async def test_free_text_resume_intent_sends_confirm_card(monkeypatch):
+    async def fake_classify(config, text):
+        return {"intent": "resume", "filter": "6753"}
+
+    sent = []
+
+    async def fake_card(context, iid, title):
+        sent.append(iid)
+
+    class _Ado:
+        async def get_work_item(self, iid):
+            return None
+
+    class _Cont:
+        ado = _Ado()
+
+    monkeypatch.setattr(teams_agent, "_classify_intent", fake_classify)
+    monkeypatch.setattr(teams_agent, "_send_resume_confirm_card", fake_card)
+    await teams_agent._handle_free_text(
+        _FakeContext(), Settings(teams_agent_nlu_enabled=True), container=_Cont(),
+        reviewer_tracker=_FakeReviewerTracker(), text="tiếp tục giúp mình việc 6753",
+    )
+    assert sent == [6753]  # routed to the gated resume card, not a direct resume
+
+
 async def test_free_text_mutation_request_still_redirects(monkeypatch):
     """A mutation-style message is redirected to ADO BEFORE any Claude call —
     the read-only guarantee must not depend on the model."""

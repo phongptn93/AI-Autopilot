@@ -893,7 +893,7 @@ có bước xác nhận trước khi tạo). Bot KHÔNG được sửa code, vot
 
 Phân loại tin nhắn của người dùng vào ĐÚNG MỘT trong các intent sau, và trả về \
 CHÍNH XÁC một dòng JSON, không kèm giải thích, không markdown:
-{{"intent": "items|prs|pr_lookup|item_lookup|team_overview|status|help|create_ticket|unknown", \
+{{"intent": "items|prs|pr_lookup|item_lookup|team_overview|status|help|create_ticket|queue|resume|unknown", \
 "filter": null hoặc giá trị tương ứng bên dưới}}
 
 - "items": người dùng muốn xem WORK ITEM CỦA CHÍNH HỌ. filter = null hoặc từ khoá \
@@ -912,6 +912,10 @@ rồi"), không phân biệt của ai. filter = số PR đó dạng chuỗi (vd 
 - "create_ticket": người dùng muốn TẠO / GHI / LOG một ticket, task, bug hay yêu cầu MỚI \
 (vd "tạo ticket ...", "log giúp bug ...", "mở 1 task cho ...", "ghi nhận việc ..."). \
 filter = TIÊU ĐỀ ngắn gọn (một câu) tóm tắt ticket, rút từ lời người dùng.
+- "queue": người dùng hỏi việc đang CHỜ NGƯỜI XỬ LÝ / bị giữ / cần duyệt (vd "có việc nào \
+đang chờ không", "queue", "còn gì cần tôi xử lý"). filter = null.
+- "resume": người dùng muốn TIẾP TỤC / CHẠY LẠI / MỞ LẠI một việc đang chờ theo số (vd \
+"tiếp tục #6753", "resume 6753", "chạy lại việc 6753"). filter = số work item đó dạng chuỗi.
 - "unknown": MỌI yêu cầu khác — đặc biệt là bất kỳ yêu cầu SỬA CODE/VOTE/MERGE/\
 APPROVE/REJECT/COMMIT/PUSH nào — luôn phân vào "unknown", không tự bịa intent mới.
 
@@ -920,7 +924,7 @@ Tin nhắn: {text}"""
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 _ALLOWED_INTENTS = {
     "items", "prs", "pr_lookup", "item_lookup", "team_overview", "status", "help",
-    "create_ticket", "unknown",
+    "create_ticket", "queue", "resume", "unknown",
 }
 
 
@@ -1145,6 +1149,17 @@ async def _handle_free_text(
         # an explicit Confirm click.
         title = (flt if isinstance(flt, str) else "").strip() or text.strip()
         await _send_log_confirm_card(context, title[:250])
+        return
+    if intent == "queue":
+        await _reply_queue(context, container)
+        return
+    if intent == "resume":
+        iid = _as_int(flt)
+        if iid is None:
+            await context.send_activity("Bạn muốn tiếp tục việc nào? Cho mình số work item nhé.")
+            return
+        item = await container.ado.get_work_item(iid)
+        await _send_resume_confirm_card(context, iid, item.title if item else "")
         return
     if intent == "items":
         email, items = await _items_data(context, container)

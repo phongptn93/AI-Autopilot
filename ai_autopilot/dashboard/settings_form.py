@@ -390,6 +390,25 @@ def import_settings(raw: str, valid_keys: set[str]) -> dict[str, Any]:
     }
 
 
+def import_full_settings(blob: bytes, password: str, valid_keys: set[str]) -> dict[str, Any]:
+    """Decrypt a full-export ``.enc`` blob (from :func:`export_full_encrypted`) and
+    parse it into an updates dict.
+
+    Unlike :func:`import_settings` this KEEPS secrets and machine-specific values —
+    a full export is a deliberate backup/restore, not a share. Only keys that aren't
+    valid Settings fields are dropped. The mechanism's own keys (export password,
+    dashboard hash) were never in the export, so a restore never clobbers the target
+    host's own credentials. Raises :class:`ValueError` on a wrong password / corrupt
+    file (from :func:`security.decrypt_bytes`) or non-mapping YAML."""
+    from ai_autopilot import security
+
+    raw = security.decrypt_bytes(blob, password).decode("utf-8")
+    data = yaml.safe_load(raw) or {}
+    if not isinstance(data, dict):
+        raise ValueError("Config file must be a YAML mapping")
+    return {k: v for k, v in data.items() if k in valid_keys}
+
+
 def sections() -> list[tuple[str, list[Field]]]:
     """Return fields grouped by section, preserving declaration order."""
     grouped: dict[str, list[Field]] = {}

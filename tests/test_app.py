@@ -11,6 +11,7 @@ from starlette.testclient import TestClient
 
 from ai_autopilot.app import create_app
 from ai_autopilot.config import Settings
+from ai_autopilot.dashboard import settings_form
 
 
 @pytest.fixture
@@ -97,6 +98,46 @@ def test_export_full_config_is_encrypted_and_round_trips(tmp_path):
     decrypted = security.decrypt_bytes(resp.content, "pw-xyz").decode("utf-8")
     assert "top-secret" in decrypted                    # PAT IS in the encrypted payload
     assert "ExportProj" in decrypted
+
+
+def test_import_full_restores_secrets(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    # A source config with a secret, exported + encrypted (as from another machine).
+    blob = settings_form.export_full_encrypted(
+        Settings(ado_pat="restore-me", ado_project="RP"), "kpw"
+    )
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        resp = client.post(
+            "/dashboard/settings/import-full",
+            data={"password": "kpw"},
+            files={"file": ("autopilot-config-full.enc", blob, "application/octet-stream")},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303 and "imported=1" in resp.headers["location"]
+        cfg = client.app.state.container.config
+        assert cfg.ado_pat == "restore-me"      # secret WAS restored (unlike safe import)
+        assert cfg.ado_project == "RP"
+    import yaml
+
+    saved = yaml.safe_load(cfg_file.read_text())
+    assert saved["ado_pat"] == "restore-me"     # persisted to the config file
+
+
+def test_import_full_wrong_password_reports_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    blob = settings_form.export_full_encrypted(Settings(ado_pat="x"), "right")
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        resp = client.post(
+            "/dashboard/settings/import-full",
+            data={"password": "wrong"},
+            files={"file": ("c.enc", blob, "application/octet-stream")},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303 and "import_error" in resp.headers["location"]
+        assert client.app.state.container.config.ado_pat == ""  # nothing applied
 
 
 def test_dashboard_auth_gate(tmp_path):

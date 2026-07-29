@@ -842,6 +842,46 @@ def create_dashboard_router() -> APIRouter:
             headers={"Content-Disposition": 'attachment; filename="autopilot-config-full.enc"'},
         )
 
+    @router.post("/settings/import-full")
+    async def import_config_full(request: Request):
+        """Restore a FULL encrypted config (.enc from export-full), INCLUDING secrets.
+
+        The password is entered on the form (a restore often lands on a fresh host
+        whose own config_export_password differs from the source). Simple fields
+        (incl. secrets) apply live and are persisted to config.yaml; nested structures
+        (tenants, repos) are fully typed after a restart — same as the shareable
+        import."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        upload = form.get("file")
+        password = str(form.get("password", ""))
+        if upload is None or not hasattr(upload, "read"):
+            return RedirectResponse("/dashboard/settings?import_error=No+file", status_code=303)
+        if not password:
+            return RedirectResponse(
+                "/dashboard/settings?import_error=Password+required", status_code=303
+            )
+        blob = await upload.read()
+        try:
+            updates = settings_form.import_full_settings(
+                blob, password, set(type(c.config).model_fields)
+            )
+        except (ValueError, yaml.YAMLError) as exc:
+            _log.warning("full config import failed", error=str(exc))
+            return RedirectResponse(
+                "/dashboard/settings?import_error=Wrong+password+or+invalid+file",
+                status_code=303,
+            )
+        if not updates:
+            return RedirectResponse(
+                "/dashboard/settings?import_error=Nothing+to+import", status_code=303
+            )
+        settings_form.save_to_yaml(config_file_path(), updates)
+        settings_form.apply_to_config(c.config, updates)
+        c.ado.refresh()
+        _log.warning("FULL config restored via dashboard", keys=sorted(updates.keys()))
+        return RedirectResponse("/dashboard/settings?imported=1", status_code=303)
+
     @router.post("/settings/import")
     async def import_config(request: Request):
         """Apply an uploaded YAML config (shared by a teammate). PAT is never imported."""

@@ -223,6 +223,10 @@ Server-rendered Jinja2 (no SPA). Pages: **Overview**, **Board**, **History**, **
   yaml_text = decrypt_bytes(open("autopilot-config-full.enc", "rb").read(), "Export#12345").decode()
   print(yaml_text)   # full config, incl. ado_pat
   ```
+  Restore it on another machine via **🔓 Import full** (`/dashboard/settings/import-full`):
+  upload the `.enc` + type the export password. Secrets are restored (unlike the
+  shareable import which strips them); the target's own dashboard password / export
+  password are never overwritten (excluded from the export).
 - **Schedule guard** (`scheduling.py`) — only act within configured windows.
 - **Autonomy levels** — `report` (L1: comment only), `assisted` (L2: draft PR, default),
   `unattended` (L3: normal PR, auto-resolve).

@@ -143,6 +143,24 @@ def test_export_full_encrypted_round_trips():
     assert restored["ado_project"] == "MyProj"
 
 
+def test_import_full_settings_restores_secrets():
+    config = Settings(ado_pat="top-secret", ado_project="MyProj", smtp_password="smtp-pw")
+    blob = settings_form.export_full_encrypted(config, "k")
+    updates = settings_form.import_full_settings(blob, "k", set(Settings.model_fields))
+    # full restore keeps secrets (unlike the shareable import_settings)
+    assert updates["ado_pat"] == "top-secret"
+    assert updates["smtp_password"] == "smtp-pw"
+    assert updates["ado_project"] == "MyProj"
+
+
+def test_import_full_settings_wrong_password_raises():
+    import pytest
+
+    blob = settings_form.export_full_encrypted(Settings(ado_pat="x"), "right")
+    with pytest.raises(ValueError):
+        settings_form.import_full_settings(blob, "wrong", set(Settings.model_fields))
+
+
 def test_import_settings_keeps_known_drops_secrets_and_unknown():
     valid = set(Settings.model_fields)
     raw = (

@@ -65,6 +65,13 @@
       <input type="file" name="file" accept=".yaml,.yml" required class="file-mini">
       <button type="submit" class="btn-ghost">⬆ Import</button>
     </form>
+    <form method="post" action="/dashboard/settings/import-full" enctype="multipart/form-data"
+          style="display:flex;align-items:center;gap:6px"
+          onsubmit="return confirm('Restore FULL config (incl. secrets) — ghi đè cấu hình hiện tại. Tiếp tục?')">
+      <input type="file" name="file" accept=".enc" required class="file-mini">
+      <input type="password" name="password" placeholder="Full-export password" required class="file-mini">
+      <button type="submit" class="btn-ghost">🔓 Import full</button>
+    </form>
   </div>
 </div>
 <p class="subnote">Saved to <code>{{ config_path }}</code> and applied live. <b>Export</b> shares your setup

@@ -111,6 +111,61 @@ async def test_free_text_create_ticket_uses_confirm_card(monkeypatch):
     assert sent_titles == ["đăng nhập lỗi SSO timeout"]  # confirm card, not a direct create
 
 
+class _FakeStateRepo:
+    def __init__(self, held):
+        self._held = held
+        self.sets: list[tuple] = []
+
+    async def all(self):
+        return self._held
+
+    async def set(self, item_id, state, **kwargs):
+        self.sets.append((item_id, state))
+
+
+class _FakeAdoResume:
+    def __init__(self):
+        self.removed: list[tuple] = []
+
+    async def remove_tag(self, item_id, tag):
+        self.removed.append((item_id, tag))
+
+
+class _FakeQueueContainer:
+    def __init__(self, config, held):
+        self.config = config
+        self.state_repo = _FakeStateRepo(held)
+        self.ado = _FakeAdoResume()
+
+
+async def test_reply_queue_lists_held_items():
+    from ai_autopilot.data.entities import PipelineState, WorkItemState
+
+    held = WorkItemState()
+    held.work_item_id = 42
+    held.state = PipelineState.NEEDS_HUMAN
+    held.title = "Fix SSO"
+    held.detail = "cần làm rõ AC"
+    held.updated_at = None
+    ctx = _FakeContext()
+    await teams_agent._reply_queue(ctx, _FakeQueueContainer(Settings(), [held]))
+    assert len(ctx.sent) == 1 and "#42" in ctx.sent[0] and "cần làm rõ AC" in ctx.sent[0]
+
+
+async def test_resume_held_item_clears_hold_and_restarts(monkeypatch):
+    async def fake_start(container, ids):
+        return len(ids)
+
+    monkeypatch.setattr(teams_agent.planning_analyzer, "start_items", fake_start)
+    cont = _FakeQueueContainer(Settings(escalation_tag="autopilot-hold"), [])
+    started = await teams_agent._resume_held_item(cont, 42)
+
+    assert started == 1
+    assert (42, "autopilot-hold") in cont.ado.removed          # hold tag cleared
+    from ai_autopilot.data.entities import PipelineState
+    assert cont.state_repo.sets == [(42, PipelineState.QUEUED)]  # left the queue
+
+
 class _FakeAdoCreate:
     async def create_work_item(self, **kwargs):
         self.kwargs = kwargs

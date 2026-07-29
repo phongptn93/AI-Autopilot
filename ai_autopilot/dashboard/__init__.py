@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from datetime import datetime, timedelta
@@ -18,6 +19,7 @@ from ai_autopilot.board import board_columns, build_board, latest_records, parse
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
+from ai_autopilot.data.entities import PipelineState
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services import planning_analyzer
 from ai_autopilot.services.pr_feedback import is_bot_branch, parse_work_item_id
@@ -692,6 +694,48 @@ def create_dashboard_router() -> APIRouter:
         removed = await c.execution_repo.clear_all()
         _log.info("execution history cleared via dashboard", removed=removed)
         return RedirectResponse(url="/dashboard/history", status_code=303)
+
+    @router.get("/queue", response_class=HTMLResponse)
+    async def queue_page(request: Request, resumed: int = 0):
+        """Review queue: items the autopilot escalated (needs human) with a reason,
+        so a human can Resume them (approve/redirect) in one place."""
+        c: Container = request.app.state.container
+        org = c.config.ado_organization.rstrip("/")
+        project = c.config.ado_project
+        held = [s for s in await c.state_repo.all() if s.state == PipelineState.NEEDS_HUMAN]
+        held.sort(key=lambda s: s.updated_at or datetime.min, reverse=True)
+        items = [
+            {
+                "id": s.work_item_id, "title": s.title or f"#{s.work_item_id}",
+                "detail": s.detail or "", "pr_url": s.pr_url or "",
+                "url": f"{org}/{project}/_workitems/edit/{s.work_item_id}",
+                "updated": s.updated_at,
+            }
+            for s in held
+        ]
+        return _TEMPLATES.TemplateResponse(
+            request, "queue.html", _ctx(request, "queue", items=items, resumed=resumed)
+        )
+
+    @router.post("/queue/resume")
+    async def queue_resume(request: Request):
+        """Approve/resume held items: clear the hold tag and hand them back to the
+        poller (trigger tag + state), so work continues without a manual restart."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        ids = [int(x) for x in form.getlist("ids") if str(x).strip().isdigit()]
+        if not ids:
+            return RedirectResponse("/dashboard/queue", status_code=303)
+        hold = c.config.escalation_tag
+        for iid in ids:
+            if hold:
+                with contextlib.suppress(Exception):  # best-effort — tag may be absent
+                    await c.ado.remove_tag(iid, hold)
+        started = await planning_analyzer.start_items(c, ids)
+        for iid in ids:  # leave the queue immediately; the poller will re-own the state
+            await c.state_repo.set(iid, PipelineState.QUEUED)
+        _log.info("resumed held items via queue", ids=ids, started=started)
+        return RedirectResponse(f"/dashboard/queue?resumed={started}", status_code=303)
 
     @router.get("/analytics", response_class=HTMLResponse)
     async def analytics_page(request: Request, days: int = 30, tag: str = ""):

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .q-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .q-table th, .q-table td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--border,#23232b); vertical-align:top; }
+  .q-reason { color:var(--text-dim); max-width:640px; }
+</style>
+
+<div class="page-header">
+  <h2>🙋 Review queue</h2>
+  <p>Items the autopilot escalated for a human. Resume = clear the hold and hand it back.</p>
+</div>
+
+{% if resumed %}
+<div class="card" style="border-color:var(--green)"><div style="padding:12px 18px;color:var(--green)">
+  ▶ Resumed {{ resumed }} item(s) — handed back to the autopilot.
+</div></div>
+{% endif %}
+
+{% if items %}
+<form method="post" action="/dashboard/queue/resume">
+  <div style="display:flex;justify-content:flex-end;margin:8px 0">
+    <button type="submit" class="btn-ghost">▶ Resume selected</button>
+  </div>
+  <div class="card" style="padding:4px 8px">
+    <table class="q-table">
+      <thead><tr><th style="width:24px"></th><th>Work item</th><th>Reason held</th><th>Updated</th></tr></thead>
+      <tbody>
+        {% for it in items %}
+          <tr>
+            <td><input type="checkbox" name="ids" value="{{ it.id }}"></td>
+            <td>
+              <a href="{{ it.url }}" target="_blank" rel="noopener">#{{ it.id }}</a> — {{ it.title }}
+              {% if it.pr_url %}<br/><a href="{{ it.pr_url }}" target="_blank" rel="noopener" style="font-size:12px">PR</a>{% endif %}
+            </td>
+            <td class="q-reason">{{ it.detail or '—' }}</td>
+            <td style="white-space:nowrap;color:var(--text-dim)">{{ it.updated.strftime('%Y-%m-%d %H:%M') if it.updated else '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</form>
+{% else %}
+<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">✅ Nothing held — the queue is empty.</div></div>
+{% endif %}
+{% endblock %}

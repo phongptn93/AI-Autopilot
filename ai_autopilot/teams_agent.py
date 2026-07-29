@@ -29,10 +29,13 @@ from typing import Any
 
 from ai_autopilot.config import Settings
 from ai_autopilot.container import Container
+from ai_autopilot.data.entities import PipelineState
 from ai_autopilot.logging_config import get_logger
+from ai_autopilot.services import planning_analyzer
 from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
 
 _log = get_logger("teams_agent")
+_MIN_DT = datetime.min  # sort fallback for items with no updated_at
 
 
 class _DbConversationStorage:
@@ -104,6 +107,8 @@ _HELP_TEXT = (
     "- `/pr <repo> <pr-id>` — xem chi tiết BẤT KỲ PR nào (không chỉ của bạn)\n"
     "- `/item <id>` — xem chi tiết BẤT KỲ work item nào\n"
     "- `/team` — tổng quan PR của cả team, cũ nhất trước\n"
+    "- `/queue` — việc autopilot đang chờ người xử lý (needs human)\n"
+    "- `/resume <id>` — tiếp tục 1 việc đang chờ (có xác nhận)\n"
     "- `/log <mô tả>` — tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)\n"
     "- `/status` — tình trạng hoạt động\n"
     "- `/help` — bảng lệnh này\n\n"
@@ -450,7 +455,56 @@ async def _handle_action(
     if action == "log_cancel":
         await context.send_activity("Đã hủy — không tạo ticket.")
         return
+    if action == "queue_resume":
+        try:
+            iid = int(payload.get("id"))
+        except (TypeError, ValueError):
+            await context.send_activity("Không nhận diện được item để resume.")
+            return
+        started = await _resume_held_item(container, iid)
+        await context.send_activity(
+            f"▶ Đã tiếp tục **#{iid}** — mình nhận việc lại rồi ạ."
+            if started else f"⚠️ Không resume được #{iid} (không tìm thấy hoặc dry-run)."
+        )
+        return
+    if action == "queue_cancel":
+        await context.send_activity("Đã hủy — vẫn giữ ở queue.")
+        return
     await context.send_activity("Không nhận diện được hành động trên card này.")
+
+
+async def _held_items(container: Container) -> list:
+    """Work items the autopilot escalated (needs human), newest first."""
+    held = [s for s in await container.state_repo.all() if s.state == PipelineState.NEEDS_HUMAN]
+    held.sort(key=lambda s: s.updated_at or _MIN_DT, reverse=True)
+    return held
+
+
+async def _reply_queue(context, container: Container) -> None:
+    """List held items so a human can resume them (reply `/resume <id>`)."""
+    held = await _held_items(container)
+    if not held:
+        await context.send_activity("✅ Không có việc nào đang chờ xử lý (queue trống).")
+        return
+    lines = [
+        f"- **#{s.work_item_id}** {s.title or ''} — {s.detail or 'chờ người xử lý'}"
+        for s in held[:20]
+    ]
+    await context.send_activity(
+        f"🙋 **Việc đang chờ ({len(held)})** — reply `/resume <id>` để tiếp tục:\n"
+        + "\n".join(lines)
+    )
+
+
+async def _resume_held_item(container: Container, item_id: int) -> int:
+    """Clear the hold tag and hand the item back to the poller. Returns items started."""
+    hold = container.config.escalation_tag
+    if hold:
+        with contextlib.suppress(Exception):
+            await container.ado.remove_tag(item_id, hold)
+    started = await planning_analyzer.start_items(container, [item_id])
+    await container.state_repo.set(item_id, PipelineState.QUEUED)
+    return started
 
 
 async def _create_logged_ticket(context, container: Container, title: str) -> None:
@@ -527,8 +581,33 @@ async def _send_log_confirm_card(context, title: str) -> None:
     await context.send_activity(MessageFactory.attachment(CardFactory.adaptive_card(card)))
 
 
+async def _send_resume_confirm_card(context, item_id: int, title: str) -> None:
+    """Approve/resume confirmation card for a held item — same gated round-trip as /log."""
+    from microsoft_agents.hosting.core import CardFactory, MessageFactory
+
+    card = {
+        "type": "AdaptiveCard", "version": "1.4",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "body": [
+            {"type": "TextBlock", "weight": "Bolder", "wrap": True, "size": "Medium",
+             "text": f"▶ Resume #{item_id}?"},
+            {"type": "TextBlock", "wrap": True, "text": title or f"Work item #{item_id}",
+             "spacing": "Small"},
+            {"type": "TextBlock", "wrap": True, "isSubtle": True,
+             "text": "Gỡ trạng thái giữ và giao lại cho autopilot xử lý tiếp."},
+        ],
+        "actions": [
+            {"type": "Action.Submit", "title": "▶ Resume",
+             "data": {"action": "queue_resume", "id": item_id}},
+            {"type": "Action.Submit", "title": "Giữ nguyên", "data": {"action": "queue_cancel"}},
+        ],
+    }
+    await context.send_activity(MessageFactory.attachment(CardFactory.adaptive_card(card)))
+
+
 _REVIEW_RE = re.compile(r"^/review\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _LOG_RE = re.compile(r"^/log\s+(.+)$", re.IGNORECASE | re.DOTALL)
+_RESUME_RE = re.compile(r"^/resume\s+(\d+)\s*$", re.IGNORECASE)
 _PR_LOOKUP_RE = re.compile(r"^/pr\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _ITEM_LOOKUP_RE = re.compile(r"^/item\s+(\d+)\s*$", re.IGNORECASE)
 
@@ -589,6 +668,15 @@ async def _handle_command(
         await context.send_activity(
             f"👥 **Team overview — PR active, cũ nhất trước** ({len(prs)})\n{bullets}"
         )
+        return
+    m = _RESUME_RE.match(text.strip())
+    if m:
+        iid = int(m.group(1))
+        item = await container.ado.get_work_item(iid)
+        await _send_resume_confirm_card(context, iid, item.title if item else "")
+        return
+    if low.startswith("/queue"):
+        await _reply_queue(context, container)
         return
     m = _REVIEW_RE.match(text.strip())
     if m:

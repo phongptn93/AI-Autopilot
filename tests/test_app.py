@@ -41,6 +41,7 @@ def test_metrics_endpoint(client: TestClient):
         "/dashboard/capabilities",
         "/dashboard/settings",
         "/dashboard/analytics",
+        "/dashboard/queue",
     ],
 )
 def test_dashboard_pages_render(client: TestClient, path: str):
@@ -214,6 +215,11 @@ def test_board_move_applies_tag_exclusively(tmp_path):
         fake.added.clear()
         resp = client.post("/dashboard/board/move", data={"item_id": "5", "column": "Queued"})
         assert resp.status_code == 204 and fake.added == []
+
+
+def test_queue_resume_no_ids_redirects(client: TestClient):
+    resp = client.post("/dashboard/queue/resume", data={}, follow_redirects=False)
+    assert resp.status_code == 303 and "/dashboard/queue" in resp.headers["location"]
 
 
 def test_planning_page_shows_wave_and_reasons(client: TestClient):

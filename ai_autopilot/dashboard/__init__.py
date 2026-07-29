@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 
@@ -692,6 +692,24 @@ def create_dashboard_router() -> APIRouter:
         removed = await c.execution_repo.clear_all()
         _log.info("execution history cleared via dashboard", removed=removed)
         return RedirectResponse(url="/dashboard/history", status_code=303)
+
+    @router.get("/analytics", response_class=HTMLResponse)
+    async def analytics_page(request: Request, days: int = 30, tag: str = ""):
+        """Exec / ROI dashboard: throughput, success/PR rate, cost per merged PR."""
+        from ai_autopilot.analytics import compute_analytics
+
+        c: Container = request.app.state.container
+        days = max(1, min(days, 180))
+        now = datetime.now()
+        dfrom = (now - timedelta(days=days - 1)).date().isoformat()
+        records, _ = await c.execution_repo.search(
+            dfrom=dfrom, trigger_tag=tag or None, limit=5000
+        )
+        report = compute_analytics(records, days=days, now=now)
+        return _TEMPLATES.TemplateResponse(
+            request, "analytics.html",
+            _ctx(request, "analytics", report=report, days=days, tag=tag),
+        )
 
     @router.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request):

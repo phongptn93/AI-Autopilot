@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .bars { display:flex; align-items:flex-end; gap:3px; height:140px; padding:8px 0; overflow-x:auto; }
+  .bars .bar { flex:1 0 6px; min-width:6px; background:var(--accent,#6366f1); border-radius:3px 3px 0 0; opacity:.85; }
+  .bars .bar:hover { opacity:1; }
+  .cat-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .cat-table th, .cat-table td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border,#23232b); }
+  .cat-table td.num, .cat-table th.num { text-align:right; }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+  <div>
+    <h2>📈 Analytics</h2>
+    <p>ROI &amp; throughput over the last {{ days }} days{% if tag %} · tag <code>{{ tag }}</code>{% endif %}</p>
+  </div>
+  <select onchange="location.href='/dashboard/analytics?days=' + this.value{% if tag %} + '&tag={{ tag }}'{% endif %}"
+          style="background:var(--bg-card);color:var(--text);border:1px solid var(--border,#23232b);border-radius:8px;padding:6px 10px;font-size:13px">
+    {% for d in [7, 14, 30, 90] %}
+      <option value="{{ d }}" {% if days == d %}selected{% endif %}>Last {{ d }} days</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Runs</span><div class="stat-card-icon">🏃</div></div>
+    <div class="stat-card-value">{{ report.total_runs }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Success rate</span><div class="stat-card-icon">✅</div></div>
+    <div class="stat-card-value success-val">{{ report.success_rate }}%</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">PR rate</span><div class="stat-card-icon">🔀</div></div>
+    <div class="stat-card-value">{{ report.pr_rate }}%</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Runs / item</span><div class="stat-card-icon">🔁</div></div>
+    <div class="stat-card-value">{{ report.runs_per_item }}</div>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Items worked</span><div class="stat-card-icon">📦</div></div>
+    <div class="stat-card-value">{{ report.distinct_items }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Tokens / PR</span><div class="stat-card-icon">🪙</div></div>
+    <div class="stat-card-value">{{ '{:,}'.format(report.tokens_per_pr) if report.tokens_per_pr is not none else '—' }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Total tokens</span><div class="stat-card-icon">💠</div></div>
+    <div class="stat-card-value">{{ '{:,}'.format(report.total_tokens) }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Avg duration</span><div class="stat-card-icon">⏱️</div></div>
+    <div class="stat-card-value">{{ fmt_duration(report.avg_duration_seconds) }}</div>
+  </div>
+</div>
+
+<div class="card" style="padding:14px 18px;margin-top:14px">
+  <div style="font-weight:600;margin-bottom:4px">Throughput — runs per day</div>
+  {% if report.peak_day %}
+    <div class="bars" title="runs per day">
+      {% for day, n in report.per_day %}
+        <div class="bar" style="height:{{ (n * 100 // report.peak_day) if report.peak_day else 0 }}%"
+             title="{{ day }}: {{ n }} run(s)"></div>
+      {% endfor %}
+    </div>
+    <div style="display:flex;justify-content:space-between;color:var(--text-dim);font-size:11px">
+      <span>{{ report.per_day[0][0] }}</span><span>peak {{ report.peak_day }}/day</span><span>{{ report.per_day[-1][0] }}</span>
+    </div>
+  {% else %}
+    <p style="color:var(--text-dim)">No runs in this window.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="padding:14px 18px;margin-top:14px">
+  <div style="font-weight:600;margin-bottom:8px">By category</div>
+  {% if report.by_category %}
+    <table class="cat-table">
+      <thead><tr><th>Category</th><th class="num">Runs</th><th class="num">Success</th><th class="num">Rate</th></tr></thead>
+      <tbody>
+        {% for cs in report.by_category %}
+          <tr><td>{{ cs.category }}</td><td class="num">{{ cs.runs }}</td><td class="num">{{ cs.success }}</td><td class="num">{{ cs.success_rate }}%</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p style="color:var(--text-dim)">No data.</p>
+  {% endif %}
+</div>
+{% endblock %}

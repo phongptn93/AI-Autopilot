@@ -40,6 +40,7 @@ def test_metrics_endpoint(client: TestClient):
         "/dashboard/config",
         "/dashboard/capabilities",
         "/dashboard/settings",
+        "/dashboard/analytics",
     ],
 )
 def test_dashboard_pages_render(client: TestClient, path: str):

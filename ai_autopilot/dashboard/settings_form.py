@@ -289,6 +289,14 @@ FIELDS: tuple[Field, ...] = (
     Field("zalo_oa_access_token", "Zalo OA access token", "password", "Notifications",
           "Blank = Zalo off."),
     Field("zalo_recipient_user_id", "Zalo recipient user id", "text", "Notifications"),
+    # ── Web / Security ──
+    Field("dashboard_auth_password", "Dashboard password", "password", "Web / Security",
+          "Password to access this dashboard (HTTP Basic — any username). Stored as a "
+          "PBKDF2 hash, never plaintext. Blank = keep the current one. On first start with "
+          "no password set, the CLI prompts for one."),
+    Field("config_export_password", "Full-export password", "password", "Web / Security",
+          "Encrypts the full config export (the download that INCLUDES secrets). You need "
+          "this same password to decrypt the exported file. Blank = keep the current one."),
 )
 
 # Fields that only take effect after a restart (the value is captured at startup).
@@ -298,6 +306,7 @@ RESTART_REQUIRED = frozenset({"max_concurrent"})
 SECRET_KEYS = frozenset({
     "ado_pat", "teams_agent_app_secret",
     "teams_webhook_url", "smtp_password", "zalo_oa_access_token",
+    "dashboard_auth_password", "dashboard_auth_password_hash", "config_export_password",
 })
 
 # Keys excluded from an exported/shared config. Everything else in the Settings
@@ -313,12 +322,19 @@ EXPORT_EXCLUDE = frozenset({
     "teams_webhook_url", "email_to", "email_from",
     "teams_agent_app_id", "teams_agent_app_secret", "teams_agent_tenant_id",
     "tenants",              # each tenant embeds its own ado_pat
+    "dashboard_auth_token", "dashboard_auth_password_hash", "webhook_secret",
+    "config_export_password",
     # ── machine / host specific ──
     "workspace_directory", "repo_working_directory", "worktrees_dir",
     "database_url", "health_host", "health_port", "plugins_directory",
     "trigger_tag",          # per-host default tag
     "repos",                # RepoConfig entries embed local filesystem paths
 })
+
+# Keys stripped even from the FULL (with-secrets) export: the export/auth
+# mechanism's own material — embedding it would be pointless (the export key)
+# or a hash of a credential rather than the credential itself.
+FULL_EXPORT_EXCLUDE = frozenset({"config_export_password", "dashboard_auth_password_hash"})
 
 
 def export_settings(config: Any) -> dict[str, Any]:
@@ -335,6 +351,29 @@ def export_settings(config: Any) -> dict[str, Any]:
 def export_yaml(config: Any) -> str:
     """Serialise :func:`export_settings` to a YAML document for download."""
     return yaml.safe_dump(export_settings(config), sort_keys=False, allow_unicode=True)
+
+
+def export_full_settings(config: Any) -> dict[str, Any]:
+    """Full settings dict INCLUDING secrets (ADO PAT, SMTP/Zalo tokens, per-tenant
+    PATs…). Unlike :func:`export_settings` this does NOT apply ``EXPORT_EXCLUDE`` —
+    it is meant for an encrypted backup / machine migration, not for sharing. Only
+    the export/auth mechanism's own material (``FULL_EXPORT_EXCLUDE``) is dropped."""
+    if hasattr(config, "model_dump"):
+        data = config.model_dump(mode="json")
+    else:  # fallback for non-pydantic configs (tests)
+        data = {f.key: getattr(config, f.key, None) for f in FIELDS}
+    return {k: v for k, v in data.items() if k not in FULL_EXPORT_EXCLUDE}
+
+
+def export_full_encrypted(config: Any, password: str) -> bytes:
+    """Encrypt :func:`export_full_settings` (as YAML) under ``password``.
+
+    Returns the encrypted envelope bytes for download; decrypt with the same
+    password via ``ai_autopilot.security.decrypt_bytes``."""
+    from ai_autopilot import security
+
+    body = yaml.safe_dump(export_full_settings(config), sort_keys=False, allow_unicode=True)
+    return security.encrypt_bytes(body.encode("utf-8"), password)
 
 
 def import_settings(raw: str, valid_keys: set[str]) -> dict[str, Any]:

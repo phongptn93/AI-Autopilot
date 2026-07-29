@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from ai_autopilot import activity
+from ai_autopilot import activity, security
 from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
@@ -735,6 +735,11 @@ def create_dashboard_router() -> APIRouter:
             key: bool(getattr(c.config, key, ""))
             for key in settings_form.SECRET_KEYS
         }
+        # dashboard_auth_password is entered raw but stored as a hash — reflect
+        # "set" from the hash field, since there is no attr of the raw name.
+        secrets_set["dashboard_auth_password"] = bool(
+            getattr(c.config, "dashboard_auth_password_hash", "")
+        )
         cfg = c.config
         # Read-only overview of every ADO tag the autopilot writes/reads — so the
         # whole tag vocabulary is visible in one place (not scattered across fields).
@@ -789,6 +794,12 @@ def create_dashboard_router() -> APIRouter:
         updates = settings_form.parse_form(form)
         updates["allowed_repos"] = settings_form.parse_repos(form)
 
+        # The dashboard password is entered raw but stored ONLY as a PBKDF2 hash.
+        # Pop the raw value so it never reaches config.yaml or the live config.
+        raw_password = updates.pop("dashboard_auth_password", None)
+        if raw_password:
+            updates["dashboard_auth_password_hash"] = security.hash_password(raw_password)
+
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
         c.ado.refresh()  # re-read org URL if it changed
@@ -815,6 +826,20 @@ def create_dashboard_router() -> APIRouter:
             content=body,
             media_type="application/x-yaml",
             headers={"Content-Disposition": 'attachment; filename="autopilot-config.yaml"'},
+        )
+
+    @router.get("/settings/export-full")
+    async def export_config_full(request: Request):
+        """Download the FULL config (INCLUDING secrets), encrypted with the
+        configured full-export password. Decrypt with ai_autopilot.security."""
+        c: Container = request.app.state.container
+        blob = settings_form.export_full_encrypted(c.config, c.config.config_export_password)
+        # Audit only the event — never the secret payload or the password.
+        _log.warning("FULL config (with secrets) exported via dashboard — encrypted download")
+        return Response(
+            content=blob,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="autopilot-config-full.enc"'},
         )
 
     @router.post("/settings/import")

@@ -58,6 +58,8 @@
       <button type="submit" class="btn-ghost">↻ Reload from file</button>
     </form>
     <a href="/dashboard/settings/export" class="btn-ghost" style="text-decoration:none">⬇ Export</a>
+    <a href="/dashboard/settings/export-full" class="btn-ghost" style="text-decoration:none"
+       title="Full config INCLUDING secrets (PAT, tokens…), encrypted with the Full-export password">🔒 Export full</a>
     <form method="post" action="/dashboard/settings/import" enctype="multipart/form-data"
           style="display:flex;align-items:center;gap:6px">
       <input type="file" name="file" accept=".yaml,.yml" required class="file-mini">
@@ -66,7 +68,9 @@
   </div>
 </div>
 <p class="subnote">Saved to <code>{{ config_path }}</code> and applied live. <b>Export</b> shares your setup
-  (org, tags, states, pipeline map…) — <b>never the PAT</b> or this host's trigger tag.</p>
+  (org, tags, states, pipeline map…) — <b>never the PAT</b> or this host's trigger tag.
+  <b style="color:var(--red)">🔒 Export full</b> includes <b>all secrets</b> (PAT, SMTP/Zalo tokens,
+  per-tenant PATs) and is <b>encrypted</b> with the Full-export password — for backup / machine migration only.</p>
 
 {% for flag, msg, col in [
     (saved, '✅ Settings saved and applied. Fields marked <em>restart</em> take effect after a restart.', 'green'),

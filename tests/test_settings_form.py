@@ -101,15 +101,46 @@ def test_export_settings_excludes_secrets_and_machine_specific():
     config = Settings(
         ado_pat="super-secret", ado_project="MyProj", workspace_directory="/local/ws",
         trigger_tag="myhost-autopilot", resolved_state="Closed",
+        dashboard_auth_token="dash-token", webhook_secret="hook-secret",
     )
     exported = settings_form.export_settings(config)
     # secrets + machine-specific keys are dropped
     assert "ado_pat" not in exported
     assert "workspace_directory" not in exported
     assert "trigger_tag" not in exported
+    # regression: web-surface secrets must NOT leak into the shareable export
+    assert "dashboard_auth_token" not in exported
+    assert "dashboard_auth_password_hash" not in exported
+    assert "webhook_secret" not in exported
+    assert "config_export_password" not in exported
     # shareable config is kept
     assert exported["ado_project"] == "MyProj"
     assert exported["resolved_state"] == "Closed"
+
+
+def test_export_full_settings_includes_secrets_but_not_mechanism_keys():
+    config = Settings(
+        ado_pat="super-secret", smtp_password="smtp-pw", ado_project="MyProj",
+        config_export_password="pw", dashboard_auth_password_hash="pbkdf2_sha256$1$a$b",
+    )
+    full = settings_form.export_full_settings(config)
+    # the full export deliberately carries secrets (for encrypted backup)
+    assert full["ado_pat"] == "super-secret"
+    assert full["smtp_password"] == "smtp-pw"
+    assert full["ado_project"] == "MyProj"
+    # ...but not the export/auth mechanism's own material
+    assert "config_export_password" not in full
+    assert "dashboard_auth_password_hash" not in full
+
+
+def test_export_full_encrypted_round_trips():
+    from ai_autopilot import security
+
+    config = Settings(ado_pat="super-secret", ado_project="MyProj")
+    blob = settings_form.export_full_encrypted(config, "pw-123")
+    restored = yaml.safe_load(security.decrypt_bytes(blob, "pw-123").decode("utf-8"))
+    assert restored["ado_pat"] == "super-secret"
+    assert restored["ado_project"] == "MyProj"
 
 
 def test_import_settings_keeps_known_drops_secrets_and_unknown():

@@ -151,6 +151,14 @@ schedule_days: "Mon,Tue,Wed,Thu,Fri"
 # ── Web / health ──
 health_host: "0.0.0.0"
 health_port: 5080
+# Dashboard access is password-gated. On first start with none of the values
+# below set, the CLI prompts for a password and stores its PBKDF2 hash here.
+# dashboard_auth_password_hash: ""   # auto-filled by the first-run prompt (never plaintext)
+# dashboard_auth_token: ""           # legacy plaintext alternative (prefer the hash above)
+# webhook_secret: ""                 # require X-Webhook-Secret on POST /api/webhook/*
+# Password that encrypts the FULL config export (the download that INCLUDES
+# secrets). Needed to decrypt the exported .enc file. Override via env in prod.
+config_export_password: "Export#12345"
 
 # ── Persistence ──
 database_url: "sqlite+aiosqlite:///autopilot.db"

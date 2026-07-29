@@ -82,6 +82,38 @@ def test_export_config_omits_pat(tmp_path):
     assert "ado_pat" not in resp.text
 
 
+def test_export_full_config_is_encrypted_and_round_trips(tmp_path):
+    from ai_autopilot import security
+
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        ado_pat="top-secret", ado_project="ExportProj", config_export_password="pw-xyz",
+    )
+    with TestClient(create_app(settings)) as client:
+        resp = client.get("/dashboard/settings/export-full")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers["content-disposition"]
+    assert b"top-secret" not in resp.content            # ciphertext must not leak the PAT
+    decrypted = security.decrypt_bytes(resp.content, "pw-xyz").decode("utf-8")
+    assert "top-secret" in decrypted                    # PAT IS in the encrypted payload
+    assert "ExportProj" in decrypted
+
+
+def test_dashboard_auth_gate(tmp_path):
+    from ai_autopilot import security
+
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        dashboard_auth_password_hash=security.hash_password("s3cret"),
+    )
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/dashboard").status_code == 401           # no credentials
+        assert client.get("/dashboard", auth=("x", "wrong")).status_code == 401
+        assert client.get("/dashboard", auth=("x", "s3cret")).status_code == 200
+        # health/metrics stay open for probes even when the dashboard is locked
+        assert client.get("/health").status_code in (200, 503)
+
+
 def test_import_config_applies_without_pat(tmp_path, monkeypatch):
     cfg_file = tmp_path / "config.yaml"
     monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))

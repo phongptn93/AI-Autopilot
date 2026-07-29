@@ -211,6 +211,18 @@ Server-rendered Jinja2 (no SPA). Pages: **Overview**, **Board**, **History**, **
   env vars. **Secrets come from the environment**; the PAT is never written to exported
   config and `config.yaml*` is git-ignored.
 - **RBAC** (`security.py`) — optional allow-list of who may trigger the autopilot.
+- **Dashboard auth** (`security.py` + `app.py`) — the `/dashboard/*` UI is gated by HTTP
+  Basic. The password is stored as a **PBKDF2 hash** (`dashboard_auth_password_hash`),
+  never plaintext; on first start with no password set, the CLI prompts for one and
+  persists the hash. A legacy plaintext `dashboard_auth_token` still works.
+- **Encrypted full export** — the safe `Export` strips secrets + host-specific keys;
+  `🔒 Export full` (`/dashboard/settings/export-full`) exports **everything incl.
+  secrets**, AES-encrypted (Fernet + PBKDF2) under `config_export_password`. Decrypt:
+  ```python
+  from ai_autopilot.security import decrypt_bytes
+  yaml_text = decrypt_bytes(open("autopilot-config-full.enc", "rb").read(), "Export#12345").decode()
+  print(yaml_text)   # full config, incl. ado_pat
+  ```
 - **Schedule guard** (`scheduling.py`) — only act within configured windows.
 - **Autonomy levels** — `report` (L1: comment only), `assisted` (L2: draft PR, default),
   `unattended` (L3: normal PR, auto-resolve).

@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from ai_autopilot import health
+from ai_autopilot import health, security
 from ai_autopilot.config import Settings, load_settings
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import create_dashboard_router
@@ -27,10 +27,13 @@ from ai_autopilot.services import (
 from ai_autopilot.teams_agent import build_agent as build_teams_agent
 
 
-def _basic_auth_ok(header: str | None, token: str) -> bool:
-    """Validate an HTTP Basic ``Authorization`` header against the dashboard token.
+def _dashboard_auth_ok(header: str | None, config: Settings) -> bool:
+    """Validate an HTTP Basic ``Authorization`` header against the dashboard password.
 
-    Any username is accepted; the password must equal ``token`` (constant-time).
+    Any username is accepted. The password is checked against
+    ``dashboard_auth_password_hash`` (PBKDF2, preferred) and, for backward
+    compatibility, against the legacy plaintext ``dashboard_auth_token``. Either
+    matching passes; both comparisons are constant-time.
     """
     if not header or not header.lower().startswith("basic "):
         return False
@@ -39,7 +42,13 @@ def _basic_auth_ok(header: str | None, token: str) -> bool:
     except (binascii.Error, ValueError):
         return False
     _, _, password = decoded.partition(":")
-    return secrets.compare_digest(password, token)
+    if config.dashboard_auth_password_hash and security.verify_password(
+        password, config.dashboard_auth_password_hash
+    ):
+        return True
+    return bool(config.dashboard_auth_token) and secrets.compare_digest(
+        password, config.dashboard_auth_token
+    )
 
 
 def _quiet_proactor_connection_reset(log) -> None:
@@ -118,7 +127,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 app.state.teams_agent = None
 
-            if config.health_host not in ("127.0.0.1", "localhost", "::1") and not config.dashboard_auth_token:
+            dashboard_has_auth = bool(
+                config.dashboard_auth_password_hash or config.dashboard_auth_token
+            )
+            exposed = config.health_host not in ("127.0.0.1", "localhost", "::1")
+            if exposed and not dashboard_has_auth:
                 log.warning(
                     "dashboard is exposed on a non-loopback host with NO auth — anyone who "
                     "can reach it can rewrite config (incl. the ADO PAT) and trigger runs. "
@@ -153,8 +166,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             got = request.headers.get("x-webhook-secret") or request.query_params.get("secret", "")
             if not secrets.compare_digest(got, config.webhook_secret):
                 return Response(status_code=401, content="unauthorized")
-        if config.dashboard_auth_token and path.startswith("/dashboard"):
-            if not _basic_auth_ok(request.headers.get("authorization"), config.dashboard_auth_token):
+        dashboard_locked = bool(config.dashboard_auth_password_hash or config.dashboard_auth_token)
+        if dashboard_locked and path.startswith("/dashboard"):
+            if not _dashboard_auth_ok(request.headers.get("authorization"), config):
                 return Response(
                     status_code=401,
                     content="authentication required",

@@ -594,12 +594,23 @@ class Settings(BaseSettings):
     # 0.0.0.0 (all interfaces):
     #   dashboard_auth_token – when set, the /dashboard/* UI requires HTTP Basic
     #     auth (any username; password = this token). Protects config/PAT writes,
-    #     run triggers and record deletion from anyone on the network.
+    #     run triggers and record deletion from anyone on the network. Legacy
+    #     plaintext form; prefer dashboard_auth_password_hash below.
+    #   dashboard_auth_password_hash – PBKDF2 hash of the dashboard password
+    #     (security.hash_password). Preferred over the plaintext token: on first
+    #     start with neither set, the CLI prompts for a password and persists its
+    #     hash here. Either one being set enables the /dashboard auth gate.
     #   webhook_secret – when set, POST /api/webhook/* requires a matching
     #     `X-Webhook-Secret` header (or `?secret=`), so the run/command trigger
     #     can't be fired by an unauthenticated request.
     dashboard_auth_token: str = ""
+    dashboard_auth_password_hash: str = ""
     webhook_secret: str = ""
+    # Symmetric password that encrypts the FULL config export (the download that
+    # deliberately includes secrets — PAT, SMTP/Zalo tokens, per-tenant PATs).
+    # Must stay usable to encrypt, so it is stored as-is (not hashed); the same
+    # value is needed to decrypt the exported file. Override in config.yaml / env.
+    config_export_password: str = "Export#12345"
 
     # ── Persistence ──
     database_url: str = "sqlite+aiosqlite:///autopilot.db"

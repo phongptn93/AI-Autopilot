@@ -789,6 +789,7 @@ class AdoPollerService:
             files_changed=len(result.files_changed),
             needs_human=result.needs_human,
             had_error=bool(result.error),
+            ci_passed=result.tests_passed,  # auto-test-gate result (None = not run)
         )
         return score_run(
             inp, auto_min=cfg.pr_score_auto_min, review_min=cfg.pr_score_review_min

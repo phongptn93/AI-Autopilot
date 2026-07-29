@@ -27,6 +27,7 @@ from pathlib import Path
 from ai_autopilot import activity
 from ai_autopilot.config import BOT_COMMENT_INSTRUCTION, Settings
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
+from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.execution.claude_client import ClaudeRun, run_claude
 from ai_autopilot.execution.result_contract import clear_result, read_result
 from ai_autopilot.logging_config import get_logger
@@ -65,6 +66,7 @@ class ClaudeExecutor:
     ) -> None:
         self._config = config
         self._reviewer = reviewer
+        self._test_gate = TestGate(config)  # runs the repo's tests before a PR (opt-in)
         self._session_repo = session_repo  # ClaudeSessionRepository | None
         self._log = get_logger("execution.claude_executor")
         # Serialise git worktree bookkeeping per source repo: two concurrent tasks
@@ -794,6 +796,21 @@ class ClaudeExecutor:
                 result.cost_tokens = claude_run.total_tokens
                 return result
 
+            # Auto-test-gate: run the repo's tests in the worktree BEFORE opening a
+            # PR (mirrors the auto-review block above). A red run blocks the PR; a
+            # skip (gate off / no runner) passes through.
+            tests = await self._test_gate.run(work_dir)
+            if tests.ran and not tests.passed:
+                self._log.warning("test gate blocked PR", id=item_id, summary=tests.summary)
+                result = ExecutionResult.fail(item_id, prompt, "Tests failed: " + tests.summary)
+                result.branch_name = branch
+                result.files_changed = changed_files
+                result.tests_passed = False
+                result.output = tests.output_tail
+                result.duration_seconds = time.monotonic() - started
+                result.cost_tokens = claude_run.total_tokens
+                return result
+
             pr_run = None
             if create_pr:
                 self._log.info("creating PR", id=item_id, draft=draft_pr)
@@ -804,6 +821,7 @@ class ClaudeExecutor:
             result = ExecutionResult.ok(item_id, prompt, claude_run.text)
             result.branch_name = branch
             result.files_changed = changed_files
+            result.tests_passed = tests.passed if tests.ran else None
             result.duration_seconds = time.monotonic() - started
             result.cost_tokens = sum(r.total_tokens for r in runs)
             result.cost_usd = _sum_cost(*runs)

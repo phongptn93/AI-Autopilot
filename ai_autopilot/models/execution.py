@@ -25,6 +25,9 @@ class ExecutionResult:
     # The agent ran but reports it needs a human (ambiguous AC, missing info).
     # Not a failure to retry — escalate and stop.
     needs_human: bool = False
+    # Auto-test-gate outcome: True/False when the suite ran, None when skipped
+    # (gate off / no runner). Feeds pr_scorer's ci signal.
+    tests_passed: bool | None = None
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod

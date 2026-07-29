@@ -31,6 +31,7 @@ from ai_autopilot.execution.sdlc_plan import (
     stage_score_input,
 )
 from ai_autopilot import activity
+from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 
@@ -46,6 +47,7 @@ class SdlcLoopEngine:
     ) -> None:
         self._exec = executor
         self._reviewer = reviewer
+        self._test_gate = TestGate(config)  # auto-test-gate signal for the review stage
         self._ado = ado
         self._router = router
         self._config = config
@@ -191,6 +193,12 @@ class SdlcLoopEngine:
             review = await self._reviewer.review(primary)
             self._pending_review = review  # consumed in _absorb
             activity.append(ws, item.id, "🔍 auto-review " + ("passed" if review.passed else "found issues"))
+            # Same gate stage runs the test suite; its result feeds signals.ci_passed
+            # (sdlc_plan hard-fails on ci_passed is False).
+            tests = await self._test_gate.run(primary)
+            self._pending_tests = tests  # consumed in _absorb
+            if tests.ran:
+                activity.append(ws, item.id, "🧪 tests " + ("passed" if tests.passed else "FAILED"))
             return review.raw_output, False, 0
 
         # For the pr stage, make sure the branch is on origin before /pr-create.
@@ -222,6 +230,10 @@ class SdlcLoopEngine:
             signals.review_critical = len(review.critical_issues)
             signals.review_warnings = len(review.warnings)
             self._pending_review = None
+        tests = getattr(self, "_pending_tests", None)
+        if tests is not None and stage.role == "review":
+            signals.ci_passed = tests.passed if tests.ran else None
+            self._pending_tests = None
 
     def _stage_prompt(self, item: WorkItemInfo, stage: SdlcStage, branch: str) -> str:
         """Brief for one stage. By default it states the goal and lets Claude choose

@@ -144,6 +144,14 @@ FIELDS: tuple[Field, ...] = (
           "Restart required to take effect."),
     Field("task_timeout_minutes", "Task timeout (minutes)", "int", "Execution & Autonomy"),
     Field("auto_review_enabled", "Auto security review", "bool", "Execution & Autonomy"),
+    Field("test_gate_enabled", "🧪 Auto-test-gate", "bool", "Execution & Autonomy",
+          "Run the repo's test suite in the worktree before opening a PR; a red run blocks "
+          "the PR and lowers the run score. Off = no test run."),
+    Field("test_command", "↳ Test command", "text", "Execution & Autonomy",
+          "Command to run the tests (in the repo worktree). Blank = auto-detect "
+          "(pytest / dotnet test / npm test); no runner found = skipped, never blocks."),
+    Field("test_timeout_seconds", "↳ Test timeout (seconds)", "int", "Execution & Autonomy",
+          "Kill the test run after this long and treat it as failed. Default 600."),
     Field("pr_scoring_enabled", "Score each run (0–100)", "bool", "Execution & Autonomy",
           "Grade each run from objective signals; below the review threshold → hold for human."),
     Field("pr_score_auto_min", "Score ≥ this → auto-resolve", "int", "Execution & Autonomy",

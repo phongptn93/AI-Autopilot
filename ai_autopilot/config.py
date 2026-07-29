@@ -548,6 +548,16 @@ class Settings(BaseSettings):
     auto_review_enabled: bool = True
     block_on_severity: str = "Critical,High"
 
+    # ── Auto-test-gate ──
+    # Run the target repo's test suite in the worktree after the agent edits but
+    # BEFORE a PR is opened; a red run blocks the PR (mirrors auto-review) and feeds
+    # the CI signal into pr_scorer. Opt-in — off = no behaviour change.
+    test_gate_enabled: bool = False
+    # Explicit test command; blank = auto-detect (pytest / dotnet test / npm test)
+    # from the files in the worktree. No runner detected = skip (never blocks).
+    test_command: str = ""
+    test_timeout_seconds: int = 600
+
     # ── PR scoring ("get a score": grade each run from objective signals) ──
     pr_scoring_enabled: bool = True
     pr_score_auto_min: int = 85     # ≥ this → eligible to auto-resolve (L3)

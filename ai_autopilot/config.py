@@ -561,6 +561,12 @@ class Settings(BaseSettings):
     auto_review_enabled: bool = True
     block_on_severity: str = "Critical,High"
 
+    # ── Retrospective learning loop ──
+    # Capture auto-review findings per repo and inject the recent ones into the next
+    # run's brief, so the agent stops repeating flagged mistakes. Opt-in — off = the
+    # brief is unchanged and nothing is written.
+    learning_loop_enabled: bool = False
+
     # ── Auto-test-gate ──
     # Run the target repo's test suite in the worktree after the agent edits but
     # BEFORE a PR is opened; a red run blocks the PR (mirrors auto-review) and feeds

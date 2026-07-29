@@ -22,9 +22,10 @@ import time
 import unicodedata
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
-from ai_autopilot import activity
+from ai_autopilot import activity, lessons
 from ai_autopilot.config import BOT_COMMENT_INSTRUCTION, Settings
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
 from ai_autopilot.execution.test_gate import TestGate
@@ -130,6 +131,10 @@ class ClaudeExecutor:
             f"Follow the project's .claude rules and skills.\n"
             f"You may use the Azure DevOps MCP to fetch more detail on #{item.id} if needed."
         )
+        if self._config.learning_loop_enabled:
+            past = lessons.lessons_brief(self._config.workspace_directory, [repo_name])
+            if past:
+                parts.append(past)
         parts.append(f"\nNow run this skill: {skill_command}")
         return "\n".join(parts)
 
@@ -585,6 +590,10 @@ class ClaudeExecutor:
                 "top-priority instruction and let it override earlier assumptions where "
                 f"they conflict:\n\n{item.pending_comment}"
             )
+        if self._config.learning_loop_enabled:
+            past = lessons.lessons_brief(self._config.workspace_directory, repos)
+            if past:
+                lines.append(past)
         lines += [
             "",
             "# Repositories you may edit (subfolders of this workspace)",
@@ -781,6 +790,14 @@ class ClaudeExecutor:
             await self._git(push_args, work_dir)
 
             review = await self._reviewer.review(work_dir)
+            if self._config.learning_loop_enabled and (review.critical_issues or review.warnings):
+                # Remember what got flagged so the next run on this repo is warned.
+                ws = self._config.workspace_directory
+                repo_name = _repo_name(repo, ws) if ws else repo
+                lessons.record_lessons(
+                    ws or work_dir, repo_name,
+                    review.critical_issues + review.warnings, now=datetime.now(),
+                )
             if not review.passed:
                 self._log.warning(
                     "auto-review blocked PR", id=item_id, issues=len(review.critical_issues)

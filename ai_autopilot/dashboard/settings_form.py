@@ -144,6 +144,9 @@ FIELDS: tuple[Field, ...] = (
           "Restart required to take effect."),
     Field("task_timeout_minutes", "Task timeout (minutes)", "int", "Execution & Autonomy"),
     Field("auto_review_enabled", "Auto security review", "bool", "Execution & Autonomy"),
+    Field("learning_loop_enabled", "🧠 Learning loop", "bool", "Execution & Autonomy",
+          "Remember what auto-review flagged per repo and inject recent lessons into the "
+          "next run's brief, so the agent stops repeating them. Off = brief unchanged."),
     Field("test_gate_enabled", "🧪 Auto-test-gate", "bool", "Execution & Autonomy",
           "Run the repo's test suite in the worktree before opening a PR; a red run blocks "
           "the PR and lowers the run score. Off = no test run."),

@@ -86,6 +86,27 @@ async def test_answer_freeform_falls_back_on_failure(monkeypatch):
     assert out == teams_agent._FREEFORM_FALLBACK  # graceful, never raises
 
 
+async def test_free_text_create_ticket_uses_confirm_card(monkeypatch):
+    """Natural-language 'tạo ticket ...' routes to the confirm card (never creates
+    directly) — reusing the same gated path as /log."""
+    sent_titles = []
+
+    async def fake_classify(config, text):
+        return {"intent": "create_ticket", "filter": "đăng nhập lỗi SSO timeout"}
+
+    async def fake_card(context, title):
+        sent_titles.append(title)
+
+    monkeypatch.setattr(teams_agent, "_classify_intent", fake_classify)
+    monkeypatch.setattr(teams_agent, "_send_log_confirm_card", fake_card)
+
+    await teams_agent._handle_free_text(
+        _FakeContext(), Settings(teams_agent_nlu_enabled=True), container=None,
+        reviewer_tracker=_FakeReviewerTracker(), text="tạo ticket giúp mình vụ đăng nhập lỗi",
+    )
+    assert sent_titles == ["đăng nhập lỗi SSO timeout"]  # confirm card, not a direct create
+
+
 async def test_free_text_mutation_request_still_redirects(monkeypatch):
     """A mutation-style message is redirected to ADO BEFORE any Claude call —
     the read-only guarantee must not depend on the model."""

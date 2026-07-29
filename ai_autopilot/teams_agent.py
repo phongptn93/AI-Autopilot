@@ -107,8 +107,9 @@ _HELP_TEXT = (
     "- `/log <mô tả>` — tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)\n"
     "- `/status` — tình trạng hoạt động\n"
     "- `/help` — bảng lệnh này\n\n"
-    "💬 Cũng có thể gõ tự nhiên để hỏi (chỉ tra cứu, KHÔNG sửa/vote/merge được qua "
-    "chat), vd: *\"PR nào của tôi đang bị block?\"*, *\"work item nào còn active?\"*\n\n"
+    "💬 Cũng có thể gõ tự nhiên: hỏi để tra cứu (*\"PR nào của tôi đang bị block?\"*) "
+    "hoặc **tạo ticket** (*\"tạo ticket: đăng nhập lỗi khi SSO timeout\"* — bot hỏi xác "
+    "nhận trước khi tạo). KHÔNG sửa/vote/merge được qua chat.\n\n"
     "Muốn `/ai /spec /test /qc /security /impact /summary` trên một PR cụ thể — "
     "reply ngay trên PR đó trong Azure DevOps (bot review ở đâu, trả lời ở đó)."
 )
@@ -745,12 +746,13 @@ _REDIRECT_TO_ADO = (
     "hỗ trợ ở đây."
 )
 
-_INTENT_PROMPT = """Bạn là bộ phân loại Ý ĐỊNH cho một bot Teams CHỈ ĐỌC dữ liệu — \
-không có khả năng và không được phép sửa code, vote, merge hay thay đổi bất cứ gì.
+_INTENT_PROMPT = """Bạn là bộ phân loại Ý ĐỊNH cho một bot Teams chủ yếu CHỈ ĐỌC. \
+Ngoại lệ GHI DUY NHẤT được phép là TẠO một ticket/Requirement mới trong ADO (và luôn \
+có bước xác nhận trước khi tạo). Bot KHÔNG được sửa code, vote, merge hay thay đổi gì khác.
 
 Phân loại tin nhắn của người dùng vào ĐÚNG MỘT trong các intent sau, và trả về \
 CHÍNH XÁC một dòng JSON, không kèm giải thích, không markdown:
-{{"intent": "items|prs|pr_lookup|item_lookup|team_overview|status|help|unknown", \
+{{"intent": "items|prs|pr_lookup|item_lookup|team_overview|status|help|create_ticket|unknown", \
 "filter": null hoặc giá trị tương ứng bên dưới}}
 
 - "items": người dùng muốn xem WORK ITEM CỦA CHÍNH HỌ. filter = null hoặc từ khoá \
@@ -766,14 +768,18 @@ rồi"), không phân biệt của ai. filter = số PR đó dạng chuỗi (vd 
 (vd "PR nào bị treo lâu nhất", "PR nào của team đang chờ review lâu"). filter = null.
 - "status": hỏi tình trạng hoạt động chung.
 - "help": muốn xem danh sách lệnh.
-- "unknown": MỌI yêu cầu khác — đặc biệt là bất kỳ yêu cầu THAY ĐỔI/SỬA/VOTE/MERGE/\
+- "create_ticket": người dùng muốn TẠO / GHI / LOG một ticket, task, bug hay yêu cầu MỚI \
+(vd "tạo ticket ...", "log giúp bug ...", "mở 1 task cho ...", "ghi nhận việc ..."). \
+filter = TIÊU ĐỀ ngắn gọn (một câu) tóm tắt ticket, rút từ lời người dùng.
+- "unknown": MỌI yêu cầu khác — đặc biệt là bất kỳ yêu cầu SỬA CODE/VOTE/MERGE/\
 APPROVE/REJECT/COMMIT/PUSH nào — luôn phân vào "unknown", không tự bịa intent mới.
 
 Tin nhắn: {text}"""
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
 _ALLOWED_INTENTS = {
-    "items", "prs", "pr_lookup", "item_lookup", "team_overview", "status", "help", "unknown",
+    "items", "prs", "pr_lookup", "item_lookup", "team_overview", "status", "help",
+    "create_ticket", "unknown",
 }
 
 
@@ -956,6 +962,13 @@ async def _handle_free_text(
         return
     result = await _classify_intent(config, text)
     intent, flt = result["intent"], result.get("filter")
+    if intent == "create_ticket":
+        # The ONE write intent — natural language "tạo ticket ..." reuses the exact
+        # same confirm-then-create card as /log, so a ticket is never created without
+        # an explicit Confirm click.
+        title = (flt if isinstance(flt, str) else "").strip() or text.strip()
+        await _send_log_confirm_card(context, title[:250])
+        return
     if intent == "items":
         email, items = await _items_data(context, container)
         if email is None:

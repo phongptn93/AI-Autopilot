@@ -122,7 +122,7 @@ def test_import_full_restores_secrets(tmp_path, monkeypatch):
         assert cfg.ado_project == "RP"
     import yaml
 
-    saved = yaml.safe_load(cfg_file.read_text())
+    saved = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
     assert saved["ado_pat"] == "restore-me"     # persisted to the config file
 
 

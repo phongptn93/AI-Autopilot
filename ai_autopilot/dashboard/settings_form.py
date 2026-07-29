@@ -196,7 +196,7 @@ FIELDS: tuple[Field, ...] = (
           "registered Azure Bot / Agent ID — fill in the App ID/tenant/secret fields below. "
           "Also requires `pip install .[teams-bot]`. Restart required."),
     Field("bot_persona_name", "🎭 Bot persona name", "text", "Execution & Autonomy",
-          "How the bot refers to itself in Teams replies (e.g. 'Chú bé chăm chỉ'). "
+          "How the bot refers to itself in Teams replies (e.g. 'AI Autopilot'). "
           "Used when it composes ticket acknowledgements / free-text answers."),
     Field("bot_persona_voice", "↳ Bot persona voice", "text", "Execution & Autonomy",
           "Tone/register guide handed to Claude so the bot's replies read like a "

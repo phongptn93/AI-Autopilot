@@ -470,7 +470,7 @@ class Settings(BaseSettings):
     # rather than a terse machine. ``name`` = how it refers to itself; ``voice`` =
     # the tone/register guide handed to Claude. Falls back to a plain line if the
     # compose call fails, so a reply is never lost.
-    bot_persona_name: str = "Chú bé chăm chỉ"
+    bot_persona_name: str = "AI Autopilot"
     bot_persona_voice: str = (
         "một kỹ sư đồng đội tận tâm, chủ động và lễ phép. Xưng 'em', gọi người dùng "
         "là 'anh/chị'. Trả lời ngắn gọn, rõ ràng, tự nhiên; chủ động gợi ý bước tiếp "

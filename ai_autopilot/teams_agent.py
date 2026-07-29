@@ -863,6 +863,85 @@ async def _phrase_natural(config: Settings, question: str, bullets: str) -> str:
         return bullets
 
 
+# Fallback shown only when the intelligent answer can't be produced (Claude down /
+# timeout) — never crash the turn, always leave the user something actionable.
+_FREEFORM_FALLBACK = (
+    "Mình chưa trả lời được câu này ngay lúc này. Bạn thử hỏi cụ thể hơn (vd "
+    "*\"PR nào của tôi đang bị block?\"*, *\"work item nào còn active?\"*) hoặc gõ "
+    "`/help` để xem các lệnh."
+)
+
+_FREEFORM_PROMPT = """Bạn là trợ lý Teams CHỈ ĐỌC của AI-Autopilot — KHÔNG có khả năng \
+và KHÔNG được phép sửa code, commit, vote hay merge; mọi việc đó chỉ làm được khi reply \
+trực tiếp trên PR trong Azure DevOps.
+
+Người dùng hỏi: "{question}"
+
+Dưới đây là DỮ LIỆU THẬT đã tra cứu sẵn cho người dùng này (chỉ dùng đúng những gì có ở \
+đây — TUYỆT ĐỐI không bịa thêm work item / PR / con số nào không xuất hiện bên dưới):
+
+{snapshot}
+
+Các lệnh có sẵn để bạn gợi ý khi hợp lý:
+{help}
+
+Hãy trả lời NGẮN GỌN, TỰ NHIÊN bằng tiếng Việt, bám sát dữ liệu trên (giữ markdown nhẹ như \
+in đậm số PR/work item). Nếu dữ liệu không đủ để trả lời, nói thẳng là chưa có thông tin và \
+gợi ý lệnh phù hợp — đừng suy diễn. Nếu người dùng muốn sửa/vote/merge, nhắc họ thao tác \
+trực tiếp trên PR trong Azure DevOps. KHÔNG đề xuất bạn sẽ tự thực hiện bất kỳ thay đổi nào."""
+
+
+async def _answer_freeform(
+    context, config: Settings, container: Container,
+    reviewer_tracker: ReviewerTrackerService, question: str,
+) -> str:
+    """Answer an off-intent free-text question with a Claude call that reasons over a
+    READ-ONLY snapshot Python fetched up front. Tool-less (``allowed_tools=[]``) so it
+    can never mutate; it only phrases/reasons over data already looked up. Any failure
+    falls back to a helpful hint so the turn never crashes."""
+    from ai_autopilot.execution.claude_client import run_claude
+
+    sections: list[str] = []
+    # Each lookup is best-effort and independent: one failing source must not sink
+    # the whole answer. Personal sections are skipped when the caller's email is
+    # unknown (DM identity not resolvable), leaving the team overview.
+    try:
+        email, items = await _items_data(context, container)
+        if email is not None:
+            sections.append("Work item của bạn:\n" + _format_items(items)[1])
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("freeform: items lookup failed", error=_fmt_exc(exc))
+    try:
+        email, prs = await _prs_data(context, reviewer_tracker)
+        if email is not None:
+            sections.append("PR của bạn:\n" + _format_prs(prs)[1])
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("freeform: prs lookup failed", error=_fmt_exc(exc))
+    try:
+        sections.append(
+            "Tổng quan PR của team (cũ nhất trước):\n"
+            + _format_team_overview(await reviewer_tracker.team_overview())
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("freeform: team overview failed", error=_fmt_exc(exc))
+
+    snapshot = "\n\n".join(sections) if sections else "(chưa tra cứu được dữ liệu nào)"
+
+    try:
+        run = await run_claude(
+            _FREEFORM_PROMPT.format(question=question[:300], snapshot=snapshot, help=_HELP_TEXT),
+            tempfile.gettempdir(),  # tool-less → cwd irrelevant, just must exist
+            timeout_seconds=45,     # see _classify_intent — same headroom reasoning
+            model=config.claude_model or None,
+            max_turns=1,
+            allowed_tools=[],       # no tool use — cannot mutate anything
+        )
+        return (run.text or "").strip() or _FREEFORM_FALLBACK
+    except Exception as exc:  # noqa: BLE001 — answer failure must not crash the turn
+        _log.warning("freeform answer failed — falling back to hint", error=_fmt_exc(exc))
+        return _FREEFORM_FALLBACK
+
+
 async def _handle_free_text(
     context, config: Settings, container: Container,
     reviewer_tracker: ReviewerTrackerService, text: str,
@@ -928,7 +1007,9 @@ async def _handle_free_text(
     elif intent == "help":
         await context.send_activity(_HELP_TEXT)
     else:
+        # Off-intent free text: instead of a canned "didn't understand" reply, let
+        # Claude reason over a read-only snapshot and answer naturally (tool-less —
+        # still cannot mutate). Mutation-style requests were already redirected above.
         await context.send_activity(
-            "Chưa hiểu ý bạn — gõ `/help` để xem lệnh, hoặc hỏi cụ thể hơn (vd \"PR "
-            "nào của tôi đang bị block?\")."
+            await _answer_freeform(context, config, container, reviewer_tracker, text)
         )

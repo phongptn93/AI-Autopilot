@@ -144,6 +144,15 @@ FIELDS: tuple[Field, ...] = (
           "Restart required to take effect."),
     Field("task_timeout_minutes", "Task timeout (minutes)", "int", "Execution & Autonomy"),
     Field("auto_review_enabled", "Auto security review", "bool", "Execution & Autonomy"),
+    Field("policy_protected_paths", "🛡️ Protected paths (never modify)", "list",
+          "Execution & Autonomy",
+          "Glob patterns the autopilot must NEVER change — one per line, e.g. 'k8s/*', "
+          "'.github/*', '*.env', 'Dockerfile'. A run touching any of these is blocked "
+          "before a PR opens. Empty = off."),
+    Field("policy_max_files_changed", "🛡️ Max files changed / run", "int",
+          "Execution & Autonomy",
+          "Blast-radius cap: block a run that changes more files than this (a 'small "
+          "fix' rewriting half the repo needs a human). 0 = off."),
     Field("learning_loop_enabled", "🧠 Learning loop", "bool", "Execution & Autonomy",
           "Remember what auto-review flagged per repo and inject recent lessons into the "
           "next run's brief, so the agent stops repeating them. Off = brief unchanged."),

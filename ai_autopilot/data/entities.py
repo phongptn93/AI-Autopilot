@@ -210,6 +210,22 @@ class TeamsConversation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class AuditEvent(Base):
+    """One consequential action, for the audit trail: who did what to which target,
+    from which surface. Append-only — nothing in the app updates or deletes rows."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_events_at", "at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime)
+    actor: Mapped[str] = mapped_column(String(200), default="")   # email / "dashboard" / "system"
+    source: Mapped[str] = mapped_column(String(50), default="")   # teams | dashboard | poller
+    action: Mapped[str] = mapped_column(String(100), default="")  # e.g. "item.resumed"
+    target: Mapped[str] = mapped_column(String(300), default="")  # item id / PR / config keys
+    detail: Mapped[str] = mapped_column(String(2000), default="")
+
+
 class ExecutionRecord(Base):
     __tablename__ = "executions"
     __table_args__ = (

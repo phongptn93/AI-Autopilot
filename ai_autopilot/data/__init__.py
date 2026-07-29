@@ -3,6 +3,7 @@
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
     AiConflict,
+    AuditEvent,
     ClaudeSession,
     ExecutionRecord,
     ExecutionStatus,
@@ -19,6 +20,7 @@ from ai_autopilot.data.entities import (
 )
 from ai_autopilot.data.repository import (
     AiConflictRepository,
+    AuditRepository,
     ClaudeSessionRepository,
     EfficiencyStats,
     ExecutionRepository,
@@ -36,6 +38,8 @@ from ai_autopilot.data.repository import (
 __all__ = [
     "AiConflict",
     "AiConflictRepository",
+    "AuditEvent",
+    "AuditRepository",
     "ClaudeSession",
     "ClaudeSessionRepository",
     "Database",

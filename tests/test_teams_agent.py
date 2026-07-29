@@ -37,6 +37,14 @@ class _FakeReviewerTracker:
         return []  # _format_team_overview → "(không có PR active nào)"
 
 
+class _FakeAudit:
+    def __init__(self):
+        self.events: list[dict] = []
+
+    async def record(self, **kwargs) -> None:
+        self.events.append(kwargs)
+
+
 async def test_answer_freeform_reasons_over_snapshot(monkeypatch):
     captured = {}
 
@@ -115,6 +123,7 @@ class _ReviewExecutor:
 class _ReviewContainer:
     def __init__(self):
         self.executor = _ReviewExecutor()
+        self.audit_repo = _FakeAudit()
 
 
 async def test_pasted_pr_link_with_review_runs_skill_review():
@@ -220,6 +229,7 @@ class _FakeQueueContainer:
         self.config = config
         self.state_repo = _FakeStateRepo(held)
         self.ado = _FakeAdoResume()
+        self.audit_repo = _FakeAudit()
 
 
 async def test_reply_queue_lists_held_items():
@@ -260,6 +270,7 @@ class _FakeContainer:
     def __init__(self, config):
         self.config = config
         self.ado = _FakeAdoCreate()
+        self.audit_repo = _FakeAudit()
 
 
 async def test_create_logged_ticket_composes_in_persona_voice(monkeypatch):

@@ -42,6 +42,7 @@ def test_metrics_endpoint(client: TestClient):
         "/dashboard/settings",
         "/dashboard/analytics",
         "/dashboard/queue",
+        "/dashboard/audit",
     ],
 )
 def test_dashboard_pages_render(client: TestClient, path: str):
@@ -220,6 +221,16 @@ def test_board_move_applies_tag_exclusively(tmp_path):
 def test_queue_resume_no_ids_redirects(client: TestClient):
     resp = client.post("/dashboard/queue/resume", data={}, follow_redirects=False)
     assert resp.status_code == 303 and "/dashboard/queue" in resp.headers["location"]
+
+
+def test_settings_save_writes_audit_event(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        client.post("/dashboard/settings", data={"trigger_tag": "t"}, follow_redirects=False)
+        page = client.get("/dashboard/audit")
+        assert page.status_code == 200
+        assert "config.updated" in page.text          # the save landed in the trail
 
 
 def test_planning_page_shows_wave_and_reasons(client: TestClient):

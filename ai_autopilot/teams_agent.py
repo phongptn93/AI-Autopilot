@@ -43,6 +43,12 @@ _REVIEW_TASKS: set = set()  # keep background review tasks referenced (no GC)
 def _spawn_review(container: Container, repo_name: str, pr_id: int, pr_url: str = "") -> None:
     """Kick off the real skill-based PR review in the background — it runs for minutes
     and posts its findings on the PR itself, so the chat turn only acknowledges it."""
+    audit = asyncio.create_task(container.audit_repo.record(
+        actor="teams", source="teams", action="pr.review_requested",
+        target=f"{repo_name} !{pr_id}",
+    ))
+    _REVIEW_TASKS.add(audit)
+    audit.add_done_callback(_REVIEW_TASKS.discard)
     task = asyncio.create_task(container.executor.review_pr(repo_name, pr_id, pr_url))
     _REVIEW_TASKS.add(task)
 
@@ -528,6 +534,9 @@ async def _resume_held_item(container: Container, item_id: int) -> int:
             await container.ado.remove_tag(item_id, hold)
     started = await planning_analyzer.start_items(container, [item_id])
     await container.state_repo.set(item_id, PipelineState.QUEUED)
+    await container.audit_repo.record(
+        actor="teams", source="teams", action="item.resumed", target=f"#{item_id}",
+    )
     return started
 
 
@@ -549,6 +558,10 @@ async def _create_logged_ticket(context, container: Container, title: str) -> No
     project = cfg.ado_project
     url = f"{org}/{project}/_workitems/edit/{wid}"
     trigger = (cfg.effective_trigger_tags or ["<trigger-tag>"])[0]
+    await container.audit_repo.record(
+        actor=email, source="teams", action="ticket.created",
+        target=f"#{wid}", detail=title[:200],
+    )
     facts = (
         f"- Đã tạo Requirement [#{wid}]({url})\n"
         f"- Tiêu đề: {title}\n"

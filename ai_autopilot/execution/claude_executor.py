@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from ai_autopilot import activity, lessons
+from ai_autopilot import activity, lessons, policy
 from ai_autopilot.config import BOT_COMMENT_INSTRUCTION, Settings
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
 from ai_autopilot.execution.test_gate import TestGate
@@ -810,6 +810,23 @@ class ClaudeExecutor:
                 return result
 
             changed_files = await self._changed_files(work_dir)
+            # Policy gate: protected paths / blast radius — a hard rail checked
+            # before anything is pushed or reviewed. Violations block the PR.
+            violations = policy.check_changes(
+                changed_files,
+                protected_paths=self._config.policy_protected_paths,
+                max_files=self._config.policy_max_files_changed,
+            )
+            if violations:
+                self._log.warning("policy blocked run", id=item_id, violations=violations)
+                result = ExecutionResult.fail(
+                    item_id, prompt, "Policy blocked: " + "; ".join(violations)
+                )
+                result.branch_name = branch
+                result.files_changed = changed_files
+                result.duration_seconds = time.monotonic() - started
+                result.cost_tokens = claude_run.total_tokens
+                return result
             await self._git("add -A", work_dir)
             await self._git(["commit", "-m", commit_msg], work_dir)
             # A fresh execution rebuilds the branch from base, so a stale remote

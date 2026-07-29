@@ -567,6 +567,15 @@ class Settings(BaseSettings):
     auto_review_enabled: bool = True
     block_on_severity: str = "Critical,High"
 
+    # ── Policy engine (hard guardrails on what a run may change) ──
+    # Enforced deterministically BEFORE a PR opens (like the review/test gates) —
+    # the agent cannot talk its way past these. Empty/0 = rule off.
+    # Glob patterns of files the autopilot must never modify, e.g.
+    # ["k8s/*", ".github/*", "*.env", "Dockerfile"].
+    policy_protected_paths: list[str] = Field(default_factory=list)
+    # Blast-radius cap: block a run that changes more files than this (0 = off).
+    policy_max_files_changed: int = 0
+
     # ── Retrospective learning loop ──
     # Capture auto-review findings per repo and inject the recent ones into the next
     # run's brief, so the agent stops repeating flagged mistakes. Opt-in — off = the

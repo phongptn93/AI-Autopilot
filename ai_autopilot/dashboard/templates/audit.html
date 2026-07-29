@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .a-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .a-table th, .a-table td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border,#23232b); vertical-align:top; }
+  .a-act { font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:nowrap; }
+  .a-detail { color:var(--text-dim); max-width:520px; }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+  <div>
+    <h2>🧾 Audit trail</h2>
+    <p>Append-only log of consequential actions — config changes, tickets, resumes, reviews.</p>
+  </div>
+  <form method="get" action="/dashboard/audit" style="display:flex;gap:6px;align-items:center">
+    <input type="text" name="action" value="{{ action }}" placeholder="filter: config. / item. / pr."
+           style="background:var(--bg-card);color:var(--text);border:1px solid var(--border,#23232b);border-radius:8px;padding:6px 10px;font-size:13px">
+    <button type="submit" class="btn-ghost">Filter</button>
+  </form>
+</div>
+
+{% if events %}
+<div class="card" style="padding:4px 8px">
+  <table class="a-table">
+    <thead><tr><th>When (UTC)</th><th>Action</th><th>Actor</th><th>Source</th><th>Target</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for e in events %}
+        <tr>
+          <td style="white-space:nowrap;color:var(--text-dim)">{{ e.at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td class="a-act">{{ e.action }}</td>
+          <td>{{ e.actor }}</td>
+          <td>{{ e.source }}</td>
+          <td>{{ e.target }}</td>
+          <td class="a-detail">{{ e.detail }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">No audit events yet{% if action %} for filter <code>{{ action }}</code>{% endif %}.</div></div>
+{% endif %}
+{% endblock %}

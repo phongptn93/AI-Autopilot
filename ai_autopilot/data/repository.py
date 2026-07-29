@@ -12,6 +12,7 @@ from sqlalchemy import delete, func, select
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
     AiConflict,
+    AuditEvent,
     ClaudeSession,
     ExecutionRecord,
     ExecutionStatus,
@@ -25,6 +26,7 @@ from ai_autopilot.data.entities import (
     SdlcLoopState,
     WorkItemState,
 )
+from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 
 
@@ -476,6 +478,39 @@ class SchedulerHistoryRepository:
                     "deferred": json.loads(r.deferred_json or "[]"),
                 })
         return out
+
+
+class AuditRepository:
+    """Append-only audit trail of consequential actions (who did what, from where).
+
+    ``record`` never raises into the caller — a broken audit write must not block
+    the action being audited (the action itself is the priority; the log is not)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def record(
+        self, *, actor: str, source: str, action: str, target: str = "", detail: str = ""
+    ) -> None:
+        try:
+            async with self._db.session() as session:
+                session.add(AuditEvent(
+                    at=datetime.now(UTC).replace(tzinfo=None),
+                    actor=(actor or "")[:200], source=(source or "")[:50],
+                    action=(action or "")[:100], target=(target or "")[:300],
+                    detail=(detail or "")[:2000],
+                ))
+                await session.commit()
+        except Exception:  # noqa: BLE001 — auditing must never break the audited action
+            get_logger("data.audit").warning("audit write failed", action=action)
+
+    async def recent(self, limit: int = 100, action: str = "") -> list[AuditEvent]:
+        """Newest-first events, optionally filtered by action prefix (e.g. "config.")."""
+        async with self._db.session() as session:
+            q = select(AuditEvent).order_by(AuditEvent.at.desc()).limit(max(1, limit))
+            if action:
+                q = q.where(AuditEvent.action.startswith(action))
+            return list((await session.execute(q)).scalars().all())
 
 
 class AiConflictRepository:

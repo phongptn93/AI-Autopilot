@@ -15,6 +15,7 @@ from ai_autopilot.ado import AdoAuthService, AdoClient, AdoNotifier
 from ai_autopilot.config import Settings
 from ai_autopilot.data import (
     AiConflictRepository,
+    AuditRepository,
     ClaudeSessionRepository,
     Database,
     ExecutionRepository,
@@ -72,6 +73,7 @@ class Container:
         self.pr_command_repo = PrCommandRepository(self.database)
         self.pr_reviewer_repo = PrReviewerRepository(self.database)
         self.claude_session_repo = ClaudeSessionRepository(self.database)
+        self.audit_repo = AuditRepository(self.database)
 
         # ADO.
         self.auth = AdoAuthService(config)

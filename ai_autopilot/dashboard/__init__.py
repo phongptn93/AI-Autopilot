@@ -735,7 +735,22 @@ def create_dashboard_router() -> APIRouter:
         for iid in ids:  # leave the queue immediately; the poller will re-own the state
             await c.state_repo.set(iid, PipelineState.QUEUED)
         _log.info("resumed held items via queue", ids=ids, started=started)
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="item.resumed",
+            target=", ".join(f"#{i}" for i in ids)[:300],
+        )
         return RedirectResponse(f"/dashboard/queue?resumed={started}", status_code=303)
+
+    @router.get("/audit", response_class=HTMLResponse)
+    async def audit_page(request: Request, action: str = "", limit: int = 100):
+        """Append-only audit trail: who did what (config, tickets, resumes, reviews)."""
+        c: Container = request.app.state.container
+        events = await c.audit_repo.recent(limit=max(1, min(limit, 500)), action=action)
+        actions = sorted({e.action.split(".")[0] + "." for e in events})
+        return _TEMPLATES.TemplateResponse(
+            request, "audit.html",
+            _ctx(request, "audit", events=events, action=action, actions=actions),
+        )
 
     @router.get("/analytics", response_class=HTMLResponse)
     async def analytics_page(request: Request, days: int = 30, tag: str = ""):
@@ -866,6 +881,10 @@ def create_dashboard_router() -> APIRouter:
         settings_form.apply_to_config(c.config, updates)
         c.ado.refresh()  # re-read org URL if it changed
         _log.info("settings updated via dashboard", keys=sorted(updates.keys()))
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.updated",
+            target=", ".join(sorted(updates.keys()))[:300],
+        )
 
         return RedirectResponse(url="/dashboard/settings?saved=1", status_code=303)
 
@@ -898,6 +917,10 @@ def create_dashboard_router() -> APIRouter:
         blob = settings_form.export_full_encrypted(c.config, c.config.config_export_password)
         # Audit only the event — never the secret payload or the password.
         _log.warning("FULL config (with secrets) exported via dashboard — encrypted download")
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.exported_full",
+            detail="encrypted download incl. secrets",
+        )
         return Response(
             content=blob,
             media_type="application/octet-stream",
@@ -942,6 +965,10 @@ def create_dashboard_router() -> APIRouter:
         settings_form.apply_to_config(c.config, updates)
         c.ado.refresh()
         _log.warning("FULL config restored via dashboard", keys=sorted(updates.keys()))
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.imported_full",
+            detail=f"{len(updates)} keys restored (incl. secrets)",
+        )
         return RedirectResponse("/dashboard/settings?imported=1", status_code=303)
 
     @router.post("/settings/import")

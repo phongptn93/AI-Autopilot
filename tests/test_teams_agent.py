@@ -90,6 +90,52 @@ async def test_answer_freeform_falls_back_on_failure(monkeypatch):
     assert out == teams_agent._FREEFORM_FALLBACK  # graceful, never raises
 
 
+_PR_URL = "https://dev.azure.com/newoceanis/DxFactory/_git/Micro-Frontend/pullrequest/2470"
+
+
+class _FakeReviewTracker:
+    def __init__(self):
+        self.reviewed = []
+        self.detailed = []
+
+    async def trigger_review_now(self, repo_id, pr_id):
+        self.reviewed.append((repo_id, pr_id))
+        return f"🔍 Đang review PR !{pr_id}."
+
+    async def pr_detail(self, repo_id, pr_id):
+        self.detailed.append((repo_id, pr_id))
+        return None
+
+
+async def test_pasted_pr_link_with_review_triggers_review(monkeypatch):
+    async def fake_resolve(container, repo_name):
+        assert repo_name == "Micro-Frontend"
+        return "repo-guid"
+
+    monkeypatch.setattr(teams_agent, "_resolve_repo_id", fake_resolve)
+    rt = _FakeReviewTracker()
+    ctx = _FakeContext()
+    await teams_agent._handle_command(
+        ctx, Settings(), container=None, reviewer_tracker=rt, text=f"review đi {_PR_URL}",
+    )
+    assert rt.reviewed == [("repo-guid", 2470)]      # actually triggered a review
+    assert rt.detailed == []                          # not just a lookup
+    assert "2470" in ctx.sent[0]
+
+
+async def test_pasted_pr_link_without_review_shows_detail(monkeypatch):
+    async def fake_resolve(container, repo_name):
+        return "repo-guid"
+
+    monkeypatch.setattr(teams_agent, "_resolve_repo_id", fake_resolve)
+    rt = _FakeReviewTracker()
+    ctx = _FakeContext()
+    await teams_agent._handle_command(
+        ctx, Settings(), container=None, reviewer_tracker=rt, text=f"PR này {_PR_URL} sao rồi",
+    )
+    assert rt.reviewed == [] and rt.detailed == [("repo-guid", 2470)]  # detail, not review
+
+
 async def test_free_text_create_ticket_uses_confirm_card(monkeypatch):
     """Natural-language 'tạo ticket ...' routes to the confirm card (never creates
     directly) — reusing the same gated path as /log."""

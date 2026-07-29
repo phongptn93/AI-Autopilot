@@ -26,6 +26,7 @@ import re
 import tempfile
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import unquote
 
 from ai_autopilot.config import Settings
 from ai_autopilot.container import Container
@@ -109,6 +110,7 @@ _HELP_TEXT = (
     "- `/team` — tổng quan PR của cả team, cũ nhất trước\n"
     "- `/queue` — việc autopilot đang chờ người xử lý (needs human)\n"
     "- `/resume <id>` — tiếp tục 1 việc đang chờ (có xác nhận)\n"
+    "- 🔗 Dán **link PR** + \"review\" → mình review ngay (dán link không kèm gì → xem chi tiết)\n"
     "- `/log <mô tả>` — tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)\n"
     "- `/status` — tình trạng hoạt động\n"
     "- `/help` — bảng lệnh này\n\n"
@@ -608,6 +610,13 @@ async def _send_resume_confirm_card(context, item_id: int, title: str) -> None:
 _REVIEW_RE = re.compile(r"^/review\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _LOG_RE = re.compile(r"^/log\s+(.+)$", re.IGNORECASE | re.DOTALL)
 _RESUME_RE = re.compile(r"^/resume\s+(\d+)\s*$", re.IGNORECASE)
+# A pasted Azure DevOps PR URL, e.g.
+# https://dev.azure.com/org/Project/_git/Micro-Frontend/pullrequest/2470
+_PR_URL_RE = re.compile(
+    r"dev\.azure\.com/[^/\s]+/[^/\s]+/_git/([^/\s?#]+)/pullrequest/(\d+)", re.IGNORECASE
+)
+# Words that turn a pasted PR link into a "review it" request (vs just showing detail).
+_REVIEW_INTENT = ("review", "duyệt", "rà soát", "soát", "kiểm tra", "check", "xem lại")
 _PR_LOOKUP_RE = re.compile(r"^/pr\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _ITEM_LOOKUP_RE = re.compile(r"^/item\s+(\d+)\s*$", re.IGNORECASE)
 
@@ -719,6 +728,24 @@ async def _handle_command(
             f"- Trạng thái: **{item.state}**\n"
             f"- Assigned to: {item.assigned_to or '(chưa gán)'}"
         )
+        return
+    m = _PR_URL_RE.search(text)
+    if m:
+        # A pasted PR link — understand it without needing /review <repo> <id>.
+        repo_name, pr_id = unquote(m.group(1)), int(m.group(2))
+        repo_id = await _resolve_repo_id(container, repo_name)
+        if repo_id is None:
+            await context.send_activity(f"Không tìm thấy repo `{repo_name}`.")
+            return
+        if any(k in low for k in _REVIEW_INTENT):
+            status = await reviewer_tracker.trigger_review_now(repo_id, pr_id)
+            await context.send_activity(status)
+        else:
+            detail = await reviewer_tracker.pr_detail(repo_id, pr_id)
+            await context.send_activity(
+                _format_pr_detail(detail) if detail
+                else f"PR !{pr_id} không tìm thấy hoặc không còn active trong `{repo_name}`."
+            )
         return
     await _handle_free_text(context, config, container, reviewer_tracker, text)
 

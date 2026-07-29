@@ -7,6 +7,8 @@ helpers can be exercised with plain fakes.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import ai_autopilot.execution.claude_client as claude_client
 from ai_autopilot import teams_agent
 from ai_autopilot.config import Settings
@@ -17,6 +19,8 @@ class _FakeContext:
 
     def __init__(self):
         self.sent: list[str] = []
+        # Minimal shape _teams_email reads; id=None → email resolves to "Teams".
+        self.activity = SimpleNamespace(from_property=SimpleNamespace(id=None), text="")
 
     async def send_activity(self, message) -> None:
         self.sent.append(message)
@@ -105,6 +109,49 @@ async def test_free_text_create_ticket_uses_confirm_card(monkeypatch):
         reviewer_tracker=_FakeReviewerTracker(), text="tạo ticket giúp mình vụ đăng nhập lỗi",
     )
     assert sent_titles == ["đăng nhập lỗi SSO timeout"]  # confirm card, not a direct create
+
+
+class _FakeAdoCreate:
+    async def create_work_item(self, **kwargs):
+        self.kwargs = kwargs
+        return 4242
+
+
+class _FakeContainer:
+    def __init__(self, config):
+        self.config = config
+        self.ado = _FakeAdoCreate()
+
+
+async def test_create_logged_ticket_composes_in_persona_voice(monkeypatch):
+    captured = {}
+
+    async def fake_compose(config, task, facts):
+        captured["facts"] = facts
+        return "Dạ rõ anh, em đã mở [#4242] rồi ạ 👍"
+
+    monkeypatch.setattr(teams_agent, "_compose_message", fake_compose)
+    ctx = _FakeContext()
+    cfg = Settings(ado_organization="https://dev.azure.com/org", ado_project="Proj")
+    await teams_agent._create_logged_ticket(ctx, _FakeContainer(cfg), "login lỗi SSO")
+
+    assert ctx.sent == ["Dạ rõ anh, em đã mở [#4242] rồi ạ 👍"]   # voiced reply is sent
+    # ...and the composer was handed the real facts (never invents).
+    assert "#4242" in captured["facts"] and "login lỗi SSO" in captured["facts"]
+    assert "/_workitems/edit/4242" in captured["facts"] and "teams-logged" in captured["facts"]
+
+
+async def test_create_logged_ticket_falls_back_when_compose_fails(monkeypatch):
+    async def empty_compose(config, task, facts):
+        return ""  # compose failed → caller must still send a usable line
+
+    monkeypatch.setattr(teams_agent, "_compose_message", empty_compose)
+    ctx = _FakeContext()
+    cfg = Settings(ado_organization="https://dev.azure.com/org", ado_project="Proj")
+    await teams_agent._create_logged_ticket(ctx, _FakeContainer(cfg), "login lỗi SSO")
+
+    assert len(ctx.sent) == 1
+    assert "#4242" in ctx.sent[0] and "/_workitems/edit/4242" in ctx.sent[0]
 
 
 async def test_free_text_mutation_request_still_redirects(monkeypatch):

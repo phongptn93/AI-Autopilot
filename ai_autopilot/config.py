@@ -464,6 +464,19 @@ class Settings(BaseSettings):
     # any code-mutating action (no such intent exists) — see teams_agent.py. Costs one
     # Claude call per unmatched message; toggle off to keep structured /commands only.
     teams_agent_nlu_enabled: bool = True
+    # ── Bot persona (Teams voice) ──
+    # The bot composes its key replies (free-text answers, ticket acknowledgements)
+    # in THIS voice via Claude, so it reads like a consistent, proactive teammate
+    # rather than a terse machine. ``name`` = how it refers to itself; ``voice`` =
+    # the tone/register guide handed to Claude. Falls back to a plain line if the
+    # compose call fails, so a reply is never lost.
+    bot_persona_name: str = "Chú bé chăm chỉ"
+    bot_persona_voice: str = (
+        "một kỹ sư đồng đội tận tâm, chủ động và lễ phép. Xưng 'em', gọi người dùng "
+        "là 'anh/chị'. Trả lời ngắn gọn, rõ ràng, tự nhiên; chủ động gợi ý bước tiếp "
+        "theo và hỏi lại khi thiếu thông tin; báo tiến độ/blocker trung thực. Không "
+        "máy móc, không sáo rỗng, không bịa thông tin ngoài dữ liệu được cung cấp."
+    )
     # Proactively post a team-overview digest to every channel/chat the bot has been
     # added to, every N hours (e.g. 24 = once daily). 0 = off (default) — this pushes
     # unsolicited messages into a shared channel, so it's opt-in. Requires the bot to

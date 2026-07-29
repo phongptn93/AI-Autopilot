@@ -195,6 +195,12 @@ FIELDS: tuple[Field, ...] = (
           "Reply and act on button clicks in Teams (approve/reject, chat commands) via a "
           "registered Azure Bot / Agent ID — fill in the App ID/tenant/secret fields below. "
           "Also requires `pip install .[teams-bot]`. Restart required."),
+    Field("bot_persona_name", "🎭 Bot persona name", "text", "Execution & Autonomy",
+          "How the bot refers to itself in Teams replies (e.g. 'Chú bé chăm chỉ'). "
+          "Used when it composes ticket acknowledgements / free-text answers."),
+    Field("bot_persona_voice", "↳ Bot persona voice", "text", "Execution & Autonomy",
+          "Tone/register guide handed to Claude so the bot's replies read like a "
+          "consistent, proactive teammate. Blank = terse machine style."),
     Field("teams_agent_nlu_enabled", "↳ Understand free-text (read-only)", "bool",
           "Execution & Autonomy",
           "Free-text Teams messages that don't match a /command are classified by Claude "

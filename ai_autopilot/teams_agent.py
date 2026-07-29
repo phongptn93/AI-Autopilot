@@ -466,10 +466,29 @@ async def _create_logged_ticket(context, container: Container, title: str) -> No
     if not wid:
         await context.send_activity("⚠️ Không tạo được work item — kiểm tra log server.")
         return
-    org = container.config.ado_organization.rstrip("/")
-    project = container.config.ado_project
+    cfg = container.config
+    org = cfg.ado_organization.rstrip("/")
+    project = cfg.ado_project
+    url = f"{org}/{project}/_workitems/edit/{wid}"
+    trigger = (cfg.effective_trigger_tags or ["<trigger-tag>"])[0]
+    facts = (
+        f"- Đã tạo Requirement [#{wid}]({url})\n"
+        f"- Tiêu đề: {title}\n"
+        f"- Project: {project} · Trạng thái: mới (Backlog) · Tag: teams-logged\n"
+        f"- Người yêu cầu: {email}\n"
+        f"- Ticket đang ở Backlog nên autopilot CHƯA tự xử lý; để bắt đầu thì gắn tag "
+        f"trigger `{trigger}` (hoặc chuyển sang trạng thái làm việc).\n"
+        f"- Có thể hỏi lại người dùng xem cần bổ sung mô tả / tiêu chí nghiệm thu không."
+    )
+    voiced = await _compose_message(
+        cfg,
+        "Báo cho người dùng biết ticket họ nhờ đã được tạo, kèm bước tiếp theo và chủ "
+        "động hỏi có cần bổ sung gì không.",
+        facts,
+    )
     await context.send_activity(
-        f"✅ Đã tạo **Requirement #{wid}** — {org}/{project}/_workitems/edit/{wid}"
+        voiced or f"✅ Đã tạo **Requirement [#{wid}]({url})** — {title} (Backlog). "
+        f"Gắn tag `{trigger}` khi muốn mình bắt đầu."
     )
 
 
@@ -485,10 +504,17 @@ async def _send_log_confirm_card(context, title: str) -> None:
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "body": [
             {
-                "type": "TextBlock", "weight": "Bolder", "wrap": True,
+                "type": "TextBlock", "weight": "Bolder", "wrap": True, "size": "Medium",
                 "text": "📝 Xác nhận tạo Requirement mới?",
             },
-            {"type": "TextBlock", "wrap": True, "text": title},
+            {"type": "TextBlock", "wrap": True, "text": title, "spacing": "Small"},
+            {
+                "type": "FactSet",
+                "facts": [
+                    {"title": "Loại:", "value": "Requirement"},
+                    {"title": "Trạng thái:", "value": "mới (Backlog) — chờ triage"},
+                ],
+            },
         ],
         "actions": [
             {
@@ -877,9 +903,42 @@ _FREEFORM_FALLBACK = (
     "`/help` để xem các lệnh."
 )
 
-_FREEFORM_PROMPT = """Bạn là trợ lý Teams CHỈ ĐỌC của AI-Autopilot — KHÔNG có khả năng \
-và KHÔNG được phép sửa code, commit, vote hay merge; mọi việc đó chỉ làm được khi reply \
-trực tiếp trên PR trong Azure DevOps.
+def _persona_preamble(config: Settings) -> str:
+    """Voice/identity block prepended to every message the persona composes."""
+    name = config.bot_persona_name or "trợ lý"
+    return (
+        f'Bạn là "{name}" — {config.bot_persona_voice}\n'
+        "Chỉ dùng đúng thông tin được cung cấp, TUYỆT ĐỐI không bịa. Bạn CHỈ ĐỌC dữ liệu "
+        "(không sửa code / vote / merge); nếu người dùng muốn vậy, chỉ họ thao tác trên "
+        "Azure DevOps."
+    )
+
+
+async def _compose_message(config: Settings, task: str, facts: str) -> str:
+    """Have the persona (Claude, tool-less) write ONE short voiced message from FACTS.
+
+    Returns "" on any failure so the caller can fall back to a plain line — the bot
+    must never go silent just because the stylistic compose step failed."""
+    from ai_autopilot.execution.claude_client import run_claude
+
+    prompt = (
+        _persona_preamble(config)
+        + f"\n\nTình huống: {task}\n\nDữ liệu thật:\n{facts}\n\n"
+        "Viết ĐÚNG MỘT tin nhắn Teams ngắn gọn, tự nhiên bằng tiếng Việt theo đúng giọng "
+        "trên (giữ nguyên số hiệu / link dạng markdown nếu có trong dữ liệu)."
+    )
+    try:
+        run = await run_claude(
+            prompt, tempfile.gettempdir(), timeout_seconds=45,
+            model=config.claude_model or None, max_turns=1, allowed_tools=[],
+        )
+        return (run.text or "").strip()
+    except Exception as exc:  # noqa: BLE001 — styling failure must not lose the reply
+        _log.warning("persona compose failed", error=_fmt_exc(exc))
+        return ""
+
+
+_FREEFORM_PROMPT = """{persona}
 
 Người dùng hỏi: "{question}"
 
@@ -935,7 +994,10 @@ async def _answer_freeform(
 
     try:
         run = await run_claude(
-            _FREEFORM_PROMPT.format(question=question[:300], snapshot=snapshot, help=_HELP_TEXT),
+            _FREEFORM_PROMPT.format(
+                persona=_persona_preamble(config),
+                question=question[:300], snapshot=snapshot, help=_HELP_TEXT,
+            ),
             tempfile.gettempdir(),  # tool-less → cwd irrelevant, just must exist
             timeout_seconds=45,     # see _classify_intent — same headroom reasoning
             model=config.claude_model or None,

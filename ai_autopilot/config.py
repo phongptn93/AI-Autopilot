@@ -464,6 +464,12 @@ class Settings(BaseSettings):
     # any code-mutating action (no such intent exists) — see teams_agent.py. Costs one
     # Claude call per unmatched message; toggle off to keep structured /commands only.
     teams_agent_nlu_enabled: bool = True
+    # Skill the bot runs to review a PR from chat (real diff-vs-codebase review that
+    # posts findings on the PR). Must exist in the workspace's .claude/skills.
+    teams_review_skill: str = "review-pr"
+    # Route free-text through a genuine Claude agent turn (tools + skills) instead of
+    # the fixed intent classifier — more natural/agentic, but a Claude run per message.
+    teams_agentic_enabled: bool = False
     # ── Bot persona (Teams voice) ──
     # The bot composes its key replies (free-text answers, ticket acknowledgements)
     # in THIS voice via Claude, so it reads like a consistent, proactive teammate

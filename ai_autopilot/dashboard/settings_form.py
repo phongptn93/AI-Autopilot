@@ -204,6 +204,12 @@ FIELDS: tuple[Field, ...] = (
     Field("bot_persona_voice", "↳ Bot persona voice", "text", "Execution & Autonomy",
           "Tone/register guide handed to Claude so the bot's replies read like a "
           "consistent, proactive teammate. Blank = terse machine style."),
+    Field("teams_review_skill", "↳ PR review skill", "text", "Execution & Autonomy",
+          "Skill the bot runs to review a PR from chat (real diff-vs-codebase review "
+          "that posts findings on the PR). Must exist in the workspace's .claude/skills."),
+    Field("teams_agentic_enabled", "↳ Agentic free-text (Claude turn)", "bool",
+          "Route free-text through a real Claude agent turn (tools + skills) instead of "
+          "the fixed intent classifier — more natural, but a Claude run per message."),
     Field("teams_agent_nlu_enabled", "↳ Understand free-text (read-only)", "bool",
           "Execution & Autonomy",
           "Free-text Teams messages that don't match a /command are classified by Claude "

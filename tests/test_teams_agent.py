@@ -7,6 +7,7 @@ helpers can be exercised with plain fakes.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import ai_autopilot.execution.claude_client as claude_client
@@ -95,32 +96,68 @@ _PR_URL = "https://dev.azure.com/newoceanis/DxFactory/_git/Micro-Frontend/pullre
 
 class _FakeReviewTracker:
     def __init__(self):
-        self.reviewed = []
         self.detailed = []
-
-    async def trigger_review_now(self, repo_id, pr_id):
-        self.reviewed.append((repo_id, pr_id))
-        return f"🔍 Đang review PR !{pr_id}."
 
     async def pr_detail(self, repo_id, pr_id):
         self.detailed.append((repo_id, pr_id))
         return None
 
 
-async def test_pasted_pr_link_with_review_triggers_review(monkeypatch):
-    async def fake_resolve(container, repo_name):
-        assert repo_name == "Micro-Frontend"
-        return "repo-guid"
+class _ReviewExecutor:
+    def __init__(self):
+        self.calls = []
 
-    monkeypatch.setattr(teams_agent, "_resolve_repo_id", fake_resolve)
-    rt = _FakeReviewTracker()
+    async def review_pr(self, repo_name, pr_id, pr_url=""):
+        self.calls.append((repo_name, pr_id, pr_url))
+        return "done"
+
+
+class _ReviewContainer:
+    def __init__(self):
+        self.executor = _ReviewExecutor()
+
+
+async def test_pasted_pr_link_with_review_runs_skill_review():
+    cont = _ReviewContainer()
     ctx = _FakeContext()
     await teams_agent._handle_command(
-        ctx, Settings(), container=None, reviewer_tracker=rt, text=f"review đi {_PR_URL}",
+        ctx, Settings(), container=cont, reviewer_tracker=_FakeReviewTracker(),
+        text=f"review đi {_PR_URL}",
     )
-    assert rt.reviewed == [("repo-guid", 2470)]      # actually triggered a review
-    assert rt.detailed == []                          # not just a lookup
-    assert "2470" in ctx.sent[0]
+    await asyncio.sleep(0)  # let the spawned background review task run
+    assert cont.executor.calls == [("Micro-Frontend", 2470, _PR_URL)]
+    assert "2470" in ctx.sent[0] and "codebase" in ctx.sent[0]
+
+
+async def test_executor_review_pr_runs_skill_without_vote(monkeypatch):
+    from ai_autopilot.execution.auto_reviewer import AutoReviewer
+    from ai_autopilot.execution.claude_executor import ClaudeExecutor
+
+    cfg = Settings(teams_review_skill="review-pr")
+    ex = ClaudeExecutor(cfg, AutoReviewer(cfg))
+    captured = {}
+
+    class _Run:
+        text = "Verdict: OK — 0 critical, 2 medium"
+
+    async def fake_scratch(item_id, repos):
+        return None
+
+    async def fake_release(run_dir):
+        return None
+
+    async def fake_run(prompt, work_dir, repo=None, on_event=None, resume=None):
+        captured["prompt"] = prompt
+        return _Run()
+
+    monkeypatch.setattr(ex, "_acquire_agent_scratch", fake_scratch)
+    monkeypatch.setattr(ex, "release_scratch", fake_release)
+    monkeypatch.setattr(ex, "_run_claude", fake_run)
+
+    out = await ex.review_pr("Micro-Frontend", 2470, _PR_URL)
+    assert "/review-pr" in captured["prompt"] and _PR_URL in captured["prompt"]
+    assert "KHÔNG cast vote" in captured["prompt"]     # never votes
+    assert out == "Verdict: OK — 0 critical, 2 medium"
 
 
 async def test_pasted_pr_link_without_review_shows_detail(monkeypatch):
@@ -131,9 +168,10 @@ async def test_pasted_pr_link_without_review_shows_detail(monkeypatch):
     rt = _FakeReviewTracker()
     ctx = _FakeContext()
     await teams_agent._handle_command(
-        ctx, Settings(), container=None, reviewer_tracker=rt, text=f"PR này {_PR_URL} sao rồi",
+        ctx, Settings(), container=_ReviewContainer(), reviewer_tracker=rt,
+        text=f"PR này {_PR_URL} sao rồi",
     )
-    assert rt.reviewed == [] and rt.detailed == [("repo-guid", 2470)]  # detail, not review
+    assert rt.detailed == [("repo-guid", 2470)]  # detail, not review
 
 
 async def test_free_text_create_ticket_uses_confirm_card(monkeypatch):

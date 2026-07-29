@@ -37,6 +37,28 @@ from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
 
 _log = get_logger("teams_agent")
 _MIN_DT = datetime.min  # sort fallback for items with no updated_at
+_REVIEW_TASKS: set = set()  # keep background review tasks referenced (no GC)
+
+
+def _spawn_review(container: Container, repo_name: str, pr_id: int, pr_url: str = "") -> None:
+    """Kick off the real skill-based PR review in the background — it runs for minutes
+    and posts its findings on the PR itself, so the chat turn only acknowledges it."""
+    task = asyncio.create_task(container.executor.review_pr(repo_name, pr_id, pr_url))
+    _REVIEW_TASKS.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        _REVIEW_TASKS.discard(t)
+        exc = None if t.cancelled() else t.exception()
+        if exc:
+            _log.warning("background review failed", pr=pr_id, error=_fmt_exc(exc))
+
+    task.add_done_callback(_done)
+
+
+_REVIEWING_MSG = (
+    "🔍 Đang review PR !{pr} trong `{repo}` — Claude phân tích diff so với codebase, "
+    "findings sẽ được đăng thẳng lên PR trong ít phút."
+)
 
 
 class _DbConversationStorage:
@@ -690,12 +712,8 @@ async def _handle_command(
     m = _REVIEW_RE.match(text.strip())
     if m:
         repo_name, pr_id = m.group(1), int(m.group(2))
-        repo_id = await _resolve_repo_id(container, repo_name)
-        if repo_id is None:
-            await context.send_activity(f"Không tìm thấy repo `{repo_name}`.")
-            return
-        status = await reviewer_tracker.trigger_review_now(repo_id, pr_id)
-        await context.send_activity(status)
+        _spawn_review(container, repo_name, pr_id)
+        await context.send_activity(_REVIEWING_MSG.format(pr=pr_id, repo=repo_name))
         return
     m = _LOG_RE.match(text.strip())
     if m:
@@ -733,19 +751,19 @@ async def _handle_command(
     if m:
         # A pasted PR link — understand it without needing /review <repo> <id>.
         repo_name, pr_id = unquote(m.group(1)), int(m.group(2))
+        if any(k in low for k in _REVIEW_INTENT):
+            _spawn_review(container, repo_name, pr_id, f"https://{m.group(0)}")
+            await context.send_activity(_REVIEWING_MSG.format(pr=pr_id, repo=repo_name))
+            return
         repo_id = await _resolve_repo_id(container, repo_name)
         if repo_id is None:
             await context.send_activity(f"Không tìm thấy repo `{repo_name}`.")
             return
-        if any(k in low for k in _REVIEW_INTENT):
-            status = await reviewer_tracker.trigger_review_now(repo_id, pr_id)
-            await context.send_activity(status)
-        else:
-            detail = await reviewer_tracker.pr_detail(repo_id, pr_id)
-            await context.send_activity(
-                _format_pr_detail(detail) if detail
-                else f"PR !{pr_id} không tìm thấy hoặc không còn active trong `{repo_name}`."
-            )
+        detail = await reviewer_tracker.pr_detail(repo_id, pr_id)
+        await context.send_activity(
+            _format_pr_detail(detail) if detail
+            else f"PR !{pr_id} không tìm thấy hoặc không còn active trong `{repo_name}`."
+        )
         return
     await _handle_free_text(context, config, container, reviewer_tracker, text)
 

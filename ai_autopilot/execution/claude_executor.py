@@ -186,6 +186,39 @@ class ClaudeExecutor:
         result.duration_seconds = time.monotonic() - started
         return result
 
+    async def review_pr(self, repo_name: str, pr_id: int, pr_url: str = "") -> str:
+        """Run the real code-review SKILL on a PR, evaluating the diff against the
+        codebase (not just PR metadata). Claude runs the ``review-pr`` skill in an
+        isolated worktree with the workspace's .claude skills + ADO MCP, fetches the
+        diff, reviews per the project's checklist, and posts findings to the PR
+        thread. Returns a short summary for the chat. Does NOT cast a vote."""
+        workspace = self._config.workspace_directory
+        scratch = await self._acquire_agent_scratch(pr_id, [repo_name])
+        if scratch:
+            run_dir = str(Path(scratch) / repo_name)
+        else:  # no isolation available → run in the repo inside the shared workspace
+            cand = Path(workspace or ".") / repo_name
+            run_dir = str(cand) if cand.is_dir() else (workspace or ".")
+        skill = self._config.teams_review_skill or "review-pr"
+        ref = pr_url or f"PR !{pr_id} (repo {repo_name})"
+        prompt = (
+            f"/{skill} {ref}\n\n"
+            f"Review pull request: {ref}. Phân tích diff SO VỚI codebase theo checklist "
+            "của skill (Logic, Architecture, Security, Performance, Data). Đăng review "
+            "findings (kèm severity + verdict) LÊN PR thread. TUYỆT ĐỐI KHÔNG cast vote. "
+            "Cuối cùng trả về một tóm tắt NGẮN (verdict + số lượng finding theo severity)."
+        )
+        try:
+            run = await self._run_claude(prompt, run_dir, repo=run_dir)
+            return (run.text or "").strip() or f"Đã review PR !{pr_id}."
+        except TimeoutError:
+            return f"Review PR !{pr_id} quá thời gian ({self._config.task_timeout_minutes} phút)."
+        except Exception as exc:  # noqa: BLE001 — a review failure must not crash the caller
+            self._log.warning("review_pr failed", pr=pr_id, error=str(exc))
+            return f"Không review được PR !{pr_id}: {exc}"
+        finally:
+            await self.release_scratch(scratch)
+
     def _allowed_repos(self, workspace: str) -> list[str]:
         """Repos the agent may edit: the configured whitelist, or all discovered."""
         discovered = discover_repos(workspace)

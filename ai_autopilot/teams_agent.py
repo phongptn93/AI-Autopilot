@@ -747,9 +747,16 @@ async def _handle_command(
             f"- Assigned to: {item.assigned_to or '(chưa gán)'}"
         )
         return
+    # Agentic mode: hand everything non-slash to a real Claude agent turn — it
+    # parses PR links, looks up data with tools, and requests gated actions itself
+    # (no regex/keyword routing). Falls back to the classifier path on failure.
+    if config.teams_agentic_enabled and await _agentic_turn(
+        context, config, container, reviewer_tracker, text
+    ):
+        return
     m = _PR_URL_RE.search(text)
     if m:
-        # A pasted PR link — understand it without needing /review <repo> <id>.
+        # Classifier mode fast-path: a pasted PR link, no /review syntax needed.
         repo_name, pr_id = unquote(m.group(1)), int(m.group(2))
         if any(k in low for k in _REVIEW_INTENT):
             _spawn_review(container, repo_name, pr_id, f"https://{m.group(0)}")
@@ -1145,6 +1152,115 @@ async def _answer_freeform(
     except Exception as exc:  # noqa: BLE001 — answer failure must not crash the turn
         _log.warning("freeform answer failed — falling back to hint", error=_fmt_exc(exc))
         return _FREEFORM_FALLBACK
+
+
+# ── Agentic free-text (opt-in): a REAL Claude agent turn with tools ──────────
+#
+# Instead of a fixed intent classifier + keyword guards, the message is handed to
+# Claude with actual (read-only) tools: it looks up live ADO data itself, decides
+# what the user means, and answers in the persona voice. SAFETY moves from keyword
+# guessing to a hard TOOL ALLOWLIST — write tools (vote, merge, update, create,
+# delete…) are simply not available to the agent, so no phrasing can reach them.
+# Consequential actions (review / create ticket / resume) are requested via a final
+# ACTION line, which Python routes through the SAME gated paths as the slash
+# commands (background review; confirm cards for writes).
+_AGENT_ADO_READ_TOOLS = (
+    "repo_get_pull_request_by_id", "repo_get_pull_request_changes",
+    "repo_list_pull_requests_by_repo_or_project", "repo_list_pull_request_threads",
+    "repo_list_repos_by_project", "repo_get_repo_by_name_or_id",
+    "wit_get_work_item", "wit_get_work_items_batch_by_ids", "wit_my_work_items",
+    "wit_list_work_item_comments", "search_code", "search_workitem",
+)
+_AGENT_ACTION_RE = re.compile(r"^ACTION:\s*(\{.*\})\s*$", re.MULTILINE)
+
+
+def _agent_allowed_tools(mcp_servers: dict | None) -> list[str]:
+    """The agentic turn's hard tool allowlist: read-only builtins + read-only ADO
+    MCP tools on every configured server. Nothing here can mutate ADO or code."""
+    tools = ["Read", "Grep", "Glob"]
+    for server in (mcp_servers or {}):
+        tools += [f"mcp__{server}__{t}" for t in _AGENT_ADO_READ_TOOLS]
+    return tools
+
+
+_AGENTIC_PROMPT = """{persona}
+
+Bạn đang trả lời một tin nhắn Teams. Người gửi: {email}.
+Tin nhắn: "{text}"
+
+Bạn CÓ các tool CHỈ ĐỌC (Azure DevOps MCP: PR, work item, search; đọc file trong
+workspace). Hãy TỰ tra cứu dữ liệu thật cần thiết rồi trả lời NGẮN GỌN, tự nhiên
+bằng tiếng Việt theo đúng giọng trên. Không bịa — chỉ nói điều tra cứu được.
+
+Bạn KHÔNG có tool ghi. Nếu người dùng muốn một HÀNH ĐỘNG, kết thúc câu trả lời
+bằng ĐÚNG MỘT dòng (Python sẽ thực thi qua luồng có kiểm soát):
+ACTION: {{"action": "review_pr", "repo": "<tên repo>", "pr_id": <số>, "pr_url": "<url nếu có>"}}
+ACTION: {{"action": "create_ticket", "title": "<tiêu đề ngắn>"}}
+ACTION: {{"action": "resume", "id": <số work item>}}
+- review_pr: người dùng muốn review/đánh giá code một PR (kèm lời xác nhận bạn sẽ review).
+- create_ticket: muốn tạo ticket/task/bug mới (sẽ có card xác nhận trước khi tạo).
+- resume: muốn tiếp tục một việc autopilot đang giữ (sẽ có card xác nhận).
+Yêu cầu sửa code / vote / merge / xoá: KHÔNG có action — giải thích rằng việc đó
+thao tác trực tiếp trên PR trong Azure DevOps. Không có hành động nào → không có dòng ACTION."""
+
+
+async def _agentic_turn(
+    context, config: Settings, container: Container,
+    reviewer_tracker: ReviewerTrackerService, text: str,
+) -> bool:
+    """One genuine agent turn over the message. Returns True when it handled the
+    reply; False on any failure so the caller falls back to the classifier path."""
+    from ai_autopilot.execution.claude_client import run_claude
+    from ai_autopilot.execution.claude_executor import _load_mcp_servers
+
+    workspace = config.workspace_directory
+    mcp = _load_mcp_servers(workspace) if workspace else None
+    email = await _teams_email(context) or "(không rõ)"
+    try:
+        run = await run_claude(
+            _AGENTIC_PROMPT.format(
+                persona=_persona_preamble(config), email=email, text=text[:600]
+            ),
+            workspace or tempfile.gettempdir(),
+            timeout_seconds=120,
+            model=config.claude_model or None,
+            max_turns=12,                                  # room for tool lookups
+            allowed_tools=_agent_allowed_tools(mcp),       # read-only, hard limit
+            mcp_servers=mcp,
+        )
+    except Exception as exc:  # noqa: BLE001 — agent failure must not lose the turn
+        _log.warning("agentic turn failed — falling back to classifier", error=_fmt_exc(exc))
+        return False
+
+    reply = (run.text or "").strip()
+    if not reply:
+        return False
+
+    action = None
+    m = _AGENT_ACTION_RE.search(reply)
+    if m:
+        reply = reply[: m.start()].strip()
+        with contextlib.suppress(ValueError):
+            action = json.loads(m.group(1))
+    if reply:
+        await context.send_activity(reply)
+
+    if isinstance(action, dict):
+        kind = str(action.get("action") or "")
+        if kind == "review_pr" and action.get("repo") and _as_int(action.get("pr_id")):
+            pr_id = _as_int(action.get("pr_id"))
+            _spawn_review(container, str(action["repo"]), pr_id, str(action.get("pr_url") or ""))
+            if not reply:  # the agent's own confirmation usually covers this
+                await context.send_activity(
+                    _REVIEWING_MSG.format(pr=pr_id, repo=action["repo"])
+                )
+        elif kind == "create_ticket" and str(action.get("title") or "").strip():
+            await _send_log_confirm_card(context, str(action["title"]).strip()[:250])
+        elif kind == "resume" and _as_int(action.get("id")) is not None:
+            iid = _as_int(action.get("id"))
+            item = await container.ado.get_work_item(iid)
+            await _send_resume_confirm_card(context, iid, item.title if item else "")
+    return True
 
 
 async def _handle_free_text(

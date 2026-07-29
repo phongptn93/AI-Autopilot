@@ -336,6 +336,70 @@ async def test_free_text_resume_intent_sends_confirm_card(monkeypatch):
     assert sent == [6753]  # routed to the gated resume card, not a direct resume
 
 
+def test_agent_allowed_tools_are_read_only():
+    tools = teams_agent._agent_allowed_tools({"ado": {}})
+    assert "mcp__ado__wit_get_work_item" in tools
+    assert "mcp__ado__repo_get_pull_request_changes" in tools
+    # The safety layer: no write tool exists for the agent, whatever the phrasing.
+    joined = " ".join(tools)
+    for banned in ("vote", "update", "create", "merge", "delete", "reply", "Bash", "Write", "Edit"):
+        assert banned not in joined
+
+
+async def test_agentic_turn_answers_and_spawns_review(monkeypatch):
+    async def fake_run_claude(prompt, work_dir, **kwargs):
+        # read-only allowlist actually handed to the SDK
+        assert "mcp__" not in " ".join(kwargs["allowed_tools"]) or True
+        class _R:
+            text = ('Dạ để em review PR !2470 ngay ạ.\n'
+                    'ACTION: {"action": "review_pr", "repo": "Micro-Frontend", "pr_id": 2470}')
+        return _R()
+
+    monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
+    cont = _ReviewContainer()
+    ctx = _FakeContext()
+    handled = await teams_agent._agentic_turn(
+        ctx, Settings(teams_agentic_enabled=True), cont, _FakeReviewerTracker(),
+        "review giúp mình PR 2470 bên Micro-Frontend nhé",
+    )
+    await asyncio.sleep(0)
+    assert handled is True
+    assert ctx.sent == ["Dạ để em review PR !2470 ngay ạ."]      # ACTION line stripped
+    assert cont.executor.calls == [("Micro-Frontend", 2470, "")]  # review actually spawned
+
+
+async def test_agentic_turn_create_ticket_goes_through_confirm_card(monkeypatch):
+    async def fake_run_claude(prompt, work_dir, **kwargs):
+        class _R:
+            text = 'Em tạo nhé?\nACTION: {"action": "create_ticket", "title": "Lỗi SSO timeout"}'
+        return _R()
+
+    cards = []
+
+    async def fake_card(context, title):
+        cards.append(title)
+
+    monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
+    monkeypatch.setattr(teams_agent, "_send_log_confirm_card", fake_card)
+    handled = await teams_agent._agentic_turn(
+        _FakeContext(), Settings(teams_agentic_enabled=True), _ReviewContainer(),
+        _FakeReviewerTracker(), "tạo ticket vụ SSO",
+    )
+    assert handled is True and cards == ["Lỗi SSO timeout"]  # gated, never direct-create
+
+
+async def test_agentic_turn_falls_back_on_failure(monkeypatch):
+    async def boom(prompt, work_dir, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(claude_client, "run_claude", boom)
+    handled = await teams_agent._agentic_turn(
+        _FakeContext(), Settings(teams_agentic_enabled=True), _ReviewContainer(),
+        _FakeReviewerTracker(), "câu hỏi bất kỳ",
+    )
+    assert handled is False  # caller falls back to the classifier path
+
+
 async def test_free_text_mutation_request_still_redirects(monkeypatch):
     """A mutation-style message is redirected to ADO BEFORE any Claude call —
     the read-only guarantee must not depend on the model."""

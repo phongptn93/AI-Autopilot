@@ -29,5 +29,6 @@ class TenantManager:
                 base_branch=self._config.base_branch,
                 repos=self._config.repos,
                 teams_webhook_url=self._config.teams_webhook_url,
+                teams_webhook_urls=list(self._config.teams_webhook_urls),
             )
         ]

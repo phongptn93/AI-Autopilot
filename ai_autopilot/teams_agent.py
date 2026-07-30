@@ -1375,6 +1375,7 @@ async def _classify_intent(config: Settings, text: str) -> dict:
             model=config.claude_model or None,
             max_turns=1,
             allowed_tools=[],  # no tool use — pure text classification
+            effort=config.claude_effort_chat,
         )
         m = _JSON_RE.search(run.text or "")
         if not m:
@@ -1419,6 +1420,7 @@ async def _phrase_natural(config: Settings, question: str, bullets: str) -> str:
             model=config.claude_model or None,
             max_turns=1,
             allowed_tools=[],
+            effort=config.claude_effort_chat,
         )
         return (run.text or "").strip() or bullets
     except Exception as exc:  # noqa: BLE001 — phrasing failure must not crash the turn
@@ -1462,6 +1464,7 @@ async def _compose_message(config: Settings, task: str, facts: str) -> str:
         run = await run_claude(
             prompt, tempfile.gettempdir(), timeout_seconds=45,
             model=config.claude_model or None, max_turns=1, allowed_tools=[],
+            effort=config.claude_effort_chat,
         )
         return (run.text or "").strip()
     except Exception as exc:  # noqa: BLE001 — styling failure must not lose the reply
@@ -1534,6 +1537,7 @@ async def _answer_freeform(
             model=config.claude_model or None,
             max_turns=1,
             allowed_tools=[],       # no tool use — cannot mutate anything
+            effort=config.claude_effort_chat,
         )
         return (run.text or "").strip() or _FREEFORM_FALLBACK
     except Exception as exc:  # noqa: BLE001 — answer failure must not crash the turn
@@ -1559,6 +1563,54 @@ _AGENT_ADO_READ_TOOLS = (
     "wit_list_work_item_comments", "search_code", "search_workitem",
 )
 _AGENT_ACTION_RE = re.compile(r"^ACTION:\s*(\{.*\})\s*$", re.MULTILINE)
+# Session memory is stored in the shared per-branch table under this pseudo-repo, so no
+# schema change is needed; the "branch" is the Teams conversation.
+_SESSION_REPO_KEY = "teams"
+
+
+def _conversation_key(activity) -> str:
+    """Stable key for this conversation's Claude session.
+
+    Teams' ``conversation.id`` already encodes the THREAD inside a channel
+    (``19:…@thread.tacv2;messageid=…``), so keying on it gives per-thread memory for free
+    and keeps separate threads from bleeding into one another. Hashed when it would not fit
+    the ``String(200)`` column — SQLite silently accepts an overlong value but SQL Server
+    and Postgres reject it, which would surface as a write error mid-reply."""
+    conv = getattr(activity, "conversation", None)
+    cid = str(getattr(conv, "id", "") or "")
+    if not cid:
+        return ""
+    if len(cid) <= 200:
+        return cid
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(cid.encode("utf-8")).hexdigest()
+
+
+async def _load_session(config: Settings, container: Container, activity) -> tuple[str, str | None]:
+    """``(conversation_key, session_id_to_resume)`` — best-effort, never raises."""
+    if not config.teams_agent_session_memory:
+        return "", None
+    key = _conversation_key(activity)
+    repo = getattr(container, "claude_session_repo", None)
+    if not key or repo is None:
+        return key, None
+    try:
+        return key, await repo.get(
+            _SESSION_REPO_KEY, key, config.claude_session_ttl_hours
+        )
+    except Exception as exc:  # noqa: BLE001 — memory is a nicety, never block the reply
+        _log.warning("teams session lookup failed", error=_fmt_exc(exc))
+        return key, None
+
+
+async def _save_session(container: Container, key: str, session_id: str | None) -> None:
+    """Remember this turn's session so the next message in the thread continues it."""
+    repo = getattr(container, "claude_session_repo", None)
+    if not (key and session_id and repo is not None):
+        return
+    with contextlib.suppress(Exception):
+        await repo.save(_SESSION_REPO_KEY, key, session_id)
 
 
 def _agent_allowed_tools(mcp_servers: dict | None) -> list[str]:
@@ -1574,7 +1626,7 @@ _AGENTIC_PROMPT = """{persona}
 
 Bạn đang trả lời một tin nhắn Teams. Người gửi: {email}.
 Tin nhắn: "{text}"
-{quoted}
+{quoted}{continuing}
 Bạn CÓ các tool CHỈ ĐỌC (Azure DevOps MCP: PR, work item, search; đọc file trong
 workspace). Hãy TỰ tra cứu dữ liệu thật cần thiết rồi trả lời NGẮN GỌN, tự nhiên
 bằng tiếng Việt theo đúng giọng trên. Không bịa — chỉ nói điều tra cứu được.
@@ -1600,9 +1652,20 @@ async def _agentic_turn(
     from ai_autopilot.execution.claude_client import run_claude
     from ai_autopilot.execution.claude_executor import _load_mcp_servers
 
+    # Runs in the MAIN workspace on purpose — no git worktree, unlike task execution and
+    # review_pr (which get one via _acquire_agent_scratch). Chat is overwhelmingly Q&A, so
+    # isolation would buy nothing and cost 200-500ms plus disk on every message, on the one
+    # path where latency is felt directly. Safety here is the read-only tool allowlist below
+    # (no Write/Edit/Bash, no ADO write tools), not the filesystem.
+    #
+    # Consequence worth knowing: answers reflect the checkout AS IT IS on the machine
+    # running autopilot, uncommitted changes included — not a clean base branch.
     workspace = config.workspace_directory
     mcp = _load_mcp_servers(workspace) if workspace else None
     email = await _teams_email(context) or "(không rõ)"
+    # Continue this thread's session so the reply knows what was already said. run_claude
+    # falls back to a fresh session by itself if the stored id can't be resumed.
+    conv_key, resume = await _load_session(config, container, context.activity)
     try:
         run = await run_claude(
             _AGENTIC_PROMPT.format(
@@ -1613,6 +1676,14 @@ async def _agentic_turn(
                     f'\nHọ đang reply/quote tin nhắn này — chủ thể câu hỏi thường nằm ở '
                     f'đây:\n"""{quoted[:800]}"""\n' if quoted else ""
                 ),
+                # Resuming a session: without saying so, the agent re-introduces itself and
+                # re-asks for context it already has earlier in this same thread.
+                continuing=(
+                    "\nĐây là tin nhắn TIẾP THEO trong cùng một cuộc hội thoại — bạn đã "
+                    "nói chuyện với họ ở các tin trước. Dùng lại ngữ cảnh đó (PR/work item "
+                    "đang bàn, việc đã tra cứu); KHÔNG chào lại từ đầu, KHÔNG hỏi lại điều "
+                    "họ đã nói rồi.\n" if resume else ""
+                ),
             ),
             workspace or tempfile.gettempdir(),
             timeout_seconds=120,
@@ -1620,10 +1691,16 @@ async def _agentic_turn(
             max_turns=12,                                  # room for tool lookups
             allowed_tools=_agent_allowed_tools(mcp),       # read-only, hard limit
             mcp_servers=mcp,
+            resume=resume,
+            effort=config.claude_effort_agentic,
         )
     except Exception as exc:  # noqa: BLE001 — agent failure must not lose the turn
         _log.warning("agentic turn failed — falling back to classifier", error=_fmt_exc(exc))
         return False
+
+    # Saved even when the reply is empty below: the session exists and its context is worth
+    # continuing, whatever this particular turn produced.
+    await _save_session(container, conv_key, run.session_id)
 
     reply = (run.text or "").strip()
     if not reply:

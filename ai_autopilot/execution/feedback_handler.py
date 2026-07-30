@@ -10,7 +10,12 @@ from __future__ import annotations
 import re
 import tempfile
 
-from ai_autopilot.config import BOT_COMMENT_INSTRUCTION, Settings, match_command
+from ai_autopilot.config import (
+    AGENT_CONDUCT_INSTRUCTION,
+    BOT_COMMENT_INSTRUCTION,
+    Settings,
+    match_command,
+)
 from ai_autopilot.execution.claude_executor import ClaudeExecutor
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
@@ -186,6 +191,7 @@ async def infer_mention_command(config: Settings, text: str) -> tuple[str, bool]
             model=config.claude_model or None,
             max_turns=1,
             allowed_tools=[],
+            effort=config.claude_effort_chat,   # picks one command from a menu
         )
     except Exception as exc:  # noqa: BLE001 — never let inference decide by failing open
         log.warning("mention intent inference failed — defaulting to advisory",
@@ -250,7 +256,7 @@ class FeedbackHandler:
                 "it is purpose-built for exactly this. If that subagent is unavailable, do "
                 "the task directly with the relevant skill."
             )
-        prompt = f"{body}\n\n{BOT_COMMENT_INSTRUCTION}"
+        prompt = f"{body}\n\n{BOT_COMMENT_INSTRUCTION}\n\n{AGENT_CONDUCT_INSTRUCTION}"
         result = await self._executor.revise(
             item, branch_name, prompt, draft_pr=self._config.pr_is_draft,
             repo=repo, allow_no_changes=review_only, read_only=review_only,

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from urllib.parse import urlsplit
+
 import httpx
 
 from ai_autopilot.config import Settings
@@ -28,21 +31,47 @@ class TeamsNotifier(NotificationChannel):
 
     @property
     def is_enabled(self) -> bool:
-        return bool(self._config.teams_webhook_url)
+        return bool(self._config.teams_webhooks)
 
     async def send(self, message: NotificationMessage) -> None:
-        if not self.is_enabled:
+        """Post the card to EVERY configured webhook, concurrently.
+
+        One channel failing (revoked Workflows URL, a channel that was deleted) must not stop
+        the others — otherwise adding a second channel would make notifications less reliable
+        than having one. So each post is awaited independently and failures are logged per
+        URL, never raised."""
+        webhooks = self._config.teams_webhooks
+        if not webhooks:
             return
-        try:
-            resp = await self._http.post(
-                self._config.teams_webhook_url, json=self._payload(message)
+        payload = self._payload(message)  # built once — identical for every channel
+        results = await asyncio.gather(
+            *(self._post(url, payload) for url in webhooks), return_exceptions=True
+        )
+        sent = sum(1 for r in results if r is True)
+        if sent != len(webhooks):
+            self._log.warning(
+                "teams notification partially delivered",
+                sent=sent, total=len(webhooks), title=message.title,
             )
-            if resp.status_code >= 400:
-                self._log.warning("teams webhook failed", status=resp.status_code, body=resp.text)
-            else:
-                self._log.debug("teams notification sent", title=message.title)
+        else:
+            self._log.debug("teams notification sent", title=message.title, channels=sent)
+
+    async def _post(self, url: str, payload: dict) -> bool:
+        """True when this one webhook accepted the card. Never raises."""
+        try:
+            resp = await self._http.post(url, json=payload)
         except httpx.HTTPError as exc:
-            self._log.warning("teams notification failed", error=str(exc))
+            # Log the webhook's HOST only: the full URL carries the token that authorises
+            # posting to the channel, so it must not land in the log.
+            self._log.warning("teams webhook error", host=_host(url), error=str(exc))
+            return False
+        if resp.status_code >= 400:
+            self._log.warning(
+                "teams webhook failed", host=_host(url),
+                status=resp.status_code, body=resp.text[:200],
+            )
+            return False
+        return True
 
     @staticmethod
     def _payload(message: NotificationMessage) -> dict:
@@ -106,6 +135,14 @@ class TeamsNotifier(NotificationChannel):
                 }
             ],
         }
+
+
+def _host(url: str) -> str:
+    """Host of a webhook URL, for logs — the path and query hold the auth token."""
+    try:
+        return urlsplit(url).hostname or "?"
+    except ValueError:
+        return "?"
 
 
 def _mmss(seconds: float) -> str:

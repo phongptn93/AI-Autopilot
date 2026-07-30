@@ -51,6 +51,33 @@ BOT_COMMENT_INSTRUCTION = (
     "human command. Do not start any comment with a slash command like /ai or /review."
 )
 
+# Appended to every task/feedback brief. Two behaviours worth pinning down for a model
+# that will run unattended:
+#
+# SCOPE — left alone, a capable model widens a task: it applies its own judgement about
+# what the work "should" be, adds steps nobody asked for, and the diff stops matching the
+# ticket. Under unattended autonomy nobody catches that before the branch moves, so the
+# boundary has to be stated rather than assumed.
+#
+# LENGTH — written deliverables (spec updates, HTML reports, fix notes) run long by
+# default, and padding is worse than useless in a document a human has to review. Note
+# this asks for calibration, NOT brevity: cutting substance to look tidy is the opposite
+# of what is wanted.
+#
+# Deliberately absent: any instruction to verify, double-check or re-review its own work.
+# The model already does that, and repeating it compounds into wasted work without
+# improving the result. Verification here is the deterministic gates (the test gate runs
+# the repo's real tests; the scorer scores the run), not a request to the model.
+AGENT_CONDUCT_INSTRUCTION = (
+    "SCOPE: deliver what the work item asks, at the scope it intends. Make routine "
+    "judgement calls yourself. If the request looks mistaken, or a better approach "
+    "exists, say so in one sentence in your PR/comment and then do the task as asked — "
+    "do not quietly narrow, widen or reshape it. Finish the whole task, and stop short "
+    "of changes clearly beyond what was asked.\n"
+    "LENGTH: match any document you write to what the task needs — cover the substance, "
+    "and do not pad with filler sections, restated summaries or boilerplate."
+)
+
 
 def is_bot_signed(text: str | None) -> bool:
     """True if ``text`` was authored by the autopilot (leads with the bot icon).
@@ -237,6 +264,8 @@ class TenantConfig(BaseModel):
     base_branch: str = "development"
     repos: list[RepoConfig] = Field(default_factory=list)
     teams_webhook_url: str = ""
+    # Per-tenant extra channels, mirroring Settings.teams_webhook_urls.
+    teams_webhook_urls: list[str] = Field(default_factory=list)
     allowed_users: list[str] = Field(default_factory=list)
     approver_users: list[str] = Field(default_factory=list)
     allowed_skills: list[str] = Field(default_factory=list)
@@ -599,6 +628,37 @@ class Settings(BaseSettings):
     # governs 30-minute worktree tasks, and reusing it would make the whole team's chat
     # single-file. 0 = no cap.
     teams_agent_max_concurrent: int = 3
+    # Let the agentic chat REMEMBER the conversation: each reply resumes the Claude session
+    # from the previous message in the same thread instead of starting cold. Without it every
+    # message was an independent session, so a thread could not be a conversation — you had
+    # to restate which PR or item you meant every single time.
+    #
+    # Scoped per Teams conversation id, which in a channel already encodes the THREAD, so
+    # threads never bleed into each other. Bounded by claude_session_ttl_hours (24h): a
+    # thread colder than that starts clean, because stale context misleads more than it
+    # helps. Deliberately its OWN switch rather than reuse_claude_session — that one governs
+    # 30-minute worktree task runs and must stay independently tunable.
+    teams_agent_session_memory: bool = True
+
+    # ── Reasoning effort (how hard the model thinks per call) ──
+    # "low" | "medium" | "high" | "xhigh" | "max"; blank = the model's own default.
+    # Every call used to run at that default, including the trivial ones — picking one of a
+    # dozen intents, rewording data Python had already fetched. Those reach the same answer
+    # far cheaper and faster on a low setting, and the chat path is exactly where a person is
+    # sitting there waiting.
+    #
+    # Short, tool-less calls: classify an intent, reword a looked-up list, write one persona
+    # message, pick a command for an @mention. They choose or rephrase, never reason about
+    # code, so "low" is nearly free of risk.
+    claude_effort_chat: str = "low"
+    # The agentic Teams turn: real tool lookups against ADO, up to 12 turns, but still a chat
+    # reply rather than an edit.
+    claude_effort_agentic: str = "medium"
+    # Task execution / PR review — real multi-file work. Left BLANK on purpose: the vendor
+    # guidance is to re-sweep effort on your own evals before lowering it, and there is no
+    # eval for these runs here. The knob exists so it can be tuned (or raised to "xhigh")
+    # without a code change.
+    claude_effort_task: str = ""
     # ── Bot persona (Teams voice) ──
     # The bot composes its key replies (free-text answers, ticket acknowledgements)
     # in THIS voice via Claude, so it reads like a consistent, proactive teammate
@@ -796,6 +856,13 @@ class Settings(BaseSettings):
 
     # ── Notifications: MS Teams ──
     teams_webhook_url: str = ""
+    # Additional Teams Workflows webhook URLs — every notice is posted to ALL of them, so one
+    # autopilot can report into several channels (e.g. #dev, #qc, a manager's channel) without
+    # running a second instance. Kept separate from ``teams_webhook_url`` rather than turning
+    # that into a list: it is an existing setting that people already have in config.yaml,
+    # .env and per-tenant overrides, and changing its type would break every one of them.
+    # Read them together via the ``teams_webhooks`` property, never individually.
+    teams_webhook_urls: list[str] = Field(default_factory=list)
 
     # ── Notifications: Zalo OA ──
     zalo_oa_access_token: str = ""
@@ -850,6 +917,20 @@ class Settings(BaseSettings):
     def advisory_commands(self) -> list[str]:
         """Review-only command prefixes (``comment_advisory_commands`` split on commas)."""
         return [t.strip() for t in (self.comment_advisory_commands or "").split(",") if t.strip()]
+
+    @property
+    def teams_webhooks(self) -> list[str]:
+        """Every Teams webhook to post to — the single ``teams_webhook_url`` first, then
+        ``teams_webhook_urls``. Blanks dropped and duplicates removed while keeping order, so
+        the same channel listed in both places is not notified twice."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for url in [self.teams_webhook_url, *self.teams_webhook_urls]:
+            url = (url or "").strip()
+            if url and url not in seen:
+                seen.add(url)
+                out.append(url)
+        return out
 
     @property
     def command_user(self) -> str:

@@ -30,6 +30,9 @@ from ai_autopilot.logging_config import get_logger
 _log = get_logger("execution.claude_client")
 
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk"]
+# Mirrors the SDK's EffortLevel. Kept as a plain set so a bad config value can be
+# rejected with a warning instead of a crash (see run_claude).
+_EFFORT_LEVELS = frozenset({"low", "medium", "high", "xhigh", "max"})
 
 # Transient stream/connection failures a run can survive by simply re-running —
 # NOT real task failures. Windows periodically resets the Anthropic streaming
@@ -104,6 +107,7 @@ async def run_claude(
     mcp_servers: dict | None = None,
     add_dirs: list[str] | None = None,
     resume: str | None = None,
+    effort: str | None = None,
     on_event: Callable[[str], None] | None = None,
 ) -> ClaudeRun:
     """Run Claude Code once in ``work_dir`` and return a structured result.
@@ -124,7 +128,19 @@ async def run_claude(
     default, so without it ``/skill`` commands are inert. ``mcp_servers`` and
     ``add_dirs`` let the run reach the workspace's MCP servers and extra repo
     directories.
+
+    ``effort`` ("low"|"medium"|"high"|"xhigh"|"max") caps how much the model reasons.
+    ``None`` leaves the model's own default, which is where every call sat before this
+    parameter existed — including the trivial ones (classify a message into one of a
+    dozen intents, reword data Python already fetched). Those get strong results at a
+    fraction of the tokens and latency on a lower setting, which matters most on the
+    chat path where a person is waiting. An unrecognised value is ignored rather than
+    raising: a typo in config must not take the autopilot down.
     """
+    effort_level = effort if effort in _EFFORT_LEVELS else None
+    if effort and effort_level is None:
+        _log.warning("ignoring unknown effort level", effort=effort,
+                     allowed=sorted(_EFFORT_LEVELS))
     def _build_options(resume_id: str | None) -> ClaudeAgentOptions:
         options = ClaudeAgentOptions(cwd=work_dir, permission_mode=permission_mode)
         if allowed_tools is not None:
@@ -145,6 +161,8 @@ async def run_claude(
             options.add_dirs = add_dirs
         if resume_id:
             options.resume = resume_id
+        if effort_level:
+            options.effort = effort_level
         return options
 
     def _emit(line: str) -> None:

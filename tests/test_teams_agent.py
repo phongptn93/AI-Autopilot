@@ -29,8 +29,9 @@ class _FakeContext:
 
 
 class _FakeRun:
-    def __init__(self, text: str):
+    def __init__(self, text: str, session_id: str | None = None):
         self.text = text
+        self.session_id = session_id
 
 
 class _FakeReviewerTracker:
@@ -365,6 +366,7 @@ async def test_agentic_turn_answers_and_spawns_review(monkeypatch):
         class _R:
             text = ('Dạ để em review PR !2470 ngay ạ.\n'
                     'ACTION: {"action": "review_pr", "repo": "Micro-Frontend", "pr_id": 2470}')
+            session_id = None      # ClaudeRun always carries this
         return _R()
 
     monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
@@ -384,6 +386,7 @@ async def test_agentic_turn_create_ticket_goes_through_confirm_card(monkeypatch)
     async def fake_run_claude(prompt, work_dir, **kwargs):
         class _R:
             text = 'Em tạo nhé?\nACTION: {"action": "create_ticket", "title": "Lỗi SSO timeout"}'
+            session_id = None
         return _R()
 
     cards = []
@@ -475,6 +478,7 @@ async def test_deferred_turn_acks_instantly_and_answers_in_background(monkeypatc
 
         class _R:
             text = "Dạ PR !2470 đang chờ review ạ."
+            session_id = None
 
         return _R()
 
@@ -897,3 +901,177 @@ async def test_unresolvable_pr_number_says_so_instead_of_guessing():
     )
     assert cont.executor.calls == []
     assert "999999" in ctx.sent[0] and "/review" in ctx.sent[0]
+
+
+# ── Conversation memory: a thread must behave like a conversation ─────────────
+#
+# Reported from real use: "trong một thread, mày không đi theo lịch sử cũ". Every message
+# opened a brand-new Claude session, so the user had to restate which PR or item they meant
+# each time. Each reply now RESUMES the session from the previous message in that thread.
+
+
+class _SessionRepo:
+    """Stands in for ClaudeSessionRepository (keyed by repo + branch)."""
+
+    def __init__(self, stored: dict | None = None):
+        self.stored = stored or {}
+        self.saved: list[tuple] = []
+        self.asked: list[tuple] = []
+
+    async def get(self, repo, branch, ttl_hours):
+        self.asked.append((repo, branch, ttl_hours))
+        return self.stored.get((repo, branch))
+
+    async def save(self, repo, branch, session_id):
+        self.saved.append((repo, branch, session_id))
+
+
+class _MemoryContainer(_ReviewContainer):
+    def __init__(self, session_repo):
+        super().__init__()
+        self.claude_session_repo = session_repo
+
+
+def _ctx_in_thread(conv_id: str) -> _FakeContext:
+    ctx = _FakeContext()
+    ctx.activity = SimpleNamespace(
+        from_property=SimpleNamespace(id=None), text="",
+        conversation=SimpleNamespace(id=conv_id),
+    )
+    return ctx
+
+
+_THREAD = "19:abc@thread.tacv2;messageid=1690000000000"
+
+
+async def test_first_message_starts_fresh_then_session_is_remembered(monkeypatch):
+    seen = {}
+
+    async def fake_run_claude(prompt, work_dir, **kwargs):
+        seen["resume"] = kwargs.get("resume")
+        seen["prompt"] = prompt
+
+        class _R:
+            text = "Dạ PR !2470 đang chờ review ạ."
+            session_id = "sess-1"
+
+        return _R()
+
+    monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
+    repo = _SessionRepo()
+    await teams_agent._agentic_turn(
+        _ctx_in_thread(_THREAD), Settings(teams_agentic_enabled=True),
+        _MemoryContainer(repo), _FakeReviewerTracker(), "PR 2470 sao rồi?",
+    )
+    assert seen["resume"] is None                     # nothing stored yet → fresh
+    assert "TIẾP THEO" not in seen["prompt"]           # and not told it is a follow-up
+    assert repo.saved == [("teams", _THREAD, "sess-1")]  # remembered for the next message
+
+
+async def test_next_message_in_same_thread_resumes_that_session(monkeypatch):
+    seen = {}
+
+    async def fake_run_claude(prompt, work_dir, **kwargs):
+        seen["resume"] = kwargs.get("resume")
+        seen["prompt"] = prompt
+
+        class _R:
+            text = "Dạ, PR đó anh Lâm chưa vote ạ."
+            session_id = "sess-2"
+
+        return _R()
+
+    monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
+    repo = _SessionRepo({("teams", _THREAD): "sess-1"})
+    cfg = Settings(teams_agentic_enabled=True)
+    await teams_agent._agentic_turn(
+        _ctx_in_thread(_THREAD), cfg, _MemoryContainer(repo),
+        _FakeReviewerTracker(), "ai chưa vote?",   # meaningless without the earlier context
+    )
+    assert seen["resume"] == "sess-1"                       # continues the thread
+    assert "TIẾP THEO" in seen["prompt"]                    # told not to re-introduce itself
+    assert repo.asked == [("teams", _THREAD, cfg.claude_session_ttl_hours)]
+    assert repo.saved == [("teams", _THREAD, "sess-2")]     # rolls forward
+
+
+async def test_separate_threads_do_not_share_memory(monkeypatch):
+    """A channel's conversation id encodes the thread, so two threads key differently."""
+    other = "19:abc@thread.tacv2;messageid=1699999999999"
+    assert teams_agent._conversation_key(
+        SimpleNamespace(conversation=SimpleNamespace(id=_THREAD))
+    ) != teams_agent._conversation_key(
+        SimpleNamespace(conversation=SimpleNamespace(id=other))
+    )
+
+    seen = {}
+
+    async def fake_run_claude(prompt, work_dir, **kwargs):
+        seen["resume"] = kwargs.get("resume")
+
+        class _R:
+            text = "ok"
+            session_id = "sess-other"
+
+        return _R()
+
+    monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
+    repo = _SessionRepo({("teams", _THREAD): "sess-1"})
+    await teams_agent._agentic_turn(
+        _ctx_in_thread(other), Settings(teams_agentic_enabled=True),
+        _MemoryContainer(repo), _FakeReviewerTracker(), "câu hỏi khác",
+    )
+    assert seen["resume"] is None      # the other thread's session must NOT leak in
+
+
+async def test_memory_can_be_switched_off(monkeypatch):
+    async def fake_run_claude(prompt, work_dir, **kwargs):
+        assert kwargs.get("resume") is None
+
+        class _R:
+            text = "ok"
+            session_id = "sess-x"
+
+        return _R()
+
+    monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
+    repo = _SessionRepo({("teams", _THREAD): "sess-1"})
+    await teams_agent._agentic_turn(
+        _ctx_in_thread(_THREAD),
+        Settings(teams_agentic_enabled=True, teams_agent_session_memory=False),
+        _MemoryContainer(repo), _FakeReviewerTracker(), "x",
+    )
+    assert repo.asked == [] and repo.saved == []   # nothing read, nothing written
+
+
+async def test_session_lookup_failure_never_blocks_the_reply(monkeypatch):
+    """Memory is a nicety — a broken store must not cost the user their answer."""
+    class _BrokenRepo:
+        async def get(self, *a):
+            raise RuntimeError("db down")
+
+        async def save(self, *a):
+            raise RuntimeError("db down")
+
+    async def fake_run_claude(prompt, work_dir, **kwargs):
+        class _R:
+            text = "vẫn trả lời được"
+            session_id = "sess-1"
+
+        return _R()
+
+    monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
+    ctx = _ctx_in_thread(_THREAD)
+    handled = await teams_agent._agentic_turn(
+        ctx, Settings(teams_agentic_enabled=True),
+        _MemoryContainer(_BrokenRepo()), _FakeReviewerTracker(), "x",
+    )
+    assert handled is True and ctx.sent == ["vẫn trả lời được"]
+
+
+def test_overlong_conversation_id_is_hashed_to_fit_the_column():
+    """String(200): SQLite would accept an overlong key, SQL Server/Postgres reject it."""
+    key = teams_agent._conversation_key(
+        SimpleNamespace(conversation=SimpleNamespace(id="19:" + "x" * 400))
+    )
+    assert key.startswith("sha256:") and len(key) <= 200
+    assert teams_agent._conversation_key(SimpleNamespace(conversation=None)) == ""

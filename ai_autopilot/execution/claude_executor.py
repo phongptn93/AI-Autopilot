@@ -27,7 +27,11 @@ from datetime import datetime
 from pathlib import Path
 
 from ai_autopilot import activity, lessons, policy
-from ai_autopilot.config import BOT_COMMENT_INSTRUCTION, Settings
+from ai_autopilot.config import (
+    AGENT_CONDUCT_INSTRUCTION,
+    BOT_COMMENT_INSTRUCTION,
+    Settings,
+)
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
 from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.execution.claude_client import ClaudeRun, run_claude
@@ -659,6 +663,7 @@ class ClaudeExecutor:
             "- Run a self-review (e.g. security-review / review-pr skill) before opening the PR.",
             ambiguity,
             f"- {BOT_COMMENT_INSTRUCTION}",
+            AGENT_CONDUCT_INSTRUCTION,
             "",
             "# Required output (the control plane reads ONLY this — you MUST write it)",
             f"When finished, write a JSON file at `{result_rel}` (relative to this workspace):",
@@ -1112,6 +1117,9 @@ class ClaudeExecutor:
             mcp_servers=mcp_servers,
             add_dirs=add_dirs,
             resume=resume,
+            # Blank by default → the model's own default, i.e. unchanged. Exposed so effort
+            # can be swept on real evals (or raised to "xhigh") without touching code.
+            effort=self._config.claude_effort_task or None,
             on_event=on_event,
         )
 

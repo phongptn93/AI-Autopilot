@@ -1164,18 +1164,42 @@ async def _reply_prs(
 # ── Free-text understanding (read-only queries only) ─────────────────────────
 #
 # SAFETY: this is a two-layer guard, not a single point of trust in the model.
-#   1. A deterministic keyword pre-filter refuses anything that reads like a mutating
-#      request BEFORE any Claude call — cheap, and doesn't depend on the model behaving.
+#   1. A deterministic pre-filter refuses anything that reads like an INSTRUCTION to
+#      mutate BEFORE any Claude call — cheap, and doesn't depend on the model behaving.
 #   2. Even past that filter, the classifier's OUTPUT SCHEMA only has four intents —
 #      items / prs / status / help — and _dispatch_intent below has no branch that
 #      calls anything but the existing read-only reply functions. There is no code
 #      path from free text to /ai, cast_pull_request_vote, or any write — the model's
 #      only power is picking among reply functions that were already safe to call.
-_MUTATION_HINTS = (
-    "sửa", "sửa code", "fix", "thay đổi code", "cập nhật code", "update code",
-    "chỉnh sửa", "edit code", "change code", "commit", "push", " merge ",
-    "approve", "reject", "revert", "xoá pr", "delete", "vote giúp", "cast vote",
+#
+# Layer 1 matches on WORD BOUNDARIES and only fires on an INSTRUCTION, not a question.
+# As plain substrings these hints misfired badly: "fix" also hit "prefix" and "đã fix",
+# "delete"/"approve"/"push" hit their own past tenses — so ordinary read-only questions
+# ("PR nào cần fix?", "ai đã push lên branch này?") were refused with a lecture about
+# Azure DevOps instead of being answered. Meanwhile " merge " needed literal surrounding
+# spaces, so it missed "merge hộ PR 2470" at the start of a message.
+_MUTATION_WORDS = (
+    "sửa", "chỉnh", "fix", "commit", "push", "merge", "approve", "reject",
+    "revert", "delete", "xoá", "xóa", "vote",
 )
+_MUTATION_RE = re.compile(
+    r"(?<!\w)(" + "|".join(re.escape(w) for w in _MUTATION_WORDS) + r")(?!\w)",
+    re.IGNORECASE,
+)
+# Asking ABOUT a change is a lookup, not a request to make one: "PR nào đang chờ merge?"
+# must be answered while "merge hộ PR 2470" is refused. A mutation phrased as a question
+# ("sửa chỗ nào sai?") therefore reaches the classifier — which is fine, because layer 2
+# has no mutating intent to reach: this filter is defence in depth, not the wall.
+_QUESTION_RE = re.compile(
+    r"\?|(?<!\w)(nào|ai|sao|đâu|bao nhiêu|thế nào|chưa|gì|liệt kê|list)(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _is_mutation_request(text: str) -> bool:
+    """True for an instruction to change something (refuse it), False for a question
+    about one (answer it)."""
+    return bool(_MUTATION_RE.search(text)) and not _QUESTION_RE.search(text)
 
 _REDIRECT_TO_ADO = (
     "Việc sửa code / vote / merge chỉ thực hiện được khi reply trực tiếp trên PR "
@@ -1541,7 +1565,7 @@ async def _handle_free_text(
 ) -> None:
     """Classifier path (agentic mode off). The two guards below are instant, so they
     answer on the live turn; everything past them needs Claude and is deferred."""
-    if any(hint in text.lower() for hint in _MUTATION_HINTS):
+    if _is_mutation_request(text):
         await context.send_activity(_REDIRECT_TO_ADO)
         return
     if not config.teams_agent_nlu_enabled:

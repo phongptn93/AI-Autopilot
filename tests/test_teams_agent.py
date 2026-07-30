@@ -745,3 +745,46 @@ async def test_digest_sends_to_every_stored_conversation():
         window_hours=24,
     )
     assert sorted(delivered) == ["19:channel-a", "19:channel-b"]
+
+
+# ── Mutation pre-filter: word boundaries, and questions are not instructions ──
+
+
+def test_mutation_instructions_are_refused():
+    """Layer 1 of the read-only guard: an instruction to change something is refused
+    before any Claude call."""
+    for text in (
+        "sửa giúp bug ở PR 42",
+        "merge hộ PR 2470",          # " merge " needed literal spaces before → missed this
+        "approve PR này đi",
+        "vote giúp mình PR 42",
+        "push code lên đi",
+        "revert commit vừa rồi",
+        "xoá PR 42 đi",
+        "reject PR đó",
+    ):
+        assert teams_agent._is_mutation_request(text), text
+
+
+def test_questions_about_changes_are_answered_not_refused():
+    """The substring match refused ordinary questions: "fix" also hit "prefix" and
+    "đã fix", so "PR nào cần fix?" got a lecture about Azure DevOps instead of an answer."""
+    for text in (
+        "PR nào cần fix?",
+        "ai đã push lên branch này?",
+        "bug đó đã fix chưa?",
+        "PR nào đang chờ merge?",
+        "ai chưa approve PR 2470?",
+        "commit mới nhất là gì?",
+        "prefix của branch là gì?",   # "prefix" contains "fix" — must not match at all
+        "PR nào của tôi đang bị block?",
+    ):
+        assert not teams_agent._is_mutation_request(text), text
+
+
+def test_mutation_words_need_word_boundaries():
+    """Past tenses and longer words that merely CONTAIN a hint are not instructions."""
+    assert not teams_agent._MUTATION_RE.search("prefix")
+    assert not teams_agent._MUTATION_RE.search("deleted rows")
+    assert not teams_agent._MUTATION_RE.search("approved by QC")
+    assert teams_agent._MUTATION_RE.search("fix cái này")   # the bare verb still matches

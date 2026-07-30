@@ -51,7 +51,23 @@ Teams → **Apps → Manage your apps → Upload a custom app** → chọn zip �
 
 Ngoài ra: hỏi tiếng Việt tự nhiên, dán link PR (hoặc reply kèm quote một PR) rồi nói "review". Bot **chỉ đọc** qua chat — sửa code / vote / merge phải thao tác trên PR trong Azure DevOps.
 
-> Danh sách này khớp `_COMMANDS` trong `ai_autopilot/teams_agent.py` và `commandLists` trong `manifest.json`. Thêm lệnh mới thì sửa **cả ba** — `commandLists` chính là menu Teams hiển thị cho người dùng.
+> Danh sách này khớp `_COMMANDS` trong `ai_autopilot/teams_agent.py`. `commandLists` trong `manifest.json` là menu Teams hiển thị — nó **chỉ chứa 10 lệnh** vì schema Teams giới hạn `commands` tối đa 10 phần tử mỗi list (vượt là Teams từ chối cả package). Lệnh bị để ngoài menu là `/status`; `/help` vẫn liệt kê đủ 11. Thêm lệnh mới → sửa `_COMMANDS`, bảng này, và cân nhắc phải bỏ lệnh nào khỏi menu.
+
+## Validate manifest trước khi upload
+
+Bắt buộc — Teams từ chối cả package nếu manifest sai một chi tiết, và thông báo lỗi không luôn chỉ rõ chỗ:
+
+```bash
+curl -sL -o /tmp/teams.json \
+  "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json"
+python -c "
+import json, jsonschema
+jsonschema.validate(json.load(open('teams-app/manifest.json',encoding='utf-8')),
+                    json.load(open('/tmp/teams.json',encoding='utf-8')))
+print('manifest hợp lệ')"
+```
+
+Chạy trên **manifest đã điền placeholder** (bản template vẫn còn `<...>` sẽ báo lỗi ở `id` vì không phải GUID).
 
 ## Ghi chú kỹ thuật
 

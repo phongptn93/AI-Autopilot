@@ -64,8 +64,7 @@
             { "title": "/item", "description": "Chi tiết một work item — /item <id>" },
             { "title": "/review", "description": "Bot review lại một PR ngay — /review <repo> <pr-id>" },
             { "title": "/resume", "description": "Tiếp tục một việc đang chờ — /resume <id>" },
-            { "title": "/log", "description": "Tạo nhanh Requirement — /log <mô tả>" },
-            { "title": "/status", "description": "Tình trạng hoạt động" }
+            { "title": "/log", "description": "Tạo nhanh Requirement — /log <mô tả>" }
           ]
         }
       ]

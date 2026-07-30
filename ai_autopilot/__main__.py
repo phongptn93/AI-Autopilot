@@ -55,7 +55,29 @@ def _ensure_dashboard_password() -> None:
     print("  Giving up after 3 attempts — starting WITHOUT a dashboard password.", file=sys.stderr)
 
 
+_USAGE = """usage: ai-autopilot [doctor]
+
+  (no argument)  start the autopilot (poller, PR babysitter, dashboard, webhooks)
+  doctor         audit the configuration for coherence and exit
+"""
+
+
 def main() -> None:
+    # One subcommand, so argparse would be more machinery than it is worth. `doctor` must
+    # work without starting anything: it is what you run when the autopilot is NOT
+    # behaving, so it must not need a working autopilot.
+    argv = sys.argv[1:]
+    if argv:
+        if argv[0] in ("doctor", "--doctor"):
+            from ai_autopilot import doctor
+
+            sys.exit(doctor.run())
+        if argv[0] in ("-h", "--help", "help"):
+            print(_USAGE)
+            sys.exit(0)
+        print(_USAGE, file=sys.stderr)
+        sys.exit(2)
+
     _ensure_dashboard_password()
     config = load_settings()
     uvicorn.run(

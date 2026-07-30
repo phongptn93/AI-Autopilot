@@ -1,0 +1,139 @@
+"""Tests for the configuration doctor.
+
+Each case is a configuration that passes ``health.py`` (ADO reachable, Claude reachable,
+disk fine) yet can never actually work — which is exactly the gap the doctor exists to
+close. Most were diagnosed by hand first.
+"""
+
+from __future__ import annotations
+
+from ai_autopilot import doctor
+from ai_autopilot.config import Settings
+
+_SANE = {
+    "ado_organization": "https://dev.azure.com/org",
+    "ado_project": "Proj",
+    "ado_pat": "pat",
+    "health_host": "127.0.0.1",
+}
+
+
+def _titles(findings, level=None) -> list[str]:
+    return [f.title for f in findings if level is None or f.level == level]
+
+
+def _diagnose(**overrides):
+    return doctor.diagnose(Settings(**{**_SANE, **overrides}))
+
+
+def test_missing_ado_credentials_is_an_error():
+    found = _diagnose(ado_pat="", ado_project="")
+    assert "Azure DevOps connection incomplete" in _titles(found, doctor.ERROR)
+
+
+def test_no_trigger_means_nothing_is_ever_picked_up():
+    found = _diagnose(trigger_tag="", trigger_states=[])
+    assert "Nothing can ever be picked up" in _titles(found, doctor.ERROR)
+
+
+def test_concurrency_without_worktrees_is_an_error():
+    """config.py says worktrees are required for safe max_concurrent > 1; without them
+    parallel runs share one checkout and corrupt each other's branches."""
+    found = _diagnose(max_concurrent=4, use_worktrees=False)
+    assert "Concurrent tasks share one checkout" in _titles(found, doctor.ERROR)
+    ok = _diagnose(max_concurrent=4, use_worktrees=True)
+    assert "Concurrent tasks share one checkout" not in _titles(ok)
+
+
+def test_teams_bot_enabled_but_unconfigured():
+    """The trap that cost the most time: build_agent() returns None, so the bot is
+    silently ABSENT rather than visibly broken."""
+    found = _diagnose(teams_agent_enabled=True)
+    titles = _titles(found, doctor.ERROR)
+    assert "Two-way Teams bot enabled but not configured" in titles
+    assert "Teams can never reach the bot" in titles      # health_host is loopback
+
+
+def test_configured_bot_on_a_public_host_passes():
+    found = _diagnose(
+        teams_agent_enabled=True, teams_agent_app_id="id",
+        teams_agent_app_secret="s", teams_agent_tenant_id="t",
+        health_host="0.0.0.0", dashboard_auth_token="x", webhook_secret="y",
+    )
+    assert "Teams bot configuration complete" in _titles(found, doctor.OK)
+
+
+def test_exposed_dashboard_without_password_is_an_error():
+    found = _diagnose(health_host="0.0.0.0", dashboard_auth_token="",
+                      dashboard_auth_password_hash="")
+    assert "Dashboard reachable from the network with no password" in _titles(found, doctor.ERROR)
+
+
+def test_loopback_dashboard_without_password_is_fine():
+    assert "Dashboard reachable from the network with no password" not in _titles(_diagnose())
+
+
+def test_unknown_effort_is_flagged_because_it_is_silently_ignored():
+    found = _diagnose(claude_effort_chat="verylow")
+    assert "Unknown reasoning-effort value" in _titles(found, doctor.WARN)
+    assert "Reasoning effort valid" in _titles(_diagnose(claude_effort_chat=""), doctor.OK)
+
+
+def test_unattended_without_guardrails_warns():
+    found = _diagnose(autonomy_level="unattended", test_gate_enabled=False,
+                      policy_protected_paths=[], auto_review_enabled=False)
+    assert "Unattended autonomy with few guardrails" in _titles(found, doctor.WARN)
+
+
+def test_no_notification_channel_warns():
+    found = _diagnose(teams_webhook_url="", teams_webhook_urls=[], teams_agent_enabled=False)
+    assert "The autopilot cannot tell anyone anything" in _titles(found, doctor.WARN)
+
+
+def test_advisory_command_that_can_never_match_warns():
+    """A typo'd advisory command silently downgrades to ACTION — it changes code."""
+    found = _diagnose(comment_command="/ai, /review", comment_advisory_commands="/reviw")
+    assert "Advisory command not in the accepted command list" in _titles(found, doctor.WARN)
+
+
+def test_no_advisory_command_warns():
+    found = _diagnose(comment_command="/ai", comment_advisory_commands="")
+    assert "No advisory command configured" in _titles(found, doctor.WARN)
+
+
+def test_missing_workspace_directory_is_an_error(tmp_path):
+    found = _diagnose(workspace_directory=str(tmp_path / "nope"))
+    assert "Workspace directory does not exist" in _titles(found, doctor.ERROR)
+
+
+def test_allowed_repo_absent_from_workspace_is_an_error(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    found = _diagnose(workspace_directory=str(tmp_path), allowed_repos=["Ghost"])
+    assert "allowed_repos not found in the workspace" in _titles(found, doctor.ERROR)
+
+
+def test_real_repo_has_consistent_versions_and_a_valid_manifest():
+    """Guards the two release bugs found by hand: __version__ drifting behind pyproject,
+    and a Teams command menu over Teams' 10-command limit."""
+    found = doctor.diagnose(Settings(**_SANE))
+    titles = _titles(found)
+    assert "Version drifted between files" not in titles
+    assert "Teams command menu over the limit" not in titles
+    assert "Teams command titles missing the leading '/'" not in titles
+
+
+def test_render_lists_problems_first_and_names_next_actions():
+    findings = [
+        doctor.Finding(doctor.OK, "fine"),
+        doctor.Finding(doctor.WARN, "meh", "detail", "do this"),
+        doctor.Finding(doctor.ERROR, "broken", "detail", "fix this"),
+    ]
+    text = doctor.render(findings)
+    assert text.index("Must fix") < text.index("Worth fixing") < text.index("Passing")
+    assert "Do these first" in text and "1. broken" in text
+    assert "/health" in text          # points at the runtime checks it does NOT do
+
+
+def test_render_says_so_when_everything_passes():
+    text = doctor.render([doctor.Finding(doctor.OK, "fine")])
+    assert "Nothing to fix" in text

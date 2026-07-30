@@ -79,26 +79,39 @@
   <a href="#what">1. AI-Autopilot là gì</a>
   <a href="#flow">2. Luồng hoạt động</a>
   <a href="#setup">3. Cài đặt &amp; khởi động</a>
+  <a href="#doctor">4. Kiểm tra cấu hình (doctor)</a>
   <h4>Sử dụng Dashboard</h4>
-  <a href="#dash">4. Tổng quan Dashboard</a>
-  <a href="#board">5. Board</a>
-  <a href="#planning">6. Planning workbench</a>
-  <a href="#history">7. History</a>
-  <a href="#settings">8. Settings &amp; Config</a>
+  <a href="#dash">5. Tổng quan Dashboard</a>
+  <a href="#board">6. Board</a>
+  <a href="#planning">7. Planning workbench</a>
+  <a href="#history">8. History</a>
+  <a href="#reviews">9. PR Reviews</a>
+  <a href="#queue">10. Review queue</a>
+  <a href="#analytics">11. Analytics / ROI</a>
+  <a href="#audit">12. Audit trail</a>
+  <a href="#settings">13. Settings &amp; Config</a>
+  <h4>Trao đổi qua Teams</h4>
+  <a href="#teams-setup">14. Bot Teams — cài đặt</a>
+  <a href="#teams-use">15. Lệnh &amp; hội thoại</a>
+  <a href="#teams-pr">16. @mention trên PR</a>
   <h4>Cấu hình (giải thích)</h4>
-  <a href="#cfg-conn">9. Kết nối ADO</a>
-  <a href="#cfg-trigger">10. Triggering (tag/state)</a>
-  <a href="#cfg-outcome">11. Outcomes → tag+state</a>
-  <a href="#cfg-board">12. Board columns</a>
-  <a href="#cfg-exec">13. Execution &amp; Autonomy</a>
-  <a href="#cfg-sched">14. Dependency scheduling</a>
-  <a href="#cfg-sdlc">15. SDLC v2</a>
-  <a href="#cfg-planning">16. Planning &amp; scoring</a>
-  <a href="#cfg-auto">17. Auto-transitions &amp; deploy</a>
-  <a href="#cfg-misc">18. Schedule · budget · notify · RBAC</a>
+  <a href="#cfg-conn">17. Kết nối ADO</a>
+  <a href="#cfg-trigger">18. Triggering (tag/state)</a>
+  <a href="#cfg-outcome">19. Outcomes → tag+state</a>
+  <a href="#cfg-board">20. Board columns</a>
+  <a href="#cfg-exec">21. Execution &amp; Autonomy</a>
+  <a href="#cfg-policy">22. Guardrails &amp; policy</a>
+  <a href="#cfg-gates">23. Quality gates</a>
+  <a href="#cfg-prreview">24. PR review &amp; feedback</a>
+  <a href="#cfg-sched">25. Dependency scheduling</a>
+  <a href="#cfg-sdlc">26. SDLC v2</a>
+  <a href="#cfg-planning">27. Planning &amp; scoring</a>
+  <a href="#cfg-auto">28. Auto-transitions &amp; deploy</a>
+  <a href="#cfg-teams">29. Bot Teams &amp; effort</a>
+  <a href="#cfg-misc">30. Schedule · budget · notify · RBAC</a>
   <h4>Vận hành</h4>
-  <a href="#scenarios">19. Các kịch bản mẫu</a>
-  <a href="#pitfalls">20. Lưu ý &amp; lỗi thường gặp</a>
+  <a href="#scenarios">31. Các kịch bản mẫu</a>
+  <a href="#pitfalls">32. Lưu ý &amp; lỗi thường gặp</a>
 </nav>
 
 <main>
@@ -204,23 +217,66 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </section>
 
 <!-- 4 -->
+<section id="doctor">
+<h2>4. Kiểm tra cấu hình — <code>ai-autopilot doctor</code></h2>
+<p><code>/health</code> trả lời <b>"hệ thống có chạm được ADO / Claude / đĩa không"</b> — và nó
+pass thoải mái trên một cấu hình không thể hoạt động. <code>doctor</code> trả lời câu còn lại:
+<b>"cấu hình có mạch lạc không"</b>. Chạy nó <b>trước</b> khi khởi động lần đầu, và sau mỗi lần
+đổi config.</p>
+
+<pre><code>ai-autopilot doctor</code></pre>
+
+<table>
+<tr><th>Exit code</th><th>Nghĩa</th></tr>
+<tr><td class="def">0</td><td>Cấu hình mạch lạc — không có gì phải sửa.</td></tr>
+<tr><td class="def">1</td><td>Có lỗi <b>phải sửa</b> (autopilot sẽ không làm được việc bạn tưởng).</td></tr>
+<tr><td class="def">2</td><td>Sai cú pháp dòng lệnh.</td></tr>
+</table>
+
+<p>12 check, mỗi cái sinh ra từ một sự cố đã phải chẩn đoán bằng tay:</p>
+<table>
+<tr><th>Bắt được gì</th><th>Vì sao im lặng nếu không kiểm</th></tr>
+<tr><td>Bot Teams <b>bật</b> mà thiếu app id / secret / tenant</td><td><code>build_agent()</code> trả <code>None</code> → endpoint không đăng ký → bot <b>vắng mặt âm thầm</b>, không phải lỗi rõ ràng.</td></tr>
+<tr><td><code>health_host</code> là loopback khi bot đang bật</td><td>Teams không bao giờ gọi tới được <code>127.0.0.1</code>.</td></tr>
+<tr><td><code>max_concurrent &gt; 1</code> mà tắt worktree</td><td>Các run song song phá nhau trong cùng một checkout.</td></tr>
+<tr><td>Version lệch giữa các file cùng khai báo nó</td><td>Không ai nhận ra tới lúc release.</td></tr>
+<tr><td>Menu lệnh Teams vượt giới hạn <b>10</b></td><td>Teams từ chối <b>cả package</b>, không chỉ lệnh thừa.</td></tr>
+<tr><td>Advisory command gõ sai</td><td>Âm thầm thành <b>action</b> — tức là sửa code thật.</td></tr>
+<tr><td><code>pr_reviewer_reminder_repeat_hours</code> đặt mà <code>..._hours = 0</code></td><td>Đồng hồ nhắc lại chỉ chạy sau lần nhắc đầu → setting <b>không làm gì cả</b>.</td></tr>
+<tr><td>Nhắc reviewer bật mà <code>pr_reviewer_tracking_enabled = false</code></td><td>Tracker không start → không ai được nhắc.</td></tr>
+</table>
+
+<div class="callout c-info"><b>Chỉ đọc config</b> — không gọi mạng, không ghi gì. An toàn để chạy
+trong CI. Nó <b>không</b> kiểm runtime, nên báo cáo xanh <b>không</b> có nghĩa "mọi thứ đều ổn":
+vẫn phải xem <code>/health</code>.</div>
+</section>
+
+<!-- 4 -->
 <section id="dash">
-<h2>4. Tổng quan Dashboard</h2>
+<h2>5. Tổng quan Dashboard</h2>
 <table>
 <tr><th>Trang</th><th>Dùng để</th></tr>
 <tr><td>📊 <b>Overview</b></td><td>Số liệu run (success/failed/tokens), hoạt động gần đây.</td></tr>
 <tr><td>🗂️ <b>Board</b></td><td>Kanban trực tiếp mọi item autopilot: Queued → In progress → Review → Done… Kéo-thả, lọc, phân trang.</td></tr>
 <tr><td>🧭 <b>Planning</b></td><td>Nạp việc của bạn, cho AI gom nhóm/kiểm xung đột, Start ngay hoặc hẹn giờ.</td></tr>
 <tr><td>📜 <b>History</b></td><td>Nhật ký mọi execution: skill, PR, duration, tokens — có lọc + phân trang.</td></tr>
-<tr><td>🛠️ <b>Settings</b></td><td>Chỉnh mọi cấu hình (editable). Có Export/Import, panel Active tags.</td></tr>
+<tr><td>👀 <b>Reviews</b></td><td>Reviewer của mọi PR active: ai chưa vote, đã nhắc chưa, PR nào tắc lâu nhất. <a href="#reviews">§9</a></td></tr>
+<tr><td>🙋 <b>Queue</b></td><td>Việc autopilot đang giữ cho người, kèm lý do + nút Resume. <a href="#queue">§10</a></td></tr>
+<tr><td>📈 <b>Analytics</b></td><td>Throughput, success/PR rate, token/PR, thời lượng — theo 7/14/30/90 ngày. <a href="#analytics">§11</a></td></tr>
+<tr><td>🧾 <b>Audit</b></td><td>Nhật ký append-only mọi hành động có hệ quả. <a href="#audit">§12</a></td></tr>
+<tr><td>🛠️ <b>Settings</b></td><td>Chỉnh mọi cấu hình (editable). Có Export/Import mã hóa, panel Active tags. <a href="#settings">§13</a></td></tr>
 <tr><td>⚙️ <b>Configuration</b></td><td>Xem cấu hình hiện tại (read-only), secret chỉ hiện set/chưa.</td></tr>
 <tr><td>✨ <b>Capabilities</b></td><td>Các skill khả dụng trong workspace.</td></tr>
+<tr><td>📡 <b>Activity</b></td><td>Live feed hoạt động của các stage đang chạy.</td></tr>
 </table>
+<div class="callout c-info">Dashboard <b>chỉ điều khiển</b>, không nằm trong đường ống thực thi —
+tắt nó autopilot vẫn chạy bình thường. Nên khóa bằng mật khẩu nếu host public
+(<a href="#settings">§13</a>).</div>
 </section>
 
 <!-- 5 -->
 <section id="board">
-<h2>5. Board</h2>
+<h2>6. Board</h2>
 <p>Cột được sinh từ cấu hình: <code>Queued · In progress · In review · [Ready for review] · [Ready to deploy] · Needs human · Done · Failed</code> (2 cột trong ngoặc chỉ hiện khi cấu hình <code>board_review_state</code> / <code>board_deploy_state</code>).</p>
 <ul>
 <li><b>Cột item nằm ở đâu</b>: ưu tiên ADO state (done_states → Done; board_*_state) → pipeline state đã lưu → tag (hold/review/done) → record cuối.</li>
@@ -232,7 +288,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 
 <!-- 6 -->
 <section id="planning">
-<h2>6. Planning workbench</h2>
+<h2>7. Planning workbench</h2>
 <p>Bàn điều khiển để bạn <b>chủ động</b> đưa việc vào autopilot: nạp việc → cho AI gom nhóm &amp; soi xung đột → chạy ngay hoặc hẹn giờ.</p>
 
 <figure class="fig">
@@ -310,24 +366,240 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 
 <!-- 7 -->
 <section id="history">
-<h2>7. History</h2>
+<h2>8. History</h2>
 <p>Bảng mọi execution, <b>phân trang</b> 25 dòng/trang + <b>bộ lọc</b>: search (id/title), status (Success/Failed/Running/Retrying/Pending), loại (BE/FE/DB/QC/Bug/Req), khoảng ngày bắt đầu. Xoá 1 dòng hoặc Clear all.</p>
 <div class="callout c-info"><div class="h">⏱️ Duration</div>Tính từ lúc dispatch → khi xong (kể cả interactive session dài); hiển thị <code>MM:SS</code> hoặc <code>H:MM:SS</code> khi ≥ 1 giờ.</div>
 </section>
 
+<!-- 9 -->
+<section id="reviews">
+<h2>9. PR Reviews — theo dõi người review</h2>
+<p>Trang <code>/dashboard/reviews</code> trả lời câu <b>"PR nào đang tắc vì chưa ai review"</b>.
+Autopilot theo dõi reviewer của <b>mọi</b> PR active (không chỉ PR nó tạo).</p>
+
+<table>
+<tr><th>Cột</th><th>Nghĩa</th></tr>
+<tr><td>PR / repo / tiêu đề</td><td>Link mở PR trên ADO.</td></tr>
+<tr><td>Reviewer</td><td>Từng người được thêm — <b>bỏ qua group</b>, vì group không tự vote được.</td></tr>
+<tr><td>Vote</td><td>Approved · Approved w/ suggestions · Waiting · Rejected · chưa vote.</td></tr>
+<tr><td>Đã nhắc</td><td>Đã gửi lời nhắc chưa (xem <a href="#cfg-prreview">§24</a>).</td></tr>
+<tr><td>Tuổi PR</td><td>Bao lâu kể từ lúc tạo — cột để sắp thứ tự cần xử lý.</td></tr>
+</table>
+
+<p>Bật bằng <code>pr_reviewer_tracking_enabled</code>. Chỉ theo dõi PR merge vào các nhánh trong
+<code>pr_reviewer_target_branches</code> (trống = mọi nhánh đích).</p>
+
+<div class="callout c-info">Khi <b>bot</b> được thêm làm reviewer và
+<code>pr_auto_review_on_added</code> bật, nó tự chạy review có cấu trúc rồi vote. Re-arm khi có
+commit mới — nên push thêm là được review lại.</div>
+</section>
+
+<!-- 10 -->
+<section id="queue">
+<h2>10. Review queue — việc đang chờ người</h2>
+<p><code>/dashboard/queue</code> gom mọi việc autopilot <b>đã dừng và đang giữ cho người</b>, kèm
+<b>lý do</b> — thay vì để bạn tự đi tìm trong History xem cái gì bị treo.</p>
+
+<table>
+<tr><th>Cột</th><th>Nghĩa</th></tr>
+<tr><td>Work item</td><td>Item đang giữ, link sang ADO.</td></tr>
+<tr><td>Lý do</td><td>Vì sao cần người: điểm run thấp · test đỏ · policy chặn · escalate từ SDLC gate.</td></tr>
+<tr><td>Giữ từ</td><td>Bao lâu rồi — việc giữ lâu là việc đang mất giá trị.</td></tr>
+<tr><td><b>Resume</b></td><td>Một cú click giao lại cho autopilot sau khi bạn đã xử lý.</td></tr>
+</table>
+
+<p>Cũng làm được từ Teams bằng lời: <i>"còn việc nào đang chờ?"</i> → <i>"tiếp tục 6753"</i>
+(có card xác nhận). Xem <a href="#teams-use">§15</a>.</p>
+</section>
+
+<!-- 11 -->
+<section id="analytics">
+<h2>11. Analytics / ROI</h2>
+<p><code>/dashboard/analytics</code> là trang để trả lời cấp trên: <b>autopilot tạo ra giá trị
+gì</b>. Chọn cửa sổ 7 / 14 / 30 / 90 ngày.</p>
+
+<table>
+<tr><th>Số liệu</th><th>Đọc thế nào</th></tr>
+<tr><td>Throughput</td><td>Bao nhiêu item hoàn thành trong kỳ.</td></tr>
+<tr><td>Success rate</td><td>Tỷ lệ run thành công. Thấp bất thường → xem History để tìm skill hay lỗi.</td></tr>
+<tr><td>PR rate</td><td>Tỷ lệ run thực sự mở được PR — <b>khác</b> success rate: một run "thành công" mà không có PR thì chưa giao được gì.</td></tr>
+<tr><td>Runs / item</td><td>Trung bình mấy lần chạy cho một item. Càng cao càng phải revise nhiều.</td></tr>
+<tr><td>Token / PR</td><td>Chi phí quy về đơn vị giao hàng — chỉ số đáng theo dõi nhất khi tối ưu chi phí.</td></tr>
+<tr><td>Thời lượng</td><td>Trung bình một run mất bao lâu.</td></tr>
+</table>
+
+<div class="callout c-warn"><b>"Test xanh" ≠ "đã tạo giá trị".</b> Trang này là chỗ duy nhất trả lời
+được câu sau. Bật một tính năng mới rồi so số liệu trước/sau, thay vì tin vào cảm giác.</div>
+</section>
+
+<!-- 12 -->
+<section id="audit">
+<h2>12. Audit trail</h2>
+<p><code>/dashboard/audit</code> là <b>nhật ký append-only</b> mọi hành động có hệ quả — không sửa
+được, không xóa được từ UI. Dùng khi cần trả lời <i>"ai đã làm cái này, khi nào, từ đâu"</i>.</p>
+
+<table>
+<tr><th>Ghi lại gì</th><th>Ví dụ</th></tr>
+<tr><td>Đổi cấu hình</td><td>Ai bật <code>unattended</code>, lúc nào.</td></tr>
+<tr><td>Export secret</td><td>Ai tải file config mã hóa (kèm secret) về máy.</td></tr>
+<tr><td>Tạo ticket</td><td>Ticket tạo từ chat Teams — ai xác nhận.</td></tr>
+<tr><td>Resume</td><td>Ai giao lại một item đang giữ cho autopilot.</td></tr>
+<tr><td>Review</td><td>Lần review PR nào do ai yêu cầu.</td></tr>
+</table>
+
+<p>Mỗi dòng có <b>ai · làm gì · từ đâu · khi nào</b>. Đây là tầng thứ ba trong ba tầng bảo vệ:
+<i>không-thể-làm</i> (tool-allowlist, policy) · <i>phải-qua-người</i> (draft PR, review queue,
+card xác nhận) · <i>truy-vết</i> (trang này).</p>
+</section>
+
 <!-- 8 -->
 <section id="settings">
-<h2>8. Settings &amp; Config</h2>
-<ul>
-<li><b>Settings</b> (editable): mọi field nhóm theo section, có <b>quick-nav</b>, <b>Active tags</b> tổng quan, lưu sống + Reload.</li>
-<li><b>Export/Import</b>: chia sẻ cấu hình cho đồng đội — <b>không</b> gồm secrets &amp; giá trị máy-riêng (PAT, workspace path, tenants, database_url, notifications…). Bản export gồm <b>toàn bộ field còn lại</b>.</li>
-<li><b>Configuration</b> (read-only): xem nhanh cấu hình sống.</li>
-</ul>
+<h2>13. Settings &amp; Config</h2>
+<p><b>Settings</b> (editable) có <b>quick-nav</b>, panel <b>Active tags</b>, lưu sống + Reload.
+<b>117 field</b> chia thành <b>16 section</b>:</p>
+<table>
+<tr><th>Nhóm</th><th>Section</th></tr>
+<tr><td>Nền tảng</td><td>Workspace &amp; Repository · Azure DevOps Connection · Web / Security</td></tr>
+<tr><td>Điều gì kích hoạt</td><td>Tags &amp; Trigger · Outcomes → tag + state · Board columns · Auto transitions</td></tr>
+<tr><td>Cách chạy</td><td>Execution &amp; Autonomy · Dependency scheduling · Closed-loop SDLC (v2) · Planning workbench</td></tr>
+<tr><td>Rào &amp; chất lượng</td><td>🛡️ Guardrails &amp; policy · 🧪 Quality gates · 🔁 PR review &amp; feedback</td></tr>
+<tr><td>Nói cho ai biết</td><td>Notifications · 💬 Teams bot (2-way chat)</td></tr>
+</table>
+
+<h3>Export / Import</h3>
+<table>
+<tr><th>Kiểu</th><th>Gồm secret?</th><th>Dùng khi</th></tr>
+<tr><td><b>Export thường</b></td><td class="def">❌ Không</td><td>Chia sẻ cấu hình cho đồng đội. Bỏ secret + giá trị máy-riêng (PAT, workspace path, tenants, <code>database_url</code>, webhook…).</td></tr>
+<tr><td><b>Export mã hóa</b> 🔒</td><td class="def">✅ Có</td><td>Chuyển máy / backup. File được <b>mã hóa bằng mật khẩu</b> bạn đặt; import cần đúng mật khẩu đó để <b>restore cả secret</b>.</td></tr>
+</table>
+
+<div class="callout c-warn"><b>Export mã hóa mang theo PAT và app secret.</b> File đó có quyền tương
+đương credential gốc — đừng để trong repo, đừng gửi qua chat. Mỗi lần export được ghi vào
+<a href="#audit">§12 Audit trail</a>.</div>
+
+<h3>Khóa dashboard</h3>
+<p>Đặt <code>dashboard_password</code> (lưu dạng hash) để chặn truy cập. <b>Bắt buộc</b> nếu
+<code>health_host</code> là <code>0.0.0.0</code> — nếu không, ai chạm được cổng đó đều đọc được cấu
+hình và bấm Resume/Export. <a href="#doctor">§4 doctor</a> cảnh báo trường hợp này.</p>
+
+<div class="callout c-info"><b>48 / 165 setting chưa có field trên form</b> — phải sửa trực tiếp
+<code>config.yaml</code>. Trang <b>Configuration</b> (read-only) hiển thị <b>đầy đủ</b> giá trị
+đang chạy, kể cả những field đó (secret chỉ hiện set/chưa).</div>
+</section>
+
+<!-- 14 -->
+<section id="teams-setup">
+<h2>14. Bot Teams — cài đặt</h2>
+<p>Bot Teams là kênh <b>hai chiều</b>: khác với webhook (chỉ gửi ra), bot nhận tin nhắn và trả lời.
+Cần 4 thứ.</p>
+
+<table>
+<tr><th>#</th><th>Việc</th><th>Chi tiết</th></tr>
+<tr><td class="def">1</td><td>Azure Bot resource</td><td>Tạo trên Azure, lấy <b>App ID</b>, <b>App secret</b>, <b>Tenant ID</b>.</td></tr>
+<tr><td class="def">2</td><td>Điền vào Settings</td><td><code>teams_agent_app_id</code> · <code>teams_agent_app_secret</code> 🔒 · <code>teams_agent_tenant_id</code>, rồi bật <code>teams_agent_enabled</code>.</td></tr>
+<tr><td class="def">3</td><td>Messaging endpoint <b>công khai</b></td><td>Trỏ Azure Bot tới <code>https://&lt;host&gt;/api/messages</code>. Host phải Teams gọi tới được — <code>127.0.0.1</code> thì <b>không bao giờ</b> hoạt động.</td></tr>
+<tr><td class="def">4</td><td>Upload app package</td><td>Dùng <code>teams-app/</code> trong repo: sửa <code>&lt;PUBLIC_HOST&gt;</code> trong manifest thành host thật, zip lại, upload vào Teams.</td></tr>
+</table>
+
+<div class="callout c-warn"><b>Thiếu app id/secret/tenant mà vẫn bật bot</b> là cái bẫy tốn thời
+gian nhất: <code>build_agent()</code> trả <code>None</code>, endpoint không được đăng ký, và bot
+<b>vắng mặt âm thầm</b> — log không báo lỗi gì. Chạy <a href="#doctor">§4</a> để bắt sớm.</div>
+
+<p>App package gồm: menu lệnh (giữ trong <b>giới hạn 10 lệnh</b> của Teams — vượt là Teams từ chối
+cả package), và <b>static tabs</b> mở thẳng dashboard trong Teams.</p>
+
+<div class="callout c-info"><b>Trong channel phải @mention bot</b> nó mới nhận tin. Trong chat 1-1
+(DM) thì không cần. Đây là mặc định của Teams, không phải giới hạn của autopilot — bỏ nó cần
+quyền RSC (bot sẽ nhận <b>mọi</b> tin trong channel, cần admin consent).</div>
+</section>
+
+<!-- 15 -->
+<section id="teams-use">
+<h2>15. Bot Teams — lệnh &amp; hội thoại tự nhiên</h2>
+<p>Hai cách dùng: <b>lệnh</b> (nhanh, chính xác) và <b>nói tự nhiên</b> (khi không nhớ lệnh).</p>
+
+<h3>Lệnh</h3>
+<table>
+<tr><th>Lệnh</th><th>Làm gì</th></tr>
+<tr><td><code>/help</code></td><td>Danh sách lệnh — sinh <b>từ cấu hình thật</b>, nên luôn khớp cái đang chạy.</td></tr>
+<tr><td><code>/items</code> · <code>/prs</code></td><td>Work item / PR <b>của bạn</b>.</td></tr>
+<tr><td><code>/team</code></td><td>Toàn bộ PR của team, <b>cũ nhất trước</b> — cái tắc lâu nhất nằm trên.</td></tr>
+<tr><td><code>/pr &lt;repo&gt; &lt;id&gt;</code> · <code>/item &lt;id&gt;</code></td><td>Chi tiết <b>bất kỳ</b> PR / work item.</td></tr>
+<tr><td><code>/review &lt;repo&gt; &lt;id&gt;</code></td><td>Chạy skill <code>review-pr</code> thật: phân tích diff <b>so với codebase</b>, đăng findings lên PR.</td></tr>
+<tr><td><code>/log</code></td><td>Tạo ticket Requirement nhanh — có card xác nhận trước khi tạo.</td></tr>
+<tr><td><code>/queue</code> · <code>/resume &lt;id&gt;</code></td><td>Xem việc đang giữ · giao lại cho autopilot.</td></tr>
+<tr><td><code>/status</code></td><td>Autopilot còn sống không, đang chạy gì.</td></tr>
+</table>
+
+<div class="callout c-info">Gõ lệnh <b>sai cú pháp</b> (<code>/review 2470</code> thiếu repo) được
+trả lời <b>ngay</b> bằng usage đúng — không tốn một lượt Claude nào.</div>
+
+<h3>Nói tự nhiên</h3>
+<p>Khi bật <code>teams_agentic_enabled</code>, tin nhắn tự do được giao cho <b>một lượt agent
+Claude thật</b>: nó cầm <b>tool ADO chỉ-đọc</b>, tự tra dữ liệu sống, tự bóc link PR trong câu, tự
+quyết hành động. An toàn không dựa vào đoán keyword mà dựa vào <b>tool-allowlist cứng</b> — tool ghi
+<b>không tồn tại</b> với agent chat, nên nó không thể sửa code kể cả khi bị yêu cầu.</p>
+
+<table>
+<tr><th>Bạn nói</th><th>Nó làm</th></tr>
+<tr><td><i>"PR nào của team đang chờ lâu nhất?"</i></td><td>Tra ADO rồi trả lời.</td></tr>
+<tr><td>Dán link PR + <i>"review giúp"</i></td><td>Bóc repo/PR từ link rồi chạy review thật.</td></tr>
+<tr><td>Reply-quote một tin có PR + <i>"review giúp e nha"</i></td><td>Đọc <b>nội dung tin được quote</b>; PR gọi bằng <b>số trần</b> (<code>2488</code>) cũng resolve được repo.</td></tr>
+<tr><td><i>"tạo ticket: sửa lỗi xuất Excel"</i></td><td>Đề xuất nội dung, tạo khi bạn bấm <b>Xác nhận</b>.</td></tr>
+<tr><td><i>"còn việc nào đang chờ?"</i> → <i>"tiếp tục 6753"</i></td><td>Xem queue rồi resume, có card xác nhận.</td></tr>
+</table>
+
+<h3>Hai thứ làm hội thoại mượt</h3>
+<table>
+<tr><th>Cơ chế</th><th>Vì sao cần</th></tr>
+<tr><td><b>Trả lời tức thì</b></td><td>Teams bỏ request sau <b>~15s</b>, còn một lượt Claude mất 30–120s. Bot ack <b>&lt;1s</b> rồi gửi kết quả sau qua tin nhắn chủ động về đúng thread/DM. Không có cơ chế này thì bot <b>treo</b>.</td></tr>
+<tr><td><b>Nhớ ngữ cảnh thread</b></td><td>Mỗi câu tiếp tục session của câu trước, khóa theo conversation id (trong channel id đã chứa thread → các thread không lẫn nhau). Không cần nhắc lại PR nào mỗi lần. TTL <b>24h</b>: thread nguội quá thì bắt đầu sạch, vì ngữ cảnh cũ gây hại hơn giúp.</td></tr>
+</table>
+
+<h3>Digest hằng ngày</h3>
+<p>Bot chủ động đăng báo cáo hoạt động vào channel/DM đã từng chat với nó: PR của team, việc đã
+làm trong kỳ, cái gì đang tắc. Cấu hình ở <a href="#cfg-teams">§29</a>.</p>
+</section>
+
+<!-- 16 -->
+<section id="teams-pr">
+<h2>16. @mention trên comment Pull Request</h2>
+<p>Ngoài Teams, bạn còn gọi autopilot <b>ngay trên comment Pull Request</b> — chỗ việc thực sự
+diễn ra. Hai cách:</p>
+
+<h3>1. Gõ <code>/command</code> đầu comment</h3>
+<table>
+<tr><th>Lệnh</th><th>Vai</th><th>Có sửa code?</th></tr>
+<tr><td><code>/ai</code></td><td>DEV</td><td class="def">✅ Có — sửa trên nhánh, commit, push</td></tr>
+<tr><td><code>/spec</code></td><td>BA</td><td class="def">✅ Có — cập nhật spec + sync work item</td></tr>
+<tr><td><code>/test</code></td><td>DEV/QC</td><td class="def">✅ Có — viết/sửa test</td></tr>
+<tr><td><code>/review</code></td><td>Reviewer</td><td class="def">❌ Không — chỉ đăng findings</td></tr>
+<tr><td><code>/qc</code></td><td>QC</td><td class="def">❌ Không — đề xuất test case</td></tr>
+<tr><td><code>/security</code></td><td>SA</td><td class="def">❌ Không — rà OWASP</td></tr>
+<tr><td><code>/impact</code></td><td>BA</td><td class="def">❌ Không — phân tích blast-radius</td></tr>
+<tr><td><code>/summary</code></td><td>Mọi người</td><td class="def">❌ Không — tóm tắt cho người không kỹ thuật</td></tr>
+</table>
+
+<div class="callout c-warn"><b>Gõ sai tên một lệnh advisory</b> (vd <code>/reviw</code>) thì nó
+<b>không</b> báo lỗi — nó rơi về nhánh action, tức là <b>sửa code</b>. Đây là lý do
+<a href="#doctor">§4</a> có check riêng cho danh sách lệnh.</div>
+
+<h3>2. Chỉ @mention bot, không cần lệnh</h3>
+<p>Tag bot trong comment và nói bằng lời thường. Claude suy luận bạn muốn lệnh nào.</p>
+
+<div class="callout c-info"><b>Mặc định luôn là advisory.</b> Mọi đường thất bại — timeout, câu
+trả lời không parse được, lệnh suy ra không có trong cấu hình — đều rơi về <b>"chỉ bình luận"</b>.
+Chỉ khi câu nói <b>rõ ràng</b> yêu cầu thay đổi (<i>"sửa lại chỗ này"</i>, <i>"thêm test cho case
+X"</i>) nó mới chọn action. Một câu hỏi hay nhận xét (<i>"chỗ này sai rồi"</i>, <i>"sao chậm
+vậy?"</i>) <b>không</b> phải lệnh sửa code.</div>
+
+<p>Lý do phải nghiêng về advisory: một mention hiểu sai theo hướng action sẽ <b>ghi vào nhánh và
+push</b>. Hiểu sai theo hướng advisory thì chỉ tốn một comment.</p>
 </section>
 
 <!-- ══════════ CẤU HÌNH ══════════ -->
 <section id="cfg-conn">
-<h2>9. Cấu hình — Kết nối Azure DevOps</h2>
+<h2>17. Cấu hình — Kết nối Azure DevOps</h2>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
 <tr><td><code>ado_organization</code></td><td class="def">""</td><td>URL org, vd <code>https://dev.azure.com/your-org</code>.</td></tr>
@@ -339,7 +611,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </section>
 
 <section id="cfg-trigger">
-<h2>10. Cấu hình — Triggering (tag / state)</h2>
+<h2>18. Cấu hình — Triggering (tag / state)</h2>
 <p>Item được nhặt khi: <b>(mang tag trigger)</b> <b>VÀ</b> <b>(đang ở một trigger state)</b> <b>VÀ</b> <b>(không có skip-tag)</b>.</p>
 
 <figure class="fig">
@@ -404,7 +676,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </section>
 
 <section id="cfg-outcome">
-<h2>11. Cấu hình — Outcomes → tag + state</h2>
+<h2>19. Cấu hình — Outcomes → tag + state</h2>
 <p><b>Một bảng chính sách duy nhất</b>: mỗi kết cục → (tag thêm, ADO state đặt). Để trống = bỏ qua phần đó. Đây là <b>nơi duy nhất</b> đổi tag/state — không rải rác trong code.</p>
 
 <figure class="fig">
@@ -468,7 +740,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </section>
 
 <section id="cfg-board">
-<h2>12. Cấu hình — Board columns</h2>
+<h2>20. Cấu hình — Board columns</h2>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
 <tr><td><code>board_review_state</code></td><td class="def">""</td><td>Item ở state này → cột "Ready for review" (read-only, người tự kéo). Trống = không có cột.</td></tr>
@@ -480,7 +752,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </section>
 
 <section id="cfg-exec">
-<h2>13. Cấu hình — Execution &amp; Autonomy</h2>
+<h2>21. Cấu hình — Execution &amp; Autonomy</h2>
 <p>Triển khai tự động <b>theo bậc</b> — bắt đầu quan sát, tăng dần khi đã tin.</p>
 
 <figure class="fig">
@@ -523,8 +795,65 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </table>
 </section>
 
+<!-- 22 -->
+<section id="cfg-policy">
+<h2>22. Cấu hình — Guardrails &amp; policy</h2>
+<p>Rào <b>cứng</b> kiểm tra trước khi PR được mở. Khác với prompt: agent không "nói khéo" vượt
+được, vì việc chặn nằm ở tầng hệ thống.</p>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>policy_enabled</code></td><td class="def">false</td><td>Bật policy engine.</td></tr>
+<tr><td><code>policy_protected_paths</code></td><td class="def">[]</td><td>Glob các file <b>cấm sửa</b> — vd <code>k8s/*</code>, <code>.github/*</code>, <code>*.env</code>. Chạm vào là chặn PR.</td></tr>
+<tr><td><code>policy_max_files_changed</code></td><td class="def">0</td><td>Blast-radius: quá số file này thì chặn. 0 = không giới hạn.</td></tr>
+<tr><td><code>audit_enabled</code></td><td class="def">false</td><td>Ghi nhật ký append-only (xem <a href="#audit">§12</a>).</td></tr>
+</table>
+<div class="callout c-info">Nên đặt <code>policy_protected_paths</code> <b>trước</b> khi bật
+<code>unattended</code>. Thứ tự ngược lại là lúc dễ mất một file hạ tầng nhất.</div>
+</section>
+
+<!-- 23 -->
+<section id="cfg-gates">
+<h2>23. Cấu hình — Quality gates</h2>
+<p>Những cổng biến "trông có vẻ xong" thành "đã chạy được" — trước khi PR tới tay reviewer.</p>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>auto_test_enabled</code></td><td class="def">false</td><td>Chạy test suite của repo trong worktree; <b>test đỏ → không mở PR</b>. Tự nhận pytest / dotnet / npm.</td></tr>
+<tr><td><code>auto_test_command</code></td><td class="def">""</td><td>Ghi đè lệnh test khi tự nhận sai.</td></tr>
+<tr><td><code>auto_security_review</code></td><td class="def">false</td><td>Rà soát diff theo severity; <b>critical → chặn PR</b>. Tín hiệu đi vào điểm run.</td></tr>
+<tr><td><code>lessons_enabled</code></td><td class="def">false</td><td>Learning loop: ghi nhớ điều auto-review nhắc <b>theo từng repo</b> rồi nhồi các bài học gần nhất vào brief của run sau.</td></tr>
+<tr><td><code>lessons_max_injected</code></td><td class="def">5</td><td>Nhồi tối đa bao nhiêu bài học mỗi run.</td></tr>
+</table>
+<div class="callout c-info">Đây là nhóm nên bật <b>đầu tiên</b> khi thử autopilot: nó giảm PR rác
+mà không đổi cách bạn làm việc.</div>
+</section>
+
+<!-- 24 -->
+<section id="cfg-prreview">
+<h2>24. Cấu hình — PR review &amp; feedback</h2>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>pr_reviewer_tracking_enabled</code></td><td class="def">false</td><td>Theo dõi reviewer mọi PR active → trang <a href="#reviews">§9</a>.</td></tr>
+<tr><td><code>pr_auto_review_on_added</code></td><td class="def">false</td><td>Bot được thêm làm reviewer → tự review có cấu trúc + vote. Re-arm khi có commit mới.</td></tr>
+<tr><td><code>pr_reviewer_reminder_hours</code></td><td class="def">24</td><td>Reviewer chưa vote sau bao nhiêu giờ thì được nhắc <b>lần đầu</b>. 0 = tắt nhắc.</td></tr>
+<tr><td><code>pr_reviewer_reminder_repeat_hours</code></td><td class="def">0</td><td><b>Nhắc lại</b> mỗi bao nhiêu giờ nếu vẫn chưa vote — tính từ <b>lần nhắc trước</b>, không phải từ lúc được thêm. <b>0 = nhắc một lần rồi im</b>.</td></tr>
+<tr><td><code>pr_reviewer_target_branches</code></td><td class="def">[]</td><td>Chỉ theo dõi PR merge vào các nhánh này. Trống = mọi nhánh đích.</td></tr>
+<tr><td><code>pr_bot_identity</code></td><td class="def">""</td><td>Ghi đè danh tính bot (email / display name). Trống = tự nhận từ PAT.</td></tr>
+<tr><td><code>pr_feedback_enabled</code></td><td class="def">false</td><td>Theo dõi comment review mới trên PR của bot và tự revise nhánh.</td></tr>
+<tr><td><code>comment_command</code></td><td class="def">/ai, /spec, …</td><td>Các lệnh nhận trên comment PR (xem <a href="#teams-pr">§16</a>).</td></tr>
+<tr><td><code>comment_advisory_commands</code></td><td class="def">/review, /qc, …</td><td>Lệnh <b>chỉ bình luận</b>, không sửa code.</td></tr>
+</table>
+
+<div class="callout c-warn"><b>Mặc định <code>repeat_hours = 0</code> nghĩa là nhắc đúng một lần
+cho mỗi (PR, reviewer) rồi im vĩnh viễn.</b> PR treo cả tuần sẽ không được nhắc lại — đúng lúc lời
+nhắc có giá trị nhất. Đặt <code>24</code> nếu bạn muốn nhắc mỗi ngày cho tới khi có vote.</div>
+
+<div class="callout c-info">Đặt <code>repeat_hours</code> mà để <code>..._hours = 0</code> thì
+<b>không có gì xảy ra</b> — đồng hồ nhắc lại chỉ chạy sau lần nhắc đầu.
+<a href="#doctor">§4</a> bắt trường hợp này.</div>
+</section>
+
 <section id="cfg-sched">
-<h2>14. Cấu hình — Dependency scheduling</h2>
+<h2>25. Cấu hình — Dependency scheduling</h2>
 <p>Đây là điểm khác biệt lớn: autopilot <b>không dội hết mọi item cùng lúc</b> mà đọc <b>link graph</b> ADO để xếp thành các <b>wave</b> — tránh 2 việc đụng nhau chạy song song rồi conflict git. Miễn phí (0 token).</p>
 
 <figure class="fig">
@@ -605,7 +934,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </section>
 
 <section id="cfg-sdlc">
-<h2>15. Cấu hình — Closed-loop SDLC (v2)</h2>
+<h2>26. Cấu hình — Closed-loop SDLC (v2)</h2>
 <p>Opt-in. Bật thì item chạy qua <b>chuỗi stage theo profile</b> (headless), gate từng bước, revise trong ngân sách chung, escalate, và bàn giao đa máy.</p>
 
 <figure class="fig">
@@ -665,7 +994,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </section>
 
 <section id="cfg-planning">
-<h2>16. Cấu hình — Planning &amp; PR scoring</h2>
+<h2>27. Cấu hình — Planning &amp; PR scoring</h2>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
 <tr><td><code>planning_ai_analysis</code></td><td class="def">true</td><td>Bật AI judge trong Analyze (tốn token). Off = chỉ gom link (0 token).</td></tr>
@@ -683,7 +1012,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </section>
 
 <section id="cfg-auto">
-<h2>17. Cấu hình — Auto-transitions &amp; deploy</h2>
+<h2>28. Cấu hình — Auto-transitions &amp; deploy</h2>
 <p>Độc lập với triggering: tự chuyển ADO state theo <b>sự kiện thật</b> (merge, deploy, children done). Bật bằng <code>auto_transition_enabled</code>.</p>
 
 <figure class="fig">
@@ -739,8 +1068,34 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 </table>
 </section>
 
+<!-- 29 -->
+<section id="cfg-teams">
+<h2>29. Cấu hình — Bot Teams &amp; reasoning effort</h2>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
+<tr><td><code>teams_agent_enabled</code></td><td class="def">false</td><td>Bật bot hai chiều (xem <a href="#teams-setup">§14</a>).</td></tr>
+<tr><td><code>teams_agent_app_id</code> / <code>_app_secret</code> 🔒 / <code>_tenant_id</code></td><td class="def">""</td><td>Từ Azure Bot resource. Thiếu = bot vắng mặt âm thầm.</td></tr>
+<tr><td><code>teams_agentic_enabled</code></td><td class="def">false</td><td>Tin nhắn tự do → lượt agent Claude thật với tool ADO chỉ-đọc.</td></tr>
+<tr><td><code>teams_agent_session_memory</code></td><td class="def">true</td><td>Nhớ ngữ cảnh theo thread (TTL 24h). Tắt = mỗi tin là session mới.</td></tr>
+<tr><td><code>teams_agent_max_concurrent</code></td><td class="def">3</td><td>Tối đa bao nhiêu lượt Claude chạy song song từ chat. Chặn nhiều người chat cùng lúc làm ngập process.</td></tr>
+<tr><td><code>teams_persona_name</code> / <code>_style</code></td><td class="def">AI Autopilot</td><td>Tên &amp; giọng bot dùng khi trả lời.</td></tr>
+<tr><td><code>teams_digest_enabled</code> / <code>_interval_hours</code></td><td class="def">false / 24</td><td>Digest chủ động + chu kỳ. Cửa sổ thống kê khớp với chu kỳ này.</td></tr>
+</table>
+
+<h3>Reasoning effort — khớp mức suy luận với loại việc</h3>
+<table>
+<tr><th>Field</th><th>Mặc định</th><th>Dùng cho</th></tr>
+<tr><td><code>claude_effort_chat</code></td><td class="def">low</td><td>Call chat ngắn: phân loại intent, diễn đạt lại, suy luận @mention. Chúng <b>chọn hoặc diễn đạt</b>, không suy luận về code.</td></tr>
+<tr><td><code>claude_effort_agentic</code></td><td class="def">medium</td><td>Lượt agentic Teams — tra ADO thật, nhưng vẫn là câu trả lời chat.</td></tr>
+<tr><td><code>claude_effort_task</code></td><td class="def">""</td><td>Task execution / review PR. <b>Trống = giữ mặc định của model.</b></td></tr>
+</table>
+<div class="callout c-warn">Đừng hạ <code>claude_effort_task</code> chỉ để tiết kiệm: đây là đường
+<b>viết code</b>. Hướng dẫn của vendor là phải đo lại trên bộ eval của chính bạn trước khi hạ.
+Giá trị lạ được <b>log rồi bỏ qua</b>, không làm sập autopilot.</div>
+</section>
+
 <section id="cfg-misc">
-<h2>18. Cấu hình — Schedule · Budget · Notifications · RBAC</h2>
+<h2>30. Cấu hình — Schedule · Budget · Notifications · RBAC</h2>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
 <tr><td><code>schedule_start</code>/<code>end</code>/<code>days</code></td><td class="def">"" / "" / Mon..Fri</td><td>Cửa sổ giờ chạy. Trống = luôn chạy.</td></tr>
@@ -750,6 +1105,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 <tr><td><code>tenants</code></td><td class="def">[]</td><td>Multi-tenant: nhiều org/project trên cùng instance.</td></tr>
 <tr><td><code>scheduled_loops</code></td><td class="def">[]</td><td>Vòng lặp định kỳ (sweeper/changelog) mở PR theo cron/interval.</td></tr>
 <tr><td><code>teams_webhook_url</code> / <code>zalo_*</code> / <code>smtp_*</code> 🔒</td><td class="def">""</td><td>Kênh thông báo (Teams/Zalo/Email). Để ENV.</td></tr>
+<tr><td><code>teams_webhook_urls</code> 🔒</td><td class="def">[]</td><td><b>Nhiều</b> webhook Teams — báo vào <code>#dev</code> <b>và</b> <code>#qc</code> không cần chạy thêm instance. Gửi song song, mỗi cái độc lập: một URL bị thu hồi <b>không</b> làm mất các cái còn lại. URL trùng với <code>teams_webhook_url</code> được tự bỏ.</td></tr>
 <tr><td><code>database_url</code></td><td class="def">sqlite+aiosqlite:///autopilot.db</td><td>DB trạng thái/lịch sử (resume). Máy-riêng.</td></tr>
 <tr><td><code>health_host</code> / <code>health_port</code></td><td class="def">0.0.0.0 / 5080</td><td>Web dashboard + health.</td></tr>
 </table>
@@ -757,7 +1113,7 @@ export AUTOPILOT_ADO_PAT=<span class="s">"your-pat-here"</span>     <span class=
 
 <!-- 19 -->
 <section id="scenarios">
-<h2>19. Các kịch bản mẫu</h2>
+<h2>31. Các kịch bản mẫu</h2>
 <h4>A. 1 máy, có người giám sát (khuyến nghị khởi đầu)</h4>
 <pre>execution_mode: <span class="s">interactive</span>
 autonomy_level: <span class="s">assisted</span>
@@ -782,7 +1138,7 @@ assignee_trigger_user: <span class="s">phong.pham@nois.vn</span>   <span class="
 
 <!-- 20 -->
 <section id="pitfalls">
-<h2>20. Lưu ý &amp; lỗi thường gặp</h2>
+<h2>32. Lưu ý &amp; lỗi thường gặp</h2>
 <table>
 <tr><th>Vấn đề</th><th>Triệu chứng</th><th>Cách tránh</th></tr>
 <tr><td><b>trigger_states trùng output states</b></td><td>Item đã merge/deploy bị nhặt xử lý lại (PR trùng)</td><td>Để <code>trigger_states</code> <b>rời</b> khỏi mọi output state; dùng "Proposed"/"Specification Done" làm state vào việc.</td></tr>
@@ -792,6 +1148,13 @@ assignee_trigger_user: <span class="s">phong.pham@nois.vn</span>   <span class="
 <tr><td><b>handoff_collides</b></td><td>Log lỗi lúc startup, có thể lặp</td><td>Handoff state của máy <b>không</b> được trùng <code>trigger_states</code> của chính nó.</td></tr>
 <tr><td><b>Title thuần tiếng Việt có dấu</b></td><td>AI Analyze ít chạy</td><td>Bộ lọc keyword chỉ khớp ASCII/thuật ngữ code — dựa vào BA links khi title thuần Việt.</td></tr>
 <tr><td><b>max_concurrent&gt;1 mà tắt worktrees</b></td><td>Các task đụng checkout chung</td><td>Luôn <code>use_worktrees: true</code> khi chạy song song.</td></tr>
+<tr><td><b>Bật bot Teams mà thiếu app id/secret/tenant</b></td><td>Bot <b>không phản hồi gì</b>, log cũng không báo lỗi</td><td><code>build_agent()</code> trả <code>None</code> → endpoint không đăng ký. Chạy <a href="#doctor">§4 doctor</a>.</td></tr>
+<tr><td><b>health_host là 127.0.0.1 khi bot bật</b></td><td>Teams không bao giờ gọi được endpoint</td><td>Bot cần host <b>công khai</b>. Đổi <code>health_host</code> + đặt <code>dashboard_password</code>.</td></tr>
+<tr><td><b>Menu lệnh Teams &gt; 10</b></td><td>Teams từ chối <b>cả app package</b> khi upload</td><td>Giới hạn cứng của Teams. Giữ ≤ 10 lệnh trong manifest.</td></tr>
+<tr><td><b>Gõ sai tên lệnh advisory</b></td><td><code>/reviw</code> âm thầm <b>sửa code</b> thay vì chỉ bình luận</td><td>Lệnh không khớp advisory sẽ rơi về nhánh action. <a href="#doctor">§4 doctor</a> kiểm danh sách lệnh.</td></tr>
+<tr><td><b>repeat_hours đặt mà reminder_hours = 0</b></td><td>Không ai được nhắc lại, setting như không có</td><td>Đồng hồ nhắc lại chỉ chạy <b>sau</b> lần nhắc đầu. Xem <a href="#cfg-prreview">§24</a>.</td></tr>
+<tr><td><b>Mong nhắc reviewer lặp lại nhưng để mặc định</b></td><td>PR treo cả tuần chỉ được nhắc đúng 1 lần</td><td>Mặc định <code>pr_reviewer_reminder_repeat_hours: 0</code>. Đặt <code>24</code> để nhắc hằng ngày.</td></tr>
+<tr><td><b>Hạ <code>claude_effort_task</code> để tiết kiệm</b></td><td>Chất lượng code tụt, khó phát hiện ngay</td><td>Đây là đường <b>viết code</b>. Đo trên eval của bạn trước khi hạ; giữ trống là an toàn.</td></tr>
 </table>
 <div class="callout c-ok"><div class="h">✅ Cấu hình khởi đầu an toàn</div><code>autonomy_level: assisted</code> + <code>use_worktrees: true</code> + <code>auto_review_enabled: true</code> + <code>pr_scoring_enabled: true</code> + <code>dependency_scheduling_enabled: true</code> + trigger_states rời khỏi output. Bật dần unattended/SDLC khi đã tin.</div>
 </section>

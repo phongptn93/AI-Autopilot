@@ -55,7 +55,7 @@
 <body>
 
 <!-- ========== HEADER ========== -->
-<h1>AI Autopilot — Technical Architecture <span class="rev">v1</span></h1>
+<h1>AI Autopilot — Technical Architecture <span class="rev">v2</span></h1>
 <p class="subtitle">Control plane quanh một AI agent tự trị: Python điều phối &bull; Claude làm kỹ thuật &bull; đồng bộ trạng thái Azure DevOps end-to-end &mdash; Ngày: 2026-07-03</p>
 
 <!-- ========== TOC ========== -->
@@ -96,6 +96,14 @@
       <li><a href="#s16">16. So với loop-engineering</a></li>
       <li><a href="#s17">17. PR scoring — &ldquo;get a score&rdquo;</a></li>
     </ol>
+    <div class="toc-part-title">Part VII — Hội thoại &amp; quản trị (v2.1 → v2.5)</div>
+    <ol>
+      <li><a href="#s18">18. Reviewer tracking &amp; PR feedback loop</a></li>
+      <li><a href="#s19">19. Bề mặt hội thoại: Teams agent</a></li>
+      <li><a href="#s20">20. Quản trị: policy engine + audit trail</a></li>
+      <li><a href="#s21">21. Learning loop (lessons)</a></li>
+      <li><a href="#s22">22. Config doctor</a></li>
+    </ol>
   </div>
 </div>
 
@@ -111,7 +119,7 @@
 <div class="card">
   <p><strong>Vấn đề:</strong> Xử lý work item Azure DevOps (implement bug/feature, tạo PR, cập nhật trạng thái) tốn nhiều thao tác lặp lại của dev. Cần một dịch vụ tự động nhận việc từ board, để AI làm, rồi báo cáo &amp; đồng bộ trạng thái xuyên suốt vòng đời (merge → deploy → testing).</p>
   <p style="margin-top:.6rem"><strong>Giải pháp:</strong> Một background service dạng <strong>control plane quanh agent tự trị</strong>. Python sở hữu <em>scheduling, cô lập, idempotency, trạng thái, báo cáo</em>; Claude sở hữu <em>lập luận kỹ thuật và chỉnh sửa file</em>. Autopilot poll board, nhặt item gắn trigger tag, giao cho Claude (branch → code → commit → push → PR), auto-review, rồi ghi lại trạng thái + tag + comment lên ADO và các kênh chat; sau đó tiếp tục đồng bộ trạng thái item khi PR được merge và deploy.</p>
-  <div class="info"><strong>Nguyên tắc thiết kế cốt lõi:</strong> mọi thay đổi tag/trạng thái theo một <em>outcome</em> đều đi qua <strong>một điểm duy nhất</strong> (<code>outcome_policy</code>) — xem §6. Điều này giữ cho hành vi vừa cấu hình được vừa dễ suy luận.</p>
+  <div class="info"><strong>Nguyên tắc thiết kế cốt lõi:</strong> mọi thay đổi tag/trạng thái theo một <em>outcome</em> đều đi qua <strong>một điểm duy nhất</strong> (<code>outcome_policy</code>) — xem §6. Điều này giữ cho hành vi vừa cấu hình được vừa dễ suy luận.</div>
 </div>
 </section>
 
@@ -420,6 +428,18 @@
     <tr><td>8</td><td><code>dashboard/</code></td><td>Jinja2 SSR: Overview/Board/History/Config/Settings</td><td><span class="badge badge-modified">Sửa</span></td></tr>
     <tr><td>9</td><td><code>data/</code></td><td>SQLAlchemy async: Database, Execution/State repository</td><td><span class="badge badge-core">Core</span></td></tr>
     <tr><td>10</td><td><code>routing/</code> · <code>notifications/</code> · <code>plugins/</code></td><td>Classify/prioritise · Teams/Zalo/Email · plugin hooks</td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>11</td><td><code>services/reviewer_tracker.py</code></td><td>Theo dõi reviewer mọi PR active, auto-review, nhắc, lệnh trên comment (§18)</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>12</td><td><code>services/pr_monitor.py</code> · <code>pr_feedback.py</code></td><td>Babysit PR của bot; revise theo comment review mới</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>13</td><td><code>teams_agent.py</code></td><td>Bot Teams hai chiều: deferred reply, lượt agentic, digest, tạo ticket (§19)</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>14</td><td><code>policy.py</code> · <code>tracking.py</code></td><td>Policy engine (protected paths, blast-radius) · audit trail append-only (§20)</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>15</td><td><code>lessons.py</code></td><td>Ghi &amp; nhồi bài học theo repo (§21)</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>16</td><td><code>doctor.py</code></td><td>12 check tính mạch lạc của cấu hình, config-only (§22)</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>17</td><td><code>analytics.py</code></td><td>Throughput, success/PR rate, token/PR theo cửa sổ thời gian</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>18</td><td><code>security.py</code></td><td>Export/import config mã hóa (kèm secret), khóa dashboard bằng hash</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>19</td><td><code>services/loop_scheduler.py</code> · <code>planning_analyzer.py</code></td><td>Scheduled loops · workbench phân tích xung đột &amp; xếp lịch</td><td><span class="badge badge-new">Mới</span></td></tr>
+    <tr><td>20</td><td><code>activity.py</code> · <code>metrics.py</code> · <code>health.py</code></td><td>Live feed · Prometheus <code>/metrics</code> · health probe</td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>21</td><td><code>outcomes.py</code> · <code>scheduling.py</code> · <code>skills_catalog.py</code></td><td>outcome_policy · cửa sổ giờ/budget · catalog skill</td><td><span class="badge badge-core">Core</span></td></tr>
+    <tr><td>22</td><td><code>multitenant.py</code> · <code>workspace.py</code> · <code>webhook.py</code></td><td>Nhiều org/project · giải quyết repo/nhánh · webhook vào</td><td><span class="badge badge-core">Core</span></td></tr>
   </tbody>
 </table>
 <p style="font-size:.88rem;color:#475569"><strong>Tests:</strong> pytest (<code>asyncio_mode=auto</code>), <strong>168 unit tests</strong>, fake cho ADO/executor/repo, không mạng. Bao phủ outcome policy, poller finalize, scratch base, board move, các luồng state-sync, export/import config (bỏ PAT), app smoke.</p>
@@ -514,9 +534,122 @@
 </div>
 </section>
 
+
+<!-- ================= PART VII ================= -->
+<div class="part-divider">
+  <div class="part-label">Part VII</div>
+  <div><span class="part-roman">VII</span><span class="part-title">Hội thoại &amp; quản trị</span></div>
+  <div class="part-desc">Năm hệ con thêm sau v2.0: theo dõi reviewer, bề mặt hội thoại Teams, rào quản trị, vòng học, và soi cấu hình.</div>
+</div>
+
+<section id="s18">
+<h2><span class="tag">18</span> Reviewer tracking &amp; PR feedback loop</h2>
+<div class="card">
+  <p><code>services/reviewer_tracker.py</code> là service thứ <strong>năm</strong> cạnh bốn service ở §2. Nó quét <strong>mọi</strong> PR active của mọi repo (không chỉ PR do autopilot tạo) và giữ một snapshot per <em>(PR, reviewer)</em> trong <code>data/</code>.</p>
+  <table>
+    <thead><tr><th>Trách nhiệm</th><th>Cơ chế</th></tr></thead>
+    <tbody>
+      <tr><td>Phát hiện reviewer mới</td><td>So <code>pr.reviewers</code> với snapshot đã lưu. Bỏ <code>isContainer</code> — group không tự vote được.</td></tr>
+      <tr><td>Auto-review khi bot được add</td><td>Khi bot là reviewer và <code>pr_auto_review_on_added</code> bật → chạy agent review, vote. <strong>Re-arm theo <code>lastMergeSourceCommit</code></strong>, nên push mới là review lại.</td></tr>
+      <tr><td>Nhắc reviewer trễ</td><td>Hai đồng hồ: lần đầu tính từ <code>added_at</code> (<code>pr_reviewer_reminder_hours</code>); các lần sau tính từ <code>reminded_at</code> (<code>pr_reviewer_reminder_repeat_hours</code>, 0 = không lặp). <code>mark_reminded</code> ghi lại <code>reminded_at</code> mỗi lần gửi nên đồng hồ thứ hai tự restart.</td></tr>
+      <tr><td>Lệnh trên comment PR</td><td>Trên PR <strong>không phải</strong> nhánh bot, service này xử lý <code>/review</code>/<code>/ai</code> — lấp khoảng "PR của người khác" mà babysitter không cover. Dùng chung store handled-comment nên không xử lý trùng.</td></tr>
+      <tr><td>Dọn</td><td>PR không còn active → xóa row. Cache in-memory bị bound theo tập PR đang mở; scan thấy 0 repo thì <strong>không</strong> wipe (kết quả rỗng tạm thời không được phá state).</td></tr>
+    </tbody>
+  </table>
+  <div class="info"><strong>Serialise theo nhánh:</strong> <code>/ai</code> revise được khóa theo <em>(repo, branch)</em> — hai lệnh song song trên cùng nhánh sẽ phá checkout, còn nhánh khác nhau vẫn chạy song song. Auto-review bị bound bằng <code>asyncio.Semaphore(max_concurrent)</code> vì mỗi lần là một agent run đầy đủ.</div>
+  <div class="warn"><strong>Cạm bẫy đã gặp:</strong> mặc định <code>repeat_hours = 0</code> nghĩa là nhắc <strong>đúng một lần</strong> cho mỗi (PR, reviewer) rồi im vĩnh viễn — PR treo một tuần không bao giờ được nhắc lại. Đặt <code>repeat_hours</code> mà để <code>..._hours = 0</code> thì không có gì xảy ra (§22 bắt trường hợp này).</div>
+</div>
+</section>
+
+<section id="s19">
+<h2><span class="tag">19</span> Bề mặt hội thoại: Teams agent</h2>
+<div class="card">
+  <p><code>teams_agent.py</code> dựng một bot Bot-Framework hai chiều trên <code>/api/messages</code>. Ba ràng buộc kiến trúc định hình toàn bộ file này.</p>
+
+  <h3>1. Deadline ~15s của Teams vs lượt Claude 30–120s</h3>
+  <p>Endpoint messaging chỉ trả HTTP 200 <strong>sau khi</strong> handler xong, và channel bỏ request sau ~15s. Chạy Claude đồng bộ trong turn = <strong>treo</strong>. Giải pháp: tách ack khỏi việc dài.</p>
+  <table>
+    <thead><tr><th>Thành phần</th><th>Vai trò</th></tr></thead>
+    <tbody>
+      <tr><td><code>_DeferredContext</code></td><td>Đứng thay <code>TurnContext</code> <em>sau khi</em> turn đã trả lời. <code>send_activity</code> đi qua <code>Proactive.send_activity</code> thay vì response của turn.</td></tr>
+      <tr><td><code>_Deferral</code></td><td>Giữ app + adapter + semaphore; <code>context_for(context, email)</code> dựng <code>Conversation.from_turn_context</code> để tin nhắn về <strong>đúng thread/DM ban đầu</strong>.</td></tr>
+      <tr><td><code>_run_deferred</code></td><td>Gửi typing indicator → ack → chạy việc trong task nền. <code>defer=None</code> → chạy inline (đường test giữ nguyên hành vi cũ).</td></tr>
+    </tbody>
+  </table>
+  <div class="info">Slash command thuần Python (<code>/items</code>, <code>/prs</code>, <code>/team</code>…) <strong>giữ đồng bộ</strong> — chúng đã tức thì, defer chỉ làm thành 2 tin nhắn vô ích.</div>
+
+  <h3>2. An toàn phải là cấu trúc, không phải prompt</h3>
+  <p>Lượt agentic đưa Claude một <strong>tool-allowlist</strong> chỉ-đọc. Tool ghi <strong>không tồn tại</strong> trong lượt đó, nên "nói khéo" không vượt được — khác hẳn cách đoán keyword, vốn vừa chặn oan câu hỏi vừa để lọt câu lệnh viết lại như câu hỏi. Chat <strong>không</strong> tách worktree: nó không sửa file nên không cần.</p>
+
+  <h3>3. Thread là đơn vị ngữ cảnh</h3>
+  <p>Session Claude được <code>resume</code> theo <strong>conversation id</strong>. Trong channel, id này đã bao hàm thread → các thread không lẫn nhau, không cần khóa riêng. TTL 24h: thread nguội bắt đầu sạch, vì ngữ cảnh cũ gây hại hơn giúp.</p>
+
+  <table>
+    <thead><tr><th>Cơ chế khác</th><th>Vì sao có</th></tr></thead>
+    <tbody>
+      <tr><td>Dedup theo <code>activity.id</code> (OrderedDict bounded)</td><td>Bot Service có thể redeliver; không chặn thì spawn Claude lần hai.</td></tr>
+      <tr><td>Semaphore <code>teams_agent_max_concurrent</code></td><td>Sau khi defer, nhiều người chat cùng lúc = nhiều process CLI cùng lúc.</td></tr>
+      <tr><td>Usage cho slash command sai cú pháp</td><td>Trả lời tức thì thay vì spawn agent 120s rồi đáp lạc đề.</td></tr>
+      <tr><td><code>store_conversation</code> trong <code>on_message</code></td><td>Chỉ lưu lúc bot được add thì DM của người tự chat không bao giờ nhận digest.</td></tr>
+      <tr><td>Digest đọc qua <code>storage.read(keys, target_cls=Conversation)</code></td><td><code>proactive.get_conversation()</code> prefix key <strong>lần hai</strong> → luôn trả <code>None</code> → digest im lặng mà log vẫn báo "sent".</td></tr>
+    </tbody>
+  </table>
+  <div class="warn"><strong>Bot vắng mặt âm thầm:</strong> thiếu app id/secret/tenant thì <code>build_agent()</code> trả <code>None</code> và <code>/api/messages</code> không được đăng ký — không exception, không log lỗi. Đây là lý do §22 tồn tại.</div>
+</div>
+</section>
+
+<section id="s20">
+<h2><span class="tag">20</span> Quản trị: policy engine + audit trail</h2>
+<div class="card">
+  <p><code>policy.py</code> và <code>tracking.py</code> hiện thực hai trong ba tầng bảo vệ. Điểm quan trọng: cả hai nằm <strong>ngoài</strong> prompt.</p>
+  <table>
+    <thead><tr><th>Tầng</th><th>Cơ chế</th><th>Chặn ở đâu</th></tr></thead>
+    <tbody>
+      <tr><td>Không-thể-làm</td><td>Tool-allowlist (§19) · <code>policy_protected_paths</code> · <code>policy_max_files_changed</code></td><td>Trước khi PR mở. Agent không thương lượng được vì việc kiểm nằm ở code gọi, không ở chỉ thị.</td></tr>
+      <tr><td>Phải-qua-người</td><td>Draft PR · review queue · card xác nhận Teams · điểm run dưới ngưỡng → <code>needs_human</code></td><td>Sau khi làm, trước khi có hiệu lực.</td></tr>
+      <tr><td>Truy-vết</td><td>Audit trail append-only</td><td>Sau mọi hành động có hệ quả: đổi config, export secret, tạo ticket, resume, review.</td></tr>
+    </tbody>
+  </table>
+  <div class="info"><strong>Thứ tự bật đúng:</strong> đặt <code>policy_protected_paths</code> <em>trước</em> khi nâng <code>autonomy_level</code> lên <code>unattended</code>. Ngược lại là lúc dễ mất một file hạ tầng nhất.</div>
+</div>
+</section>
+
+<section id="s21">
+<h2><span class="tag">21</span> Learning loop (lessons)</h2>
+<div class="card">
+  <p><code>lessons.py</code> đóng vòng <em>làm → kiểm chứng → học</em>. Auto-review sinh ra findings; thay vì để chúng chết theo run, service ghi lại <strong>theo từng repo</strong> và nhồi các bài học gần nhất vào brief của run sau.</p>
+  <table>
+    <thead><tr><th>Bước</th><th>Chi tiết</th></tr></thead>
+    <tbody>
+      <tr><td>Capture</td><td>Sau auto-review, findings được chuẩn hóa thành bài học ngắn, gắn với repo.</td></tr>
+      <tr><td>Inject</td><td><code>lessons_max_injected</code> bài gần nhất được thêm vào brief trước khi agent chạy.</td></tr>
+      <tr><td>Scope</td><td>Theo repo, không toàn cục — convention của BE khác FE, trộn vào nhau là nhiễu.</td></tr>
+    </tbody>
+  </table>
+  <div class="info">Đây là hệ con duy nhất mà giá trị <strong>cộng dồn theo thời gian</strong>: mọi thứ khác giữ chất lượng ổn định, cái này làm nó tăng dần — nếu findings thực sự được sinh ra, tức là auto-review phải bật.</div>
+</div>
+</section>
+
+<section id="s22">
+<h2><span class="tag">22</span> Config doctor</h2>
+<div class="card">
+  <p><code>doctor.py</code> lấp một khoảng mà <code>health.py</code> không thể: <code>/health</code> kiểm <strong>khả năng chạm tới</strong> (ADO, Claude, đĩa) và pass thoải mái trên cấu hình không thể hoạt động. Doctor kiểm <strong>tính mạch lạc</strong>.</p>
+  <table>
+    <thead><tr><th></th><th><code>/health</code></th><th><code>doctor</code></th></tr></thead>
+    <tbody>
+      <tr><td>Câu hỏi</td><td>Chạm được không?</td><td>Cấu hình có mạch lạc không?</td></tr>
+      <tr><td>Cần mạng</td><td>Có</td><td><strong>Không</strong> — chỉ đọc config, chạy được trong CI</td></tr>
+      <tr><td>Khi nào chạy</td><td>Liên tục (probe)</td><td>Trước khi khởi động, sau mỗi lần đổi config</td></tr>
+    </tbody>
+  </table>
+  <p>12 check, mỗi cái sinh từ một sự cố đã chẩn đoán bằng tay. <code>Finding(level, title, detail, fix)</code> — mỗi phát hiện <strong>bắt buộc</strong> kèm cách sửa, vì một cảnh báo không nói phải làm gì thì chỉ là tiếng ồn. Exit 1 khi có <code>ERROR</code>, 0 khi mạch lạc.</p>
+  <div class="warn"><strong>Nó không kiểm runtime.</strong> Báo cáo xanh <em>không</em> có nghĩa "mọi thứ đều ổn" — render kết thúc bằng đúng câu đó, để không ai hiểu sai. Console cp1252 (Windows mặc định) không encode được icon, nên <code>_emit</code> thử UTF-8 rồi hạ về marker ASCII: một công cụ chẩn đoán mà crash lúc đang chẩn đoán thì tệ hơn là không có.</div>
+</div>
+</section>
+
 <!-- ========== FOOTER ========== -->
 <footer>
-  Generated: 2026-07-03 &bull; Project: AI Autopilot (v2.0) &bull; Module: system-wide architecture &bull; See also: <code>TECHNICAL-NOTES.md</code>, <code>README.md</code>
+  Generated: 2026-07-03 · Rev v2: 2026-07-30 &bull; Project: AI Autopilot (v2.5.0) &bull; Module: system-wide architecture &bull; See also: <code>TECHNICAL-NOTES.md</code>, <code>README.md</code>
 </footer>
 
 </body>

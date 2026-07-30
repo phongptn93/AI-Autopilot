@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI-Autopilot — Báo cáo tiến hóa v2.5.0</title>
+<meta name="description" content="AI-Autopilot đã thành gì: năng lực, cách vận hành hiệu quả, và lộ trình tiến hóa.">
+<style>
+  :root{
+    --ink:#0e1117; --panel:#161c25; --panel2:#1b222d; --line:#2a3340;
+    --text:#cdd6e4; --dim:#8793a7; --faint:#5c6675;
+    --accent:#4cc9d6; --accent-dim:#2b7c86;
+    --good:#5bc98c; --warn:#e0a13a; --crit:#e5675e;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html{color-scheme:dark}
+  body{margin:0}
+  .doc{
+    background:
+      radial-gradient(900px 420px at 78% -8%, rgba(76,201,214,.10), transparent 60%),
+      var(--ink);
+    color:var(--text); font-family:var(--sans); line-height:1.65;
+    font-size:16px; letter-spacing:.1px;
+    padding:0 20px 90px;
+  }
+  .wrap{max-width:1080px; margin:0 auto}
+  .eyebrow{
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.22em; text-transform:uppercase;
+    color:var(--accent); margin:0 0 12px;
+  }
+  h1,h2,h3{text-wrap:balance; margin:0; font-weight:680; letter-spacing:-.01em}
+  h1{font-size:clamp(30px,5vw,52px); line-height:1.06; color:#eaf1f8}
+  h2{font-size:clamp(21px,2.6vw,27px); color:#eaf1f8}
+  h3{font-size:16px; color:#eaf1f8; letter-spacing:0}
+  p{margin:0}
+  a{color:var(--accent)}
+  code{font-family:var(--mono); font-size:.92em; color:var(--text)}
+  .mono{font-family:var(--mono)}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* top instrument bar */
+  .topbar{
+    border-bottom:1px solid var(--line); padding:14px 0;
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    font-family:var(--mono); font-size:12px; color:var(--dim); letter-spacing:.08em;
+  }
+  .topbar .live{display:inline-flex; align-items:center; gap:8px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px rgba(91,201,140,.16)}
+
+  /* hero */
+  .hero{padding:8px 0 34px; border-bottom:1px solid var(--line)}
+  .hero .thesis{font-size:clamp(17px,2vw,20px); color:var(--text); max-width:65ch; margin-top:20px}
+  .hero .thesis b{color:#eaf1f8; font-weight:660}
+
+  .stats{display:grid; grid-template-columns:repeat(4,1fr); gap:1px; margin-top:34px;
+    background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .stat{background:var(--panel); padding:18px 20px}
+  .stat .n{font-family:var(--mono); font-size:27px; color:#eaf1f8; letter-spacing:-.02em}
+  .stat .l{font-size:12.5px; color:var(--dim); margin-top:4px}
+
+  section{padding:52px 0 0; scroll-margin-top:64px}
+  h2[id]{scroll-margin-top:70px}
+  .lead{color:var(--dim); max-width:70ch; margin-top:14px; font-size:15.5px}
+
+  /* lifecycle strip */
+  .flow{display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-top:28px}
+  .phase{background:var(--panel); border:1px solid var(--line); border-radius:11px; padding:16px 14px; position:relative}
+  .phase .k{font-family:var(--mono); font-size:11px; color:var(--accent); letter-spacing:.12em}
+  .phase h3{margin:10px 0 6px; font-size:14.5px}
+  .phase p{font-size:12.8px; color:var(--dim); line-height:1.5}
+  .phase .verify{color:var(--good)}
+
+  /* feature groups */
+  .group{margin-top:30px}
+  .group>.head{display:flex; align-items:baseline; gap:12px; border-left:2px solid var(--accent);
+    padding-left:14px; margin-bottom:16px}
+  .group>.head .gk{font-family:var(--mono); font-size:11px; color:var(--faint); letter-spacing:.18em}
+  .cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:17px 18px}
+  .card h3{display:flex; align-items:center; gap:9px; flex-wrap:wrap}
+  .card p{font-size:13.6px; color:var(--dim); margin-top:8px}
+  .tag{font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; padding:2px 7px; border-radius:999px;
+    border:1px solid var(--line); color:var(--dim); white-space:nowrap}
+  .tag.opt{color:var(--warn); border-color:rgba(224,161,58,.35)}
+  .tag.on{color:var(--good); border-color:rgba(91,201,140,.35)}
+  .tag.fix{color:var(--accent); border-color:rgba(76,201,214,.35)}
+
+  /* efficiency */
+  .why{display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; margin-top:26px}
+  .why .item{background:linear-gradient(180deg,var(--panel2),var(--panel)); border:1px solid var(--line);
+    border-radius:12px; padding:18px 20px}
+  .why .item .cap{font-family:var(--mono); font-size:11px; color:var(--accent); letter-spacing:.1em}
+  .why .item h3{margin:9px 0 7px}
+  .why .item p{font-size:13.6px; color:var(--dim)}
+
+  /* future horizons */
+  .horizons{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:26px}
+  .hz{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; border-top:2px solid var(--accent-dim)}
+  .hz.mid{border-top-color:var(--accent)}
+  .hz.far{border-top-color:var(--warn)}
+  .hz .when{font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--dim)}
+  .hz h3{margin:8px 0 12px}
+  .hz ul{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:10px}
+  .hz li{font-size:13.4px; color:var(--dim); padding-left:18px; position:relative; line-height:1.5}
+  .hz li::before{content:"→"; position:absolute; left:0; color:var(--accent); font-family:var(--mono)}
+  .hz li b{color:var(--text); font-weight:620}
+  .shipped{color:var(--good)}
+
+  /* version timeline */
+  .rel{display:flex; flex-direction:column; gap:0; margin-top:24px; border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .rel .row{display:grid; grid-template-columns:120px 1fr; gap:18px; padding:14px 18px; background:var(--panel); border-bottom:1px solid var(--line)}
+  .rel .row:last-child{border-bottom:0}
+  .rel .v{font-family:var(--mono); color:var(--accent); font-size:14px}
+  .rel .row.now{background:var(--panel2)}
+  .rel .row.now .v{color:#eaf1f8}
+  .rel .d{font-size:13.6px; color:var(--dim)}
+  .rel .d b{color:var(--text); font-weight:600}
+
+  /* open-items table */
+  .open{width:100%; border-collapse:collapse; margin-top:22px; font-size:13.6px;
+    border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .open th,.open td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+  .open thead th{background:var(--panel2); color:var(--dim); font-family:var(--mono); font-size:11px;
+    letter-spacing:.12em; text-transform:uppercase; font-weight:400}
+  .open tbody tr{background:var(--panel)}
+  .open tbody tr:last-child td{border-bottom:0}
+  .open td b{color:var(--text)}
+  .scroll{overflow-x:auto}
+
+  .note{margin-top:40px; border:1px dashed var(--line); border-radius:12px; padding:16px 20px;
+    color:var(--dim); font-size:13.4px; background:rgba(224,161,58,.04)}
+  .note b{color:var(--warn)}
+  footer{margin-top:48px; padding-top:20px; border-top:1px solid var(--line); color:var(--faint);
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.06em; display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap}
+
+  /* section nav — dính trên khi cuộn */
+  .nav{position:sticky; top:0; z-index:5; display:flex; gap:2px; flex-wrap:wrap;
+    padding:9px 0; background:rgba(14,17,23,.93); backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line)}
+  .nav a{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--dim); text-decoration:none; padding:6px 11px; border:1px solid transparent;
+    border-radius:999px; transition:color .15s, border-color .15s}
+  .nav a:hover,.nav a:focus-visible{color:var(--accent); border-color:var(--line); background:var(--panel)}
+  .nav a .k{color:var(--faint); margin-right:5px}
+  .nav{margin-bottom:40px}
+
+  /* system diagram */
+  .diagram{margin:28px 0 0; border:1px solid var(--line); border-radius:12px;
+    background:var(--panel); padding:18px 18px 14px}
+  .diagram svg{display:block; width:100%; height:auto}
+  .diagram figcaption{margin-top:13px; font-size:12.4px; color:var(--faint);
+    font-family:var(--mono); letter-spacing:.05em; line-height:1.6}
+
+  .meta{display:flex; gap:24px; flex-wrap:wrap; margin-top:20px; font-family:var(--mono);
+    font-size:11.5px; color:var(--faint); letter-spacing:.06em}
+  .meta b{color:var(--dim); font-weight:400}
+
+  .gcount{font-family:var(--mono); font-size:11px; color:var(--faint); letter-spacing:.1em;
+    margin-left:auto; white-space:nowrap}
+
+  @media print{
+    html{color-scheme:light}
+    .doc{background:#fff; color:#111; padding:0}
+    h1,h2,h3,.stat .n{color:#000}
+    .nav,.topbar .live{display:none}
+    .card,.phase,.stat,.hz,.why .item,.rel .row,.open tbody tr{background:#fff !important; border-color:#bbb}
+    .lead,.card p,.phase p,.hz li,.why .item p,.rel .d,.open td,.meta{color:#333}
+    .eyebrow,.why .item .cap,.phase .k,.hz .when,.rel .v{color:#0b6b74}
+    .diagram{background:#0e1117 !important; border-color:#555}
+    section{break-inside:avoid; padding-top:26px}
+    .card,.hz,.why .item,.open tr{break-inside:avoid}
+    .fade{animation:none; opacity:1; transform:none}
+    footer{color:#555}
+  }
+
+  @media (max-width:820px){
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .flow{grid-template-columns:repeat(2,1fr)}
+    .horizons{grid-template-columns:1fr}
+    .rel .row{grid-template-columns:84px 1fr}
+  }
+  .fade{opacity:0; transform:translateY(8px); animation:rise .7s cubic-bezier(.2,.7,.2,1) forwards}
+  .fade:nth-child(2){animation-delay:.05s}
+  @keyframes rise{to{opacity:1; transform:none}}
+  @media (prefers-reduced-motion:reduce){.fade{animation:none; opacity:1; transform:none}}
+</style>
+</head>
+<body>
+
+<div class="doc"><div class="wrap">
+
+  <div class="topbar">
+    <span class="live"><span class="dot"></span>HỆ THỐNG · TRỰC TUYẾN</span>
+    <span>BÁO CÁO TIẾN HÓA — v2.5.0</span>
+  </div>
+
+  <nav class="nav" aria-label="Mục lục">
+    <a href="#lifecycle"><span class="k">01</span>Vòng đời</a>
+    <a href="#capabilities"><span class="k">02</span>Năng lực</a>
+    <a href="#why"><span class="k">03</span>Vì sao hiệu quả</a>
+    <a href="#future"><span class="k">04</span>Tương lai</a>
+    <a href="#open"><span class="k">04b</span>Còn tồn</a>
+    <a href="#releases"><span class="k">05</span>Lịch sử</a>
+  </nav>
+
+  <header class="hero">
+    <p class="eyebrow">AI-Autopilot · Autonomous SDLC Agent</p>
+    <h1 class="fade">Từ một con bot chạy việc,<br>giờ là một đồng đội kỹ sư tự chủ.</h1>
+    <p class="thesis fade">AI-Autopilot nhận work item từ Azure DevOps, <b>tự implement trong môi trường cô lập,
+      tự chạy test để kiểm chứng, tự học từ review cũ</b>, rồi mở PR — còn bạn <b>trò chuyện tự nhiên</b> với nó
+      trên Microsoft Teams: nhờ review một PR là nó <b>review thật so với codebase</b>, nhờ tạo ticket là có card
+      xác nhận. Từ v2.5.0, cuộc hội thoại đó <b>trả lời tức thì và nhớ ngữ cảnh thread</b>. Mọi quyền lực nằm sau
+      <b>rào quản trị cứng</b>: policy engine, tool-allowlist, audit trail — và một lệnh <code>doctor</code> soi
+      cấu hình trước khi bạn chạy thật.</p>
+
+    <div class="stats">
+      <div class="stat"><div class="n tnum">6</div><div class="l">giai đoạn vòng đời khép kín</div></div>
+      <div class="stat"><div class="n tnum">451</div><div class="l">bài test tự động — xanh</div></div>
+      <div class="stat"><div class="n tnum">3</div><div class="l">tầng bảo vệ: không-thể-làm · phải-qua-người · truy-vết</div></div>
+      <div class="stat"><div class="n mono">v2.5.0</div><div class="l">bản phát hành mới nhất</div></div>
+    </div>
+
+    <div class="meta">
+      <span><b>PHẠM VI</b> v2.0.0 → v2.5.0</span>
+      <span><b>CHỐT TẠI</b> commit 15c3a46 · 2026-07-30</span>
+      <span><b>KIỂM CHỨNG</b> pytest 451 passed</span>
+      <span><b>ĐỘC GIẢ</b> kỹ sư · quản lý kỹ thuật</span>
+    </div>
+  </header>
+
+  <section id="lifecycle">
+    <p class="eyebrow">01 · Vòng đời</p>
+    <h2>Một vòng khép kín: làm → kiểm chứng → học</h2>
+    <p class="lead">Mỗi work item đi qua sáu giai đoạn. Điểm khác biệt so với "bot gọi AI sửa code" là hai giai đoạn
+      ở giữa — <span style="color:var(--good)">kiểm chứng</span> và <span style="color:var(--accent)">học</span> —
+      biến kết quả từ "trông có vẻ xong" thành "đã chạy được và không lặp lỗi cũ".</p>
+
+    <div class="flow">
+      <div class="phase"><div class="k">01 · INGEST</div><h3>Nhận việc</h3><p>Poll ADO theo tag/state; xếp lịch theo đồ thị phụ thuộc; nhận cả ticket tạo từ chat.</p></div>
+      <div class="phase"><div class="k">02 · IMPLEMENT</div><h3>Thực thi</h3><p>Claude code trong <b>git worktree cô lập</b>; SDLC loop theo vai (BA/Dev/QC/Review).</p></div>
+      <div class="phase"><div class="k">03 · VERIFY</div><h3 class="verify">Kiểm chứng</h3><p><b>Chạy test suite</b> + rà soát bảo mật; chấm điểm run; test đỏ → chặn PR.</p></div>
+      <div class="phase"><div class="k">04 · LEARN</div><h3 style="color:var(--accent)">Học</h3><p>Ghi nhớ điều bị review nhắc theo repo, nhồi vào brief lần sau.</p></div>
+      <div class="phase"><div class="k">05 · OVERSEE</div><h3>Giám sát</h3><p>Dashboard: board · planning · analytics · review queue · <b>audit trail</b>. Người duyệt/điều hướng.</p></div>
+      <div class="phase"><div class="k">06 · CONVERSE</div><h3>Trao đổi</h3><p>Bot Teams <b>agentic</b>: tự tra dữ liệu bằng tool, review PR thật, tạo ticket, resume — <b>ack &lt;1s</b>, nhớ thread.</p></div>
+    </div>
+
+    <figure class="diagram">
+      <svg viewBox="0 0 1000 392" role="img" aria-labelledby="dgT dgD"
+           font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
+        <title id="dgT">Sơ đồ thành phần AI-Autopilot</title>
+        <desc id="dgD">Ba tầng: người giám sát (dashboard, bot Teams) điều khiển đường ống
+          Azure DevOps → poller/scheduler → executor → cổng kiểm chứng → pull request; bên dưới là
+          policy engine chặn trước khi mở PR, kho bài học nhồi ngược vào executor, và audit trail
+          ghi mọi hành động hệ quả.</desc>
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#4cc9d6"/>
+          </marker>
+          <marker id="ahd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#8793a7"/>
+          </marker>
+          <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#5bc98c"/>
+          </marker>
+          <marker id="ahw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#e0a13a"/>
+          </marker>
+        </defs>
+
+        <!-- lane labels -->
+        <g font-family="ui-monospace,SF Mono,Consolas,monospace" font-size="9.5" fill="#5c6675" letter-spacing="1.6">
+          <text x="8" y="16">NGƯỜI GIÁM SÁT</text>
+          <text x="8" y="126">ĐƯỜNG ỐNG THỰC THI</text>
+          <text x="8" y="238">RÀO CỨNG &amp; TRÍ NHỚ</text>
+        </g>
+
+        <!-- band 1: oversight -->
+        <g>
+          <rect x="150" y="28" width="250" height="52" rx="9" fill="#1b222d" stroke="#2a3340"/>
+          <text x="275" y="50" text-anchor="middle" font-size="12.5" font-weight="600" fill="#eaf1f8">Dashboard</text>
+          <text x="275" y="67" text-anchor="middle" font-size="10.5" fill="#8793a7">board · planning · analytics · queue · audit</text>
+
+          <rect x="430" y="28" width="280" height="52" rx="9" fill="#1b222d" stroke="#2a3340"/>
+          <text x="570" y="50" text-anchor="middle" font-size="12.5" font-weight="600" fill="#eaf1f8">Bot Teams (agentic)</text>
+          <text x="570" y="67" text-anchor="middle" font-size="10.5" fill="#8793a7">chat · review PR · tạo ticket · resume</text>
+        </g>
+
+        <!-- band 2: pipeline -->
+        <g>
+          <rect x="8" y="138" width="118" height="62" rx="9" fill="#1b222d" stroke="#2a3340"/>
+          <text x="67" y="164" text-anchor="middle" font-size="12" font-weight="600" fill="#eaf1f8">Azure DevOps</text>
+          <text x="67" y="181" text-anchor="middle" font-size="10.5" fill="#8793a7">work item · PR</text>
+
+          <rect x="156" y="138" width="142" height="62" rx="9" fill="#1b222d" stroke="#2a3340"/>
+          <text x="227" y="164" text-anchor="middle" font-size="12" font-weight="600" fill="#eaf1f8">Poller · Scheduler</text>
+          <text x="227" y="181" text-anchor="middle" font-size="10.5" fill="#8793a7">tag/state · đồ thị link</text>
+
+          <rect x="328" y="138" width="176" height="62" rx="9" fill="#1b222d" stroke="#4cc9d6" stroke-opacity=".45"/>
+          <text x="416" y="164" text-anchor="middle" font-size="12" font-weight="600" fill="#eaf1f8">Executor</text>
+          <text x="416" y="181" text-anchor="middle" font-size="10.5" fill="#8793a7">git worktree cô lập + Claude</text>
+
+          <rect x="534" y="138" width="150" height="62" rx="9" fill="#1b222d" stroke="#5bc98c" stroke-opacity=".45"/>
+          <text x="609" y="164" text-anchor="middle" font-size="12" font-weight="600" fill="#5bc98c">Cổng kiểm chứng</text>
+          <text x="609" y="181" text-anchor="middle" font-size="10.5" fill="#8793a7">test · security · điểm</text>
+
+          <rect x="714" y="138" width="112" height="62" rx="9" fill="#1b222d" stroke="#2a3340"/>
+          <text x="770" y="164" text-anchor="middle" font-size="12" font-weight="600" fill="#eaf1f8">Pull request</text>
+          <text x="770" y="181" text-anchor="middle" font-size="10.5" fill="#8793a7">draft / thường</text>
+
+          <g stroke="#4cc9d6" stroke-width="1.4" marker-end="url(#ah)" fill="none">
+            <path d="M126 169 H152"/><path d="M298 169 H324"/>
+            <path d="M504 169 H530"/><path d="M684 169 H710"/>
+          </g>
+        </g>
+
+        <!-- oversight → pipeline -->
+        <g stroke="#8793a7" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#ahd)" fill="none">
+          <path d="M275 80 V134"/><path d="M470 80 V134"/>
+        </g>
+
+        <!-- band 3: rails + memory -->
+        <g>
+          <rect x="328" y="250" width="176" height="56" rx="9" fill="#1b222d" stroke="#2a3340"/>
+          <text x="416" y="274" text-anchor="middle" font-size="12" font-weight="600" fill="#eaf1f8">Kho bài học</text>
+          <text x="416" y="291" text-anchor="middle" font-size="10.5" fill="#8793a7">theo từng repo</text>
+
+          <rect x="534" y="250" width="170" height="56" rx="9" fill="#1b222d" stroke="#e0a13a" stroke-opacity=".45"/>
+          <text x="619" y="274" text-anchor="middle" font-size="12" font-weight="600" fill="#e0a13a">Policy engine</text>
+          <text x="619" y="291" text-anchor="middle" font-size="10.5" fill="#8793a7">protected paths · blast-radius</text>
+        </g>
+
+        <!-- learn loop: gate → lessons → executor -->
+        <path d="M600 200 V278 H508" stroke="#4cc9d6" stroke-width="1.3" fill="none" marker-end="url(#ah)"/>
+        <text x="556" y="270" text-anchor="middle" font-size="9.5" fill="#5c6675"
+              font-family="ui-monospace,SF Mono,Consolas,monospace">GHI BÀI HỌC</text>
+        <path d="M380 250 V204" stroke="#4cc9d6" stroke-width="1.3" fill="none" marker-end="url(#ah)"/>
+        <text x="330" y="228" font-size="9.5" fill="#5c6675"
+              font-family="ui-monospace,SF Mono,Consolas,monospace">NHỒI VÀO BRIEF</text>
+
+        <!-- policy gate before PR -->
+        <path d="M699 250 V178" stroke="#e0a13a" stroke-width="1.3" fill="none" marker-end="url(#ahw)"/>
+        <text x="708" y="228" font-size="9.5" fill="#e0a13a"
+              font-family="ui-monospace,SF Mono,Consolas,monospace">CHẶN</text>
+
+        <!-- verify gate blocks PR when red -->
+        <text x="697" y="158" font-size="9.5" fill="#5bc98c" text-anchor="middle"
+              font-family="ui-monospace,SF Mono,Consolas,monospace">XANH</text>
+
+        <!-- band 4: audit -->
+        <rect x="8" y="344" width="818" height="32" rx="8" fill="#161c25" stroke="#2a3340" stroke-dasharray="5 4"/>
+        <text x="24" y="364" font-size="11" fill="#8793a7"
+              font-family="ui-monospace,SF Mono,Consolas,monospace" letter-spacing="1">
+          AUDIT TRAIL · append-only · mọi hành động hệ quả: đổi config · export secret · tạo ticket · resume · review
+        </text>
+
+        <!-- legend -->
+        <g font-family="ui-monospace,SF Mono,Consolas,monospace" font-size="9.5" fill="#5c6675">
+          <line x1="856" y1="252" x2="878" y2="252" stroke="#4cc9d6" stroke-width="1.4"/>
+          <text x="884" y="255">luồng việc</text>
+          <line x1="856" y1="272" x2="878" y2="272" stroke="#8793a7" stroke-width="1.2" stroke-dasharray="4 4"/>
+          <text x="884" y="275">điều khiển</text>
+          <line x1="856" y1="292" x2="878" y2="292" stroke="#e0a13a" stroke-width="1.4"/>
+          <text x="884" y="295">rào cứng</text>
+        </g>
+      </svg>
+      <figcaption>Ba tầng, một chiều đi. Người giám sát <b style="color:#cdd6e4">điều khiển</b> chứ không nằm trong
+        đường ống — nên tắt dashboard hay bot Teams thì autopilot vẫn chạy. Hai thứ duy nhất có quyền
+        <b style="color:#e0a13a">chặn</b> việc mở PR là cổng kiểm chứng (test đỏ) và policy engine (chạm file cấm,
+        vượt blast-radius) — cả hai đều ở tầng hệ thống, agent không thuyết phục được.</figcaption>
+    </figure>
+  </section>
+
+  <section id="capabilities">
+    <p class="eyebrow">02 · Năng lực</p>
+    <h2>AI-Autopilot làm được gì</h2>
+    <p class="lead"><b style="color:var(--text)">37 năng lực</b> trong sáu nhóm. Mọi tính năng mới đều
+      <span class="tag opt">opt-in</span> — nâng cấp không đổi
+      hành vi cho tới khi bạn bật. <span class="tag on">mới</span> = ship trong v2.4.x–2.5.0;
+      <span class="tag fix">sửa</span> = lỗi thật đã gặp khi dùng, đã vá.</p>
+
+    <div class="group">
+      <div class="head"><span class="gk">A</span><h3>Tự chủ &amp; thực thi</h3><span class="gcount">6</span></div>
+      <div class="cards">
+        <div class="card"><h3>⚙️ Poller theo tag/state</h3><p>Nhận work item theo tag trigger + trạng thái ADO; mỗi máy claim một luồng riêng.</p></div>
+        <div class="card"><h3>🧭 Dependency scheduling</h3><p>Xếp việc theo đồ thị link (Predecessor/Related) — chạy thành "wave", 0 token.</p></div>
+        <div class="card"><h3>🌿 Cô lập bằng git worktree</h3><p>Mỗi task một checkout riêng → chạy song song an toàn, không đụng main.</p></div>
+        <div class="card"><h3>🧹 Dọn worktree cứng đầu <span class="tag fix">sửa</span></h3><p>Windows giữ handle làm <code>rmtree</code> thất bại → worktree rác tích lại. Nay xóa cưỡng chế, bỏ read-only rồi thử lại.</p></div>
+        <div class="card"><h3>🔁 Closed-loop SDLC</h3><p>Chuỗi stage theo profile (ba/dev/qc/review), gate + revise + escalate + handoff.</p></div>
+        <div class="card"><h3>🎚️ 3 mức tự chủ</h3><p>report (chỉ comment) · assisted (draft PR) · unattended (PR thường, auto-resolve).</p></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="head"><span class="gk">B</span><h3>Kiểm chứng &amp; chất lượng</h3><span class="gcount">6</span></div>
+      <div class="cards">
+        <div class="card"><h3>🧪 Auto-test-gate <span class="tag opt">opt-in</span></h3><p>Chạy test repo trong worktree; chỉ mở PR khi xanh. Tự nhận pytest/dotnet/npm.</p></div>
+        <div class="card"><h3>🛡️ Auto security review</h3><p>Rà soát diff theo severity; critical → chặn PR. Tín hiệu vào điểm run.</p></div>
+        <div class="card"><h3>📊 PR scoring</h3><p>Chấm 0–100 từ tín hiệu khách quan (delivery/review/ci/scope) → auto / review / escalate.</p></div>
+        <div class="card"><h3>🔁 PR feedback loop</h3><p>Theo dõi comment review mới trên PR và tự revise nhánh để xử lý.</p></div>
+        <div class="card"><h3>👀 Reviewer tracking</h3><p>Theo dõi reviewer mọi PR active; tự review khi bot được add; nhắc reviewer trễ.</p></div>
+        <div class="card"><h3>🔍 Review PR bằng skill thật</h3><p>Nhờ review qua chat → chạy skill <code>review-pr</code>: phân tích diff <b>so với codebase</b> theo checklist, đăng findings lên PR. Không vote.</p></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="head"><span class="gk">C</span><h3>Học hỏi</h3><span class="gcount">1</span></div>
+      <div class="cards">
+        <div class="card"><h3>🧠 Retrospective learning loop <span class="tag opt">opt-in</span></h3><p>Ghi nhớ điều auto-review nhắc theo từng repo và nhồi các bài học gần nhất vào brief của run sau → ngừng lặp lỗi cũ.</p></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="head"><span class="gk">D</span><h3>Giám sát &amp; điều khiển</h3><span class="gcount">8</span></div>
+      <div class="cards">
+        <div class="card"><h3>🗂️ Board &amp; Planning</h3><p>Bảng trạng thái theo tag/state; workbench phân tích xung đột &amp; xếp lịch.</p></div>
+        <div class="card"><h3>📈 Analytics / ROI</h3><p>Throughput, success/PR rate, runs-per-item, token/PR, thời lượng — theo 7/14/30/90 ngày.</p></div>
+        <div class="card"><h3>🙋 Review queue</h3><p>Gom việc "cần người" kèm lý do; Resume một cú click để giao lại autopilot.</p></div>
+        <div class="card"><h3>🔒 Config mã hóa + khóa dashboard</h3><p>Export/import cấu hình đầy đủ (kèm secret) đã mã hóa; dashboard khóa bằng mật khẩu (hash).</p></div>
+        <div class="card"><h3>🛡️ Policy engine</h3><p>Rào cứng trước khi PR mở: <b>protected paths</b> (file cấm sửa — k8s/*, .github/*, *.env) + <b>blast-radius cap</b>. Agent không "nói khéo" vượt được.</p></div>
+        <div class="card"><h3>🧾 Audit trail</h3><p>Nhật ký append-only mọi hành động hệ quả: đổi config, export secrets, tạo ticket, resume, review — ai, làm gì, từ đâu, khi nào.</p></div>
+        <div class="card"><h3>🩺 <code>ai-autopilot doctor</code> <span class="tag on">mới</span></h3><p><b>12 check</b> tính mạch lạc của cấu hình — mỗi check sinh ra từ một sự cố đã phải chẩn đoán bằng tay. Chỉ đọc config: không mạng, không ghi, chạy được trong CI.</p></div>
+        <div class="card"><h3>🗃️ Settings gom nhóm lại <span class="tag fix">sửa</span></h3><p>Một section từng chứa 42 field thuộc 5 chủ đề. Nay tách thành Execution &amp; Autonomy · Guardrails &amp; policy · Quality gates · PR review &amp; feedback; Teams bot dời cạnh Notifications.</p></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="head"><span class="gk">E</span><h3>Trao đổi (Microsoft Teams)</h3><span class="gcount">10</span></div>
+      <div class="cards">
+        <div class="card"><h3>🤖 Lượt agent thật</h3><p>Tin nhắn tự do → Claude cầm <b>tool ADO chỉ-đọc</b>, tự tra dữ liệu sống, tự bóc link PR, tự quyết hành động. An toàn bằng <b>tool-allowlist cứng</b>, không phải đoán keyword.</p></div>
+        <div class="card"><h3>⚡ Trả lời tức thì <span class="tag on">mới</span></h3><p>Teams bỏ request sau ~15s, còn một lượt Claude mất 30–120s → trước đây <b>treo</b>. Nay turn ack &lt;1s rồi trả lời qua <b>proactive message</b> về đúng thread/DM ban đầu.</p></div>
+        <div class="card"><h3>🧵 Nhớ ngữ cảnh thread <span class="tag on">mới</span></h3><p>Mỗi tin nhắn từng mở một session Claude mới — bạn phải nhắc lại PR nào mỗi lần. Nay <code>resume</code> theo conversation id (trong channel id đã chứa thread → không lẫn nhau), TTL 24h.</p></div>
+        <div class="card"><h3>💬 @mention trên comment PR <span class="tag on">mới</span></h3><p>Tag bot trong comment không kèm lệnh → Claude suy luận ý. <b>Mặc định luôn là advisory</b>: mọi lỗi (timeout, parse fail, lệnh không có trong config) đều rơi về "chỉ bình luận", không sửa code.</p></div>
+        <div class="card"><h3>📎 Đọc tin nhắn quote <span class="tag on">mới</span></h3><p>Reply-quote một tin có PR rồi nói "review giúp" → bot đọc nội dung quote; PR gọi bằng <b>số trần</b> (<code>2488</code>) cũng resolve được repo.</p></div>
+        <div class="card"><h3>🎭 Bot persona</h3><p>Giọng nhất quán, chủ động như đồng đội; phản hồi do Claude soạn, không cụt lủn.</p></div>
+        <div class="card"><h3>🎫 Tạo ticket bằng lời</h3><p>"tạo ticket: …" → bot đề xuất và tạo khi bạn bấm Xác nhận (không cần lệnh).</p></div>
+        <div class="card"><h3>▶ Queue &amp; resume bằng lời</h3><p>"còn việc nào đang chờ?", "tiếp tục 6753" — xem &amp; tiếp tục việc đang giữ, có card xác nhận.</p></div>
+        <div class="card"><h3>❓ Không từ chối câu hỏi <span class="tag fix">sửa</span></h3><p><code>fix</code> từng khớp cả "prefix"/"đã fix" nên câu hỏi bình thường ("PR nào cần fix?") bị đẩy sang ADO. Nay match theo <b>ranh giới từ</b>.</p></div>
+        <div class="card"><h3>📦 Teams app package <span class="tag on">mới</span></h3><p>Manifest v1.19: menu lệnh chạy đúng, static tabs trỏ dashboard, mô tả trung thực. Giữ trong <b>giới hạn 10 lệnh</b> của Teams — vượt là Teams từ chối cả package.</p></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="head"><span class="gk">F</span><h3>Vận hành &amp; hạ tầng</h3><span class="gcount">6</span></div>
+      <div class="cards">
+        <div class="card"><h3>📡 Nhiều webhook Teams <span class="tag on">mới</span></h3><p>Báo vào <code>#dev</code> <b>và</b> <code>#qc</code> không cần chạy thêm instance. Gửi song song, mỗi cái await độc lập — một URL bị thu hồi không làm mất các cái còn lại. Log chỉ ghi <b>host</b>, vì query string chứa token.</p></div>
+        <div class="card"><h3>🎚️ Effort theo loại việc <span class="tag on">mới</span></h3><p>Call chat ngắn (classify/phrase/suy luận mention) → <code>low</code>; lượt agentic → <code>medium</code>; <b>task execution giữ nguyên</b> — đó là đường viết code, hạ effort phải đo trên eval riêng trước.</p></div>
+        <div class="card"><h3>🐳 Docker / Kubernetes</h3><p>Đóng gói container, deploy k8s; chạy nhiều máy chia luồng theo tag.</p></div>
+        <div class="card"><h3>📟 Observability</h3><p>Prometheus <span class="mono">/metrics</span>, health check ADO/Claude/disk, log JSON.</p></div>
+        <div class="card"><h3>💰 Cost tracking &amp; budget</h3><p>Đếm token, hạn mức ngày, cảnh báo — nền cho tối ưu chi phí.</p></div>
+        <div class="card"><h3>🏢 Multi-tenant · Plugins · Loops</h3><p>Nhiều org/project; plugin hook; scheduled loops (dependency sweeper, changelog…).</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="why">
+    <p class="eyebrow">03 · Vì sao hiệu quả</p>
+    <h2>Không nhanh ẩu — nhanh có kiểm soát</h2>
+    <div class="why">
+      <div class="item"><div class="cap">ISOLATION</div><h3>Cô lập trước, song song sau</h3><p>Mỗi task nằm trong worktree riêng nên nhiều việc chạy cùng lúc mà không giẫm chân — và không bao giờ đụng checkout chính của bạn.</p></div>
+      <div class="item"><div class="cap">VERIFY-FIRST</div><h3>Kiểm chứng trước khi mở PR</h3><p>Auto-test-gate + auto-review biến "có vẻ xong" thành "đã chạy được". PR rác giảm, reviewer đỡ bắt lỗi cơ bản.</p></div>
+      <div class="item"><div class="cap">GATED SCORE</div><h3>Chấm điểm để quyết định</h3><p>Điểm cao → tự resolve; điểm thấp → giữ cho người. Tự chủ đúng chỗ đáng tin, không liều toàn phần.</p></div>
+      <div class="item"><div class="cap">COMPOUNDING</div><h3>Học nên tốt dần</h3><p>Learning loop nhồi bài học cũ vào lần sau → chất lượng cộng dồn theo thời gian thay vì lặp lỗi.</p></div>
+      <div class="item"><div class="cap">RESPONSIVE</div><h3>Tách ack khỏi việc dài</h3><p>Deadline của Teams (~15s) không thể thương lượng, nên đừng bắt nó đợi Claude. Trả lời ngay rồi gửi kết quả sau — hội thoại mượt mà không phải rút ngắn công việc.</p></div>
+      <div class="item"><div class="cap">RIGHT-SIZED COMPUTE</div><h3>Effort khớp việc</h3><p>Phân loại một câu vào 1 trong hơn 10 intent không cần cùng mức suy luận với việc viết code. Hạ effort ở đường chat, giữ nguyên ở đường sửa code.</p></div>
+      <div class="item"><div class="cap">PRE-FLIGHT</div><h3>Soi cấu hình trước khi chạy</h3><p><code>/health</code> trả lời "có chạm được ADO/Claude/đĩa không" — và pass thoải mái trên cấu hình không thể hoạt động. <code>doctor</code> trả lời câu còn lại: "cấu hình có mạch lạc không".</p></div>
+      <div class="item"><div class="cap">ZERO-RISK ADOPT</div><h3>Opt-in toàn bộ</h3><p>Mọi năng lực mới mặc định tắt. Bật từng cái, đo tác động, giữ cái đáng giá — không ép thay đổi.</p></div>
+      <div class="item"><div class="cap">HUMAN-IN-LOOP</div><h3>Người luôn ở vô-lăng</h3><p>Draft PR, review queue, card xác nhận, duyệt qua Teams. Autopilot đề xuất; quyết định cuối vẫn của con người.</p></div>
+      <div class="item"><div class="cap">HARD RAILS</div><h3>Rào cứng, không phải lời hứa</h3><p>Tool-allowlist (tool ghi không tồn tại với chat agent) + policy engine (protected paths, blast-radius) + audit trail — an toàn nằm ở tầng hệ thống, không ở prompt.</p></div>
+      <div class="item"><div class="cap">FAIL-SAFE DEFAULT</div><h3>Sai thì rơi về phía an toàn</h3><p>Suy luận @mention thất bại → advisory. Effort ghi sai trong config → log rồi bỏ qua, không sập. Một webhook chết → các webhook khác vẫn gửi.</p></div>
+    </div>
+  </section>
+
+  <section id="future">
+    <p class="eyebrow">04 · Tương lai &amp; tiến hóa</p>
+    <h2>Sẽ tiến hóa thế nào</h2>
+    <p class="lead">Hướng đi (tầm nhìn — chưa ship): từ "tự làm có kiểm chứng" → "tự tin cậy được đo lường" → "tự cải thiện".</p>
+    <div class="horizons">
+      <div class="hz near">
+        <div class="when">GẦN · 1–2 nhịp</div>
+        <h3>Tin cậy hơn</h3>
+        <ul>
+          <li><b>Nhồi log test thất bại</b> vào lần revise để sửa trúng.</li>
+          <li><b>Review theo blast-radius</b> — đào sâu đúng vùng ảnh hưởng.</li>
+          <li><b>Digest ROI cho quản lý</b> — số liệu giá trị gửi định kỳ.</li>
+          <li><b>Nhắc reviewer lặp lại</b> — hiện chỉ nhắc đúng một lần cho mỗi (PR, reviewer).</li>
+          <li><b>Hỗ trợ GitHub</b> bên cạnh Azure DevOps.</li>
+        </ul>
+      </div>
+      <div class="hz mid">
+        <div class="when">GIỮA · nền tảng</div>
+        <h3>Quản trị &amp; quy mô</h3>
+        <ul>
+          <li><b>Policy engine + audit</b> — <span class="shipped">✓ đã ship (v2.4.1)</span>; tiếp theo: ma trận duyệt theo hành động.</li>
+          <li><b>Điều phối đa-repo</b> — một tính năng, nhiều PR phối hợp (BE+FE).</li>
+          <li><b>Model routing theo stage</b> — <span class="shipped">✓ một phần (v2.5.0: effort theo workload)</span>; còn lại: chọn model theo độ khó.</li>
+          <li><b>Auto-merge theo điểm</b> khi test xanh + điểm cao.</li>
+        </ul>
+      </div>
+      <div class="hz far">
+        <div class="when">XA · tự cải thiện</div>
+        <h3>Tự tiến hóa</h3>
+        <ul>
+          <li><b>Học từ kết quả merge/abandon</b> để tinh chỉnh prompt &amp; chọn skill.</li>
+          <li><b>Đội agent theo vai</b> phối hợp (BA → Dev → QC → Review).</li>
+          <li><b>Tự chủ theo ROI</b> — nâng mức tự chủ ở nơi đã chứng minh đáng tin.</li>
+          <li><b>Trí nhớ quy ước sống</b> — tự bồi đắp tài liệu convention của dự án.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 id="open" style="margin-top:44px; font-size:clamp(18px,2.2vw,22px)">Còn tồn — nói thẳng</h2>
+    <p class="lead">Danh sách này không phải roadmap. Đây là những chỗ <b>đã biết là thiếu</b> ở v2.5.0.</p>
+    <div class="scroll">
+      <table class="open">
+        <thead><tr><th>Việc còn tồn</th><th>Vì sao chưa làm</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>@mention trên comment work item</b><br>Hiện chỉ hoạt động trên comment PR.</td>
+            <td>Đường work item <b>không có chế độ advisory</b> — mention ở đó chỉ có thể nghĩa là "chạy lại item", tức là sửa code. Không có lựa chọn an toàn để mặc định về.</td>
+          </tr>
+          <tr>
+            <td><b>Hạ <code>effort</code> cho task execution</b></td>
+            <td>Hướng dẫn của vendor là phải đo lại trên eval của chính mình trước khi hạ, và đây đúng là đường <b>viết code</b>. Chưa có bộ eval → chưa hạ.</td>
+          </tr>
+          <tr>
+            <td><b>Nhắc reviewer lặp lại</b></td>
+            <td>Nhắc đúng một lần cho mỗi (PR, reviewer) rồi im vĩnh viễn. Chống spam, nhưng mất tác dụng với PR treo lâu — đúng lúc cần nhất.</td>
+          </tr>
+          <tr>
+            <td><b>Giới hạn PR review chạy song song</b></td>
+            <td>Chat đã có semaphore; đường auto-review PR dùng <code>max_concurrent</code> chung, chưa có hạn mức riêng.</td>
+          </tr>
+          <tr>
+            <td><b>48/161 setting chưa có trên dashboard</b></td>
+            <td>Phải sửa file <code>config.yaml</code> tay. Việc gom nhóm lại (v2.5.0) mới lộ ra con số này.</td>
+          </tr>
+          <tr>
+            <td><b>RSC để bỏ yêu cầu @mention trong channel</b></td>
+            <td>Bot sẽ nhận <b>mọi</b> tin nhắn trong channel, cần admin consent, và mỗi tin tự do có thể tốn một call Claude. Đánh đổi chưa đáng.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="releases">
+    <p class="eyebrow">05 · Lịch sử phát hành</p>
+    <h2>Đường bay đã qua</h2>
+    <div class="rel">
+      <div class="row"><span class="v">v2.0–2.2</span><span class="d"><b>Nền tảng.</b> Poller, SDLC loop, dashboard, PR reviewer tracking, scheduled loops, multi-tenant.</span></div>
+      <div class="row"><span class="v">v2.3.0</span><span class="d"><b>Bảo mật.</b> Export/import config mã hóa (kèm secret) + khóa dashboard bằng mật khẩu, bootstrap lần đầu.</span></div>
+      <div class="row"><span class="v">v2.3.1</span><span class="d"><b>Hoàn thiện.</b> Import full mã hóa — restore secret khi chuyển máy.</span></div>
+      <div class="row"><span class="v">v2.4.0</span><span class="d"><b>Kiểm chứng · Học · Giám sát.</b> Auto-test-gate, learning loop, analytics/ROI, review queue, tạo ticket bằng lời, bot persona.</span></div>
+      <div class="row"><span class="v">v2.4.1</span><span class="d"><b>Agentic · Quản trị.</b> Review PR thật bằng skill (diff vs codebase), lượt agent Claude có tool chỉ-đọc, policy engine (protected paths + blast-radius), audit trail, queue/resume bằng lời.</span></div>
+      <div class="row"><span class="v">v2.4.2</span><span class="d"><b>Hết treo.</b> Deferred reply (ack &lt;1s + proactive), một call Claude cho mỗi tin nhắn thay vì tối đa ba, @mention trên comment PR, xóa cưỡng chế worktree Windows giữ handle.</span></div>
+      <div class="row"><span class="v">v2.4.3</span><span class="d"><b>Không từ chối câu hỏi.</b> Mutation hint match theo ranh giới từ — "PR nào cần fix?" không còn bị đẩy sang ADO.</span></div>
+      <div class="row"><span class="v">v2.4.5–2.4.6</span><span class="d"><b>Teams app package.</b> Đọc tin nhắn quote, resolve PR gọi bằng số trần; manifest v1.19 với menu lệnh chạy đúng + static tabs, giữ trong giới hạn 10 lệnh.</span></div>
+      <div class="row now"><span class="v">v2.5.0 ◂</span><span class="d"><b>Hội thoại · Cấu hình.</b> Nhớ ngữ cảnh thread (resume theo conversation id, TTL 24h), nhiều webhook Teams gửi song song, effort theo loại việc, <code>ai-autopilot doctor</code> (12 check), settings gom nhóm lại — <b>451 test xanh</b>, không breaking change.</span></div>
+    </div>
+  </section>
+
+  <div class="note"><b>Ghi chú thật:</b> các năng lực v2.4.x–2.5.0 là <b>opt-in</b> và mới ship — cần bật &amp; chạy thật
+    trên Teams/ADO của bạn để kiểm chứng giá trị ("test xanh" ≠ "đã tạo giá trị"). Gợi ý thứ tự dùng thử:
+    ⓿ chạy <code>ai-autopilot doctor</code> trước, vì nó bắt đúng loại cấu hình <i>trông như đang chạy</i>
+    ① auto-test-gate ② review PR qua chat ③ bật <code>teams_agentic_enabled</code> ④ đặt
+    <code>policy_protected_paths</code> — rồi xem <code>/dashboard/analytics</code> +
+    <code>/dashboard/audit</code> để đo tác động.</div>
+
+  <footer>
+    <span>AI-AUTOPILOT · github.com/phongptn93/AI-Autopilot</span>
+    <span>BÁO CÁO v2.5.0 · 451 TESTS ✓</span>
+  </footer>
+
+</div></div>
+
+</body></html>

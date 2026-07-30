@@ -25,6 +25,7 @@ from ai_autopilot.services import (
     StateSyncService,
 )
 from ai_autopilot.teams_agent import build_agent as build_teams_agent
+from ai_autopilot.teams_agent import cancel_background_work as cancel_teams_background_work
 
 
 def _dashboard_auth_ok(header: str | None, config: Settings) -> bool:
@@ -99,6 +100,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 teams_digest_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await teams_digest_task
+            # Deferred Teams replies / background PR reviews are detached on purpose —
+            # cancel them explicitly so shutdown is clean.
+            with contextlib.suppress(Exception):
+                await cancel_teams_background_work()
             with contextlib.suppress(Exception):
                 await container.shutdown()
 
@@ -241,7 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resource = payload.get("resource", {}) or {}
 
         if payload.get("eventType") == "ms.vss-code.git-pullrequest-comment-event":
-            from ai_autopilot.config import is_bot_signed, match_command
+            from ai_autopilot.config import find_bot_mention, is_bot_signed, match_command
 
             pr = resource.get("pullRequest") or {}
             repo = pr.get("repository") or {}
@@ -252,9 +257,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content = (resource.get("comment") or {}).get("content") or ""
             if is_bot_signed(content):
                 return {"ignored": "bot comment"}  # our own reply — never self-trigger
-            # Only a /command warrants an immediate inspection; plain chatter waits
-            # for the regular poll (which ignores it anyway).
-            if content and match_command(content, c.config.comment_commands) is None:
+            # Only something addressed to us warrants an immediate inspection; plain
+            # chatter waits for the regular poll (which ignores it anyway). An @mention
+            # counts — otherwise it would sit until the next poll while a /command in the
+            # same thread gets answered in a second.
+            addressed = content and (
+                match_command(content, c.config.comment_commands) is not None
+                or find_bot_mention(content, await c.mention_identity()) is not None
+            )
+            if content and not addressed:
                 return {"ignored": "not a command"}
             monitor.kick(repo_id, repo.get("name") or "", pr)
             log.info("webhook kicked PR inspection", pr=pr_id)

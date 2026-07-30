@@ -84,7 +84,16 @@ async def _make(ado, feedback, **overrides):
     db = Database("sqlite+aiosqlite:///:memory:")
     await db.create_all()
     repo = PrReviewerRepository(db)
-    c = SimpleNamespace(config=config, ado=ado, feedback=feedback, pr_reviewer_repo=repo)
+    async def bot_identity() -> dict:
+        return await ado.get_connection_data()
+
+    async def mention_identity():
+        return None  # @mention detection off in these fakes → plain /command path
+
+    c = SimpleNamespace(
+        config=config, ado=ado, feedback=feedback, pr_reviewer_repo=repo,
+        bot_identity=bot_identity, mention_identity=mention_identity,
+    )
     return ReviewerTrackerService(c), repo, db
 
 

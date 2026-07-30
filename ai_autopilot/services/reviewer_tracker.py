@@ -22,8 +22,9 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 
 from ai_autopilot import metrics
-from ai_autopilot.config import match_command, matches_user
+from ai_autopilot.config import matches_user
 from ai_autopilot.container import Container
+from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import TaskCategory, WorkItemInfo
 from ai_autopilot.notifications.base import NotificationMessage, NotificationType
@@ -111,8 +112,6 @@ class ReviewerTrackerService:
         self._sem = asyncio.Semaphore(c.config.max_concurrent)
         # PRs with an auto-review in flight (don't double-launch across scans).
         self._reviewing: set[int] = set()
-        # Resolved bot identity {"id", "display_name", "unique_name"} — cached.
-        self._bot: dict | None = None
         # Serialise /ai revises per (repo, branch) so parallel commands on one branch
         # can't corrupt the checkout (different branches still run in parallel).
         self._branch_locks: dict[tuple[str, str], asyncio.Lock] = {}
@@ -387,25 +386,9 @@ class ReviewerTrackerService:
     # ── Bot identity ─────────────────────────────────────────────────────────
 
     async def _bot_identity(self) -> dict:
-        """Who "the bot" is on ADO — the identity behind our credentials (auto-detected
-        once via connectionData), optionally overridden by ``pr_bot_identity``."""
-        if self._bot is None:
-            detected = None
-            with contextlib.suppress(Exception):
-                detected = await self._c.ado.get_connection_data()
-            self._bot = detected or {"id": "", "display_name": "", "unique_name": ""}
-            if detected:
-                self._log.info(
-                    "bot identity resolved",
-                    id=detected["id"], name=detected["display_name"],
-                    unique=detected["unique_name"],
-                )
-            else:
-                self._log.warning(
-                    "could not resolve bot identity from connectionData — relying on "
-                    "pr_bot_identity config", override=self._config.pr_bot_identity,
-                )
-        return self._bot
+        """Who "the bot" is on ADO — delegated to the container's cached lookup, which the
+        PR babysitter and work-item poller share for @mention detection."""
+        return await self._c.bot_identity()
 
     def _is_bot(self, reviewer: dict, bot: dict) -> bool:
         rid = str(reviewer.get("id") or "")
@@ -593,10 +576,12 @@ class ReviewerTrackerService:
         if pr_id is None or cmd_repo is None:
             return
         threads = await c.ado.get_pull_request_threads(repo_id, pr_id)
-        commands = command_threads(threads, cfg.comment_commands)
+        commands = command_threads(
+            threads, cfg.comment_commands, bot=await c.mention_identity()
+        )
         if not commands:
             return
-        claimed = cfg.assignee_trigger_user or cfg.auto_transition_assignee
+        claimed = cfg.command_user
         handled = await cmd_repo.handled_comments(pr_id)
         branch = pr.get("sourceRefName", "").removeprefix("refs/heads/")
         item = await self._pr_work_item(pr)
@@ -616,7 +601,9 @@ class ReviewerTrackerService:
                     "người reply để tôi tiếp nhận.</div>"))
                 continue
             await cmd_repo.mark_handled(pr_id, cid)
-            advisory = match_command(cmd["instruction"], cfg.advisory_commands) is not None
+            # A bare @mention gets its command inferred here (advisory by default) and
+            # written into the instruction, so the metric and _guidance see a real command.
+            advisory = await resolve_command(cfg, cmd)
             metrics.record_pr_command(self._verb(cmd["instruction"]))
             if not advisory:
                 spent = await cmd_repo.revision_count(item.id)
@@ -654,12 +641,10 @@ class ReviewerTrackerService:
                     item, branch, cmd["instruction"], revision=0,
                     repo=repo_name, review_only=advisory,
                 )
-            hint = (
-                "<br/><sub>💬 Reply để tôi làm tiếp: <code>/ai</code> sửa code · "
-                "<code>/spec</code> cập nhật spec · <code>/test</code> viết test · "
-                "<code>/review</code> · <code>/qc</code> · <code>/security</code> · "
-                "<code>/impact</code> · <code>/summary</code>.</sub>"
-            )
+            # Single source of truth (see Settings.comment_command_hint_html) — blank when
+            # the command trigger is off.
+            hint_html = self._config.comment_command_hint_html
+            hint = f"<br/>{hint_html}" if hint_html else ""
             if result.success:
                 msg = (
                     f"<div><b>🔍 Đã xem xong</b> — nhận xét chi tiết ở trên.{hint}</div>"
@@ -734,12 +719,13 @@ class ReviewerTrackerService:
                     if voted:
                         metrics.record_vote(_VOTE_METRIC.get(vote, "other"))
                 label = VOTE_LABELS.get(vote, "—") if vote is not None else "—"
+                # Same generated hint as everywhere else (this copy used to omit
+                # /summary) — see Settings.comment_command_hint_html.
+                hint_html = self._config.comment_command_hint_html
+                hint = f"<br/>{hint_html}" if hint_html else ""
                 note = (
-                    f"<div><b>✅ Review xong</b> — tôi đã tự vote: <b>{label}</b>."
-                    "<br/><sub>💬 Reply để tôi làm tiếp: <code>/ai</code> sửa theo nhận xét "
-                    "· <code>/spec</code> · <code>/test</code> · <code>/review</code> · "
-                    "<code>/qc</code> · <code>/security</code> · <code>/impact</code>. "
-                    "Push commit mới → tôi tự review lại.</sub></div>"
+                    f"<div><b>✅ Review xong</b> — tôi đã tự vote: <b>{label}</b>.{hint}"
+                    "<br/><sub>Push commit mới → tôi tự review lại.</sub></div>"
                 )
                 if vote is not None and not voted:
                     vote = None  # vote didn't land — don't record it

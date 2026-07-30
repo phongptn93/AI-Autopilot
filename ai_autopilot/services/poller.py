@@ -441,8 +441,7 @@ class AdoPollerService:
     def _is_my_user(self, email: str | None, name: str | None) -> bool:
         """True if the identity is the user THIS machine acts for — so on a multi-machine
         setup each person's own machine handles only their own commands."""
-        cfg = self._config
-        return matches_user(email, name, cfg.assignee_trigger_user or cfg.auto_transition_assignee)
+        return matches_user(email, name, self._config.command_user)
 
     def _owns_item(self, item: WorkItemInfo) -> bool:
         """True if this machine's stream owns the item — mirrors the main poll's candidate

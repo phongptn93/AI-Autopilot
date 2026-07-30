@@ -24,6 +24,8 @@ import contextlib
 import json
 import re
 import tempfile
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import unquote
@@ -38,6 +40,39 @@ from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
 _log = get_logger("teams_agent")
 _MIN_DT = datetime.min  # sort fallback for items with no updated_at
 _REVIEW_TASKS: set = set()  # keep background review tasks referenced (no GC)
+_BG_TASKS: set = set()  # same, for deferred (slow) turn work
+
+# Activity ids already handled, so a channel redelivery can't run the same message twice
+# (and, worse, spawn a second Claude process for it). Bounded FIFO — this only needs to
+# cover the retry window, not history.
+_SEEN_ACTIVITIES: OrderedDict[str, None] = OrderedDict()
+_SEEN_LIMIT = 512
+
+
+async def cancel_background_work() -> None:
+    """Cancel deferred replies / background PR reviews still in flight.
+
+    Called from the app's teardown: these tasks are detached by design (that's what keeps
+    the Teams turn fast), so without an explicit cancel the process exits with a
+    "Task was destroyed but it is pending" warning for every reply still composing."""
+    tasks = list(_BG_TASKS) + list(_REVIEW_TASKS)
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+
+def _already_handled(activity_id: str | None) -> bool:
+    """True if this exact activity was already processed (channel redelivery)."""
+    if not activity_id:
+        return False  # no id to key on — treat as new rather than dropping the turn
+    if activity_id in _SEEN_ACTIVITIES:
+        return True
+    _SEEN_ACTIVITIES[activity_id] = None
+    while len(_SEEN_ACTIVITIES) > _SEEN_LIMIT:
+        _SEEN_ACTIVITIES.popitem(last=False)
+    return False
 
 
 def _spawn_review(container: Container, repo_name: str, pr_id: int, pr_url: str = "") -> None:
@@ -127,27 +162,156 @@ class _DbConversationStorage:
             rows = await session.execute(select(TeamsConversation.key))
             return list(rows.scalars().all())
 
-_HELP_TEXT = (
-    "🤖 **AI Autopilot**\n\n"
-    "- `/items` — work item của bạn (khớp theo email Teams ↔ ADO assignee)\n"
-    "- `/prs` — PR bạn là author hoặc reviewer, kèm tình trạng vote\n"
-    "- `/review <repo> <pr-id>` — yêu cầu bot review lại PR ngay (bot phải đã là "
-    "reviewer trên PR đó)\n"
-    "- `/pr <repo> <pr-id>` — xem chi tiết BẤT KỲ PR nào (không chỉ của bạn)\n"
-    "- `/item <id>` — xem chi tiết BẤT KỲ work item nào\n"
-    "- `/team` — tổng quan PR của cả team, cũ nhất trước\n"
-    "- `/queue` — việc autopilot đang chờ người xử lý (needs human)\n"
-    "- `/resume <id>` — tiếp tục 1 việc đang chờ (có xác nhận)\n"
-    "- 🔗 Dán **link PR** + \"review\" → mình review ngay (dán link không kèm gì → xem chi tiết)\n"
-    "- `/log <mô tả>` — tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)\n"
-    "- `/status` — tình trạng hoạt động\n"
-    "- `/help` — bảng lệnh này\n\n"
-    "💬 Cũng có thể gõ tự nhiên: hỏi để tra cứu (*\"PR nào của tôi đang bị block?\"*) "
-    "hoặc **tạo ticket** (*\"tạo ticket: đăng nhập lỗi khi SSO timeout\"* — bot hỏi xác "
-    "nhận trước khi tạo). KHÔNG sửa/vote/merge được qua chat.\n\n"
-    "Muốn `/ai /spec /test /qc /security /impact /summary` trên một PR cụ thể — "
-    "reply ngay trên PR đó trong Azure DevOps (bot review ở đâu, trả lời ở đó)."
-)
+_UNSET = object()  # "no cached email" — distinct from a cached None (lookup failed)
+
+
+class _DeferredContext:
+    """Stands in for the ``TurnContext`` after the turn has already been answered.
+
+    WHY: the Teams messaging endpoint only returns HTTP 200 once the turn handler
+    finishes (``app.py`` → ``start_agent_process`` → ``adapter.process`` awaits it), and
+    the channel gives up on the request after ~15 seconds. Any Claude call made inline
+    (the agentic turn budgets 120s, the tool-less ones 45s) therefore strands the user:
+    no reply ever arrives, while the run keeps going invisibly. So the live turn acks in
+    under a second and hands the slow work a context that looks the same to every reply
+    function but delivers through the proactive API instead.
+
+    Quacks like the two things those functions touch: ``send_activity`` (text OR an
+    Adaptive Card attachment) and ``.activity``. ``resolved_email`` is filled in during
+    the LIVE turn because the identity lookup needs a real ``TurnContext`` connector,
+    which no longer exists out here — see ``_teams_email``."""
+
+    def __init__(self, app, adapter, conversation, activity, email: str | None) -> None:
+        self._app = app
+        self._adapter = adapter
+        self._conversation = conversation
+        self.activity = activity
+        self.resolved_email = email
+
+    async def send_activity(self, message) -> None:
+        from microsoft_agents.hosting.core import MessageFactory
+
+        activity = MessageFactory.text(message) if isinstance(message, str) else message
+        await self._app.proactive.send_activity(
+            self._adapter, self._conversation, activity
+        )
+
+
+@dataclass
+class _Deferral:
+    """Ability to reply into THIS turn's conversation from a background task.
+
+    ``sem`` caps how many of those background replies may hold a Claude process at once
+    (``teams_agent_max_concurrent``); ``None`` = uncapped. It is acquired around the WORK
+    only, never around the ack — a queued message must still get immediate feedback."""
+
+    app: Any
+    adapter: Any
+    sem: asyncio.Semaphore | None = None
+
+    def context_for(self, context, email: str | None) -> _DeferredContext:
+        from microsoft_agents.hosting.core.app.proactive import Conversation
+
+        return _DeferredContext(
+            self.app, self.adapter, Conversation.from_turn_context(context),
+            context.activity, email,
+        )
+
+
+def _typing_activity():
+    from microsoft_agents.activity import Activity, ActivityTypes
+
+    return Activity(type=ActivityTypes.typing)
+
+
+async def _run_deferred(defer, context, ack: str, work) -> bool:
+    """Ack on the live turn, then run ``work(deferred_context)`` detached.
+
+    Returns False when deferral isn't available (unit tests calling these helpers
+    directly, or the SDK absent) so the caller can just run ``work(context)`` inline —
+    which is the pre-existing behaviour, kept so nothing depends on the fast path."""
+    if defer is None:
+        return False
+    with contextlib.suppress(Exception):  # cosmetic, and the cheapest signal — send first
+        await context.send_activity(_typing_activity())
+    # Resolve identity while the real TurnContext is still alive (one quick connector
+    # call); the background work can't do it afterwards.
+    email = await _teams_email(context)
+    deferred = defer.context_for(context, email)
+    sem = defer.sem
+    if ack:
+        # Say so when the reply will have to queue behind other runs, rather than letting
+        # it look like the bot went quiet again.
+        queued = sem is not None and sem.locked()
+        await context.send_activity(ack + (_QUEUED_SUFFIX if queued else ""))
+
+    async def _guarded() -> None:
+        try:
+            if sem is None:
+                await work(deferred)
+            else:
+                async with sem:  # cap concurrent Claude processes, not concurrent turns
+                    await work(deferred)
+        except asyncio.CancelledError:
+            raise  # shutdown — cancel_background_work() is draining us
+        except Exception as exc:  # noqa: BLE001 — a detached task must not die silently
+            _log.error("deferred Teams work failed", error=_fmt_exc(exc))
+            with contextlib.suppress(Exception):
+                await deferred.send_activity(
+                    "⚠️ Có lỗi khi xử lý — thử lại giúp mình nhé."
+                )
+
+    task = asyncio.create_task(_guarded())
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return True
+
+
+_THINKING_ACK = "⏳ Để mình tra cứu rồi trả lời ngay nhé…"
+_CREATING_ACK = "⏳ Đang tạo ticket…"
+_QUEUED_SUFFIX = " (đang có việc khác chạy trước nên hơi lâu một chút nhé)"
+
+# Chat commands, each with its usage — the ONE place they're described. Used to build
+# /help and, on a syntax slip, to answer with that command's usage instantly instead of
+# dropping the message into the (slow) agent path.
+_COMMANDS: dict[str, tuple[str, str]] = {
+    "/items": ("/items", "work item của bạn (khớp theo email Teams ↔ ADO assignee)"),
+    "/prs": ("/prs", "PR bạn là author hoặc reviewer, kèm tình trạng vote"),
+    "/review": ("/review <repo> <pr-id>", "bot review lại PR đó ngay (chạy skill review đầy đủ)"),
+    "/pr": ("/pr <repo> <pr-id>", "xem chi tiết BẤT KỲ PR nào (không chỉ của bạn)"),
+    "/item": ("/item <id>", "xem chi tiết BẤT KỲ work item nào"),
+    "/team": ("/team", "tổng quan PR của cả team, cũ nhất trước"),
+    "/queue": ("/queue", "việc autopilot đang chờ người xử lý (needs human)"),
+    "/resume": ("/resume <id>", "tiếp tục 1 việc đang chờ (có xác nhận)"),
+    "/log": ("/log <mô tả>", "tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)"),
+    "/status": ("/status", "tình trạng hoạt động"),
+    "/help": ("/help", "bảng lệnh này"),
+}
+
+
+def _help_text(config: Settings) -> str:
+    """The /help table. Built at call time so the PR-comment command list comes from
+    ``config`` (see ``Settings.comment_command_hint_markdown``) instead of a hardcoded
+    copy that silently drifted from what this instance actually accepts."""
+    lines = [f"- `{usage}` — {desc}" for usage, desc in _COMMANDS.values()]
+    pr_hint = config.comment_command_hint_markdown
+    text = (
+        "🤖 **AI Autopilot**\n\n"
+        + "\n".join(lines)
+        + "\n- 🔗 Dán **link PR** + \"review\" → mình review ngay (dán link không kèm gì "
+        "→ xem chi tiết)\n\n"
+        "💬 Cũng có thể gõ tự nhiên: hỏi để tra cứu (*\"PR nào của tôi đang bị block?\"*) "
+        "hoặc **tạo ticket** (*\"tạo ticket: đăng nhập lỗi khi SSO timeout\"* — bot hỏi xác "
+        "nhận trước khi tạo). KHÔNG sửa/vote/merge được qua chat."
+    )
+    if pr_hint:
+        # Same word, two scopes — worth spelling out: /review HERE runs the full review
+        # skill, whereas /review as a PR reply is one of the advisory commands below.
+        text += (
+            "\n\n**Trên chính PR trong Azure DevOps** (reply vào PR, không phải ở đây):\n"
+            + pr_hint
+        )
+    return text
 
 # ADO reviewer vote → short label (mirrors reviewer_tracker.VOTE_LABELS, compact form).
 _VOTE_SHORT = {10: "✅ approved", 5: "✅ suggestions", 0: "⏳ chưa vote", -5: "⏸️ waiting", -10: "❌ rejected"}
@@ -210,10 +374,23 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
         connection_manager=connections,
     )
 
+    cap = config.teams_agent_max_concurrent
+    deferral = _Deferral(
+        app=app, adapter=adapter,
+        sem=asyncio.Semaphore(cap) if cap > 0 else None,  # 0/negative = no cap
+    )
+
     @app.activity(ActivityTypes.message)
     async def on_message(context: TurnContext, _state) -> None:
         try:
-            await _handle_turn(context, config, container, reviewer_tracker)
+            # Remember every conversation we actually talk in, not just the one where the
+            # bot was added (on_members_added below) — otherwise a DM the user started
+            # themselves never receives the proactive digest.
+            with contextlib.suppress(Exception):
+                await app.proactive.store_conversation(context)
+            await _handle_turn(
+                context, config, container, reviewer_tracker, defer=deferral
+            )
         except Exception as exc:  # noqa: BLE001 — a bot turn must not crash the process
             _log.error("Teams turn failed", error=str(exc))
             with contextlib.suppress(Exception):
@@ -437,34 +614,52 @@ async def _send_digest(
         _log.warning("digest: standup failed", error=str(exc))
 
     text = "\n\n".join(parts)
+    # Read with the keys EXACTLY as stored. ``all_keys`` returns the SDK's own storage
+    # keys, which are already prefixed ("proactive/conversations/<id>"); passing one to
+    # ``proactive.get_conversation`` — which prefixes the id it's given — looked up
+    # "proactive/conversations/proactive/conversations/<id>" and always missed, so every
+    # digest quietly went to nobody while logging a healthy "sent". Going through storage
+    # directly also avoids depending on that private prefix.
+    from microsoft_agents.hosting.core.app.proactive import Conversation
+
     keys = await storage.all_keys()
+    conversations = await storage.read(keys, target_cls=Conversation)
     sent, failed = 0, 0
-    for key in keys:
+    for key, conversation in conversations.items():
+        if conversation is None:
+            continue
         try:
-            conversation = await app.proactive.get_conversation(key)
-            if conversation is None:
-                continue
             await app.proactive.send_activity(adapter, conversation, message_factory.text(text))
             sent += 1
         except Exception as exc:  # noqa: BLE001 — one bad conversation must not stop the rest
             failed += 1
-            _log.warning("digest send failed for one conversation", error=str(exc))
+            _log.warning(
+                "digest send failed for one conversation", key=key, error=_fmt_exc(exc)
+            )
     _log.info("Teams digest sent", sent=sent, failed=failed, total=len(keys))
 
 
 async def _handle_turn(
-    context, config: Settings, container: Container, reviewer_tracker: ReviewerTrackerService
+    context, config: Settings, container: Container,
+    reviewer_tracker: ReviewerTrackerService, *, defer: _Deferral | None = None,
 ) -> None:
     activity = context.activity
+    if _already_handled(getattr(activity, "id", None)):
+        _log.info("skipping redelivered Teams activity", activity_id=activity.id)
+        return
     payload: dict[str, Any] | None = getattr(activity, "value", None)
     if payload:
-        await _handle_action(context, container, reviewer_tracker, payload)
+        await _handle_action(context, container, reviewer_tracker, payload, defer=defer)
         return
-    await _handle_command(context, config, container, reviewer_tracker, (activity.text or "").strip())
+    await _handle_command(
+        context, config, container, reviewer_tracker, (activity.text or "").strip(),
+        defer=defer,
+    )
 
 
 async def _handle_action(
-    context, container: Container, reviewer_tracker: ReviewerTrackerService, payload: dict
+    context, container: Container, reviewer_tracker: ReviewerTrackerService, payload: dict,
+    *, defer: _Deferral | None = None,
 ) -> None:
     """An Adaptive Card ``Action.Submit`` — ``reverify`` (re-run the bot's own review
     on demand) or ``log_confirm``/``log_cancel`` (the /log ticket confirmation card).
@@ -480,7 +675,16 @@ async def _handle_action(
         await context.send_activity(status)
         return
     if action == "log_confirm":
-        await _create_logged_ticket(context, container, str(payload.get("title") or ""))
+        # Creating the item is quick, but the persona then composes the reply with a
+        # Claude call — deferred so tapping Confirm feels instant instead of hanging out
+        # the whole turn (and with it the channel's HTTP request).
+        title = str(payload.get("title") or "")
+
+        async def _work(ctx) -> None:
+            await _create_logged_ticket(ctx, container, title)
+
+        if not await _run_deferred(defer, context, _CREATING_ACK, _work):
+            await _work(context)
         return
     if action == "log_cancel":
         await context.send_activity("Đã hủy — không tạo ticket.")
@@ -654,6 +858,28 @@ _PR_URL_RE = re.compile(
 _REVIEW_INTENT = ("review", "duyệt", "rà soát", "soát", "kiểm tra", "check", "xem lại")
 _PR_LOOKUP_RE = re.compile(r"^/pr\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _ITEM_LOOKUP_RE = re.compile(r"^/item\s+(\d+)\s*$", re.IGNORECASE)
+_SLASH_WORD_RE = re.compile(r"^(/\w+)")
+
+
+def _slash_help(text: str) -> str | None:
+    """Reply for a message that LOOKS like a command but matched nothing, or ``None`` if
+    it isn't slash-prefixed at all.
+
+    Without this, ``/review 2470`` (right command, missing the repo) fell through to the
+    natural-language path and spent a whole Claude run answering something else — the
+    command appeared "broken". A known command gets its own usage line; an unknown one
+    gets the closest match by prefix."""
+    m = _SLASH_WORD_RE.match(text.strip())
+    if not m:
+        return None
+    word = m.group(1).lower()
+    known = _COMMANDS.get(word)
+    if known:
+        usage, desc = known
+        return f"⚠️ Cú pháp: `{usage}` — {desc}.\nGõ `/help` để xem tất cả lệnh."
+    near = [c for c in _COMMANDS if c.startswith(word[:3])] or None
+    suggestion = f" Ý bạn là {', '.join(f'`{c}`' for c in near)}?" if near else ""
+    return f"⚠️ Không có lệnh `{word}`.{suggestion} Gõ `/help` để xem lệnh có sẵn."
 
 
 def _format_team_overview(prs: list[dict]) -> str:
@@ -690,23 +916,30 @@ def _format_pr_detail(detail: dict) -> str:
 async def _handle_command(
     context, config: Settings, container: Container,
     reviewer_tracker: ReviewerTrackerService, text: str,
+    *, defer: _Deferral | None = None,
 ) -> None:
     low = text.lower()
-    if low in ("", "/help", "help"):
-        await context.send_activity(_HELP_TEXT)
+    # Dispatch the no-argument commands on the EXACT leading word, not a prefix:
+    # ``startswith("/prs")`` also swallowed ``/prss``, so a typo silently ran a different
+    # command and looked like the bot ignoring what was asked. An unrecognised word falls
+    # through to _slash_help below, which answers with usage.
+    word_match = _SLASH_WORD_RE.match(text.strip())
+    word = word_match.group(1).lower() if word_match else ""
+    if low in ("", "help") or word == "/help":
+        await context.send_activity(_help_text(config))
         return
-    if low.startswith("/status"):
+    if word == "/status":
         await context.send_activity(
             "📊 Đang hoạt động. Xem chi tiết trên dashboard `/dashboard/reviews`."
         )
         return
-    if low.startswith("/items"):
+    if word == "/items":
         await _reply_items(context, container)
         return
-    if low.startswith("/prs"):
+    if word == "/prs":
         await _reply_prs(context, reviewer_tracker)
         return
-    if low.startswith("/team"):
+    if word == "/team":
         prs = await reviewer_tracker.team_overview()
         bullets = _format_team_overview(prs)
         await context.send_activity(
@@ -719,7 +952,7 @@ async def _handle_command(
         item = await container.ado.get_work_item(iid)
         await _send_resume_confirm_card(context, iid, item.title if item else "")
         return
-    if low.startswith("/queue"):
+    if word == "/queue":
         await _reply_queue(context, container)
         return
     m = _REVIEW_RE.match(text.strip())
@@ -760,13 +993,28 @@ async def _handle_command(
             f"- Assigned to: {item.assigned_to or '(chưa gán)'}"
         )
         return
-    # Agentic mode: hand everything non-slash to a real Claude agent turn — it
-    # parses PR links, looks up data with tools, and requests gated actions itself
-    # (no regex/keyword routing). Falls back to the classifier path on failure.
-    if config.teams_agentic_enabled and await _agentic_turn(
-        context, config, container, reviewer_tracker, text
-    ):
+    # Looks like a command but matched nothing above → answer with its usage NOW. Must
+    # come before the Claude paths: a typo'd command is a typo, not a question, and
+    # sending it to the agent costs a whole run to produce an off-target reply.
+    usage = _slash_help(text)
+    if usage is not None:
+        await context.send_activity(usage)
         return
+
+    # Agentic mode: hand everything non-slash to a real Claude agent turn — it parses PR
+    # links, looks up data with tools, and requests gated actions itself (no regex/keyword
+    # routing). It is then the ONLY path: chaining the classifier + phrasing calls behind
+    # it meant one message could spawn three sequential Claude processes (~210s worst
+    # case), so a failure ends in a static hint instead.
+    if config.teams_agentic_enabled:
+        async def _agentic_work(ctx) -> None:
+            if not await _agentic_turn(ctx, config, container, reviewer_tracker, text):
+                await ctx.send_activity(_FREEFORM_FALLBACK)
+
+        if not await _run_deferred(defer, context, _THINKING_ACK, _agentic_work):
+            await _agentic_work(context)
+        return
+
     m = _PR_URL_RE.search(text)
     if m:
         # Classifier mode fast-path: a pasted PR link, no /review syntax needed.
@@ -785,7 +1033,9 @@ async def _handle_command(
             else f"PR !{pr_id} không tìm thấy hoặc không còn active trong `{repo_name}`."
         )
         return
-    await _handle_free_text(context, config, container, reviewer_tracker, text)
+    await _handle_free_text(
+        context, config, container, reviewer_tracker, text, defer=defer
+    )
 
 
 def _as_int(value: Any) -> int | None:
@@ -808,7 +1058,15 @@ async def _teams_email(context) -> str | None:
     """The email/UPN of whoever sent this turn — resolved via the Teams-specific
     member lookup (the base Activity only carries a Teams/AAD object id, not email).
     None if the lookup fails (e.g. running outside a real Teams tenant) — callers
-    then report "identity chưa xác định" rather than silently showing everyone's data."""
+    then report "identity chưa xác định" rather than silently showing everyone's data.
+
+    On a DEFERRED turn the answer was already resolved during the live turn and cached on
+    the context: the lookup below needs a real ``TurnContext`` connector, which is gone by
+    then, so without this the background work would lose the caller's identity and silently
+    drop every personal (items / PRs) section."""
+    cached = getattr(context, "resolved_email", _UNSET)
+    if cached is not _UNSET:
+        return cached
     user_id = getattr(context.activity.from_property, "id", None)
     if not user_id:
         return None
@@ -1153,7 +1411,7 @@ async def _answer_freeform(
         run = await run_claude(
             _FREEFORM_PROMPT.format(
                 persona=_persona_preamble(config),
-                question=question[:300], snapshot=snapshot, help=_HELP_TEXT,
+                question=question[:300], snapshot=snapshot, help=_help_text(config),
             ),
             tempfile.gettempdir(),  # tool-less → cwd irrelevant, just must exist
             timeout_seconds=45,     # see _classify_intent — same headroom reasoning
@@ -1279,7 +1537,10 @@ async def _agentic_turn(
 async def _handle_free_text(
     context, config: Settings, container: Container,
     reviewer_tracker: ReviewerTrackerService, text: str,
+    *, defer: _Deferral | None = None,
 ) -> None:
+    """Classifier path (agentic mode off). The two guards below are instant, so they
+    answer on the live turn; everything past them needs Claude and is deferred."""
     if any(hint in text.lower() for hint in _MUTATION_HINTS):
         await context.send_activity(_REDIRECT_TO_ADO)
         return
@@ -1288,6 +1549,20 @@ async def _handle_free_text(
             "Lệnh này chưa hỗ trợ — gõ `/help` để xem lệnh có sẵn."
         )
         return
+
+    async def _work(ctx) -> None:
+        await _classify_and_reply(ctx, config, container, reviewer_tracker, text)
+
+    if not await _run_deferred(defer, context, _THINKING_ACK, _work):
+        await _work(context)
+
+
+async def _classify_and_reply(
+    context, config: Settings, container: Container,
+    reviewer_tracker: ReviewerTrackerService, text: str,
+) -> None:
+    """Classify the message, then answer it — every branch here costs at least one
+    Claude call, so callers run it off the turn (see ``_handle_free_text``)."""
     result = await _classify_intent(config, text)
     intent, flt = result["intent"], result.get("filter")
     if intent == "create_ticket":
@@ -1357,7 +1632,7 @@ async def _handle_free_text(
             "📊 Đang hoạt động. Xem chi tiết trên dashboard `/dashboard/reviews`."
         )
     elif intent == "help":
-        await context.send_activity(_HELP_TEXT)
+        await context.send_activity(_help_text(config))
     else:
         # Off-intent free text: instead of a canned "didn't understand" reply, let
         # Claude reason over a read-only snapshot and answer naturally (tool-less —

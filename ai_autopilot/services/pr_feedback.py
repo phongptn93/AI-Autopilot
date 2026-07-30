@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ai_autopilot.config import is_bot_signed, match_command
+from ai_autopilot.config import BotIdentity, find_bot_mention, is_bot_signed, match_command
 
 # Thread statuses that mean "no action needed".
 _RESOLVED_STATUSES = {"closed", "fixed", "wontfix", "resolved", "bydesign"}
@@ -55,12 +55,15 @@ def actionable_comments(threads: list[dict[str, Any]], bot_name: str = "") -> li
 
 
 def command_threads(
-    threads: list[dict[str, Any]], commands: list[str]
+    threads: list[dict[str, Any]], commands: list[str], *, bot: BotIdentity | None = None
 ) -> list[dict[str, Any]]:
-    """PR threads whose latest human comment is a ``/command`` addressed to the autopilot.
+    """PR threads whose latest human comment addresses the autopilot — either with a
+    ``/command`` or, when ``bot`` is given, by @mentioning it.
 
     Returns one entry per actionable thread — ``{thread_id, comment_id, instruction,
-    author_email, author_name}`` — so the babysitter can handle each command individually.
+    author_email, author_name, via_mention}`` — so the babysitter can handle each command
+    individually. ``via_mention`` means no command was named, so the caller must INFER one
+    (and must default to advisory — see ``infer_mention_command``).
 
     "Handled" is judged PER COMMENT, not by thread status: a command counts as done once a
     bot-signed reply follows it in the thread. That's the durable mark (survives restarts),
@@ -75,20 +78,28 @@ def command_threads(
         if tid is None:
             continue
         latest, instruction = None, None
+        via_mention = False
         bot_seen = False          # any bot-signed comment so far
         bot_replied_after = False  # bot-signed reply AFTER the newest command → handled
         follows_bot = False        # newest command came after a bot reply (a follow-up)
         for comment in thread.get("comments") or []:
             if (comment.get("commentType") or "text") == "system":
                 continue
-            if is_bot_signed(comment.get("content") or ""):
+            content = comment.get("content") or ""
+            if is_bot_signed(content):
                 bot_seen = True
                 if latest is not None:
                     bot_replied_after = True
                 continue
-            got = match_command(comment.get("content"), commands)
+            got, mentioned = match_command(content, commands), False
+            if got is None and bot is not None:
+                got = find_bot_mention(content, bot)
+                # "@bot /security check this" names a command after the mention — honour it
+                # rather than inferring, so an explicit ask is never second-guessed.
+                mentioned = got is not None and match_command(got, commands) is None
             if got is not None:
                 latest, instruction = comment, got  # keep the NEWEST command in the thread
+                via_mention = mentioned
                 bot_replied_after = False           # a newer command supersedes old replies
                 follows_bot = bot_seen
         if latest is None or bot_replied_after:
@@ -102,6 +113,7 @@ def command_threads(
             "instruction": instruction,
             "author_email": author.get("uniqueName"),
             "author_name": author.get("displayName"),
+            "via_mention": via_mention,
         })
     return out
 

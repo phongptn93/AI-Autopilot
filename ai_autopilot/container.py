@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 
 from ai_autopilot.ado import AdoAuthService, AdoClient, AdoNotifier
-from ai_autopilot.config import Settings
+from ai_autopilot.config import BotIdentity, Settings
 from ai_autopilot.data import (
     AiConflictRepository,
     AuditRepository,
@@ -111,6 +111,49 @@ class Container:
         self.webhook_queue = WebhookQueue()
         # Last dependency-scheduling decision (ready vs deferred), for the Planning UI.
         self.scheduler_view: dict | None = None
+        self._bot_identity: dict | None = None  # cached connectionData (see bot_identity)
+
+    async def bot_identity(self) -> dict:
+        """Who "the bot" is on ADO — the identity behind our credentials, auto-detected
+        once via ``connectionData``. Shared here (rather than cached per service) because
+        the reviewer tracker, the PR babysitter and the work-item poller all need it: the
+        tracker to recognise "the bot was added as a reviewer", the other two to recognise
+        an @mention of the bot in a comment.
+
+        Always returns a dict (blank fields when detection failed) so callers never have to
+        None-check; ``pr_bot_identity`` remains the manual override for that case."""
+        if self._bot_identity is None:
+            detected = None
+            try:
+                detected = await self.ado.get_connection_data()
+            except Exception as exc:  # noqa: BLE001 — never block startup on this
+                self.log.warning("bot identity lookup failed", error=str(exc))
+            self._bot_identity = detected or {"id": "", "display_name": "", "unique_name": ""}
+            if detected:
+                self.log.info(
+                    "bot identity resolved", id=detected["id"],
+                    name=detected["display_name"], unique=detected["unique_name"],
+                )
+            else:
+                self.log.warning(
+                    "could not resolve bot identity from connectionData — @mention "
+                    "detection falls back to display name / pr_bot_identity",
+                    override=self.config.pr_bot_identity,
+                )
+        return self._bot_identity
+
+    async def mention_identity(self) -> BotIdentity | None:
+        """``BotIdentity`` for @mention matching, or ``None`` when the feature is off."""
+        if not self.config.comment_mention_enabled:
+            return None
+        bot = await self.bot_identity()
+        return BotIdentity(
+            identity_id=bot.get("id") or "",
+            display_name=(
+                bot.get("display_name") or self.config.pr_bot_identity or ""
+            ),
+            claimed=self.config.command_user,
+        )
 
     async def startup(self) -> None:
         await self.database.create_all()

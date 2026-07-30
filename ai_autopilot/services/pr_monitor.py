@@ -13,6 +13,7 @@ import time
 
 from ai_autopilot.config import match_command, matches_user
 from ai_autopilot.container import Container
+from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.services.pr_feedback import (
@@ -310,11 +311,13 @@ class PrMonitorService:
             return
 
         threads = await c.ado.get_pull_request_threads(repo_id, pr_id)
-        commands = command_threads(threads, cfg.comment_commands)
+        commands = command_threads(
+            threads, cfg.comment_commands, bot=await c.mention_identity()
+        )
         if not commands:
             return
 
-        claimed = cfg.assignee_trigger_user or cfg.auto_transition_assignee
+        claimed = cfg.command_user
         handled = await self._get_handled(pr_id)
         branch = source_ref.removeprefix("refs/heads/")
         to_run: list[tuple[dict, int]] = []
@@ -335,7 +338,8 @@ class PrMonitorService:
             # The revision cap guards against runaway CODE churn — advisory commands
             # (/review) change nothing, so they neither consume nor hit the budget:
             # you can ask for another review even after the item is revision-capped.
-            advisory = match_command(cmd["instruction"], cfg.advisory_commands) is not None
+            # A bare @mention has its command inferred here, defaulting to advisory.
+            advisory = await resolve_command(cfg, cmd)
             if advisory:
                 to_run.append((cmd, await self._get_revisions(work_item_id)))
                 continue
@@ -434,12 +438,11 @@ class PrMonitorService:
             # Resolving below doesn't end the conversation: command detection is
             # per-comment (see ``command_threads``), so a reply here re-activates
             # the thread. Say so — otherwise nobody knows replying works.
-            hint = (
-                "<br/><sub>💬 Reply để tôi làm tiếp: <code>/ai</code> sửa code · "
-                "<code>/spec</code> cập nhật spec · <code>/test</code> viết test · "
-                "<code>/review</code> · <code>/qc</code> · <code>/security</code> · "
-                "<code>/impact</code> · <code>/summary</code>.</sub>"
-            )
+            # Generated from comment_command / comment_advisory_commands, so the hint can
+            # never advertise a command this instance would ignore. Blank when the command
+            # trigger is off — then offer nothing rather than a dangling label.
+            hint_html = self._config.comment_command_hint_html
+            hint = f"<br/>{hint_html}" if hint_html else ""
             if result.success:
                 msg = (
                     f"<div><b>🔍 Đã review xong</b> — nhận xét chi tiết ở trên.{hint}</div>"

@@ -408,7 +408,9 @@ async def test_agentic_turn_falls_back_on_failure(monkeypatch):
         _FakeContext(), Settings(teams_agentic_enabled=True), _ReviewContainer(),
         _FakeReviewerTracker(), "câu hỏi bất kỳ",
     )
-    assert handled is False  # caller falls back to the classifier path
+    # False = "I did not answer"; the caller then sends a static hint (it must NOT spend
+    # another Claude call on the classifier path — see the agentic-only test below).
+    assert handled is False
 
 
 async def test_free_text_mutation_request_still_redirects(monkeypatch):
@@ -426,3 +428,320 @@ async def test_free_text_mutation_request_still_redirects(monkeypatch):
         reviewer_tracker=_FakeReviewerTracker(), text="sửa giúp bug ở PR 42",
     )
     assert ctx.sent == [teams_agent._REDIRECT_TO_ADO]
+
+
+# ── Deferred replies: the Teams turn must never wait on Claude ────────────────
+
+
+class _FakeProactive:
+    """Records what a background task delivered into the conversation."""
+
+    def __init__(self):
+        self.sent: list = []
+
+    async def send_activity(self, adapter, conversation, activity):
+        self.sent.append(activity)
+
+    async def store_conversation(self, context):
+        return None
+
+
+class _FakeDeferral:
+    """Stands in for ``_Deferral`` without needing a real TurnContext to build a
+    ConversationReference from. ``context_for`` returns the REAL ``_DeferredContext`` so
+    the delivery path under test is the production one."""
+
+    def __init__(self, sem=None):
+        self.app = SimpleNamespace(proactive=_FakeProactive())
+        self.sem = sem
+
+    def context_for(self, context, email):
+        return teams_agent._DeferredContext(
+            self.app, adapter=None, conversation=None,
+            activity=context.activity, email=email,
+        )
+
+
+async def test_deferred_turn_acks_instantly_and_answers_in_background(monkeypatch):
+    """The regression that made the bot feel frozen: the messaging endpoint only returns
+    HTTP 200 once the turn handler finishes, so an inline 120s Claude call blew past the
+    channel's ~15s deadline and the user got nothing. The turn must return while Claude
+    is still running, then deliver the answer into the same conversation."""
+    release = asyncio.Event()
+
+    async def slow_run_claude(prompt, work_dir, **kwargs):
+        await release.wait()          # still running when the turn returns
+
+        class _R:
+            text = "Dạ PR !2470 đang chờ review ạ."
+
+        return _R()
+
+    monkeypatch.setattr(claude_client, "run_claude", slow_run_claude)
+    defer, ctx = _FakeDeferral(), _FakeContext()
+
+    await asyncio.wait_for(
+        teams_agent._handle_command(
+            ctx, Settings(teams_agentic_enabled=True), container=_ReviewContainer(),
+            reviewer_tracker=_FakeReviewerTracker(), text="PR 2470 sao rồi?",
+            defer=defer,
+        ),
+        timeout=1,                    # the turn itself must not wait on Claude
+    )
+    assert not release.is_set()                       # Claude deliberately still running
+    assert teams_agent._THINKING_ACK in ctx.sent      # user got immediate feedback
+    assert defer.app.proactive.sent == []             # nothing delivered yet
+
+    release.set()
+    for _ in range(10):               # let the detached task finish
+        await asyncio.sleep(0)
+    assert [a.text for a in defer.app.proactive.sent] == ["Dạ PR !2470 đang chờ review ạ."]
+
+
+async def test_deferred_failure_is_reported_not_swallowed(monkeypatch):
+    """A detached task that raises must still tell the user something — otherwise the
+    turn "succeeded" and the reply simply never arrives."""
+    defer, ctx = _FakeDeferral(), _FakeContext()
+
+    async def boom(_ctx):
+        raise RuntimeError("nope")
+
+    assert await teams_agent._run_deferred(defer, ctx, "⏳", boom) is True
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert "⚠️" in defer.app.proactive.sent[0].text
+
+
+async def test_run_deferred_without_deferral_runs_inline():
+    """``defer=None`` (unit tests, SDK absent) keeps the old inline behaviour."""
+    ran = []
+    assert await teams_agent._run_deferred(None, _FakeContext(), "⏳", ran.append) is False
+    assert ran == []                  # caller runs the work itself in this case
+
+
+async def test_deferred_work_is_capped_by_semaphore():
+    """Answering off the turn means a busy channel could otherwise spawn one Claude
+    process per message. The cap bounds the RUNS, never the acks — a queued user must
+    still hear back immediately (and be told they're queued)."""
+    defer = _FakeDeferral(sem=asyncio.Semaphore(1))
+    release, running, done = asyncio.Event(), [], []
+
+    async def work(ctx):
+        running.append(1)
+        await release.wait()
+        done.append(1)
+
+    first, second = _FakeContext(), _FakeContext()
+    assert await teams_agent._run_deferred(defer, first, "⏳", work) is True
+    for _ in range(5):
+        await asyncio.sleep(0)         # let the first task take the slot
+    assert await teams_agent._run_deferred(defer, second, "⏳", work) is True
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert len(running) == 1           # second is queued, not running
+    assert first.sent[-1] == "⏳"      # first went straight through
+    assert teams_agent._QUEUED_SUFFIX in second.sent[-1]   # second was told it waits
+
+    release.set()
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert len(done) == 2              # and it does eventually run
+
+
+async def test_uncapped_when_configured_zero():
+    """0 = no cap, and must not deadlock (a Semaphore(0) never admits anyone)."""
+    defer = _FakeDeferral(sem=None)
+    ran = []
+    assert await teams_agent._run_deferred(defer, _FakeContext(), "", ran.append) is True
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert len(ran) == 1
+
+
+async def test_deferred_context_keeps_caller_identity():
+    """Identity is resolved on the LIVE turn: the connector lookup needs a real
+    TurnContext, so without caching the background work would lose the caller's email
+    and silently drop every personal section."""
+    deferred = teams_agent._DeferredContext(
+        app=SimpleNamespace(proactive=_FakeProactive()), adapter=None,
+        conversation=None, activity=SimpleNamespace(from_property=SimpleNamespace(id="29:x")),
+        email="phong.pham@nois.vn",
+    )
+    assert await teams_agent._teams_email(deferred) == "phong.pham@nois.vn"
+    # A cached None means "looked up and failed" — must NOT retry the connector.
+    failed = teams_agent._DeferredContext(
+        app=None, adapter=None, conversation=None,
+        activity=SimpleNamespace(from_property=SimpleNamespace(id="29:x")), email=None,
+    )
+    assert await teams_agent._teams_email(failed) is None
+
+
+async def test_agentic_failure_sends_hint_without_a_second_claude_call(monkeypatch):
+    """One message = at most one Claude process. Chaining the classifier + phrasing calls
+    behind a failed agentic turn cost up to three sequential runs (~210s)."""
+    calls = []
+
+    async def boom(prompt, work_dir, **kwargs):
+        calls.append(prompt)
+        raise TimeoutError
+
+    monkeypatch.setattr(claude_client, "run_claude", boom)
+    ctx = _FakeContext()
+    await teams_agent._handle_command(
+        ctx, Settings(teams_agentic_enabled=True), container=_ReviewContainer(),
+        reviewer_tracker=_FakeReviewerTracker(), text="câu hỏi bất kỳ",
+    )
+    assert len(calls) == 1
+    assert ctx.sent == [teams_agent._FREEFORM_FALLBACK]
+
+
+# ── Slash commands: a syntax slip must not become a Claude run ────────────────
+
+
+async def test_malformed_slash_command_answers_usage_without_claude(monkeypatch):
+    """``/review 2470`` is the right command missing its repo. It used to fall through to
+    the agent, which spent a full run answering something else — so the command looked
+    broken. It must answer with its own usage, instantly."""
+    async def must_not_run(*args, **kwargs):
+        raise AssertionError("a malformed command must not reach Claude")
+
+    monkeypatch.setattr(claude_client, "run_claude", must_not_run)
+    ctx = _FakeContext()
+    await teams_agent._handle_command(
+        ctx, Settings(teams_agentic_enabled=True), container=_ReviewContainer(),
+        reviewer_tracker=_FakeReviewerTracker(), text="/review 2470",
+    )
+    assert "/review <repo> <pr-id>" in ctx.sent[0]
+
+
+async def test_unknown_slash_command_suggests_nearest(monkeypatch):
+    async def must_not_run(*args, **kwargs):
+        raise AssertionError("an unknown command must not reach Claude")
+
+    monkeypatch.setattr(claude_client, "run_claude", must_not_run)
+    ctx = _FakeContext()
+    await teams_agent._handle_command(
+        ctx, Settings(teams_agentic_enabled=True), container=_ReviewContainer(),
+        reviewer_tracker=_FakeReviewerTracker(), text="/prss",
+    )
+    assert "/prs" in ctx.sent[0] and "/help" in ctx.sent[0]
+
+
+def test_slash_help_ignores_plain_text():
+    assert teams_agent._slash_help("PR nào của tôi đang bị block?") is None
+    assert teams_agent._slash_help("/items") is not None
+
+
+def test_help_text_follows_configured_pr_commands():
+    """/help used to hardcode the PR command list (and had already dropped /review), so
+    it advertised commands the instance might ignore."""
+    text = teams_agent._help_text(
+        Settings(comment_command="/ai, /qc", comment_advisory_commands="/qc")
+    )
+    assert "`/ai`" in text and "`/qc`" in text
+    assert "/spec" not in text and "/summary" not in text
+    # Chat commands are still listed, with their usage.
+    assert "/review <repo> <pr-id>" in text
+
+
+# ── Dedup + digest delivery ──────────────────────────────────────────────────
+
+
+async def test_redelivered_activity_is_ignored():
+    """A channel redelivery must not run the message (and spawn Claude) twice."""
+    teams_agent._SEEN_ACTIVITIES.clear()
+    cfg = Settings()
+    sent = []
+
+    class _Ctx(_FakeContext):
+        def __init__(self):
+            super().__init__()
+            self.activity = SimpleNamespace(
+                id="act-1", text="/status", value=None,
+                from_property=SimpleNamespace(id=None),
+            )
+
+        async def send_activity(self, message):
+            sent.append(message)
+
+    for _ in range(2):
+        await teams_agent._handle_turn(_Ctx(), cfg, None, _FakeReviewerTracker())
+    assert len(sent) == 1  # second delivery skipped
+
+
+async def test_digest_sends_to_every_stored_conversation():
+    """Guards the double-prefix bug: ``all_keys`` yields already-prefixed storage keys,
+    so passing one to ``get_conversation`` (which prefixes again) missed every time and
+    the digest went to nobody while logging a healthy "sent"."""
+    from microsoft_agents.activity import ConversationAccount, ConversationReference
+    from microsoft_agents.hosting.core.app.proactive import (
+        Conversation,
+        Proactive,
+        ProactiveOptions,
+    )
+
+    class _DictStorage:
+        """Same contract as _DbConversationStorage: prefixed keys in, keys back out."""
+
+        def __init__(self):
+            self.items: dict = {}
+
+        async def read(self, keys, *, target_cls=None, **kwargs):
+            out = {}
+            for key in keys:
+                if key in self.items:
+                    data = self.items[key]
+                    out[key] = (
+                        target_cls.from_json_to_store_item(data) if target_cls else data
+                    )
+            return out
+
+        async def write(self, changes):
+            for key, item in changes.items():
+                self.items[key] = (
+                    item.store_item_to_json()
+                    if hasattr(item, "store_item_to_json") else item
+                )
+
+        async def all_keys(self):
+            return list(self.items)
+
+    storage = _DictStorage()
+    proactive = Proactive(
+        SimpleNamespace(options=SimpleNamespace(storage=storage)),
+        ProactiveOptions(storage=storage),
+    )
+    for cid in ("19:channel-a", "19:channel-b"):
+        await proactive.store_conversation(
+            Conversation({}, ConversationReference(
+                conversation=ConversationAccount(id=cid),
+                service_url="https://smba.example",
+            ))
+        )
+
+    delivered = []
+
+    class _App:
+        def __init__(self):
+            self.proactive = proactive
+
+    async def fake_send(adapter, conversation, activity):
+        delivered.append(conversation.conversation_reference.conversation.id)
+
+    proactive.send_activity = fake_send   # only the wire call is faked
+
+    class _EmptyTracker:
+        async def new_prs_since(self, cutoff): return []
+        async def merged_prs_since(self, cutoff): return []
+        async def tickets_logged_since(self, cutoff): return []
+        async def prs_ready_to_merge(self): return []
+        async def team_overview(self, limit=10): return []
+
+    await teams_agent._send_digest(
+        container=SimpleNamespace(), app=_App(), adapter=None,
+        reviewer_tracker=_EmptyTracker(), storage=storage,
+        message_factory=SimpleNamespace(text=lambda t: SimpleNamespace(text=t)),
+        window_hours=24,
+    )
+    assert sorted(delivered) == ["19:channel-a", "19:channel-b"]

@@ -18,6 +18,7 @@ import html
 import os
 import re
 import socket
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -75,13 +76,134 @@ def match_command(text: str | None, commands: list[str] | tuple[str, ...]) -> st
     WHOLE plain text (command + note) is returned — kept intact so the agent can interpret
     the intent (``/ai`` vs ``/review`` …) itself. HTML tags/entities are stripped first,
     since ADO stores comments as HTML. No prefix matches → ``None``."""
-    plain = html.unescape(_HTML_TAG_RE.sub(" ", text or "")).strip()
+    plain = _plain(text)
     low = plain.lower()
     for cmd in commands or ():
         cmd = (cmd or "").strip()
         if cmd and low.startswith(cmd.lower()):
             return plain
     return None
+
+
+@dataclass(frozen=True)
+class BotIdentity:
+    """Who "the autopilot" is on Azure DevOps, for recognising an @mention of it.
+
+    ``identity_id`` is the ADO identity GUID (auto-detected via ``connectionData``);
+    ``display_name`` is what a mention actually renders as. ``claimed`` is the configured
+    user (``assignee_trigger_user`` / ``auto_transition_assignee``) so a mention of the
+    operator's own account counts too — the bot posts under that identity."""
+
+    identity_id: str = ""
+    display_name: str = ""
+    claimed: str = ""
+
+
+# Azure DevOps stores an @mention inside comment HTML as an anchor carrying the mentioned
+# identity's GUID, e.g.
+#   <a href="#" data-vss-mention="version:2.0,11111111-2222-3333-4444-555555555555">@Phong Pham</a>
+# The attribute is captured whole and the GUID picked out separately — the "version:" part
+# has changed shape before, and a mention with no GUID must still be matchable by name.
+_MENTION_RE = re.compile(
+    r"<(?P<tag>a|span)\b[^>]*\bdata-vss-mention\s*=\s*\"(?P<attr>[^\"]*)\"[^>]*>"
+    r"(?P<label>.*?)</(?P=tag)>",
+    re.IGNORECASE | re.DOTALL,
+)
+_GUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
+)
+
+
+def _plain(text: str) -> str:
+    """Comment HTML → plain text (ADO stores comments as HTML)."""
+    return html.unescape(_HTML_TAG_RE.sub(" ", text or "")).strip()
+
+
+def find_bot_mention(text: str | None, bot: BotIdentity | None) -> str | None:
+    """If ``text`` @mentions the autopilot, return the comment as PLAIN text with that
+    mention removed; otherwise ``None``.
+
+    An @mention is how a human naturally addresses a bot, but ``match_command`` only ever
+    matched a LEADING ``/command`` — so "@AI Autopilot review this" on a pull request was
+    silently ignored (the rendered text starts with the display NAME, so not even putting
+    the bot's email in ``comment_command`` helped).
+
+    Identification is by GUID when the mention carries one AND we know ours: that survives
+    a rename and can't collide with a same-named colleague. Only when there's no GUID to
+    compare do we fall back to the display name."""
+    if not text or bot is None:
+        return None
+    for m in _MENTION_RE.finditer(text):
+        guid_match = _GUID_RE.search(m.group("attr") or "")
+        label = _plain(m.group("label") or "").lstrip("@").strip()
+        if guid_match and bot.identity_id:
+            # Definitive either way — never second-guess a GUID with a name.
+            if guid_match.group(0).lower() != bot.identity_id.lower():
+                continue
+        elif not (
+            (bot.display_name and matches_user(None, label, bot.display_name))
+            or (bot.claimed and matches_user(None, label, bot.claimed))
+        ):
+            continue
+        # Drop just this mention, keep the rest of what they wrote as the instruction.
+        return _plain(text[: m.start()] + " " + text[m.end():])
+    return None
+
+
+# Short purpose label per known /command, so the "reply to me" hint tells a reviewer what
+# each one DOES instead of listing bare verbs. A command with no entry here (an operator
+# added their own to ``comment_command``) still appears — just without a label.
+_COMMAND_LABELS = {
+    "/ai": "sửa code theo nhận xét",
+    "/spec": "cập nhật spec",
+    "/test": "viết test",
+    "/review": "review code",
+    "/qc": "phân tích test case",
+    "/security": "soát bảo mật (OWASP)",
+    "/impact": "phân tích ảnh hưởng",
+    "/summary": "tóm tắt dễ hiểu",
+}
+
+
+def split_commands(
+    commands: list[str], advisory: list[str]
+) -> tuple[list[str], list[str]]:
+    """Split configured trigger prefixes into ``(action, advisory)``, preserving the
+    configured order.
+
+    Only SLASH commands come back: ``comment_command`` may also carry a bare account
+    ("dxfactory@nois.vn"), which addresses the bot but isn't something a human types as
+    a command, so it must never appear in a hint offering commands to type."""
+    slash = [c for c in commands if c.startswith("/")]
+    advisory_set = {a.lower() for a in advisory}
+    action = [c for c in slash if c.lower() not in advisory_set]
+    advise = [c for c in slash if c.lower() in advisory_set]
+    return action, advise
+
+
+def _render_command_hint(action: list[str], advise: list[str], *, html_out: bool) -> str:
+    """Render the shared "reply to me" command hint in HTML (ADO comments) or Markdown
+    (Teams). One renderer so the two surfaces can never drift apart again."""
+    def fmt(cmds: list[str]) -> str:
+        parts = []
+        for cmd in cmds:
+            code = f"<code>{cmd}</code>" if html_out else f"`{cmd}`"
+            label = _COMMAND_LABELS.get(cmd.lower())
+            parts.append(f"{code} {label}" if label else code)
+        return " · ".join(parts)
+
+    def bold(text: str) -> str:
+        return f"<b>{text}</b>" if html_out else f"**{text}**"
+
+    groups = []
+    if action:
+        groups.append(f"{bold('sửa code:')} {fmt(action)}")
+    if advise:
+        groups.append(f"{bold('chỉ nhận xét:')} {fmt(advise)}")
+    if not groups:
+        return ""
+    body = f"💬 Reply để tôi làm tiếp — {' — '.join(groups)}."
+    return f"<sub>{body}</sub>" if html_out else body
 
 
 def matches_user(email: str | None, name: str | None, claimed: str) -> bool:
@@ -470,6 +592,13 @@ class Settings(BaseSettings):
     # Route free-text through a genuine Claude agent turn (tools + skills) instead of
     # the fixed intent classifier — more natural/agentic, but a Claude run per message.
     teams_agentic_enabled: bool = False
+    # How many chat replies may hold a Claude process AT ONCE. Replies are answered off
+    # the Teams turn (see teams_agent._run_deferred), so without a cap a busy channel
+    # spawns one CLI per message and the box thrashes — starving the work pipeline it is
+    # supposed to be reporting on. Deliberately NOT max_concurrent (default 1): that
+    # governs 30-minute worktree tasks, and reusing it would make the whole team's chat
+    # single-file. 0 = no cap.
+    teams_agent_max_concurrent: int = 3
     # ── Bot persona (Teams voice) ──
     # The bot composes its key replies (free-text answers, ticket acknowledgements)
     # in THIS voice via Claude, so it reads like a consistent, proactive teammate
@@ -524,6 +653,12 @@ class Settings(BaseSettings):
     # findings but makes NO code change, and "no file changes" counts as success. Everything
     # else (e.g. /ai, /spec, /test) is an ACTION command that revises the branch. Comma-separated.
     comment_advisory_commands: str = "/review, /qc, /security, /impact, /summary"
+    # Also treat an @MENTION of the bot (no slash needed) as addressing it — how a human
+    # naturally asks a teammate. The intent is then INFERRED from the comment text into one
+    # of the commands above, defaulting to an ADVISORY one: an ambiguous mention
+    # ("@bot sao chỗ này chậm vậy?") must never turn into a code change + push. Only
+    # wording that clearly asks for a change routes to an action command.
+    comment_mention_enabled: bool = True
     # Cap on human↔bot comment rounds per item, so a back-and-forth can't run away.
     max_comment_rounds: int = 5
     # Seconds between comment scans — the /command loop runs on its OWN cadence, decoupled
@@ -715,6 +850,43 @@ class Settings(BaseSettings):
     def advisory_commands(self) -> list[str]:
         """Review-only command prefixes (``comment_advisory_commands`` split on commas)."""
         return [t.strip() for t in (self.comment_advisory_commands or "").split(",") if t.strip()]
+
+    @property
+    def command_user(self) -> str:
+        """The user THIS machine acts for — ``assignee_trigger_user`` falling back to
+        ``auto_transition_assignee``. Scopes /commands and @mentions to one person so, on a
+        multi-machine setup, each person's machine handles only their own."""
+        return self.assignee_trigger_user or self.auto_transition_assignee
+
+    @property
+    def command_catalog(self) -> list[tuple[str, bool, str]]:
+        """``(command, is_advisory, label)`` for every configured slash command — the menu
+        offered when inferring what a bare @mention meant."""
+        action, advise = split_commands(self.comment_commands, self.advisory_commands)
+        return [
+            (cmd, cmd in advise, _COMMAND_LABELS.get(cmd.lower(), ""))
+            for cmd in action + advise
+        ]
+
+    @property
+    def comment_command_hint_html(self) -> str:
+        """The "reply to me with /command" hint for ADO comments, DERIVED from
+        ``comment_command`` + ``comment_advisory_commands``.
+
+        Single source of truth: it used to be hand-written in three places
+        (``pr_monitor``, ``reviewer_tracker`` ×2) which had drifted apart — one dropped
+        ``/review``, another dropped ``/summary`` — and none reflected an operator who
+        customised ``comment_command``, so the bot advertised commands it would ignore.
+        Empty string when no slash command is configured (command trigger off), and the
+        callers then omit the hint entirely rather than printing a dangling label."""
+        action, advise = split_commands(self.comment_commands, self.advisory_commands)
+        return _render_command_hint(action, advise, html_out=True)
+
+    @property
+    def comment_command_hint_markdown(self) -> str:
+        """Markdown form of :attr:`comment_command_hint_html`, for Teams chat replies."""
+        action, advise = split_commands(self.comment_commands, self.advisory_commands)
+        return _render_command_hint(action, advise, html_out=False)
 
     @property
     def report_only(self) -> bool:

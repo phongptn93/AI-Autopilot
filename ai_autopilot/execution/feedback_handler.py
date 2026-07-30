@@ -7,7 +7,10 @@ guidance that steers the agent to the right skill; unknown text falls back to th
 
 from __future__ import annotations
 
-from ai_autopilot.config import BOT_COMMENT_INSTRUCTION, Settings
+import re
+import tempfile
+
+from ai_autopilot.config import BOT_COMMENT_INSTRUCTION, Settings, match_command
 from ai_autopilot.execution.claude_executor import ClaudeExecutor
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
@@ -101,6 +104,116 @@ def _guidance(command: str, item: WorkItemInfo, branch: str, feedback: str, base
         f"#{wid}:\n\n{feedback}\n\nInterpret their intent and act on this branch: make the "
         "requested change, commit and push. Choose the most appropriate skill(s)."
     )
+
+
+# ── Inferring what a bare @mention meant ─────────────────────────────────────
+
+_INFER_PROMPT = """A teammate @mentioned the autopilot in a code-review comment without \
+naming a command. Decide which ONE command they meant.
+
+Their comment (may be Vietnamese):
+\"\"\"{text}\"\"\"
+
+Available commands:
+{catalog}
+
+Rules:
+- DEFAULT TO AN ADVISORY command. Most mentions are questions, opinions, or requests to \
+look at something.
+- Pick an ACTION command ONLY if the comment unmistakably instructs you to CHANGE the \
+code, spec or tests — e.g. "sửa lại chỗ này", "fix this", "thêm test cho case X", \
+"cập nhật spec". A question, a complaint, or an observation that something looks wrong \
+("chỗ này sai rồi", "sao chậm vậy?") is NOT an instruction to change anything: those are \
+ADVISORY.
+- If you are unsure at all, choose the advisory command that best fits.
+
+Answer with EXACTLY the command token and nothing else, e.g. /security"""
+
+
+_ADVISORY_NOTE = "ADVISORY (comment only, never changes code)"
+_ACTION_NOTE = "ACTION (changes code and pushes)"
+
+
+def _format_catalog(catalog: list[tuple[str, bool, str]]) -> str:
+    return "\n".join(
+        f"- {cmd} — {_ADVISORY_NOTE if adv else _ACTION_NOTE}"
+        + (f" — {label}" if label else "")
+        for cmd, adv, label in catalog
+    )
+
+
+def _advisory_default(config: Settings) -> str:
+    """The command a mention falls back to: the first configured ADVISORY one."""
+    for cmd, advisory, _ in config.command_catalog:
+        if advisory:
+            return cmd
+    return ""
+
+
+async def infer_mention_command(config: Settings, text: str) -> tuple[str, bool]:
+    """Map a bare @mention comment onto ``(command, advisory)``.
+
+    An @mention is how a human asks a teammate something, so it carries no command — but
+    everything downstream (``_guidance``, ``review_only``) is keyed on one. Rather than
+    special-casing mentions through that machinery, we infer the command they meant and let
+    the existing paths run unchanged.
+
+    SAFETY: ``advisory`` is DERIVED from the chosen command, never decided separately, and
+    every failure mode (timeout, unparseable answer, a command that isn't configured) lands
+    on the advisory default. That matters because the alternative — treating an unrecognised
+    mention as an action, which is what the plain command path does — would let
+    "@bot sao chỗ này chậm vậy?" rewrite the branch and push."""
+    catalog = config.command_catalog
+    if not catalog:
+        return "", True
+    default = _advisory_default(config)
+    advisory_set = {cmd.lower() for cmd, adv, _ in catalog if adv}
+
+    def _resolve(choice: str) -> tuple[str, bool]:
+        low = choice.lower()
+        if low not in {c.lower() for c, _, _ in catalog}:
+            return default, True
+        return choice, low in advisory_set
+
+    from ai_autopilot.execution.claude_client import run_claude
+
+    log = get_logger("execution.feedback_handler")
+    try:
+        run = await run_claude(
+            _INFER_PROMPT.format(text=text[:800], catalog=_format_catalog(catalog)),
+            tempfile.gettempdir(),  # tool-less → cwd only has to exist
+            timeout_seconds=45,
+            model=config.claude_model or None,
+            max_turns=1,
+            allowed_tools=[],
+        )
+    except Exception as exc:  # noqa: BLE001 — never let inference decide by failing open
+        log.warning("mention intent inference failed — defaulting to advisory",
+                    error=f"{type(exc).__name__}: {exc}", default=default)
+        return default, True
+    m = re.search(r"/\w+", run.text or "")
+    if not m:
+        log.warning("mention intent unparseable — defaulting to advisory",
+                    reply=(run.text or "")[:120], default=default)
+        return default, True
+    command, advisory = _resolve(m.group(0))
+    log.info("mention intent inferred", command=command, advisory=advisory)
+    return command, advisory
+
+
+async def resolve_command(config: Settings, cmd: dict) -> bool:
+    """Whether ``cmd`` is ADVISORY (review-only), inferring the command first when it came
+    from a bare @mention — in which case ``cmd["instruction"]`` is rewritten to carry the
+    inferred command so ``_guidance`` / ``_AGENT_FOR`` route it like any other.
+
+    One helper for every caller (PR babysitter, reviewer tracker) so the advisory default
+    for mentions can't be honoured in one place and forgotten in another."""
+    if cmd.get("via_mention"):
+        command, advisory = await infer_mention_command(config, cmd["instruction"])
+        if command:
+            cmd["instruction"] = f"{command} {cmd['instruction']}"
+        return advisory
+    return match_command(cmd["instruction"], config.advisory_commands) is not None
 
 
 class FeedbackHandler:

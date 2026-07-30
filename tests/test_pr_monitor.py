@@ -68,12 +68,25 @@ def _thread(tid: int, cid: int, content: str, email: str = "phong@nois.vn"):
     }
 
 
+async def _no_bot_identity() -> dict:
+    return {"id": "", "display_name": "", "unique_name": ""}
+
+
+async def _no_mention_identity():
+    return None
+
+
 def _service(ado, feedback, **overrides) -> PrMonitorService:
     config = Settings(
         comment_command="/ai, /review", max_concurrent=4,
         pr_adjust_related_drafts=False, **overrides,
     )
-    c = SimpleNamespace(config=config, ado=ado, feedback=feedback, executor=None)
+    c = SimpleNamespace(
+        config=config, ado=ado, feedback=feedback, executor=None,
+        # No bot identity in these fakes → @mention detection is simply off, so these
+        # tests keep exercising the plain /command path.
+        bot_identity=_no_bot_identity, mention_identity=_no_mention_identity,
+    )
     return PrMonitorService(c)
 
 

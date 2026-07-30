@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from ai_autopilot.config import BotIdentity
 from ai_autopilot.services.pr_feedback import (
     actionable_comments,
     command_threads,
@@ -182,3 +183,70 @@ def test_command_threads_skips_command_the_bot_already_answered():
         ]},
     ]
     assert command_threads(threads, ["/ai", "/review"]) == []
+
+
+# ── @mention: how a human actually addresses a bot ───────────────────────────
+#
+# Before this, ONLY a leading /command counted, so "@AI Autopilot review this" on a pull
+# request was silently ignored — and putting the bot's email in comment_command did not
+# help, because ADO renders a mention as the display NAME.
+
+_BOT_GUID = "11111111-2222-3333-4444-555555555555"
+
+
+def _mention(guid: str = _BOT_GUID, name: str = "Phong Pham") -> str:
+    """An @mention exactly as Azure DevOps stores it in comment HTML."""
+    return f'<a href="#" data-vss-mention="version:2.0,{guid}">@{name}</a>'
+
+
+def _bot() -> BotIdentity:
+    return BotIdentity(
+        identity_id=_BOT_GUID, display_name="Phong Pham", claimed="phong@nois.vn"
+    )
+
+
+def _mention_thread(tid: int, cid: int, content: str):
+    return {
+        "id": tid, "status": "active",
+        "comments": [{
+            "id": cid, "commentType": "text",
+            "author": {"displayName": "Phong", "uniqueName": "phong@nois.vn"},
+            "content": content,
+        }],
+    }
+
+
+def test_mention_is_detected_and_flagged_for_inference():
+    threads = [_mention_thread(10, 1, _mention() + " sao chỗ này chậm vậy?")]
+    got = command_threads(threads, ["/ai", "/review"], bot=_bot())
+    assert [t["thread_id"] for t in got] == [10]
+    assert got[0]["instruction"] == "sao chỗ này chậm vậy?"  # mention stripped
+    assert got[0]["via_mention"] is True                     # caller must infer + advisory
+
+
+def test_mention_of_someone_else_is_ignored():
+    """The bot must not answer a mention of a colleague — GUID is decisive."""
+    other = _mention(guid="99999999-2222-3333-4444-555555555555", name="Ai Khac")
+    assert command_threads(
+        [_mention_thread(10, 1, other + " xem hộ cái này")], ["/ai"], bot=_bot()
+    ) == []
+
+
+def test_mention_with_explicit_command_is_not_inferred():
+    """"@bot /security check this" named a command — honour it, don't second-guess it."""
+    threads = [_mention_thread(10, 1, _mention() + " /security rà đoạn này")]
+    got = command_threads(threads, ["/ai", "/security"], bot=_bot())
+    assert got[0]["instruction"] == "/security rà đoạn này"
+    assert got[0]["via_mention"] is False
+
+
+def test_mentions_off_when_no_identity():
+    """bot=None (comment_mention_enabled off, or identity unresolved) → old behaviour."""
+    threads = [_mention_thread(10, 1, _mention() + " review giúp")]
+    assert command_threads(threads, ["/ai", "/review"]) == []
+
+
+def test_slash_commands_still_report_no_mention():
+    threads = [_mention_thread(10, 1, "/ai đổi field")]
+    got = command_threads(threads, ["/ai"], bot=_bot())
+    assert got[0]["via_mention"] is False and got[0]["instruction"] == "/ai đổi field"

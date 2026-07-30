@@ -28,7 +28,7 @@ class Field:
 
 # Order here is the order rendered on the page. Sections group consecutive fields.
 FIELDS: tuple[Field, ...] = (
-    # ── Workspace & repository ──
+    # ── Workspace & Repository ──
     Field("workspace_directory", "Workspace directory", "text", "Workspace & Repository",
           "Folder holding the shared .claude (skills/rules/MCP). Claude runs HERE and the agent "
           "picks which repo subfolder to edit. Blank = legacy mode (run inside one repo)."),
@@ -37,7 +37,7 @@ FIELDS: tuple[Field, ...] = (
     Field("repo_descriptions", "Repo descriptions", "list", "Workspace & Repository",
           "What each repo is, so the agent picks the right one. One 'RepoName = description' per "
           "line, e.g. 'Backend-Fresh = .NET API', 'Dxfac-gitops = deploy manifests, don't edit'."),
-    # ── Azure DevOps connection ──
+    # ── Azure DevOps Connection ──
     Field("ado_organization", "Organization URL", "text", "Azure DevOps Connection",
           "e.g. https://dev.azure.com/your-org"),
     Field("ado_project", "Project (work items)", "text", "Azure DevOps Connection"),
@@ -46,7 +46,7 @@ FIELDS: tuple[Field, ...] = (
           "work-item project. Blank = same. (Cross-project setup.)"),
     Field("ado_pat", "Personal Access Token", "password", "Azure DevOps Connection",
           "Leave blank to keep the current token."),
-    # ── Tags & trigger ──
+    # ── Tags & Trigger ──
     Field("trigger_tag", "Trigger tag", "text", "Tags & Trigger",
           "Work items with this tag get processed."),
     Field("assignee_trigger_tag", "Assignee trigger tag", "text", "Tags & Trigger",
@@ -88,7 +88,7 @@ FIELDS: tuple[Field, ...] = (
           "Tag added when the autopilot gives up after retries. Blank = use the Done tag."),
     Field("state_failed", "⛔ Failed — ADO state", "stateone", "Outcomes → tag + state",
           "State when the autopilot gives up after exhausting retries."),
-    # ── Board columns (extra, read-only by ADO state) ──
+    # ── Board columns ──
     Field("board_review_state", "Column: Ready for review", "stateone", "Board columns",
           "Items in this ADO state show in a 'Ready for review' board column. Blank = no column. "
           "Use a state the autopilot doesn't set."),
@@ -124,7 +124,7 @@ FIELDS: tuple[Field, ...] = (
           "ADO build definition id of the deploy pipeline. 0 = watch any successful build on the branch."),
     Field("deploy_branch", "Deploy branch", "text", "Auto transitions",
           "Branch the deploy builds run on (blank = base branch)."),
-    # ── Execution & autonomy ──
+    # ── Execution & Autonomy ──
     Field("execution_mode", "Execution mode", "select", "Execution & Autonomy",
           "interactive = launch a Remote-Control Claude session per task you can /rc into and steer; "
           "headless = autonomous SDK run (no human attach).",
@@ -143,38 +143,20 @@ FIELDS: tuple[Field, ...] = (
     Field("max_concurrent", "Max concurrent", "int", "Execution & Autonomy",
           "Restart required to take effect."),
     Field("task_timeout_minutes", "Task timeout (minutes)", "int", "Execution & Autonomy"),
-    Field("auto_review_enabled", "Auto security review", "bool", "Execution & Autonomy"),
-    Field("policy_protected_paths", "🛡️ Protected paths (never modify)", "list",
-          "Execution & Autonomy",
-          "Glob patterns the autopilot must NEVER change — one per line, e.g. 'k8s/*', "
-          "'.github/*', '*.env', 'Dockerfile'. A run touching any of these is blocked "
-          "before a PR opens. Empty = off."),
-    Field("policy_max_files_changed", "🛡️ Max files changed / run", "int",
-          "Execution & Autonomy",
-          "Blast-radius cap: block a run that changes more files than this (a 'small "
-          "fix' rewriting half the repo needs a human). 0 = off."),
-    Field("learning_loop_enabled", "🧠 Learning loop", "bool", "Execution & Autonomy",
-          "Remember what auto-review flagged per repo and inject recent lessons into the "
-          "next run's brief, so the agent stops repeating them. Off = brief unchanged."),
-    Field("test_gate_enabled", "🧪 Auto-test-gate", "bool", "Execution & Autonomy",
-          "Run the repo's test suite in the worktree before opening a PR; a red run blocks "
-          "the PR and lowers the run score. Off = no test run."),
-    Field("test_command", "↳ Test command", "text", "Execution & Autonomy",
-          "Command to run the tests (in the repo worktree). Blank = auto-detect "
-          "(pytest / dotnet test / npm test); no runner found = skipped, never blocks."),
-    Field("test_timeout_seconds", "↳ Test timeout (seconds)", "int", "Execution & Autonomy",
-          "Kill the test run after this long and treat it as failed. Default 600."),
-    Field("pr_scoring_enabled", "Score each run (0–100)", "bool", "Execution & Autonomy",
-          "Grade each run from objective signals; below the review threshold → hold for human."),
-    Field("pr_score_auto_min", "Score ≥ this → auto-resolve", "int", "Execution & Autonomy",
-          "Only at unattended autonomy. Default 85."),
-    Field("pr_score_review_min", "Score < this → escalate", "int", "Execution & Autonomy",
-          "Below this the run is held for a human instead of review/done. Default 60."),
-    Field("feedback_loop_enabled", "🔁 PR feedback loop", "bool", "Execution & Autonomy",
-          "Watch open autopilot PRs for new human review comments and auto-revise the branch to "
-          "address them. Restart required to take effect."),
-    Field("max_revisions", "↳ Max PR revisions / item", "int", "Execution & Autonomy",
-          "Cap auto-revisions per work item so a review back-and-forth can't run away. Default 3."),
+    Field("claude_effort_task", "⚡ Effort — task runs", "select", "Execution & Autonomy",
+          "How hard the model reasons on real code work. Blank = the model's default. "
+          "Raise to xhigh/max for demanding refactors; only LOWER it after checking quality "
+          "on your own work, since this is the path that writes code.",
+          ("", "low", "medium", "high", "xhigh", "max")),
+    Field("claude_effort_agentic", "⚡ Effort — agentic chat", "select", "Execution & Autonomy",
+          "The Teams agent turn: real ADO lookups, but a chat reply rather than an edit. "
+          "medium keeps quality at a fraction of the latency someone is waiting through.",
+          ("", "low", "medium", "high", "xhigh", "max")),
+    Field("claude_effort_chat", "⚡ Effort — short chat calls", "select", "Execution & Autonomy",
+          "Classify an intent, reword a looked-up list, write one persona message, pick a "
+          "command for an @mention. These choose or rephrase — they never reason about code — "
+          "so low is nearly free of risk and noticeably faster.",
+          ("", "low", "medium", "high", "xhigh", "max")),
     Field("use_specialized_agents", "🧩 Route commands to specialist agents", "bool",
           "Execution & Autonomy",
           "Send /spec /qc /security /review /test /impact to their purpose-built subagents "
@@ -186,65 +168,70 @@ FIELDS: tuple[Field, ...] = (
     Field("claude_session_ttl_hours", "↳ Session reuse TTL (hours)", "int",
           "Execution & Autonomy",
           "Only resume a session this fresh; older → start clean. Default 24."),
+    Field("dry_run", "Dry run", "bool", "Execution & Autonomy",
+          "Log only — never execute or write to ADO."),
+    # ── 🛡️ Guardrails & policy ──
+    Field("policy_protected_paths", "🛡️ Protected paths (never modify)", "list",
+          "🛡️ Guardrails & policy",
+          "Glob patterns the autopilot must NEVER change — one per line, e.g. 'k8s/*', "
+          "'.github/*', '*.env', 'Dockerfile'. A run touching any of these is blocked "
+          "before a PR opens. Empty = off."),
+    Field("policy_max_files_changed", "🛡️ Max files changed / run", "int",
+          "🛡️ Guardrails & policy",
+          "Blast-radius cap: block a run that changes more files than this (a 'small "
+          "fix' rewriting half the repo needs a human). 0 = off."),
+    # ── 🧪 Quality gates ──
+    Field("auto_review_enabled", "Auto security review", "bool", "🧪 Quality gates"),
+    Field("learning_loop_enabled", "🧠 Learning loop", "bool", "🧪 Quality gates",
+          "Remember what auto-review flagged per repo and inject recent lessons into the "
+          "next run's brief, so the agent stops repeating them. Off = brief unchanged."),
+    Field("test_gate_enabled", "🧪 Auto-test-gate", "bool", "🧪 Quality gates",
+          "Run the repo's test suite in the worktree before opening a PR; a red run blocks "
+          "the PR and lowers the run score. Off = no test run."),
+    Field("test_command", "↳ Test command", "text", "🧪 Quality gates",
+          "Command to run the tests (in the repo worktree). Blank = auto-detect "
+          "(pytest / dotnet test / npm test); no runner found = skipped, never blocks."),
+    Field("test_timeout_seconds", "↳ Test timeout (seconds)", "int", "🧪 Quality gates",
+          "Kill the test run after this long and treat it as failed. Default 600."),
+    Field("pr_scoring_enabled", "Score each run (0–100)", "bool", "🧪 Quality gates",
+          "Grade each run from objective signals; below the review threshold → hold for human."),
+    Field("pr_score_auto_min", "Score ≥ this → auto-resolve", "int", "🧪 Quality gates",
+          "Only at unattended autonomy. Default 85."),
+    Field("pr_score_review_min", "Score < this → escalate", "int", "🧪 Quality gates",
+          "Below this the run is held for a human instead of review/done. Default 60."),
+    # ── 🔁 PR review & feedback ──
+    Field("feedback_loop_enabled", "🔁 PR feedback loop", "bool", "🔁 PR review & feedback",
+          "Watch open autopilot PRs for new human review comments and auto-revise the branch to "
+          "address them. Restart required to take effect."),
+    Field("max_revisions", "↳ Max PR revisions / item", "int", "🔁 PR review & feedback",
+          "Cap auto-revisions per work item so a review back-and-forth can't run away. Default 3."),
     Field("pr_reviewer_tracking_enabled", "👀 Track PR reviewers", "bool",
-          "Execution & Autonomy",
+          "🔁 PR review & feedback",
           "Watch reviewer lists on ALL active PRs: dashboard status, auto-review when the bot "
           "is added as reviewer, polite overdue reminders. Restart required."),
     Field("pr_auto_review_on_added", "↳ Auto-review when bot added", "bool",
-          "Execution & Autonomy",
+          "🔁 PR review & feedback",
           "Bot added as PR reviewer → structured AI review + vote. Re-arms on new commits."),
     Field("pr_reviewer_reminder_hours", "↳ Remind reviewers after (hours)", "int",
-          "Execution & Autonomy",
+          "🔁 PR review & feedback",
           "A reviewer with no vote after this many hours gets one polite PR reminder. 0 = off."),
-    Field("pr_bot_identity", "↳ Bot identity override", "text", "Execution & Autonomy",
+    Field("pr_bot_identity", "↳ Bot identity override", "text", "🔁 PR review & feedback",
           "Email / uniqueName of the bot reviewer account. Blank = auto-detect the PAT's own "
           "identity via connectionData."),
     Field("pr_reviewer_target_branches", "↳ Only these target branches", "list",
-          "Execution & Autonomy",
+          "🔁 PR review & feedback",
           "One branch per line (e.g. dxfac/development). Only PRs merging INTO these branches "
           "are tracked / reviewed / shown. Empty = all targets."),
-    Field("teams_agent_enabled", "💬 Two-way Teams bot", "bool", "Execution & Autonomy",
-          "Reply and act on button clicks in Teams (approve/reject, chat commands) via a "
-          "registered Azure Bot / Agent ID — fill in the App ID/tenant/secret fields below. "
-          "Also requires `pip install .[teams-bot]`. Restart required."),
-    Field("bot_persona_name", "🎭 Bot persona name", "text", "Execution & Autonomy",
-          "How the bot refers to itself in Teams replies (e.g. 'AI Autopilot'). "
-          "Used when it composes ticket acknowledgements / free-text answers."),
-    Field("bot_persona_voice", "↳ Bot persona voice", "text", "Execution & Autonomy",
-          "Tone/register guide handed to Claude so the bot's replies read like a "
-          "consistent, proactive teammate. Blank = terse machine style."),
-    Field("teams_review_skill", "↳ PR review skill", "text", "Execution & Autonomy",
-          "Skill the bot runs to review a PR from chat (real diff-vs-codebase review "
-          "that posts findings on the PR). Must exist in the workspace's .claude/skills."),
-    Field("teams_agentic_enabled", "↳ Agentic free-text (Claude turn)", "bool",
-          "Route free-text through a real Claude agent turn (tools + skills) instead of "
-          "the fixed intent classifier — more natural, but a Claude run per message."),
-    Field("teams_agent_nlu_enabled", "↳ Understand free-text (read-only)", "bool",
-          "Execution & Autonomy",
-          "Free-text Teams messages that don't match a /command are classified by Claude "
-          "into items/prs/status/help — never an action. Costs one Claude call per "
-          "unmatched message. Off = unmatched text just gets the command list."),
-    Field("teams_agent_digest_interval_hours", "↳ Daily digest every (hours)", "int",
-          "Execution & Autonomy",
-          "Proactively post a full activity digest to every channel/chat the bot has "
-          "been added to: autopilot run stats, auto-reviews + reminders sent, PRs "
-          "opened/merged, /log tickets, PRs ready to merge, oldest stuck PRs, and a "
-          "per-person work item standup. 0 = off. Requires the bot to have been "
-          "messaged/added at least once so its conversation is stored (persists "
-          "across restarts)."),
-    Field("teams_agent_app_id", "↳ Agent (App) ID", "text", "Execution & Autonomy",
-          "Azure Bot's Application (client) ID. Also requires `pip install .[teams-bot]`."),
-    Field("teams_agent_tenant_id", "↳ Tenant ID", "text", "Execution & Autonomy",
-          "Directory (tenant) ID the App registration lives in."),
-    Field("teams_agent_app_secret", "↳ Agent app secret", "password", "Execution & Autonomy",
-          "Client secret from Certificates & secrets on the App registration."),
-    Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "Execution & Autonomy",
+    Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "🔁 PR review & feedback",
           "A new human comment on an autopilot-owned item (held / in review / done) re-runs it "
           "with your comment as top-priority guidance — no restart tag needed."),
-    Field("max_comment_rounds", "↳ Max comment rounds / item", "int", "Execution & Autonomy",
+    Field("max_comment_rounds", "↳ Max comment rounds / item", "int", "🔁 PR review & feedback",
           "Cap human↔bot comment rounds per item so a back-and-forth can't run away. Default 5."),
-    Field("dry_run", "Dry run", "bool", "Execution & Autonomy",
-          "Log only — never execute or write to ADO."),
+    Field("comment_mention_enabled", "↳ Answer an @mention on a PR", "bool", "🔁 PR review & feedback",
+          "Treat an @mention of the bot on a pull request as addressing it, with no /command "
+          "needed — how a human naturally asks a teammate. The intent is inferred into one of "
+          "the /commands and defaults to ADVISORY, so an ambiguous mention never becomes a "
+          "code change and push."),
     # ── Dependency scheduling ──
     Field("dependency_scheduling_enabled", "Order by link graph", "bool",
           "Dependency scheduling",
@@ -263,7 +250,7 @@ FIELDS: tuple[Field, ...] = (
     Field("scheduler_history_limit", "History to keep", "int", "Dependency scheduling",
           "How many recent scheduling decisions (that held work back) to keep for the "
           "Planning history panel. 0 = keep only the live view."),
-    # ── Closed-loop SDLC engine (v2) ──
+    # ── Closed-loop SDLC (v2) ──
     Field("sdlc_loop_enabled", "Enable SDLC loop", "bool", "Closed-loop SDLC (v2)",
           "Drive items through profile-selected SDLC stages (gate + revise + escalate + handoff). "
           "Off = one-shot behaviour, unchanged. Headless only."),
@@ -312,6 +299,11 @@ FIELDS: tuple[Field, ...] = (
           "One-way channel: Teams Workflows \"Post to a channel when a webhook request is "
           "received\" URL. Started/completed/error notices and reviewer reminders post here. "
           "Blank = Teams notifications off."),
+    Field("teams_webhook_urls", "↳ Thêm channel khác (mỗi dòng 1 URL)", "list", "Notifications",
+          "Mọi thông báo sẽ được đăng vào TẤT CẢ các channel — dùng khi muốn báo song song "
+          "vào #dev, #qc, channel quản lý… mà không phải chạy thêm instance. URL trùng với ô "
+          "trên sẽ tự bỏ, nên không bị gửi 2 lần. Một channel lỗi không làm mất các channel "
+          "còn lại. ⚠️ URL chứa token cấp quyền đăng bài — đối xử như mật khẩu."),
     Field("smtp_host", "SMTP host", "text", "Notifications", "Blank = email off."),
     Field("smtp_port", "SMTP port", "int", "Notifications", "Default 587 (STARTTLS)."),
     Field("smtp_user", "SMTP user", "text", "Notifications"),
@@ -321,6 +313,53 @@ FIELDS: tuple[Field, ...] = (
     Field("zalo_oa_access_token", "Zalo OA access token", "password", "Notifications",
           "Blank = Zalo off."),
     Field("zalo_recipient_user_id", "Zalo recipient user id", "text", "Notifications"),
+    # ── 💬 Teams bot (2-way chat) ──
+    Field("teams_agent_enabled", "💬 Two-way Teams bot", "bool", "💬 Teams bot (2-way chat)",
+          "Reply and act on button clicks in Teams (approve/reject, chat commands) via a "
+          "registered Azure Bot / Agent ID — fill in the App ID/tenant/secret fields below. "
+          "Also requires `pip install .[teams-bot]`. Restart required."),
+    Field("bot_persona_name", "🎭 Bot persona name", "text", "💬 Teams bot (2-way chat)",
+          "How the bot refers to itself in Teams replies (e.g. 'AI Autopilot'). "
+          "Used when it composes ticket acknowledgements / free-text answers."),
+    Field("bot_persona_voice", "↳ Bot persona voice", "text", "💬 Teams bot (2-way chat)",
+          "Tone/register guide handed to Claude so the bot's replies read like a "
+          "consistent, proactive teammate. Blank = terse machine style."),
+    Field("teams_review_skill", "↳ PR review skill", "text", "💬 Teams bot (2-way chat)",
+          "Skill the bot runs to review a PR from chat (real diff-vs-codebase review "
+          "that posts findings on the PR). Must exist in the workspace's .claude/skills."),
+    Field("teams_agentic_enabled", "↳ Agentic free-text (Claude turn)", "bool",
+          "💬 Teams bot (2-way chat)",
+          "Route free-text through a real Claude agent turn (tools + skills) instead of "
+          "the fixed intent classifier — more natural, but a Claude run per message."),
+    Field("teams_agent_session_memory", "↳ Remember the conversation", "bool",
+          "💬 Teams bot (2-way chat)",
+          "Each reply continues the Claude session from the previous message in the SAME "
+          "thread, so a thread behaves like a conversation instead of restating which PR or "
+          "item you meant every time. Bounded by the session-reuse TTL above."),
+    Field("teams_agent_max_concurrent", "↳ Max concurrent chat replies", "int",
+          "💬 Teams bot (2-way chat)",
+          "How many chat replies may hold a Claude process at once. Separate from 'Max "
+          "concurrent' (which governs 30-minute task runs) — sharing it would put the whole "
+          "team's chat in single file. 0 = no cap."),
+    Field("teams_agent_nlu_enabled", "↳ Understand free-text (read-only)", "bool",
+          "💬 Teams bot (2-way chat)",
+          "Free-text Teams messages that don't match a /command are classified by Claude "
+          "into items/prs/status/help — never an action. Costs one Claude call per "
+          "unmatched message. Off = unmatched text just gets the command list."),
+    Field("teams_agent_digest_interval_hours", "↳ Daily digest every (hours)", "int",
+          "💬 Teams bot (2-way chat)",
+          "Proactively post a full activity digest to every channel/chat the bot has "
+          "been added to: autopilot run stats, auto-reviews + reminders sent, PRs "
+          "opened/merged, /log tickets, PRs ready to merge, oldest stuck PRs, and a "
+          "per-person work item standup. 0 = off. Requires the bot to have been "
+          "messaged/added at least once so its conversation is stored (persists "
+          "across restarts)."),
+    Field("teams_agent_app_id", "↳ Agent (App) ID", "text", "💬 Teams bot (2-way chat)",
+          "Azure Bot's Application (client) ID. Also requires `pip install .[teams-bot]`."),
+    Field("teams_agent_tenant_id", "↳ Tenant ID", "text", "💬 Teams bot (2-way chat)",
+          "Directory (tenant) ID the App registration lives in."),
+    Field("teams_agent_app_secret", "↳ Agent app secret", "password", "💬 Teams bot (2-way chat)",
+          "Client secret from Certificates & secrets on the App registration."),
     # ── Web / Security ──
     Field("dashboard_auth_password", "Dashboard password", "password", "Web / Security",
           "Password to access this dashboard (HTTP Basic — any username). Stored as a "
@@ -334,7 +373,14 @@ FIELDS: tuple[Field, ...] = (
 # Fields that only take effect after a restart (the value is captured at startup).
 RESTART_REQUIRED = frozenset({"max_concurrent"})
 
-# Never echo these values back into the form.
+# Never echo these values back into the form. Scalar (password-kind) fields only: a
+# secret must round-trip as "blank = keep the stored value", which the password input
+# does and a list textarea does NOT — a blank textarea parses as an empty list, so
+# marking a list field secret would silently WIPE it the first time anyone saved the
+# page. ``teams_webhook_urls`` is therefore not listed here; it stays in
+# EXPORT_EXCLUDE, which is where the real leak risk (sharing a config file) lives.
+# Anyone who can open this page can already rewrite the ADO PAT, so they are trusted
+# with the webhook URLs too.
 SECRET_KEYS = frozenset({
     "ado_pat", "teams_agent_app_secret",
     "teams_webhook_url", "smtp_password", "zalo_oa_access_token",
@@ -351,7 +397,7 @@ EXPORT_EXCLUDE = frozenset({
     "ado_pat", "oauth_app_id", "oauth_app_secret",
     "smtp_host", "smtp_port", "smtp_user", "smtp_password",
     "zalo_oa_access_token", "zalo_recipient_user_id",
-    "teams_webhook_url", "email_to", "email_from",
+    "teams_webhook_url", "teams_webhook_urls", "email_to", "email_from",
     "teams_agent_app_id", "teams_agent_app_secret", "teams_agent_tenant_id",
     "tenants",              # each tenant embeds its own ado_pat
     "dashboard_auth_token", "dashboard_auth_password_hash", "webhook_secret",

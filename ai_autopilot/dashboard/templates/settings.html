@@ -156,7 +156,7 @@
           {% elif f.kind == 'int' %}
             <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
           {% elif f.kind == 'list' %}
-            <textarea id="{{ f.key }}" name="{{ f.key }}" rows="2">{{ current.get(f.key)|join(', ') }}</textarea>
+            <textarea id="{{ f.key }}" name="{{ f.key }}" rows="2">{{ (current.get(f.key) or [])|join(', ') }}</textarea>
           {% elif f.kind == 'map' %}
             <textarea id="{{ f.key }}" name="{{ f.key }}" rows="3" placeholder="ba => Ready for Dev">{% for k, v in (current.get(f.key) or {}).items() %}{{ k }} => {{ v }}
 {% endfor %}</textarea>

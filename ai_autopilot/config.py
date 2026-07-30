@@ -592,6 +592,10 @@ class Settings(BaseSettings):
     # Hours a human reviewer may sit vote-less before ONE polite reminder is posted on
     # the PR (ADO then emails the thread participants). 0 = reminders off.
     pr_reviewer_reminder_hours: int = 24
+    # Hours between REPEAT reminders for a reviewer who still hasn't voted. 0 = never
+    # repeat, which nudges once and then goes quiet — exactly when a stuck PR needs it
+    # most. Set e.g. 24 to keep nudging daily until they vote.
+    pr_reviewer_reminder_repeat_hours: int = 0
     # Bot identity override (email / uniqueName / display name). Empty = auto-detect
     # the account behind this client's PAT via connectionData — usually right.
     pr_bot_identity: str = ""

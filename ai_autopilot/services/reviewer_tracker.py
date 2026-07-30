@@ -474,6 +474,7 @@ class ReviewerTrackerService:
         current_commit = (pr.get("lastMergeSourceCommit") or {}).get("commitId") or ""
 
         pending_reminders: list[dict] = []
+        repeat_nudge = False
         for r in reviewers:
             rid = str(r["id"])
             vote = int(r.get("vote") or 0)
@@ -512,9 +513,12 @@ class ReviewerTrackerService:
                         )
             elif self._reminder_due(snap):
                 pending_reminders.append(r)
+                repeat_nudge = repeat_nudge or snap.reminded_at is not None
 
         if pending_reminders:
-            await self._send_reminder(repo_id, repo_name, pr, pending_reminders)
+            await self._send_reminder(
+                repo_id, repo_name, pr, pending_reminders, repeat=repeat_nudge
+            )
         # Reviewers removed from the PR by a human → forget them.
         await self._repo.remove_absent(pr_id, {str(r["id"]) for r in reviewers})
 
@@ -537,13 +541,30 @@ class ReviewerTrackerService:
         return reviewed_commit != (commit or "@none")
 
     def _reminder_due(self, snap) -> bool:
+        """Whether this reviewer is due a nudge right now.
+
+        Two clocks. The FIRST reminder is due ``pr_reviewer_reminder_hours`` after they were
+        added; each one after that is due ``pr_reviewer_reminder_repeat_hours`` after the
+        PREVIOUS reminder — not after they were added, which would fire every scan forever.
+        ``mark_reminded`` rewrites ``reminded_at`` on every send, so that second clock
+        restarts from the last nudge for free.
+
+        ``repeat_hours = 0`` keeps the original behaviour: one nudge per reviewer per PR,
+        then silence — which meant a PR left un-voted for a week was never mentioned again,
+        exactly when the nudge was worth most."""
         hours = self._config.pr_reviewer_reminder_hours
-        if not hours or snap.vote != VOTE_NONE or snap.reminded_at is not None:
+        if not hours or snap.vote != VOTE_NONE:
             return False
-        added = _as_utc(snap.added_at)
-        if added is None:
+        if snap.reminded_at is None:
+            since, wait = _as_utc(snap.added_at), hours
+        else:
+            repeat = self._config.pr_reviewer_reminder_repeat_hours
+            if repeat <= 0:
+                return False
+            since, wait = _as_utc(snap.reminded_at), repeat
+        if since is None:
             return False
-        return (datetime.now(UTC) - added).total_seconds() >= hours * 3600
+        return (datetime.now(UTC) - since).total_seconds() >= wait * 3600
 
     def _spawn(self, coro) -> None:
         task = asyncio.create_task(coro)
@@ -790,26 +811,38 @@ class ReviewerTrackerService:
     # ── Reviewer reminders ───────────────────────────────────────────────────
 
     async def _send_reminder(
-        self, repo_id: str, repo_name: str, pr: dict, reviewers: list[dict]
+        self, repo_id: str, repo_name: str, pr: dict, reviewers: list[dict],
+        repeat: bool = False,
     ) -> None:
         """One polite reminder per PR for every overdue reviewer — posted as a PR comment
         (ADO emails the participants) AND broadcast to the configured channels (Teams /
-        Email / Zalo). Each reviewer is marked reminded once. No-op writes under dry-run."""
+        Email / Zalo).
+
+        ``mark_reminded`` restarts each reviewer's clock, so with
+        ``pr_reviewer_reminder_repeat_hours`` set they get nudged again later; at 0 this is
+        their only nudge. ``repeat`` only changes the wording — a fifth nudge that still says
+        "added over 24h ago" reads like the bot lost count. No-op writes under dry-run."""
         pr_id = pr.get("pullRequestId")
-        hours = self._config.pr_reviewer_reminder_hours
+        why = (
+            f"vẫn chưa vote (nhắc lại mỗi {self._config.pr_reviewer_reminder_repeat_hours}h)"
+            if repeat else
+            f"được thêm làm reviewer đã hơn {self._config.pr_reviewer_reminder_hours}h "
+            "nhưng chưa vote"
+        )
         names = ", ".join(
             f"<b>{r.get('displayName') or r.get('uniqueName')}</b>" for r in reviewers
         )
         if self._config.dry_run:
-            self._log.info("[DRY-RUN] would remind reviewers", pr=pr_id, count=len(reviewers))
+            self._log.info("[DRY-RUN] would remind reviewers", pr=pr_id,
+                           count=len(reviewers), repeat=repeat)
             if self._repo is not None:
                 for r in reviewers:
                     await self._repo.mark_reminded(pr_id, str(r["id"]))
             return
         note = (
-            f"<div>👋 <b>Nhắc review</b> — {names} được thêm làm reviewer đã hơn {hours}h "
-            "nhưng chưa vote. Nhờ anh/chị review để PR không bị nghẽn. Cần tóm tắt lại "
-            "thay đổi, reply <code>/review</code> để tôi tổng hợp giúp.</div>"
+            f"<div>👋 <b>Nhắc review</b> — {names} {why}. Nhờ anh/chị review để PR không bị "
+            "nghẽn. Cần tóm tắt lại thay đổi, reply <code>/review</code> để tôi tổng hợp "
+            "giúp.</div>"
         )
         ok = await self._c.ado.add_pull_request_comment(repo_id, pr_id, note)
         if ok and self._repo is not None:
@@ -817,14 +850,14 @@ class ReviewerTrackerService:
                 await self._repo.mark_reminded(pr_id, str(r["id"]))
         if ok:
             metrics.record_reminder(len(reviewers))
-            await self._broadcast_reminder(repo_name, pr, reviewers, hours)
+            await self._broadcast_reminder(repo_name, pr, reviewers, why)
         self._log.info(
-            "reviewer reminder sent", pr=pr_id, repo=repo_name,
+            "reviewer reminder sent", pr=pr_id, repo=repo_name, repeat=repeat,
             reviewers=[r.get("displayName") for r in reviewers], ok=ok,
         )
 
     async def _broadcast_reminder(
-        self, repo_name: str, pr: dict, reviewers: list[dict], hours: int
+        self, repo_name: str, pr: dict, reviewers: list[dict], why: str
     ) -> None:
         """Push the reminder to the configured notification channels (Teams/Email/Zalo)
         with an "Open PR" button. Best-effort — a channel failure never affects the flow."""
@@ -835,9 +868,7 @@ class ReviewerTrackerService:
         who = ", ".join(r.get("displayName") or r.get("uniqueName") or "?" for r in reviewers)
         item = WorkItemInfo(
             id=pr_id,
-            title=(
-                f"“{pr.get('title') or 'PR'}” chờ review — {who} chưa vote sau {hours}h"
-            ),
+            title=f"“{pr.get('title') or 'PR'}” chờ review — {who} {why}",
             work_item_type="PullRequest",
             category=TaskCategory.UNKNOWN,
         )

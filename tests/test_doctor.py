@@ -137,3 +137,50 @@ def test_render_lists_problems_first_and_names_next_actions():
 def test_render_says_so_when_everything_passes():
     text = doctor.render([doctor.Finding(doctor.OK, "fine")])
     assert "Nothing to fix" in text
+
+
+def test_repeat_reminder_without_a_first_reminder_is_a_no_op():
+    """The repeat clock only starts after a first reminder, so a repeat value with
+    reminders switched off does nothing at all — and reads as if it does."""
+    found = _diagnose(
+        pr_reviewer_tracking_enabled=True,
+        pr_reviewer_reminder_hours=0,
+        pr_reviewer_reminder_repeat_hours=24,
+    )
+    assert "Repeat reminders can never fire" in _titles(found, doctor.WARN)
+
+
+def test_reminders_configured_but_tracking_off_is_flagged():
+    found = _diagnose(
+        pr_reviewer_tracking_enabled=False,
+        pr_reviewer_reminder_hours=24,
+    )
+    assert "Reviewer reminders configured but tracking is off" in _titles(found, doctor.WARN)
+
+
+def test_reminder_cadence_is_reported_when_coherent():
+    found = _diagnose(
+        pr_reviewer_tracking_enabled=True,
+        pr_reviewer_reminder_hours=24,
+        pr_reviewer_reminder_repeat_hours=6,
+    )
+    assert "Reviewer reminders: first at 24h, then every 6h after" in _titles(found, doctor.OK)
+
+
+def test_report_survives_a_console_that_cannot_encode_icons(capsys, monkeypatch):
+    """A cp1252 Windows console raises on "✅"; the doctor must still print its report
+    instead of dying with a traceback while diagnosing."""
+    import io
+    import sys as _sys
+
+    class Cp1252Out(io.StringIO):
+        def write(self, s):
+            s.encode("cp1252")  # raises UnicodeEncodeError on the icons
+            return super().write(s)
+
+    monkeypatch.setattr(_sys, "stdout", Cp1252Out())
+    doctor._emit(f"{doctor.OK_ICON} fine\n{doctor.ERROR_ICON} broken\n→ fix it")
+    written = _sys.stdout.getvalue()
+    assert "[ok] fine" in written
+    assert "[X] broken" in written
+    assert "-> fix it" in written

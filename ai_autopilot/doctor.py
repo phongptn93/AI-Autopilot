@@ -13,15 +13,18 @@ first, because a wall of findings is its own kind of useless.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from ai_autopilot.config import Settings
 
 ERROR, WARN, OK = "error", "warn", "ok"
-_LEVEL_ICON = {ERROR: "❌", WARN: "⚠️ ", OK: "✅"}
+ERROR_ICON, WARN_ICON, OK_ICON = "❌", "⚠️ ", "✅"
+_LEVEL_ICON = {ERROR: ERROR_ICON, WARN: WARN_ICON, OK: OK_ICON}
 _EFFORTS = {"", "low", "medium", "high", "xhigh", "max"}
 # Teams caps a bot's commandList at 10; exceeding it makes Teams reject the whole package.
 _TEAMS_COMMAND_LIMIT = 10
@@ -342,10 +345,36 @@ def check_command_hints(config: Settings) -> list[Finding]:
     return out or [Finding(OK, f"{len(slash)} PR commands configured")]
 
 
+def check_reviewer_reminders(config: Settings) -> list[Finding]:
+    """Reminder settings that read as configured but can never fire."""
+    first = config.pr_reviewer_reminder_hours
+    repeat = config.pr_reviewer_reminder_repeat_hours
+    if repeat and not first:
+        return [Finding(
+            WARN, "Repeat reminders can never fire",
+            f"pr_reviewer_reminder_repeat_hours={repeat} but "
+            "pr_reviewer_reminder_hours=0, which turns reminders off entirely.",
+            "The repeat clock only starts after a first reminder, so this setting does "
+            "nothing. Set pr_reviewer_reminder_hours, or clear the repeat value.",
+        )]
+    if first and not config.pr_reviewer_tracking_enabled:
+        return [Finding(
+            WARN, "Reviewer reminders configured but tracking is off",
+            f"pr_reviewer_reminder_hours={first} with "
+            "pr_reviewer_tracking_enabled=false.",
+            "The tracker never starts, so nobody is ever reminded. Enable tracking, or "
+            "set the reminder hours to 0 so the intent is clear.",
+        )]
+    if not first:
+        return []
+    cadence = f"every {repeat}h after" if repeat else "once only"
+    return [Finding(OK, f"Reviewer reminders: first at {first}h, then {cadence}")]
+
+
 CHECKS = (
     check_ado, check_trigger, check_workspace, check_concurrency, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_teams_bot,
-    check_command_hints,
+    check_command_hints, check_reviewer_reminders,
 )
 
 
@@ -396,10 +425,32 @@ def render(findings: list[Finding]) -> str:
     return "\n".join(lines)
 
 
+def _emit(text: str) -> None:
+    """Print the report on a console that may not speak Unicode.
+
+    A stock Windows console is cp1252, where printing "✅" raises UnicodeEncodeError and the
+    whole command dies with a traceback instead of a report — a diagnostic tool that crashes
+    while diagnosing is worse than useless. Try UTF-8 first, then fall back to ASCII markers
+    rather than losing the content."""
+    try:
+        print(text)
+        return
+    except UnicodeEncodeError:
+        pass
+    with contextlib.suppress(Exception):
+        sys.stdout.reconfigure(encoding="utf-8")
+        print(text)
+        return
+    for fancy, plain in ((ERROR_ICON, "[X]"), (WARN_ICON, "[!]"), (OK_ICON, "[ok]"),
+                         ("→", "->")):
+        text = text.replace(fancy, plain)
+    print(text.encode("ascii", "replace").decode("ascii"))
+
+
 def run() -> int:
     """CLI body. Exit code 1 when something must be fixed, else 0."""
     from ai_autopilot.config import load_settings
 
     findings = diagnose(load_settings())
-    print(render(findings))
+    _emit(render(findings))
     return 1 if any(f.level == ERROR for f in findings) else 0

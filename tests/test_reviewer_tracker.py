@@ -208,6 +208,66 @@ async def test_reminder_sent_once_after_deadline():
     assert len([c for c in ado.comments if "Nhắc review" in c]) == 1
 
 
+async def _overdue(db, *, added_hours: int | None = None, reminded_hours: int | None = None):
+    """Backdate the tracked row so a reminder clock has elapsed."""
+    async with db.session() as session:
+        row = await session.get(PrReviewerState, (7, "u1"))
+        if added_hours is not None:
+            row.added_at = datetime.now(UTC) - timedelta(hours=added_hours)
+        if reminded_hours is not None:
+            row.reminded_at = datetime.now(UTC) - timedelta(hours=reminded_hours)
+        await session.commit()
+
+
+async def test_reminder_never_repeats_by_default():
+    """repeat_hours defaults to 0 — a reviewer is nudged once and then left alone, even
+    once far more time has passed than the first deadline."""
+    ado = _FakeAdo([_pr([_human(vote=0)])])
+    svc, _, db = await _make(ado, _FakeFeedback())
+    await svc._scan()
+    await _overdue(db, added_hours=25)
+    await svc._scan()
+    assert len([c for c in ado.comments if "Nhắc review" in c]) == 1
+
+    await _overdue(db, reminded_hours=240)  # ten days of silence
+    await svc._scan()
+    assert len([c for c in ado.comments if "Nhắc review" in c]) == 1
+
+
+async def test_reminder_repeats_on_the_repeat_clock():
+    ado = _FakeAdo([_pr([_human(vote=0)])])
+    svc, _, db = await _make(ado, _FakeFeedback(), pr_reviewer_reminder_repeat_hours=6)
+    await svc._scan()
+    await _overdue(db, added_hours=25)
+    await svc._scan()
+    assert len([c for c in ado.comments if "Nhắc review" in c]) == 1
+
+    await svc._scan()  # repeat window has NOT elapsed
+    assert len([c for c in ado.comments if "Nhắc review" in c]) == 1
+
+    await _overdue(db, reminded_hours=7)
+    await svc._scan()
+    reminders = [c for c in ado.comments if "Nhắc review" in c]
+    assert len(reminders) == 2
+    # The repeat must not claim they were "added over 24h ago" all over again.
+    assert "vẫn chưa vote" in reminders[1]
+    assert "6h" in reminders[1]
+
+
+async def test_repeat_reminder_stops_once_they_vote():
+    ado = _FakeAdo([_pr([_human(vote=0)])])
+    svc, _, db = await _make(ado, _FakeFeedback(), pr_reviewer_reminder_repeat_hours=6)
+    await svc._scan()
+    await _overdue(db, added_hours=25)
+    await svc._scan()
+    assert len([c for c in ado.comments if "Nhắc review" in c]) == 1
+
+    ado.prs[0]["reviewers"] = [_human(vote=10)]  # approved
+    await _overdue(db, reminded_hours=99)
+    await svc._scan()
+    assert len([c for c in ado.comments if "Nhắc review" in c]) == 1
+
+
 async def test_removed_reviewer_is_forgotten():
     ado = _FakeAdo([_pr([_human()])])
     svc, repo, _ = await _make(ado, _FakeFeedback())

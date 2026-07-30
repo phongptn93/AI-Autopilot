@@ -229,9 +229,12 @@ Enable `pr_reviewer_tracking_enabled` to watch the reviewer list of **every acti
   (`pr_auto_review_on_added`, **off by default** — casting a vote is consequential enough
   to need its own opt‑in). Re‑arms on new commits; never re‑reviews a failed attempt in a
   loop.
-- **Human reviewers** are tracked for the **Reviews** dashboard page, and one polite
+- **Human reviewers** are tracked for the **Reviews** dashboard page, and a polite
   reminder is posted (PR comment + Teams/Email/Zalo) if a reviewer sits vote‑less past
-  `pr_reviewer_reminder_hours` (default 24h, `0` = off).
+  `pr_reviewer_reminder_hours` (default 24h, `0` = off). Set
+  `pr_reviewer_reminder_repeat_hours` to keep nudging every N hours until they vote —
+  the default `0` nudges once and then stays quiet, so a PR stuck for a week is never
+  mentioned again.
 - **`pr_reviewer_target_branches`** restricts tracking/review/dashboard to PRs merging
   into specific branches — empty = every target.
 - **Role commands** — reply on any PR the bot reviews:

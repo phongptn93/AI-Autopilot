@@ -95,6 +95,7 @@ pr_reviewer_tracking_enabled: false
 pr_auto_review_on_added: false        # bot added as reviewer → structured review + vote (opt-in)
 pr_reviewer_poll_interval_seconds: 30
 pr_reviewer_reminder_hours: 24       # 0 = reminders off
+pr_reviewer_reminder_repeat_hours: 0 # keep nudging every N h until they vote; 0 = nudge once
 pr_bot_identity: ""                  # blank = auto-detect the PAT's own identity
 # Only track/review/show PRs merging INTO these target branches. Empty = all targets.
 pr_reviewer_target_branches: []      # e.g. ["dxfac/development", "main"]

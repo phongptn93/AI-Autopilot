@@ -215,6 +215,10 @@ FIELDS: tuple[Field, ...] = (
     Field("pr_reviewer_reminder_hours", "↳ Remind reviewers after (hours)", "int",
           "🔁 PR review & feedback",
           "A reviewer with no vote after this many hours gets one polite PR reminder. 0 = off."),
+    Field("pr_reviewer_reminder_repeat_hours", "↳ Repeat the reminder every (hours)", "int",
+          "🔁 PR review & feedback",
+          "Keep nudging a reviewer who still hasn't voted, this many hours after the last "
+          "reminder. 0 = nudge once then stay quiet."),
     Field("pr_bot_identity", "↳ Bot identity override", "text", "🔁 PR review & feedback",
           "Email / uniqueName of the bot reviewer account. Blank = auto-detect the PAT's own "
           "identity via connectionData."),

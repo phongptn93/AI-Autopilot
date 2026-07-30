@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
   "manifestVersion": "1.19",
-  "version": "1.0.0",
+  "version": "2.4.3",
   "id": "<TEAMS_AGENT_APP_ID>",
   "developer": {
-    "name": "AI Autopilot",
-    "websiteUrl": "https://dev.azure.com/newoceanis",
-    "privacyUrl": "https://dev.azure.com/newoceanis",
-    "termsOfUseUrl": "https://dev.azure.com/newoceanis"
+    "name": "NOIS Industrial",
+    "websiteUrl": "<WEBSITE_URL>",
+    "privacyUrl": "<PRIVACY_URL>",
+    "termsOfUseUrl": "<TERMS_URL>"
   },
   "icons": {
     "color": "color.png",
@@ -15,13 +15,36 @@
   },
   "name": {
     "short": "AI Autopilot",
-    "full": "AI Autopilot — PR Reviewer Bot"
+    "full": "AI Autopilot — trợ lý Azure DevOps"
   },
   "description": {
-    "short": "Theo dõi PR, tự review và trả lời trong Teams.",
-    "full": "AI Autopilot theo dõi reviewer trên các PR Azure DevOps, tự động review + vote khi được thêm làm reviewer, nhắc reviewer quá hạn, và trả lời lệnh /status, /review <repo> <pr-id> ngay trong Teams."
+    "short": "Theo dõi PR, tự review, trả lời work item & PR ngay trong Teams.",
+    "full": "AI Autopilot là trợ lý Azure DevOps của team.\n\n• Tự động review PR khi bot được thêm làm reviewer, vote, và nhắc reviewer quá hạn.\n• Trả lời trong Teams: work item của bạn, PR bạn là author/reviewer kèm tình trạng vote, tổng quan PR cả team, chi tiết bất kỳ PR/work item.\n• Hỏi bằng tiếng Việt tự nhiên (\"PR nào của tôi đang bị block?\") — bot tra Azure DevOps rồi trả lời.\n• Dán link PR hoặc reply kèm quote một PR rồi nói \"review\" → bot review ngay và đăng nhận xét lên chính PR đó.\n• Tạo Requirement mới từ chat, luôn có bước xác nhận trước khi tạo.\n• Xem và tiếp tục những việc autopilot đang chờ người xử lý.\n\nBot CHỈ ĐỌC dữ liệu qua chat: không sửa code, không vote, không merge từ Teams — những việc đó thao tác trực tiếp trên pull request trong Azure DevOps."
   },
   "accentColor": "#2563EB",
+  "staticTabs": [
+    {
+      "entityId": "autopilot-board",
+      "name": "Board",
+      "contentUrl": "https://<PUBLIC_HOST>/dashboard/board",
+      "websiteUrl": "https://<PUBLIC_HOST>/dashboard/board",
+      "scopes": ["personal"]
+    },
+    {
+      "entityId": "autopilot-reviews",
+      "name": "Reviews",
+      "contentUrl": "https://<PUBLIC_HOST>/dashboard/reviews",
+      "websiteUrl": "https://<PUBLIC_HOST>/dashboard/reviews",
+      "scopes": ["personal"]
+    },
+    {
+      "entityId": "autopilot-queue",
+      "name": "Chờ xử lý",
+      "contentUrl": "https://<PUBLIC_HOST>/dashboard/queue",
+      "websiteUrl": "https://<PUBLIC_HOST>/dashboard/queue",
+      "scopes": ["personal"]
+    }
+  ],
   "bots": [
     {
       "botId": "<TEAMS_AGENT_APP_ID>",
@@ -32,16 +55,22 @@
         {
           "scopes": ["team", "personal", "groupChat"],
           "commands": [
-            { "title": "help", "description": "Xem bảng lệnh" },
-            { "title": "items", "description": "Work item của bạn" },
-            { "title": "prs", "description": "PR bạn là author hoặc reviewer" },
-            { "title": "review <repo> <pr-id>", "description": "Yêu cầu bot review lại một PR ngay" },
-            { "title": "status", "description": "Xem tình trạng hoạt động" }
+            { "title": "/help", "description": "Bảng lệnh" },
+            { "title": "/items", "description": "Work item của bạn" },
+            { "title": "/prs", "description": "PR bạn là author hoặc reviewer, kèm tình trạng vote" },
+            { "title": "/team", "description": "Tổng quan PR của cả team, cũ nhất trước" },
+            { "title": "/queue", "description": "Việc autopilot đang chờ người xử lý" },
+            { "title": "/pr", "description": "Chi tiết một PR — /pr <repo> <pr-id>" },
+            { "title": "/item", "description": "Chi tiết một work item — /item <id>" },
+            { "title": "/review", "description": "Bot review lại một PR ngay — /review <repo> <pr-id>" },
+            { "title": "/resume", "description": "Tiếp tục một việc đang chờ — /resume <id>" },
+            { "title": "/log", "description": "Tạo nhanh Requirement — /log <mô tả>" },
+            { "title": "/status", "description": "Tình trạng hoạt động" }
           ]
         }
       ]
     }
   ],
   "permissions": ["identity", "messageTeamMembers"],
-  "validDomains": []
+  "validDomains": ["<PUBLIC_HOST>"]
 }

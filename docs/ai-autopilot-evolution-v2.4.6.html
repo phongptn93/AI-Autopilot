@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-Autopilot — Báo cáo tiến hóa v2.4.6</title>
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1a1d21; --muted:#5c6672; --line:#e3e7ec;
+    --card:#f7f9fb; --accent:#2563eb; --good:#0f7b3f; --warn:#a15c00; --bad:#b42318;
+    --code-bg:#f2f4f7;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151a; --fg:#e6e9ee; --muted:#9aa4b2; --line:#262c35;
+      --card:#181d24; --accent:#6f9dff; --good:#4ec27f; --warn:#e0a338; --bad:#f2716b;
+      --code-bg:#1d232b;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:40px 22px 80px}
+  h1{font-size:1.9rem;line-height:1.25;margin:0 0 6px}
+  h2{font-size:1.3rem;margin:44px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  h3{font-size:1.05rem;margin:26px 0 8px}
+  p{margin:10px 0}
+  .sub{color:var(--muted);margin:0 0 26px}
+  .lede{font-size:1.06rem;background:var(--card);border-left:3px solid var(--accent);
+    padding:14px 18px;border-radius:0 6px 6px 0;margin:22px 0}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:.93rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--card);font-weight:600}
+  code{background:var(--code-bg);padding:1px 5px;border-radius:4px;font-size:.88em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--code-bg);padding:14px 16px;border-radius:8px;overflow-x:auto;
+    font-size:.86rem;line-height:1.5;border:1px solid var(--line)}
+  pre code{background:none;padding:0}
+  ul,ol{margin:10px 0;padding-left:24px}
+  li{margin:5px 0}
+  .tag{display:inline-block;font-size:.74rem;font-weight:600;padding:2px 8px;border-radius:999px;
+    border:1px solid var(--line);background:var(--card);color:var(--muted);vertical-align:2px}
+  .good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .note{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:12px 16px;margin:16px 0}
+  .note b{display:block;margin-bottom:4px}
+  footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:.86rem}
+  nav.toc{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 20px;margin:24px 0}
+  nav.toc ol{margin:6px 0}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>AI-Autopilot — Báo cáo tiến hóa</h1>
+<p class="sub">v2.0.0 → <strong>v2.4.6</strong> · 21–30/07/2026 · 12 bản phát hành</p>
+
+<div class="lede">
+  <strong>Thay đổi lớn nhất không phải là thêm tính năng, mà là đổi ai ra quyết định.</strong>
+  Ở v2.0 Python điều phối từng bước: tạo branch, gọi skill, kiểm file đổi, commit, push, mở PR.
+  Từ chế độ <em>AI-native</em>, agent tự khám phá repo, tự chọn nơi sửa, tự mở PR — Python chỉ
+  còn dựng đề bài, đọc một <em>result contract</em> có cấu trúc, và áp policy. Con người cũng
+  đổi chỗ đứng: không còn mở dashboard để xem, mà nhắn cho autopilot trong Teams.
+</div>
+
+<nav class="toc">
+  <strong>Nội dung</strong>
+  <ol>
+    <li><a href="#lon-nhat">Thay đổi lớn nhất — quyền quyết định dịch chuyển</a></li>
+    <li><a href="#teams">Teams trở thành mặt tiền chính</a></li>
+    <li><a href="#rao-chan">Rào chắn: từ tin tưởng sang cơ chế</a></li>
+    <li><a href="#dong-thoi-gian">Dòng thời gian 12 bản</a></li>
+    <li><a href="#hom-nay">Ngày 30/07 — bốn bản trong một ngày</a></li>
+    <li><a href="#con-lai">Còn tồn &amp; hướng tiếp</a></li>
+  </ol>
+</nav>
+
+<h2 id="lon-nhat">1 · Thay đổi lớn nhất — quyền quyết định dịch chuyển</h2>
+
+<p>
+  Hai chế độ cùng tồn tại, và khác nhau ở chỗ <strong>ai chọn phải làm gì</strong>:
+</p>
+
+<table>
+  <thead><tr><th></th><th>Chế độ cổ điển</th><th>AI-native <span class="tag">mặc định mới</span></th></tr></thead>
+  <tbody>
+    <tr><td>Chọn repo để sửa</td><td>Python, từ config</td><td><strong>Agent</strong>, từ những gì nó đọc được</td></tr>
+    <tr><td>Tạo branch / commit / push</td><td>Python gọi git</td><td><strong>Agent</strong>, qua skill <code>pr-create</code></td></tr>
+    <tr><td>Số PR mỗi task</td><td>1</td><td>Bao nhiêu cũng được (đa repo)</td></tr>
+    <tr><td>Python đọc kết quả bằng</td><td>diff file + exit code</td><td><code>.autopilot/runs/&lt;id&gt;.json</code> — result contract</td></tr>
+    <tr><td>Vai trò Python</td><td>người điều phối</td><td><strong>control plane</strong>: dựng brief, đọc contract, áp policy</td></tr>
+  </tbody>
+</table>
+
+<p>
+  Hệ quả thực tế: một work item chạm 3 repo giờ mở 3 PR trong một lần chạy, việc mà kiến trúc
+  cũ không thể diễn đạt. Cái giá là Python <em>không còn biết</em> agent đã làm gì cho tới khi
+  đọc contract — nên contract trở thành phần bắt buộc, không phải tuỳ chọn.
+</p>
+
+<h3>Cô lập theo task</h3>
+<p>
+  Vì agent tự do sửa file, mỗi task chạy trong <code>git worktree</code> riêng dưới
+  <code>agent-&lt;id&gt;-&lt;uuid&gt;/</code>, kèm bản <strong>copy</strong> (không symlink) của
+  <code>.claude</code> — để lúc dọn dẹp không bao giờ xoá được <code>.claude</code> thật.
+  Checkout chính của bạn không bị chạm tới.
+</p>
+
+<h2 id="teams">2 · Teams trở thành mặt tiền chính</h2>
+
+<p>
+  14 trong 22 tính năng lớn của giai đoạn này thuộc Teams. Đường đi rõ ràng: từ <em>thông báo
+  một chiều</em> → <em>lệnh gạch chéo</em> → <em>hỏi đáp tự nhiên</em> → <em>hội thoại có ký ức</em>.
+</p>
+
+<table>
+  <thead><tr><th>Bước</th><th>Bản</th><th>Người dùng làm gì</th></tr></thead>
+  <tbody>
+    <tr><td>Webhook 1 chiều</td><td>v2.0</td><td>nhận thông báo, không trả lời được</td></tr>
+    <tr><td>Bot 2 chiều + lệnh</td><td>v2.1–2.2</td><td><code>/items</code> <code>/prs</code> <code>/pr</code> <code>/item</code> <code>/team</code></td></tr>
+    <tr><td>Hiểu câu tự nhiên</td><td>v2.3</td><td>“PR nào của tôi đang bị block?”</td></tr>
+    <tr><td>Tạo ticket từ chat</td><td>v2.3</td><td>“tạo ticket: SSO timeout” → card xác nhận</td></tr>
+    <tr><td>Agentic turn</td><td>v2.4.0</td><td>bot tự tra ADO bằng tool read-only rồi trả lời</td></tr>
+    <tr><td>Review PR từ link dán</td><td>v2.4.0</td><td>dán link + “review” → chạy skill review thật</td></tr>
+    <tr><td>@mention trên PR comment</td><td>v2.4.2</td><td>không cần lệnh; ý định được suy luận</td></tr>
+    <tr><td><strong>Hội thoại có ký ức</strong></td><td>v2.4.6</td><td>thread nhớ ngữ cảnh, không phải nhắc lại</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <b>Ranh giới cố ý giữ nguyên suốt quá trình</b>
+  Qua chat, bot <strong>chỉ đọc</strong>. Không sửa code, không vote, không merge. An toàn không
+  dựa vào việc model “ngoan”, mà dựa vào <strong>tool allowlist cứng</strong>: chỉ
+  <code>Read</code>/<code>Grep</code>/<code>Glob</code> + tool ADO read-only. Không có
+  <code>Write</code>, <code>Edit</code>, <code>Bash</code>. Prompt nói gì cũng không vượt được.
+</div>
+
+<h2 id="rao-chan">3 · Rào chắn: từ tin tưởng sang cơ chế</h2>
+
+<p>
+  Hướng chung của mọi rào chắn thêm vào: <strong>thay lời hứa bằng cơ chế</strong>.
+</p>
+
+<table>
+  <thead><tr><th>Cơ chế</th><th>Bản</th><th>Thay cho</th></tr></thead>
+  <tbody>
+    <tr><td>Auto-test-gate — chạy test thật của repo trước khi mở PR</td><td>v2.4.0</td><td>“agent nói là đã test”</td></tr>
+    <tr><td>Policy engine + audit trail append-only</td><td>v2.4.1</td><td>tin rằng agent không chạm file cấm</td></tr>
+    <tr><td>Chấm điểm run 0–100, ngưỡng tự resolve / escalate</td><td>v2.3</td><td>người đọc từng PR để quyết</td></tr>
+    <tr><td>HITL queue + resume</td><td>v2.4.0</td><td>việc bị treo im lặng</td></tr>
+    <tr><td>Learning loop — ghi bài học, tiêm lại lần sau</td><td>v2.4.0</td><td>lặp lại cùng một lỗi</td></tr>
+    <tr><td><strong>Config doctor</strong></td><td>v2.4.6</td><td>tự mò xem cấu hình sai ở đâu</td></tr>
+  </tbody>
+</table>
+
+<h3>Vì sao có <code>doctor</code></h3>
+<p>
+  <code>health.py</code> trả lời “hệ thống có chạm được ADO / Claude / đĩa không”. Nó
+  <strong>pass thoải mái</strong> trên một cấu hình không thể hoạt động: bot Teams bật mà thiếu
+  app id, endpoint bind loopback nên Teams không gọi tới được, <code>max_concurrent&gt;1</code>
+  mà tắt worktree, version lệch giữa ba file cùng khai báo nó.
+</p>
+<pre><code>ai-autopilot doctor     # 0 = mạch lạc · 1 = có lỗi phải sửa · 2 = sai cú pháp</code></pre>
+<p>
+  Mỗi check sinh ra từ một sự cố thật đã mất công chẩn đoán bằng tay. Chỉ đọc config —
+  không mạng, không ghi — nên chạy được ở bất cứ đâu, kể cả trong CI.
+</p>
+
+<h2 id="dong-thoi-gian">4 · Dòng thời gian 12 bản</h2>
+
+<table>
+  <thead><tr><th>Bản</th><th>Ngày</th><th>Nội dung chính</th></tr></thead>
+  <tbody>
+    <tr><td>v2.0.0</td><td>21/07</td><td>Chuyển toàn bộ từ .NET sang Python + Claude Agent SDK</td></tr>
+    <tr><td>v2.1.0 / .1</td><td>23/07</td><td>Bot Teams 2 chiều; lệnh tra work item &amp; PR</td></tr>
+    <tr><td>v2.2.0</td><td>23/07</td><td><code>/team</code>, <code>/pr</code>, <code>/item</code>, <code>/log</code>; digest chủ động</td></tr>
+    <tr><td>v2.3.0 / .1</td><td>29/07</td><td>Hiểu câu tự nhiên; tạo ticket từ chat; export config mã hoá; chấm điểm run</td></tr>
+    <tr><td>v2.4.0</td><td>29/07</td><td>Test gate; HITL queue; learning loop; analytics ROI; agentic turn</td></tr>
+    <tr><td>v2.4.1</td><td>29/07</td><td>Policy engine + audit trail append-only</td></tr>
+    <tr><td>v2.4.2</td><td>30/07</td><td>Teams hết treo; @mention trên PR; digest thật sự đến người nhận</td></tr>
+    <tr><td>v2.4.3</td><td>30/07</td><td>Guard read-only khớp theo ranh giới từ — câu hỏi không còn bị chặn</td></tr>
+    <tr><td>v2.4.5</td><td>30/07</td><td>Review PR từ tin nhắn được quote; làm mới Teams app package</td></tr>
+    <tr><td>v2.4.6</td><td>30/07</td><td>Hội thoại có ký ức; nhiều webhook; effort theo loại việc; <code>doctor</code></td></tr>
+  </tbody>
+</table>
+
+<h2 id="hom-nay">5 · Ngày 30/07 — bốn bản trong một ngày</h2>
+
+<p>
+  Bốn bản này đáng ghi lại riêng, vì chúng đều bắt đầu từ <strong>một câu phàn nàn</strong> chứ
+  không từ kế hoạch, và mỗi lần đào sâu lại lộ ra lỗi khác hẳn với triệu chứng ban đầu.
+</p>
+
+<h3>“Bot trả lời rất chậm và bị treo”</h3>
+<p>
+  Không phải Claude chậm. <code>/api/messages</code> chỉ trả HTTP 200 <em>sau khi</em> turn xong,
+  mà Teams bỏ request sau ~15 giây — trong khi agentic turn có ngân sách 120s. Mỗi câu chat đều
+  bỏ rơi người dùng: không có trả lời nào tới, còn Claude vẫn chạy ngầm vô hình. Tệ hơn: một tin
+  nhắn có thể sinh <strong>ba tiến trình Claude tuần tự</strong> (~210s).
+</p>
+<p>
+  Sửa: turn ack dưới 1 giây, việc chậm chạy detached rồi trả lời về đúng thread qua proactive API;
+  agentic thành đường duy nhất khi bật.
+</p>
+
+<h3>“Command mày đề xuất chạy không đúng”</h3>
+<p>
+  Danh sách lệnh bị viết tay ở <strong>sáu</strong> nơi, ba nơi khác nhau — một nơi thiếu
+  <code>/review</code>, nơi khác thiếu <code>/summary</code>, và <em>không nơi nào</em> đọc
+  config, nên bot quảng cáo những lệnh chính nó sẽ bỏ qua. Thêm nữa
+  <code>startswith("/prs")</code> khớp cả <code>/prss</code>: gõ sai một ký tự là chạy nhầm lệnh
+  mà không báo gì.
+</p>
+
+<h3>Cùng một lỗi, hai hướng ngược nhau</h3>
+<p>
+  Guard read-only khớp <strong>substring</strong>. Nó vừa chặn oan câu hỏi bình thường
+  (<code>"fix"</code> nằm trong <code>"prefix"</code>), vừa <strong>để lọt</strong> đúng thứ cần
+  chặn — <code>" merge "</code> cần space hai bên nên <code>"merge hộ PR 2470"</code> đi qua.
+  Cái thứ hai nguy hiểm hơn và không ai phát hiện cho tới khi dựng bảng 18 câu để tune.
+</p>
+
+<h3>“Bot hỏi lại PR nào” khi đã quote sẵn PR</h3>
+<p>
+  Hai lỗ hổng cộng lại: bot chưa bao giờ đọc nội dung được quote (Teams đặt nó trong
+  <code>&lt;blockquote&gt;</code> hoặc attachment, code chỉ lấy <code>activity.text</code>), và
+  chỉ nhận URL đầy đủ — trong khi Teams <em>unfurl</em> link đã dán thành preview
+  <code>"Pull request 2488: …"</code>, còn số nhưng mất URL và mất tên repo.
+</p>
+
+<div class="note">
+  <b class="warn">Bài học rút ra, đã ghi vào skill</b>
+  Cùng một lớp lỗi lặp ba lần trong một ngày, mỗi lần ở một bản sao khác của <em>cùng một danh
+  sách</em>. Và bản <code>v2.4.5</code> phát hành với manifest Teams có 11 lệnh — vượt giới hạn
+  10 của Teams, upload là bị từ chối. Pre-flight lúc đó kiểm 16 thứ và pass hết, nhưng không kiểm
+  <em>số lượng phần tử</em>: nó kiểm những gì người viết nhớ ra, không phải những gì schema quy
+  định. Quy tắc mới: <strong>validate bằng schema chính thức</strong>, đừng bằng checklist tự nghĩ.
+</div>
+
+<h2 id="con-lai">6 · Còn tồn &amp; hướng tiếp</h2>
+
+<table>
+  <thead><tr><th>Việc</th><th>Trạng thái</th></tr></thead>
+  <tbody>
+    <tr><td>@mention trên comment <em>work item</em> (khác PR)</td>
+        <td class="warn">Cố ý chưa làm — đường đó không có chế độ advisory, nên mention chỉ có thể nghĩa là “chạy lại item”, tức sửa code. Cần thêm advisory mode trước.</td></tr>
+    <tr><td>Sweep <code>effort</code> cho đường execution</td>
+        <td class="warn">Để trống = giữ mặc định. Hướng dẫn của Anthropic là phải đo trên eval của chính mình trước khi hạ; đây là đường <strong>viết code</strong>.</td></tr>
+    <tr><td>Giới hạn Claude CLI song song cho review PR</td>
+        <td class="warn">Chat đã có cap riêng; review PR thì chưa.</td></tr>
+    <tr><td>48/161 setting chưa có trên dashboard</td>
+        <td class="muted">Chỉ sửa được qua <code>config.yaml</code>. Có thể cố ý, nhưng chưa rà lại.</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  Sinh từ lịch sử git (12 tag, v2.0.0→v2.4.6) và mã nguồn tại thời điểm v2.4.6.
+  Số liệu kiểm chứng bằng <code>git log</code> và <code>pytest</code> (451 test pass), không phải
+  từ ghi chép tay.<br>
+  Tài liệu liên quan: <code>ai-autopilot-user-guide.html</code> (cài đặt &amp; cấu hình),
+  <code>ai-autopilot-technical-architecture-v1-2026-07-03.html</code> (kiến trúc chi tiết),
+  <code>planning-sdlc-v2-full-guide.html</code> (Planning Workbench &amp; SDLC v2).
+</footer>
+
+</div>
+</body>
+</html>

@@ -155,7 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await _teardown()
             log.info("autopilot stopped")
 
-    app = FastAPI(title="AI Autopilot", version="2.4.6", lifespan=lifespan)
+    app = FastAPI(title="AI Autopilot", version="2.5.0", lifespan=lifespan)
 
     @app.middleware("http")
     async def _security_guard(request: Request, call_next):

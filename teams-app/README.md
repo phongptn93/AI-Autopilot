@@ -72,7 +72,7 @@ Chạy trên **manifest đã điền placeholder** (bản template vẫn còn `<
 ## Ghi chú kỹ thuật
 
 - **Title lệnh phải có `/`.** Teams chèn nguyên văn title vào ô chat; bot dispatch theo `/lệnh`, nên title thiếu `/` sẽ không chạy lệnh nào (bản manifest trước bị lỗi này ở mọi lệnh trừ `help`).
-- **`version`** đi theo version package (hiện `2.4.5`). Teams chỉ nhận bản mới khi số này tăng — sửa manifest mà quên bump thì upload sẽ bị coi là trùng.
+- **`version`** đi theo version package (hiện `2.4.6`). Teams chỉ nhận bản mới khi số này tăng — sửa manifest mà quên bump thì upload sẽ bị coi là trùng.
 - **Không có `webApplicationInfo`/SSO.** Bot chỉ giữ credential app-only, không bao giờ có token của từng người dùng — nên nó hành động với danh nghĩa CHÍNH NÓ (vd tự vote), không thể vote hộ người bấm nút. Khai báo SSO ở đây sẽ là sai sự thật.
 - **`showLoadingIndicator`** cố ý không bật: bật thì trang tab phải gọi `notifySuccess()` của Teams JS SDK, mà dashboard không nhúng SDK → tab sẽ treo ở màn hình loading.
 - **`permissions: ["identity", "messageTeamMembers"]`** là field legacy nhưng vẫn hợp lệ ở manifest 1.19. Cố ý giữ: `identity` là thứ cho phép `TeamsInfo.get_member` tra email để lọc `/items` `/prs` theo đúng người. Đổi sang RSC (`authorization.permissions`) mà chưa kiểm chứng có thể làm mất khả năng tra danh tính.

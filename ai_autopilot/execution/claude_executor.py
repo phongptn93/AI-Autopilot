@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -358,8 +359,16 @@ class ClaudeExecutor:
                     await self._git(
                         ["worktree", "remove", "--force", str(sub)], src_repo, check=False
                     )
+                    # On Windows `worktree remove` often fails with "Permission
+                    # denied": git's own object/pack files are read-only, and a
+                    # just-exited child (Claude CLI, editor, AV scanner) can still
+                    # hold handles for a moment. Delete the tree ourselves — clearing
+                    # the read-only bit and retrying — then let `prune` drop git's
+                    # now-dangling registration, so scratch dirs never pile up.
+                    if sub.exists():
+                        await _force_rmtree(sub)
                     await self._git(["worktree", "prune"], src_repo, check=False)
-        shutil.rmtree(run_dir, ignore_errors=True)  # noqa: ASYNC240
+        await _force_rmtree(Path(run_dir))
 
     # ── SDLC loop: one shared branch across many stage runs in a scratch ──────
 
@@ -1194,6 +1203,37 @@ class ClaudeExecutor:
 # Cap the title slug so branch names (and thus the Windows worktree path) stay
 # short — long titles otherwise blow past the 260-char MAX_PATH limit on Windows.
 _MAX_SLUG_LEN = 40
+
+
+async def _force_rmtree(path: Path, attempts: int = 4) -> bool:
+    """Delete a directory tree that resists deletion. Returns True if it's gone.
+
+    Windows needs this: git's object/pack files are marked read-only (so plain
+    deletion raises ``Permission denied``), and a process that just exited — the
+    Claude CLI, an editor, an AV scanner — can keep handles open for a short
+    while. So we retry a few times, clearing the read-only bit across the tree
+    between attempts and backing off to let stale handles close. Never raises;
+    the caller only cares that scratch dirs don't accumulate.
+    """
+    for attempt in range(attempts):
+        if not path.exists():
+            return True
+        try:
+            shutil.rmtree(path)  # noqa: ASYNC240 - local fs delete, retried below
+            return True
+        except OSError:
+            # Clear read-only bits (the usual cause) before the next attempt.
+            for root, dirs, files in os.walk(path):
+                for name in (*dirs, *files):
+                    with contextlib.suppress(OSError):
+                        os.chmod(os.path.join(root, name), stat.S_IWRITE)  # noqa: ASYNC240
+            with contextlib.suppress(OSError):
+                os.chmod(path, stat.S_IWRITE)  # noqa: ASYNC240
+            await asyncio.sleep(0.4 * (attempt + 1))  # let stale handles close
+    if path.exists():
+        _log.warning("could not fully delete scratch dir — leaving it behind", path=str(path))
+        return False
+    return True
 
 
 def _repo_name(repo: str, workspace: str) -> str:

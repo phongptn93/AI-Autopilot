@@ -334,14 +334,18 @@ class ReviewerTrackerService:
 
     async def find_pr_by_id(self, pr_id: int) -> dict | None:
         """Same as ``pr_detail`` but scans every configured repo for ``pr_id`` — for
-        free-text lookups ("PR 2261 tình trạng sao rồi") that don't name a repo."""
+        free-text lookups ("PR 2261 tình trạng sao rồi") that don't name a repo.
+
+        The result carries ``repo``/``repo_id`` on top of ``pr_detail``'s fields, because
+        a caller who only had a number (e.g. a quoted "Pull request 2488" preview) needs
+        the repo name to actually act on the PR."""
         for repo in await self._c.ado.get_repositories():
             repo_id = repo.get("id")
             if not repo_id:
                 continue
             detail = await self.pr_detail(repo_id, pr_id)
             if detail is not None:
-                return detail
+                return {**detail, "repo": repo.get("name") or "", "repo_id": repo_id}
         return None
 
     async def pr_detail(self, repo_id: str, pr_id: int) -> dict | None:

@@ -651,9 +651,12 @@ async def _handle_turn(
     if payload:
         await _handle_action(context, container, reviewer_tracker, payload, defer=defer)
         return
+    # A quoted reply keeps what was quoted OUT of activity.text's own words — pull it out
+    # separately so "review" stays the instruction while the quote supplies the subject.
+    quoted = _quoted_text(activity)
     await _handle_command(
-        context, config, container, reviewer_tracker, (activity.text or "").strip(),
-        defer=defer,
+        context, config, container, reviewer_tracker,
+        _strip_quote(activity.text or ""), defer=defer, quoted=quoted,
     )
 
 
@@ -859,6 +862,70 @@ _REVIEW_INTENT = ("review", "duyệt", "rà soát", "soát", "kiểm tra", "chec
 _PR_LOOKUP_RE = re.compile(r"^/pr\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _ITEM_LOOKUP_RE = re.compile(r"^/item\s+(\d+)\s*$", re.IGNORECASE)
 _SLASH_WORD_RE = re.compile(r"^(/\w+)")
+# A PR named by NUMBER rather than a full link — "Pull request 2488", "PR 2488", "!2488".
+# Teams unfurls a pasted ADO link into a preview card titled "Pull request <n>: <title>",
+# so when that card is what got quoted, the number is all that survives: no URL for
+# _PR_URL_RE to match, and no repo name. The repo is then resolved by scanning repos for
+# that id (ReviewerTrackerService.find_pr_by_id).
+_PR_NUMBER_RE = re.compile(
+    r"(?:pull\s*request|\bpr\b|!)\s*#?\s*(\d{2,7})\b", re.IGNORECASE
+)
+_BLOCKQUOTE_RE = re.compile(r"<blockquote[^>]*>(.*?)</blockquote>", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _quoted_text(activity) -> str:
+    """The content of the message the user replied to, or ``""``.
+
+    Teams delivers a quoted reply with the original inside a ``<blockquote>`` in ``text``
+    and/or as a ``messageReference`` attachment — neither of which survives into the bare
+    ``activity.text`` the bot used to read. That mattered: replying "AI Autopilot review"
+    while quoting a PR notification put the PR *only* in the quote, so the bot had to ask
+    which PR was meant even though the user had plainly pointed at one."""
+    import html as _html
+
+    parts: list[str] = []
+    for m in _BLOCKQUOTE_RE.finditer(activity.text or ""):
+        parts.append(_html.unescape(_TAG_RE.sub(" ", m.group(1))))
+    for att in (getattr(activity, "attachments", None) or []):
+        content = getattr(att, "content", None)
+        if isinstance(content, str):
+            parts.append(_html.unescape(_TAG_RE.sub(" ", content)))
+        elif isinstance(content, dict):
+            # messageReference and card attachments both keep their human-readable bits
+            # under a handful of well-known keys.
+            for key in ("messagePreview", "text", "title", "subtitle", "body"):
+                value = content.get(key)
+                if isinstance(value, str) and value.strip():
+                    parts.append(_html.unescape(_TAG_RE.sub(" ", value)))
+    return "\n".join(p.strip() for p in parts if p.strip()).strip()
+
+
+def _strip_quote(text: str) -> str:
+    """The user's OWN words, with any quoted block removed — so "review" stays the
+    instruction and the quote is passed separately as context."""
+    return _TAG_RE.sub(" ", _BLOCKQUOTE_RE.sub(" ", text or "")).strip()
+
+
+def _find_pr_reference(*texts: str) -> tuple[str | None, int, str] | None:
+    """First PR referenced across ``texts``, as ``(repo_name | None, pr_id, url)``.
+
+    A full link gives the repo directly; a bare number ("Pull request 2488") does not, and
+    the caller resolves it. Searched in argument order so the user's own message wins over
+    anything they quoted."""
+    for text in texts:
+        if not text:
+            continue
+        m = _PR_URL_RE.search(text)
+        if m:
+            return unquote(m.group(1)), int(m.group(2)), f"https://{m.group(0)}"
+    for text in texts:
+        if not text:
+            continue
+        m = _PR_NUMBER_RE.search(text)
+        if m:
+            return None, int(m.group(1)), ""
+    return None
 
 
 def _slash_help(text: str) -> str | None:
@@ -916,7 +983,7 @@ def _format_pr_detail(detail: dict) -> str:
 async def _handle_command(
     context, config: Settings, container: Container,
     reviewer_tracker: ReviewerTrackerService, text: str,
-    *, defer: _Deferral | None = None,
+    *, defer: _Deferral | None = None, quoted: str = "",
 ) -> None:
     low = text.lower()
     # Dispatch the no-argument commands on the EXACT leading word, not a prefix:
@@ -1001,6 +1068,29 @@ async def _handle_command(
         await context.send_activity(usage)
         return
 
+    # "review" in plain words, with the PR named by link OR by number — including a number
+    # that only appears in a QUOTED message. This is the "AI Autopilot review" reply to a
+    # PR notification: the user has plainly pointed at a PR, so asking them which one back
+    # is the wrong answer. Deterministic and instant (no Claude), and identical in agentic
+    # and classifier mode. Questions are excluded — "PR 2488 review chưa?" is a lookup.
+    ref = _find_pr_reference(text, quoted)
+    if ref and any(k in low for k in _REVIEW_INTENT) and not _QUESTION_RE.search(text):
+        repo_name, pr_id, url = ref
+        if repo_name is None:
+            # Only a number survived (a quoted "Pull request 2488" preview carries no repo
+            # and no URL) — find which repo it lives in.
+            found = await reviewer_tracker.find_pr_by_id(pr_id)
+            repo_name = (found or {}).get("repo") or None
+        if repo_name is None:
+            await context.send_activity(
+                f"Mình không tìm thấy PR !{pr_id} đang active trong repo nào cả — "
+                f"bạn gửi link PR hoặc `/review <repo> {pr_id}` giúp mình nhé."
+            )
+            return
+        _spawn_review(container, repo_name, pr_id, url)
+        await context.send_activity(_REVIEWING_MSG.format(pr=pr_id, repo=repo_name))
+        return
+
     # Agentic mode: hand everything non-slash to a real Claude agent turn — it parses PR
     # links, looks up data with tools, and requests gated actions itself (no regex/keyword
     # routing). It is then the ONLY path: chaining the classifier + phrasing calls behind
@@ -1008,7 +1098,9 @@ async def _handle_command(
     # case), so a failure ends in a static hint instead.
     if config.teams_agentic_enabled:
         async def _agentic_work(ctx) -> None:
-            if not await _agentic_turn(ctx, config, container, reviewer_tracker, text):
+            if not await _agentic_turn(
+                ctx, config, container, reviewer_tracker, text, quoted=quoted
+            ):
                 await ctx.send_activity(_FREEFORM_FALLBACK)
 
         if not await _run_deferred(defer, context, _THINKING_ACK, _agentic_work):
@@ -1482,7 +1574,7 @@ _AGENTIC_PROMPT = """{persona}
 
 Bạn đang trả lời một tin nhắn Teams. Người gửi: {email}.
 Tin nhắn: "{text}"
-
+{quoted}
 Bạn CÓ các tool CHỈ ĐỌC (Azure DevOps MCP: PR, work item, search; đọc file trong
 workspace). Hãy TỰ tra cứu dữ liệu thật cần thiết rồi trả lời NGẮN GỌN, tự nhiên
 bằng tiếng Việt theo đúng giọng trên. Không bịa — chỉ nói điều tra cứu được.
@@ -1501,7 +1593,7 @@ thao tác trực tiếp trên PR trong Azure DevOps. Không có hành động n�
 
 async def _agentic_turn(
     context, config: Settings, container: Container,
-    reviewer_tracker: ReviewerTrackerService, text: str,
+    reviewer_tracker: ReviewerTrackerService, text: str, *, quoted: str = "",
 ) -> bool:
     """One genuine agent turn over the message. Returns True when it handled the
     reply; False on any failure so the caller falls back to the classifier path."""
@@ -1514,7 +1606,13 @@ async def _agentic_turn(
     try:
         run = await run_claude(
             _AGENTIC_PROMPT.format(
-                persona=_persona_preamble(config), email=email, text=text[:600]
+                persona=_persona_preamble(config), email=email, text=text[:600],
+                # The user replied TO something; that quote is usually where the subject
+                # (a PR, a work item) actually is.
+                quoted=(
+                    f'\nHọ đang reply/quote tin nhắn này — chủ thể câu hỏi thường nằm ở '
+                    f'đây:\n"""{quoted[:800]}"""\n' if quoted else ""
+                ),
             ),
             workspace or tempfile.gettempdir(),
             timeout_seconds=120,

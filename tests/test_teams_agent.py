@@ -8,6 +8,7 @@ helpers can be exercised with plain fakes.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from types import SimpleNamespace
 
 import ai_autopilot.execution.claude_client as claude_client
@@ -788,3 +789,111 @@ def test_mutation_words_need_word_boundaries():
     assert not teams_agent._MUTATION_RE.search("deleted rows")
     assert not teams_agent._MUTATION_RE.search("approved by QC")
     assert teams_agent._MUTATION_RE.search("fix cái này")   # the bare verb still matches
+
+
+# ── Quoted replies: "AI Autopilot review" pointing at a quoted PR ─────────────
+#
+# Reported from real use: replying "AI Autopilot review" while QUOTING a PR notification
+# got "cho em xin link PR" back. Two gaps behind it — the bot only read activity.text
+# (never the quote, where the PR was), and only recognised a full dev.azure.com URL, while
+# Teams unfurls a pasted link into a preview titled "Pull request 2488: …" that keeps the
+# number but drops the URL and the repo.
+
+def _FakeActivity(text: str, attachments=None):  # noqa: N802 — reads as a constructor
+    return SimpleNamespace(text=text, attachments=attachments)
+
+
+_QUOTED_PR = (
+    '<blockquote itemid="1753848000000">Pull request 2488: fix(cigarette-quality): '
+    "phân trang báo cáo và vùng cuộn - Repos<br>cc.<br>Lam Huynh (Industrial - Project "
+    "Lead) review giúp e nha</blockquote> review"
+)
+
+
+class _FindPrTracker(_FakeReviewerTracker):
+    """Resolves a bare PR number to its repo, like the real find_pr_by_id."""
+
+    def __init__(self, repo: str | None = "Micro-Frontend"):
+        self.looked_up: list[int] = []
+        self._repo = repo
+
+    async def find_pr_by_id(self, pr_id):
+        self.looked_up.append(pr_id)
+        if self._repo is None:
+            return None
+        return {"id": pr_id, "repo": self._repo, "repo_id": "guid", "title": "t",
+                "author": "a", "source": "s", "target": "t", "is_draft": False,
+                "reviewers": []}
+
+
+def test_quote_is_read_from_blockquote_and_attachment():
+    from types import SimpleNamespace as NS
+
+    act = NS(text=_QUOTED_PR, attachments=None)
+    assert "Pull request 2488" in teams_agent._quoted_text(act)
+    assert teams_agent._strip_quote(_QUOTED_PR) == "review"   # the user's own word only
+
+    # Teams also delivers the referenced message as an attachment.
+    act2 = NS(text="review", attachments=[
+        NS(content={"messagePreview": "Pull request 2488: fix(x) - Repos"}),
+    ])
+    assert "2488" in teams_agent._quoted_text(act2)
+
+
+def test_plain_message_is_untouched_by_quote_handling():
+    from types import SimpleNamespace as NS
+
+    assert teams_agent._quoted_text(NS(text="PR nào của tôi?", attachments=None)) == ""
+    assert teams_agent._strip_quote("PR nào của tôi?") == "PR nào của tôi?"
+
+
+def test_pr_reference_prefers_a_link_then_falls_back_to_a_number():
+    assert teams_agent._find_pr_reference(f"review {_PR_URL}") == (
+        "Micro-Frontend", 2470, _PR_URL
+    )
+    assert teams_agent._find_pr_reference("review", "Pull request 2488: x") == (
+        None, 2488, ""
+    )
+    # The user's own words win over the quote.
+    assert teams_agent._find_pr_reference("PR 99 nhé", "Pull request 2488")[1] == 99
+    assert teams_agent._find_pr_reference("hôm nay thế nào?", "") is None
+
+
+async def test_review_on_quoted_pr_resolves_repo_and_runs():
+    """The reported failure, end to end: "review" + a quoted PR preview must review that
+    PR, not ask which one."""
+    cont, rt, ctx = _ReviewContainer(), _FindPrTracker(), _FakeContext()
+    await teams_agent._handle_command(
+        ctx, Settings(), container=cont, reviewer_tracker=rt,
+        text=teams_agent._strip_quote(_QUOTED_PR),
+        quoted=teams_agent._quoted_text(_FakeActivity(_QUOTED_PR)),
+    )
+    await asyncio.sleep(0)
+    assert rt.looked_up == [2488]                              # number → repo
+    assert cont.executor.calls == [("Micro-Frontend", 2488, "")]  # review actually ran
+    assert "2488" in ctx.sent[0]
+
+
+async def test_question_about_a_quoted_pr_is_not_hijacked_into_a_review(monkeypatch):
+    """"PR 2488 review chưa?" is a lookup — it must not trigger a review."""
+    async def no_claude(*args, **kwargs):
+        raise AssertionError("should not reach Claude in this test")
+
+    monkeypatch.setattr(teams_agent, "_handle_free_text", no_claude)
+    cont, rt, ctx = _ReviewContainer(), _FindPrTracker(), _FakeContext()
+    with contextlib.suppress(AssertionError):
+        await teams_agent._handle_command(
+            ctx, Settings(), container=cont, reviewer_tracker=rt,
+            text="PR 2488 review chưa?", quoted="",
+        )
+    assert cont.executor.calls == []      # no review spawned
+
+
+async def test_unresolvable_pr_number_says_so_instead_of_guessing():
+    cont, rt, ctx = _ReviewContainer(), _FindPrTracker(repo=None), _FakeContext()
+    await teams_agent._handle_command(
+        ctx, Settings(), container=cont, reviewer_tracker=rt,
+        text="review", quoted="Pull request 999999: gone",
+    )
+    assert cont.executor.calls == []
+    assert "999999" in ctx.sent[0] and "/review" in ctx.sent[0]

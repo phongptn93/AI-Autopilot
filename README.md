@@ -26,7 +26,8 @@ Polls your ADO board, understands each tagged work item, and drives **Claude Cod
 | 🔀 **Dependency‑aware scheduling** | Orders work by the ADO link graph (0 tokens) and avoids running conflicting items concurrently — with an AI conflict feed‑back loop. |
 | 🔁 **Closed‑loop SDLC (v2)** | Optional multi‑stage engine (analyze → design → implement → test → review → PR) with per‑stage gating and multi‑machine handoff. |
 | 🛡️ **Safe by design** | Isolated git worktrees, auto security review, objective run scoring, and a single tag/state policy table. |
-| 📊 **Live dashboard** | Overview · Board · Planning · Reviews · History · Settings · Config — full‑width, filterable, drag‑and‑drop. |
+| 📊 **Live dashboard** | Overview · Board · Planning · Reviews · Queue · Analytics · Audit · History · Settings · Config — full‑width, filterable, drag‑and‑drop, password‑lockable. |
+| 🩺 **`ai-autopilot doctor`** | Audits whether the configuration is *coherent* — the gap `/health` cannot see. Every check came from a failure diagnosed by hand: a Teams bot switched on with no app id (silently absent, not broken), a messaging endpoint on loopback, concurrency without worktrees, a setting whose companion switch is off. Config‑only: no network, no writes, safe in CI. |
 | 🔌 **Extensible** | Python plugins (pre/post/skill hooks), scheduled loops, multi‑tenant, and Teams/Zalo/Email notifications. |
 | 👀 **PR reviewer tracking** | Watches every active PR's reviewer list (any author) — auto‑reviews + votes when the bot is added as reviewer, reminds overdue human reviewers, and answers role commands (`/spec /qc /security /impact ...`) routed to specialist subagents. |
 | 💬 **Two‑way Teams bot** | Optional Azure Bot integration — `/items /prs /review /status` plus free‑text read‑only queries ("PR nào của tôi đang bị block?"), never code‑mutating from chat. |
@@ -114,8 +115,38 @@ The webhook endpoint filters bot-signed comments and plain chatter — only real
 | **Planning** | Load your assigned work, run AI grouping & conflict analysis, then **Start now** or **Schedule**. Live scheduling view with history. |
 | **Reviews** | Every active PR grouped by target branch — status badge, reviewer votes, conflicts, age, linked work item. Command‑palette reference for the role commands. |
 | **History** | Paginated, filterable log of every execution (skill, PR, duration, tokens). |
-| **Settings** | Edit all configuration with grouped sections, an *Active tags* overview, live‑apply, and Export/Import (secrets excluded). |
+| **Settings** | Edit all configuration in 16 grouped sections, an *Active tags* overview, live‑apply, and two transfer modes (below). |
 | **Configuration** | Read‑only snapshot of the live config (secrets shown as set / not‑set). |
+| **Queue** | Work the autopilot is holding for a human, with the reason, and one‑click **Resume**. |
+| **Analytics** | Throughput, success / PR rate, runs‑per‑item, tokens‑per‑PR and duration over 7 / 14 / 30 / 90 days. |
+| **Audit** | Append‑only log of every consequential action: config change, secret export, ticket created, resume, review. |
+
+### Locking the dashboard
+
+Set `dashboard_auth_password_hash` (via the Settings UI, which hashes it) to require a
+login. Browsers get a **login page**; `curl` / probes / scripts keep working with HTTP
+Basic (`-u :password`) and still receive a plain `401`. The session is a signed cookie —
+no server‑side store, so it survives a restart — and its signing key is derived from the
+password itself, so **changing the password logs every session out**.
+
+`ai-autopilot doctor` raises an **error** if the dashboard is bound to `0.0.0.0` with no
+password: anyone who reaches that port can otherwise read the whole config and click
+Resume or Export.
+
+### Export / import — two modes
+
+| Mode | File | Carries |
+|------|------|---------|
+| **Share** | `.yaml` | Org, tags, states, pipeline map, thresholds. **No** PAT / token / webhook, and none of this host's paths, ports or trigger tag. |
+| **Backup / migrate** | `.enc` | Everything **including** the PAT and every token, encrypted with `config_export_password`. |
+
+The full export is **refused when `config_export_password` is empty** — encrypting under an
+empty password produces a valid‑looking `.enc` whose key anyone can reproduce, so the file
+would carry your PAT while looking protected.
+
+Neither mode carries the dashboard password: a restore never clobbers the target host's own
+credential, which does mean a **freshly migrated instance starts unlocked** until you set
+one. Every full export is recorded in the Audit log.
 
 ---
 
@@ -258,6 +289,22 @@ Enable `pr_reviewer_tracking_enabled` to watch the reviewer list of **every acti
 The bot's identity is auto‑detected from the ADO PAT (`connectionData`) — override with
 `pr_bot_identity` if needed. For clean audit trails, register a **dedicated ADO service
 account** for the bot rather than reusing a personal PAT.
+
+### Cost ceilings
+
+Review work is easy to run away with, because it is triggered by other people's activity
+rather than by the autopilot's own queue:
+
+| Setting | Default | Bounds |
+|---------|---------|--------|
+| `max_revisions` | `3` | Code revisions per work item. **Released when the PR merges or is abandoned** — the budget is per work item, so nothing else frees it. |
+| `pr_advisory_max_per_commit` | `2` | How often `/review` (and the other read‑only commands) may run against the **same commit**. They rightly don't spend the revision budget, but each is still a full agent run, and re‑reviewing unchanged code repeats itself. Push a commit to reset. |
+| `pr_auto_review_max_per_pr` | `0` (unlimited) | Lifetime auto‑reviews for one PR. Auto‑review re‑arms on every new commit, so a push‑heavy PR can otherwise be reviewed a dozen times. |
+| `pr_review_max_concurrent` | `0` (share) | Parallel PR‑review work. `0` shares `max_concurrent` with task execution, so a batch of PRs can crowd out the runs that actually implement work items — set it lower to keep execution slots free. |
+
+Run `ai-autopilot doctor` after changing these: it flags the combinations that read as
+configured but can never fire (auto‑review with tracking off, a repeat‑reminder interval
+with reminders disabled, a `pr_bot_identity` with pasted quotes that will never match).
 
 ---
 

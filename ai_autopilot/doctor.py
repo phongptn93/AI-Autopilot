@@ -345,6 +345,45 @@ def check_command_hints(config: Settings) -> list[Finding]:
     return out or [Finding(OK, f"{len(slash)} PR commands configured")]
 
 
+def check_pr_review(config: Settings) -> list[Finding]:
+    """The PR-review group: settings that read as configured but can never take effect."""
+    out: list[Finding] = []
+    if config.pr_auto_review_on_added and not config.pr_reviewer_tracking_enabled:
+        out.append(Finding(
+            WARN, "Auto-review can never fire",
+            "pr_auto_review_on_added=true but pr_reviewer_tracking_enabled=false.",
+            "Detecting that the bot was added as a reviewer is the tracker's job, and the "
+            "tracker never starts. Enable tracking, or turn auto-review off.",
+        ))
+    identity = config.pr_bot_identity
+    if identity and identity != identity.strip().strip("\"'"):
+        out.append(Finding(
+            WARN, "pr_bot_identity has stray whitespace or quotes",
+            f"Configured as {identity!r}.",
+            "It is compared verbatim against the reviewer's email / display name, so a "
+            "pasted quote or trailing space means the bot never recognises itself and "
+            "silently never auto-reviews. Store the bare value.",
+        ))
+    if not (config.feedback_loop_enabled or config.pr_reviewer_tracking_enabled):
+        out.append(Finding(
+            OK, "PR review & feedback: off (both services disabled)"
+        ))
+        return out
+    enabled = [
+        name for name, on in (
+            ("feedback loop", config.feedback_loop_enabled),
+            ("reviewer tracking", config.pr_reviewer_tracking_enabled),
+            ("auto-review", config.pr_auto_review_on_added),
+        ) if on
+    ]
+    concurrency = config.pr_review_max_concurrent or config.max_concurrent
+    shared = "" if config.pr_review_max_concurrent else " (shared with execution)"
+    out.append(Finding(
+        OK, f"PR review: {', '.join(enabled)} · max {concurrency} parallel{shared}"
+    ))
+    return out
+
+
 def check_reviewer_reminders(config: Settings) -> list[Finding]:
     """Reminder settings that read as configured but can never fire."""
     first = config.pr_reviewer_reminder_hours
@@ -374,7 +413,7 @@ def check_reviewer_reminders(config: Settings) -> list[Finding]:
 CHECKS = (
     check_ado, check_trigger, check_workspace, check_concurrency, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_teams_bot,
-    check_command_hints, check_reviewer_reminders,
+    check_command_hints, check_reviewer_reminders, check_pr_review,
 )
 
 

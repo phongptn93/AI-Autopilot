@@ -108,8 +108,12 @@ class ReviewerTrackerService:
         self._log = get_logger("services.reviewer_tracker")
         self._task: asyncio.Task | None = None
         self._tasks: set[asyncio.Task] = set()
-        # Bounded like the babysitter — an auto-review is a full agent run.
-        self._sem = asyncio.Semaphore(c.config.max_concurrent)
+        # Bounded like the babysitter — an auto-review is a full agent run. Its OWN cap
+        # when set, so a batch of PRs can't take every slot from the task execution that
+        # actually implements work items; 0 falls back to the shared `max_concurrent`.
+        self._sem = asyncio.Semaphore(
+            c.config.pr_review_max_concurrent or c.config.max_concurrent
+        )
         # PRs with an auto-review in flight (don't double-launch across scans).
         self._reviewing: set[int] = set()
         # Serialise /ai revises per (repo, branch) so parallel commands on one branch
@@ -453,6 +457,11 @@ class ReviewerTrackerService:
             tracked_ids = {snap.pr_id for snap in await self._repo.all_reviewers()}
             for pr_id in tracked_ids - active_ids:
                 await self._repo.delete_pr(pr_id)
+                if self._cmd_repo is not None:
+                    # The review budget dies with the PR too, or the table grows forever
+                    # and a recycled PR id would inherit a spent allowance.
+                    with contextlib.suppress(Exception):
+                        await self._cmd_repo.forget_pr_budget(pr_id)
                 self._log.info("forgot closed PR", pr=pr_id)
         except Exception as exc:  # noqa: BLE001
             self._log.warning("closed-PR cleanup failed", error=str(exc))
@@ -506,7 +515,21 @@ class ReviewerTrackerService:
                         await self._repo.set_reviewed_commit(
                             pr_id, rid, current_commit or "@none"
                         )
+                    elif await self._auto_review_exhausted(pr_id):
+                        # Stop re-arming, and mark this commit reviewed so the decision
+                        # isn't recomputed (and re-logged) on every 30s scan.
+                        await self._repo.set_reviewed_commit(
+                            pr_id, rid, current_commit or "@none"
+                        )
+                        self._log.info(
+                            "auto-review cap reached — not re-reviewing", pr=pr_id,
+                            cap=self._config.pr_auto_review_max_per_pr,
+                        )
                     else:
+                        # Count BEFORE dispatch so two scans can't both spend the last slot.
+                        if self._cmd_repo is not None:
+                            with contextlib.suppress(Exception):
+                                await self._cmd_repo.record_auto_review(pr_id)
                         self._reviewing.add(pr_id)
                         self._spawn(
                             self._auto_review(repo_id, repo_name, pr, rid, current_commit)
@@ -531,6 +554,24 @@ class ReviewerTrackerService:
             pr.get("sourceRefName", ""), tuple(self._config.bot_branch_prefixes)
         ):
             await self._handle_commands(repo_id, repo_name, pr)
+
+    async def _auto_review_exhausted(self, pr_id: int) -> bool:
+        """True when this PR has already had its lifetime allowance of auto-reviews.
+
+        ``_should_auto_review`` re-arms on every new commit, which is right for quality but
+        unbounded in cost: a PR pushed to fifteen times gets reviewed fifteen times. This
+        is a whole-life counter, not per-commit — the point is to bound the total.
+        0 = unlimited, which is the behaviour from before the setting existed.
+        """
+        cap = self._config.pr_auto_review_max_per_pr
+        if cap <= 0 or self._cmd_repo is None:
+            return False
+        try:
+            _, _, done = await self._cmd_repo.review_budget(pr_id)
+        except Exception as exc:  # noqa: BLE001 — bookkeeping must not block a review
+            self._log.warning("auto-review budget check failed", pr=pr_id, error=str(exc))
+            return False
+        return done >= cap
 
     def _should_auto_review(self, pr_id: int, reviewed_commit: str, commit: str) -> bool:
         if not self._config.pr_auto_review_on_added:
@@ -630,13 +671,28 @@ class ReviewerTrackerService:
             # written into the instruction, so the metric and _guidance see a real command.
             advisory = await resolve_command(cfg, cmd)
             metrics.record_pr_command(self._verb(cmd["instruction"]))
+            if advisory:
+                # Same ceiling as the babysitter: advisory work is free of the revision
+                # budget but not free of compute, and re-reviewing one commit repeats itself.
+                cap = cfg.pr_advisory_max_per_commit
+                commit = (pr.get("lastMergeSourceCommit") or {}).get("commitId") or ""
+                if cap > 0 and await cmd_repo.record_advisory_run(pr_id, commit) > cap:
+                    self._spawn(self._reply(repo_id, pr_id, cmd["thread_id"],
+                        f"<div>🔁 Commit này tôi đã review {cap} lần — review lại cùng một "
+                        "commit gần như luôn ra cùng kết quả, nên tôi dừng ở đây.<br>"
+                        "Push thêm commit là tôi review lại ngay; hoặc nới "
+                        "<code>pr_advisory_max_per_commit</code>.</div>"))
+                    continue
             if not advisory:
                 spent = await cmd_repo.revision_count(item.id)
                 if spent >= cfg.max_revisions:
                     self._spawn(self._reply(repo_id, pr_id, cmd["thread_id"],
                         f"<div>⏸️ Đã đạt giới hạn {cfg.max_revisions} lần sửa tự động cho "
-                        "PR này. Tôi tạm dừng để tránh sửa lan man — nới "
-                        "<code>max_revisions</code> nếu cần tiếp.</div>"))
+                        "item này. Tôi tạm dừng để tránh sửa lan man.<br>"
+                        "Hạn mức <b>tự hoàn lại khi PR merge hoặc abandon</b>. Cần sửa "
+                        "tiếp ngay thì nới <code>max_revisions</code>, hoặc reply "
+                        "<code>/review</code> — lệnh chỉ-bình-luận không tính hạn mức."
+                        "</div>"))
                     continue
                 await cmd_repo.set_revision_count(item.id, spent + 1)
             self._spawn(

@@ -199,3 +199,6 @@ smtp_user: ""
 # smtp_password: ""          # prefer env
 email_to: ""
 email_from: ""
+pr_advisory_max_per_commit: 2        # /review runs allowed per commit; 0 = unlimited
+pr_auto_review_max_per_pr: 0         # lifetime auto-reviews per PR; 0 = unlimited
+pr_review_max_concurrent: 0          # 0 = share max_concurrent with task execution

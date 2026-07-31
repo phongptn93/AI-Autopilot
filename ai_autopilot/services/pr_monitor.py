@@ -36,7 +36,10 @@ class PrMonitorService:
         # Command handling runs as bounded background tasks so a slow revise never blocks the
         # scan loop (other PRs keep getting picked up). Same-repo revises are still serialised
         # by the executor's per-repo git lock.
-        self._sem = asyncio.Semaphore(c.config.max_concurrent)
+        # Own cap when set (see ReviewerTrackerService) so PR work can't starve execution.
+        self._sem = asyncio.Semaphore(
+            c.config.pr_review_max_concurrent or c.config.max_concurrent
+        )
         self._tasks: set[asyncio.Task] = set()
         # One human often replies /ai to SEVERAL review threads at once; running those
         # concurrently on the same branch corrupts the run (worktree mode: second
@@ -201,6 +204,28 @@ class PrMonitorService:
         # (e.g. an ADO error) must not wipe the caches.
         if repos:
             self._prune_caches(active_pr_ids, active_branches, active_items)
+            await self._release_closed_budgets(active_items)
+
+    async def _release_closed_budgets(self, active_items: set[int]) -> None:
+        """Give back the revision budget of work items whose PR is no longer open.
+
+        The counter only ever incremented, so an item that spent its three revisions was
+        capped for the life of the database — and the cap reply told people to "open a new
+        PR", which freed nothing, because the budget is keyed by work item. Deriving the
+        release from "has no active PR" needs no close event and repairs itself if a scan
+        is missed. An in-flight revise is inherently safe: its PR is still open, so the
+        item is in ``active_items``.
+        """
+        if self._repo is None:
+            return
+        try:
+            spent = await self._repo.all_revision_counts()
+            for work_item_id in spent.keys() - active_items:
+                await self._repo.reset_revision_count(work_item_id)
+                self._revision_counts.pop(work_item_id, None)
+                self._log.info("revision budget released — PR closed", id=work_item_id)
+        except Exception as exc:  # noqa: BLE001 — housekeeping must not break the scan
+            self._log.warning("revision budget release failed", error=str(exc))
 
     def _prune_caches(
         self, active_pr_ids: set[int], active_branches: set[tuple[str, str]],
@@ -341,6 +366,9 @@ class PrMonitorService:
             # A bare @mention has its command inferred here, defaulting to advisory.
             advisory = await resolve_command(cfg, cmd)
             if advisory:
+                if await self._advisory_exhausted(pr_id, pr):
+                    self._spawn(self._reply_advisory_capped(repo_id, pr_id, cmd["thread_id"]))
+                    continue
                 to_run.append((cmd, await self._get_revisions(work_item_id)))
                 continue
             if await self._get_revisions(work_item_id) >= cfg.max_revisions:
@@ -365,6 +393,36 @@ class PrMonitorService:
                 )
             )
 
+    async def _advisory_exhausted(self, pr_id: int, pr: dict) -> bool:
+        """True when this PR already had its allowance of advisory reviews AT THIS COMMIT.
+
+        Advisory commands rightly don't spend the revision budget — they change nothing —
+        but each is still a full agent run, so with no ceiling five replies cost five runs
+        for findings that barely differ. Scoping the count to the commit keeps the useful
+        case (push a fix, ask again) free while stopping repeat reviews of unchanged code.
+        Counting happens here, before dispatch, so concurrent replies can't both slip past.
+        """
+        cap = self._config.pr_advisory_max_per_commit
+        if cap <= 0 or self._repo is None:
+            return False
+        commit = (pr.get("lastMergeSourceCommit") or {}).get("commitId") or ""
+        try:
+            return await self._repo.record_advisory_run(pr_id, commit) > cap
+        except Exception as exc:  # noqa: BLE001 — never block a review on bookkeeping
+            self._log.warning("advisory budget check failed", pr=pr_id, error=str(exc))
+            return False
+
+    async def _reply_advisory_capped(self, repo_id: str, pr_id: int, thread_id: int) -> None:
+        with contextlib.suppress(Exception):
+            await self._c.ado.reply_to_pull_request_thread(
+                repo_id, pr_id, thread_id,
+                f"<div>🔁 Commit này tôi đã review "
+                f"{self._config.pr_advisory_max_per_commit} lần — review lại cùng một "
+                "commit gần như luôn ra cùng kết quả, nên tôi dừng ở đây.<br>"
+                "Push thêm commit là tôi review lại ngay; hoặc nới "
+                "<code>pr_advisory_max_per_commit</code>.</div>",
+            )
+
     async def _reply_unauthorized(
         self, repo_id: str, pr_id: int, thread_id: int, claimed: str
     ) -> None:
@@ -380,8 +438,10 @@ class PrMonitorService:
             await self._c.ado.reply_to_pull_request_thread(
                 repo_id, pr_id, thread_id,
                 f"<div>⏸️ Đã đạt giới hạn {self._config.max_revisions} lần sửa tự động cho "
-                "item này. Tôi tạm dừng để tránh sửa lan man — tạo PR mới hoặc nới "
-                "<code>max_revisions</code> nếu cần tiếp.</div>",
+                "item này. Tôi tạm dừng để tránh sửa lan man.<br>"
+                "Hạn mức <b>tự hoàn lại khi PR này merge hoặc abandon</b>. Cần sửa tiếp "
+                "ngay thì nới <code>max_revisions</code>, hoặc reply <code>/review</code> "
+                "— lệnh chỉ-bình-luận không tính vào hạn mức.</div>",
             )
 
     async def _handle_command(

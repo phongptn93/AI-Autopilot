@@ -152,6 +152,28 @@ class HandledPrComment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class PrReviewBudget(Base):
+    """How much review effort one PR has already consumed.
+
+    Separate from ``PrCommandState`` (which counts CODE revisions per work item) because
+    these are per-PR and bound *reviews*, which change nothing and so were previously
+    unbounded: ``advisory_runs`` is scoped to ``commit_id`` and resets when the branch
+    moves (re-reviewing the same commit yields the same findings), while ``auto_reviews``
+    counts the PR's whole life.
+
+    A new table rather than columns on an existing one: ``create_all`` adds missing tables
+    to an existing database but will not ALTER one, so this upgrades in place.
+    """
+
+    __tablename__ = "pr_review_budgets"
+
+    pr_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    commit_id: Mapped[str] = mapped_column(String(64), default="")
+    advisory_runs: Mapped[int] = mapped_column(Integer, default=0)
+    auto_reviews: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class PrReviewerState(Base):
     """One reviewer on one active PR, as last seen by the reviewer tracker.
 

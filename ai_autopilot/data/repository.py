@@ -21,6 +21,7 @@ from ai_autopilot.data.entities import (
     PipelineState,
     PlannedRun,
     PrCommandState,
+    PrReviewBudget,
     PrReviewerState,
     SchedulerDecision,
     SdlcLoopState,
@@ -584,6 +585,80 @@ class PrCommandRepository:
             row.revisions = revisions
             row.updated_at = datetime.now(UTC)
             await session.commit()
+
+    async def all_revision_counts(self) -> dict[int, int]:
+        """Every work item with a spent revision budget → how much it spent.
+
+        Needed because the budget is otherwise write-only: nothing ever cleared it, so an
+        item that used its three revisions stayed capped for the life of the database.
+        """
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(PrCommandState.work_item_id, PrCommandState.revisions)
+            )
+            return {wid: n for wid, n in rows.all() if n}
+
+    async def reset_revision_count(self, work_item_id: int) -> None:
+        """Give the item its full revision budget back (its PR is no longer open)."""
+        async with self._db.session() as session:
+            row = await session.get(PrCommandState, work_item_id)
+            if row is not None and row.revisions:
+                row.revisions = 0
+                row.updated_at = datetime.now(UTC)
+                await session.commit()
+
+    async def review_budget(self, pr_id: int) -> tuple[str, int, int]:
+        """``(commit_id, advisory_runs, auto_reviews)`` for ``pr_id``; zeros if unseen."""
+        async with self._db.session() as session:
+            row = await session.get(PrReviewBudget, pr_id)
+            if row is None:
+                return "", 0, 0
+            return row.commit_id, row.advisory_runs, row.auto_reviews
+
+    async def record_advisory_run(self, pr_id: int, commit_id: str) -> int:
+        """Count one advisory review of ``pr_id`` at ``commit_id``; returns the new count.
+
+        A different commit resets the count to 1 — the point of the cap is to stop repeat
+        reviews of *unchanged* code, not to ration reviews across a PR's life.
+        """
+        async with self._db.session() as session:
+            row = await session.get(PrReviewBudget, pr_id)
+            if row is None:
+                # Set the counters explicitly: `default=0` on the column applies at
+                # FLUSH time, so reading the attribute before then yields None.
+                row = PrReviewBudget(
+                    pr_id=pr_id, commit_id="", advisory_runs=0, auto_reviews=0
+                )
+                session.add(row)
+            if row.commit_id != commit_id:
+                row.commit_id, row.advisory_runs = commit_id, 0
+            row.advisory_runs += 1
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return row.advisory_runs
+
+    async def record_auto_review(self, pr_id: int) -> int:
+        """Count one auto-review of ``pr_id`` (whole-life counter); returns the new count."""
+        async with self._db.session() as session:
+            row = await session.get(PrReviewBudget, pr_id)
+            if row is None:
+                # Set the counters explicitly: `default=0` on the column applies at
+                # FLUSH time, so reading the attribute before then yields None.
+                row = PrReviewBudget(
+                    pr_id=pr_id, commit_id="", advisory_runs=0, auto_reviews=0
+                )
+                session.add(row)
+            row.auto_reviews += 1
+            row.updated_at = datetime.now(UTC)
+            await session.commit()
+            return row.auto_reviews
+
+    async def forget_pr_budget(self, pr_id: int) -> None:
+        async with self._db.session() as session:
+            row = await session.get(PrReviewBudget, pr_id)
+            if row is not None:
+                await session.delete(row)
+                await session.commit()
 
     async def handled_comments(self, pr_id: int) -> set[int]:
         async with self._db.session() as session:

@@ -219,6 +219,19 @@ FIELDS: tuple[Field, ...] = (
           "🔁 PR review & feedback",
           "Keep nudging a reviewer who still hasn't voted, this many hours after the last "
           "reminder. 0 = nudge once then stay quiet."),
+    Field("pr_advisory_max_per_commit", "↳ Max advisory reviews / commit", "int",
+          "🔁 PR review & feedback",
+          "How often /review (and other comment-only commands) may run against the SAME "
+          "commit. Re-reviewing unchanged code repeats itself; push a commit to reset. "
+          "0 = unlimited."),
+    Field("pr_auto_review_max_per_pr", "↳ Max auto-reviews / PR", "int",
+          "🔁 PR review & feedback",
+          "Lifetime ceiling on auto-reviews for one PR. Auto-review re-arms on every new "
+          "commit, so a push-heavy PR can otherwise be reviewed many times. 0 = unlimited."),
+    Field("pr_review_max_concurrent", "↳ Max parallel PR reviews", "int",
+          "🔁 PR review & feedback",
+          "Concurrency cap for PR review work, separate from Max concurrent so a batch of "
+          "PRs cannot starve task execution. 0 = share Max concurrent."),
     Field("pr_bot_identity", "↳ Bot identity override", "text", "🔁 PR review & feedback",
           "Email / uniqueName of the bot reviewer account. Blank = auto-detect the PAT's own "
           "identity via connectionData."),

@@ -250,3 +250,64 @@ def test_slash_commands_still_report_no_mention():
     threads = [_mention_thread(10, 1, "/ai đổi field")]
     got = command_threads(threads, ["/ai"], bot=_bot())
     assert got[0]["via_mention"] is False and got[0]["instruction"] == "/ai đổi field"
+
+
+# ── Review budgets: the counters that bound cost ───────────────────────────────
+
+async def _budget_repo(tmp_path):
+    from ai_autopilot.data.database import Database
+    from ai_autopilot.data.repository import PrCommandRepository
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'b.sqlite'}")
+    await db.create_all()
+    return PrCommandRepository(db), db
+
+
+async def test_revision_budget_can_be_given_back(tmp_path):
+    """The counter only ever incremented before, so an item that spent its budget was
+    capped for the life of the database — and the cap reply promised otherwise."""
+    repo, db = await _budget_repo(tmp_path)
+    await repo.set_revision_count(101, 3)
+    assert await repo.revision_count(101) == 3
+    assert await repo.all_revision_counts() == {101: 3}
+
+    await repo.reset_revision_count(101)
+    assert await repo.revision_count(101) == 0
+    # Cleared items drop out of the sweep set, so the reset is not retried every scan.
+    assert await repo.all_revision_counts() == {}
+    await db.dispose()
+
+
+async def test_advisory_count_resets_when_the_commit_moves(tmp_path):
+    """The cap exists to stop repeat reviews of UNCHANGED code; pushing a fix must not be
+    punished by an allowance spent on the previous commit."""
+    repo, db = await _budget_repo(tmp_path)
+    assert await repo.record_advisory_run(7, "aaa") == 1
+    assert await repo.record_advisory_run(7, "aaa") == 2
+    assert await repo.record_advisory_run(7, "bbb") == 1     # new commit → fresh
+    commit, advisory, auto = await repo.review_budget(7)
+    assert (commit, advisory, auto) == ("bbb", 1, 0)
+    await db.dispose()
+
+
+async def test_auto_review_count_is_whole_life_not_per_commit(tmp_path):
+    """Auto-review re-arms on every commit, so bounding total cost means a counter that
+    does NOT reset when the branch moves."""
+    repo, db = await _budget_repo(tmp_path)
+    await repo.record_advisory_run(9, "aaa")
+    assert await repo.record_auto_review(9) == 1
+    assert await repo.record_auto_review(9) == 2
+    await repo.record_advisory_run(9, "bbb")                 # commit moved
+    _, advisory, auto = await repo.review_budget(9)
+    assert advisory == 1 and auto == 2                       # auto survived, advisory reset
+    await db.dispose()
+
+
+async def test_closing_a_pr_forgets_its_budget(tmp_path):
+    """Otherwise the table grows without bound and a recycled PR id inherits a spent
+    allowance."""
+    repo, db = await _budget_repo(tmp_path)
+    await repo.record_auto_review(5)
+    await repo.forget_pr_budget(5)
+    assert await repo.review_budget(5) == ("", 0, 0)
+    await repo.forget_pr_budget(5)          # idempotent
+    await db.dispose()

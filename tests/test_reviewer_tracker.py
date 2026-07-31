@@ -286,3 +286,59 @@ def test_parse_verdict():
     assert parse("verdict: WAIT") == -5
     assert parse("no marker here") is None
     assert parse(None) is None
+
+
+async def _make_with_budget(ado, feedback, **overrides):
+    """Same as `_make` but wires the shared PR-command repo, which is where the review
+    budgets live — the tracker treats a missing repo as "no caps configured"."""
+    from ai_autopilot.data.repository import PrCommandRepository
+    svc, repo, db = await _make(ado, feedback, **overrides)
+    svc._c.pr_command_repo = PrCommandRepository(db)
+    return svc, repo, db
+
+
+async def test_auto_review_stops_at_the_per_pr_cap():
+    """Re-arming on every commit is right for quality but unbounded in cost: a PR pushed
+    to fifteen times would be reviewed fifteen times."""
+    ado = _FakeAdo([_pr([_bot_reviewer()], commit="c1")])
+    feedback = _FakeFeedback()
+    svc, repo, _ = await _make_with_budget(ado, feedback, pr_auto_review_max_per_pr=1)
+
+    await svc._scan()
+    await _drain(svc)
+    assert len(feedback.calls) == 1
+
+    ado.prs = [_pr([_bot_reviewer(vote=0)], commit="c2")]   # new commit → would re-arm
+    await svc._scan()
+    await _drain(svc)
+    assert len(feedback.calls) == 1                          # capped
+
+    # The commit is marked reviewed so the decision isn't recomputed every 30s scan.
+    rows = await repo.reviewers_for_pr(7)
+    assert rows[BOT["id"]].reviewed_commit == "c2"
+
+
+async def test_auto_review_cap_of_zero_keeps_unlimited_rearming():
+    """0 must preserve the behaviour from before the setting existed."""
+    ado = _FakeAdo([_pr([_bot_reviewer()], commit="c1")])
+    feedback = _FakeFeedback()
+    svc, _, _ = await _make_with_budget(ado, feedback, pr_auto_review_max_per_pr=0)
+    await svc._scan()
+    await _drain(svc)
+    ado.prs = [_pr([_bot_reviewer(vote=0)], commit="c2")]
+    await svc._scan()
+    await _drain(svc)
+    assert len(feedback.calls) == 2
+
+
+async def test_closed_pr_releases_its_review_budget():
+    ado = _FakeAdo([_pr([_bot_reviewer()], commit="c1")])
+    svc, _, db = await _make_with_budget(ado, _FakeFeedback(), pr_auto_review_max_per_pr=5)
+    await svc._scan()
+    await _drain(svc)
+    cmd_repo = svc._c.pr_command_repo
+    assert (await cmd_repo.review_budget(7))[2] == 1     # one auto-review recorded
+
+    ado.prs = []                                        # PR completed / abandoned
+    await svc._scan()
+    assert await cmd_repo.review_budget(7) == ("", 0, 0)

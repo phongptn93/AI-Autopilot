@@ -596,6 +596,19 @@ class Settings(BaseSettings):
     # repeat, which nudges once and then goes quiet — exactly when a stuck PR needs it
     # most. Set e.g. 24 to keep nudging daily until they vote.
     pr_reviewer_reminder_repeat_hours: int = 0
+    # How many times ONE advisory command (/review, /qc …) may run against the same PR at
+    # the same commit. Advisory commands don't spend the revision budget because they
+    # change nothing — but each is still a full agent run, so without a ceiling N replies
+    # cost N runs for findings that barely differ. 0 = unlimited.
+    pr_advisory_max_per_commit: int = 2
+    # Ceiling on auto-reviews for one PR across its whole life. Auto-review re-arms on
+    # every new commit, so a push-heavy PR can otherwise be reviewed a dozen times.
+    # 0 = unlimited (the behaviour before this setting existed).
+    pr_auto_review_max_per_pr: int = 0
+    # Concurrency cap for PR review work (auto-review + comment commands), separate from
+    # `max_concurrent` so a batch of PRs cannot starve the task execution that actually
+    # implements work items. 0 = fall back to `max_concurrent`.
+    pr_review_max_concurrent: int = 0
     # Bot identity override (email / uniqueName / display name). Empty = auto-detect
     # the account behind this client's PAT via connectionData — usually right.
     pr_bot_identity: str = ""

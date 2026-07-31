@@ -184,3 +184,35 @@ def test_report_survives_a_console_that_cannot_encode_icons(capsys, monkeypatch)
     assert "[ok] fine" in written
     assert "[X] broken" in written
     assert "-> fix it" in written
+
+
+def test_auto_review_without_tracking_can_never_fire():
+    """Detecting that the bot was added as a reviewer is the tracker's job; with tracking
+    off the tracker never starts, so auto-review is dead config."""
+    found = _diagnose(pr_auto_review_on_added=True, pr_reviewer_tracking_enabled=False)
+    assert "Auto-review can never fire" in _titles(found, doctor.WARN)
+
+
+def test_pasted_quotes_in_bot_identity_are_flagged():
+    """It is compared verbatim, so a stray quote means the bot never recognises itself —
+    and never auto-reviews, silently."""
+    found = _diagnose(pr_reviewer_tracking_enabled=True, pr_bot_identity='"bot@x.vn"')
+    assert "pr_bot_identity has stray whitespace or quotes" in _titles(found, doctor.WARN)
+    found = _diagnose(pr_reviewer_tracking_enabled=True, pr_bot_identity="bot@x.vn ")
+    assert "pr_bot_identity has stray whitespace or quotes" in _titles(found, doctor.WARN)
+    clean = _diagnose(pr_reviewer_tracking_enabled=True, pr_bot_identity="bot@x.vn")
+    assert "pr_bot_identity has stray whitespace or quotes" not in _titles(clean)
+
+
+def test_pr_review_reports_whether_its_concurrency_is_shared():
+    shared = _diagnose(pr_reviewer_tracking_enabled=True, max_concurrent=3)
+    assert any("shared with execution" in t for t in _titles(shared, doctor.OK))
+    own = _diagnose(pr_reviewer_tracking_enabled=True, max_concurrent=3,
+                    pr_review_max_concurrent=1)
+    assert any("max 1 parallel" in t and "shared" not in t for t in _titles(own, doctor.OK))
+
+
+def test_pr_review_group_off_is_stated_not_warned():
+    """Everything off is a legitimate configuration, not a problem to nag about."""
+    found = _diagnose(feedback_loop_enabled=False, pr_reviewer_tracking_enabled=False)
+    assert "PR review & feedback: off (both services disabled)" in _titles(found, doctor.OK)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import secrets
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -150,9 +151,15 @@ def create_dashboard_router() -> APIRouter:
     router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
     def _ctx(request: Request, active: str, **extra) -> dict:
+        cfg = getattr(getattr(request.app.state, "container", None), "config", None)
         return {
             "request": request,
             "active": active,
+            # Drives the sidebar's logout button: with no password there is no session to
+            # end, so offering "Đăng xuất" would be a control that does nothing.
+            "dashboard_locked": bool(
+                cfg and (cfg.dashboard_auth_password_hash or cfg.dashboard_auth_token)
+            ),
             "version": request.app.version,  # single source of truth: FastAPI(version=...)
             "mmss": _mmss,
             "fmt_duration": _fmt_duration,
@@ -160,6 +167,88 @@ def create_dashboard_router() -> APIRouter:
             "status_class": _status_class,
             **extra,
         }
+
+    # ── Login ────────────────────────────────────────────────────────────────
+    # Reachable while the rest of /dashboard is locked (see `_security_guard`), so this
+    # is the one place that must never assume an authenticated caller.
+
+    def _safe_next(raw: str | None) -> str:
+        """Only ever redirect back inside our own dashboard.
+
+        `next` comes from the query string, so an attacker can put anything in it. A
+        scheme-relative value like `//evil.example` is a valid *path* to a browser and
+        would turn our login into an open redirect, which is why the check is a literal
+        prefix test rather than "does it start with a slash".
+        """
+        target = raw or "/dashboard"
+        if not target.startswith("/dashboard") or target.startswith("/dashboard//"):
+            return "/dashboard"
+        return target
+
+    def _login_locked(request: Request) -> bool:
+        cfg = request.app.state.container.config
+        return bool(cfg.dashboard_auth_password_hash or cfg.dashboard_auth_token)
+
+    @router.get("/login", response_class=HTMLResponse)
+    async def login_form(request: Request):
+        nxt = _safe_next(request.query_params.get("next"))
+        if not _login_locked(request):
+            return RedirectResponse(nxt, status_code=303)
+        cfg = request.app.state.container.config
+        if security.verify_session_token(
+            request.cookies.get(security.SESSION_COOKIE), cfg
+        ):
+            return RedirectResponse(nxt, status_code=303)   # already in
+        return _TEMPLATES.TemplateResponse(
+            request, "login.html",
+            {"request": request, "version": request.app.version, "next": nxt, "error": ""},
+        )
+
+    @router.post("/login", response_class=HTMLResponse)
+    async def login_submit(request: Request):
+        cfg = request.app.state.container.config
+        form = await request.form()
+        nxt = _safe_next(str(form.get("next") or ""))
+        password = str(form.get("password") or "")
+        ok = (
+            security.verify_password(password, cfg.dashboard_auth_password_hash)
+            if cfg.dashboard_auth_password_hash
+            else bool(cfg.dashboard_auth_token) and secrets.compare_digest(
+                password, cfg.dashboard_auth_token
+            )
+        )
+        if not ok:
+            _log.warning("dashboard login failed", client=request.client.host
+                         if request.client else "?")
+            # 401, not 200: a failed login is not a successful page view, and the status
+            # is what monitoring and fail2ban-style tooling actually key on.
+            return _TEMPLATES.TemplateResponse(
+                request, "login.html",
+                {"request": request, "version": request.app.version, "next": nxt,
+                 "error": "Mật khẩu không đúng."},
+                status_code=401,
+            )
+        response = RedirectResponse(nxt, status_code=303)
+        response.set_cookie(
+            security.SESSION_COOKIE, security.make_session_token(cfg),
+            max_age=security.SESSION_TTL_HOURS * 3600,
+            httponly=True,          # not readable from JS
+            samesite="lax",         # survives the redirect, blocks cross-site POSTs
+            secure=request.url.scheme == "https",
+            path="/dashboard",
+        )
+        with contextlib.suppress(Exception):
+            await request.app.state.container.audit_repo.record(
+                actor="dashboard", source="dashboard", action="dashboard.login",
+                target=request.client.host if request.client else "?", detail="",
+            )
+        return response
+
+    @router.post("/logout")
+    async def logout(request: Request):
+        response = RedirectResponse("/dashboard/login", status_code=303)
+        response.delete_cookie(security.SESSION_COOKIE, path="/dashboard")
+        return response
 
     @router.get("", response_class=HTMLResponse)
     @router.get("/", response_class=HTMLResponse)
@@ -857,6 +946,9 @@ def create_dashboard_router() -> APIRouter:
                 imported=bool(imported),
                 import_error=import_error,
                 config_path=str(config_file_path()),
+                # Drives the full-export panel: without it the download is refused, so the
+                # UI says why up front instead of after a click that produces nothing.
+                has_export_password=bool(c.config.config_export_password),
                 repos=discovered,
                 allowed_repos=allowed,
                 ado_states=ado_states,
@@ -914,6 +1006,18 @@ def create_dashboard_router() -> APIRouter:
         """Download the FULL config (INCLUDING secrets), encrypted with the
         configured full-export password. Decrypt with ai_autopilot.security."""
         c: Container = request.app.state.container
+        if not c.config.config_export_password:
+            # Refusing is the only safe answer. Encrypting under "" still produces a
+            # valid-looking .enc file, but the key derives from an empty password that
+            # anyone can reproduce — so the download would carry the ADO PAT and every
+            # token with no real protection, while looking protected.
+            _log.warning("full export refused — config_export_password is not set")
+            return RedirectResponse(
+                "/dashboard/settings?import_error="
+                + quote("Chưa đặt Full-export password — file sẽ không được bảo vệ. "
+                        "Đặt config_export_password (mục Web / Security) rồi export lại."),
+                status_code=303,
+            )
         blob = settings_form.export_full_encrypted(c.config, c.config.config_export_password)
         # Audit only the event — never the secret payload or the password.
         _log.warning("FULL config (with secrets) exported via dashboard — encrypted download")

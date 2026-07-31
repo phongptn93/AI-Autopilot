@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 from ai_autopilot.config import Settings
@@ -177,3 +179,68 @@ def test_import_settings_rejects_non_mapping():
 
     with pytest.raises(ValueError):
         settings_form.import_settings("- just\n- a\n- list", set(Settings.model_fields))
+
+
+# ── Export field-set invariants ────────────────────────────────────────────────
+# Both exports derive from `model_dump`, so EVERY new Settings field is exported
+# automatically. That is the right default for config knobs and the wrong one for
+# credentials — these lock the boundary so a future secret can't ride along silently.
+
+# `(^|_)pat$` is anchored on purpose: a loose `_pat` also matches
+# `policy_protected_pat|hs`, which is a list of globs a teammate SHOULD receive.
+_SECRETISH = re.compile(r"(^|_)pat$|token|secret|password", re.I)
+# Fields whose NAME looks secret but which hold no credential.
+_NOT_ACTUALLY_SECRET = {
+    "daily_budget_tokens", "conflict_ai_min_token_len", "cost_alert_threshold_tokens",
+}
+
+
+def _real_secret_keys() -> set[str]:
+    return {
+        k for k in Settings.model_fields
+        if _SECRETISH.search(k) and k not in _NOT_ACTUALLY_SECRET
+    }
+
+
+def test_shareable_export_contains_no_credential():
+    """The plain export is meant to be handed to a teammate. One secret slipping in makes
+    it a credential leak, so this asserts over the whole model rather than a fixed list."""
+    exported = set(settings_form.export_settings(Settings()))
+    leaked = _real_secret_keys() & exported
+    assert not leaked, f"secret fields present in the shareable export: {sorted(leaked)}"
+
+
+def test_shareable_export_omits_machine_specific_paths():
+    """Sharing these pins a teammate to this host's filesystem, ports and per-host tag."""
+    exported = set(settings_form.export_settings(Settings()))
+    for key in ("workspace_directory", "database_url", "health_port", "trigger_tag", "repos"):
+        assert key not in exported, key
+
+
+def test_full_export_does_carry_the_credentials():
+    """Its whole purpose is backup / machine migration — a full export without the PAT
+    would restore an autopilot that cannot talk to ADO."""
+    full = set(settings_form.export_full_settings(Settings()))
+    for key in ("ado_pat", "teams_agent_app_secret", "smtp_password", "webhook_secret"):
+        assert key in full, key
+
+
+def test_neither_export_carries_its_own_key_material():
+    """The export password would be circular (you need it to decrypt), and the dashboard
+    hash is deliberately withheld so a restore cannot clobber the target host's own
+    password — see import_full_settings."""
+    shareable = set(settings_form.export_settings(Settings()))
+    full = set(settings_form.export_full_settings(Settings()))
+    for key in ("config_export_password", "dashboard_auth_password_hash"):
+        assert key not in shareable, key
+        assert key not in full, key
+
+
+def test_full_export_is_actually_encrypted_and_round_trips():
+    cfg = Settings(ado_pat="super-secret-pat")
+    blob = settings_form.export_full_encrypted(cfg, "pw")
+    assert b"super-secret-pat" not in blob          # not sitting in plaintext
+    restored = settings_form.import_full_settings(blob, "pw", set(Settings.model_fields))
+    assert restored["ado_pat"] == "super-secret-pat"
+    with pytest.raises(ValueError):
+        settings_form.import_full_settings(blob, "wrong", set(Settings.model_fields))

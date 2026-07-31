@@ -93,3 +93,94 @@ async def test_blank_assignee_returns_empty(tmp_path):
     c._http = _CaptureHttp()
     assert await c.get_work_items_by_assignee("  , ; ") == []
     assert c._http.last_query == ""          # never queried
+
+
+# ── Batched work-item fetch ───────────────────────────────────────────────────
+# Verified against live ADO first: 3 valid ids + 1 bogus returns HTTP 404 with an empty
+# body-less result, and `errorPolicy=Omit` turns the same request into a 200 carrying the
+# 3 real items. These tests pin that behaviour so it cannot regress silently.
+
+
+class _BatchHttp:
+    """Records each GET and replays canned responses in order."""
+
+    def __init__(self, responses):
+        self.urls: list[str] = []
+        self._responses = list(responses)
+
+    async def get(self, url, headers=None):
+        self.urls.append(url)
+        return self._responses.pop(0)
+
+
+class _Resp:
+    def __init__(self, status=200, payload=None, text=""):
+        self.status_code = status
+        self._payload = payload or {}
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+def _wi(wid: int) -> dict:
+    return {"id": wid, "fields": {"System.Title": f"t{wid}", "System.State": "Active",
+                                  "System.WorkItemType": "Task"}}
+
+
+def _batch_client(responses) -> AdoClient:
+    c = _client(ado_project="Proj")
+    c._http = _BatchHttp(responses)
+
+    class _NoAuth:
+        async def get_auth_header(self):
+            return {}
+
+    c._auth = _NoAuth()
+    return c
+
+
+async def test_more_than_200_ids_are_chunked_not_truncated():
+    """ADO caps this endpoint at 200 ids (VS403474). The old code sliced to the first 200,
+    so a 300-id fetch silently reported the last 100 as non-existent."""
+    ids = list(range(1, 301))
+    c = _batch_client([
+        _Resp(payload={"value": [_wi(i) for i in ids[:200]]}),
+        _Resp(payload={"value": [_wi(i) for i in ids[200:]]}),
+    ])
+    got = await c.get_work_items_by_ids(ids)
+    assert len(got) == 300
+    assert len(c._http.urls) == 2                       # two requests, nothing dropped
+    assert "ids=1," in c._http.urls[0]
+    assert "ids=201," in c._http.urls[1]
+
+
+async def test_batch_asks_ado_to_omit_unreadable_ids():
+    """Without errorPolicy=Omit, ONE unreadable id 404s the whole batch — so a single stale
+    link used to blank out every other item in the request."""
+    c = _batch_client([_Resp(payload={"value": [_wi(1)]})])
+    await c.get_work_items_by_ids([1])
+    assert "errorPolicy=Omit" in c._http.urls[0]
+
+
+async def test_nulls_from_omit_are_filtered_not_mapped():
+    """With Omit, ADO returns a null in place of each id it could not read; mapping one
+    would raise."""
+    c = _batch_client([_Resp(payload={"value": [_wi(1), None, _wi(3)]})])
+    got = await c.get_work_items_by_ids([1, 2, 3])
+    assert [i.id for i in got] == [1, 3]
+
+
+async def test_failure_logs_the_ids_and_the_ado_message(capsys):
+    """The old warning carried only the status, so it could not say WHICH item — while the
+    body it discarded named it: "TF401232: Work item 999 does not exist".
+
+    capsys, not caplog: structlog writes to stdout rather than through the stdlib handlers
+    caplog attaches to, so caplog.text is empty here even when the line was emitted.
+    """
+    body = '{"message":"TF401232: Work item 999 does not exist, or you do not have permissions"}'
+    c = _batch_client([_Resp(status=404, text=body)])
+    assert await c.get_work_items_by_ids([999]) == []
+    logged = capsys.readouterr().out
+    assert "999" in logged
+    assert "TF401232" in logged          # the actionable part, previously thrown away

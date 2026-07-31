@@ -22,6 +22,18 @@ from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import TaskCategory, WorkItemInfo
 
 _API = "api-version=7.1"
+# ADO's cap on the ids= batch GET. Anything past this must be a second request, not
+# dropped: silently returning the first 200 of 300 ids reads as "the other 100 don't exist".
+_MAX_IDS_PER_BATCH = 200
+
+
+def _terse(body: str, limit: int = 300) -> str:
+    """One-line, bounded view of an error body — enough to name the cause in a log.
+
+    ADO error bodies are sometimes an HTML page rather than JSON, so this collapses
+    whitespace instead of dumping a screenful into the log.
+    """
+    return " ".join((body or "").split())[:limit]
 _FIELDS = (
     "System.Id,System.Title,System.WorkItemType,System.State,"
     "System.AssignedTo,System.Description,Microsoft.VSTS.Common.AcceptanceCriteria,"
@@ -312,18 +324,51 @@ class AdoClient:
         return out
 
     async def get_work_items_by_ids(self, ids: list[int]) -> list[WorkItemInfo]:
+        """Fetch work items by id, in batches ADO will accept.
+
+        Previously this truncated to the first 200 ids and returned the rest as though
+        they did not exist — silently, so a 201-item planning load simply lost the tail.
+        """
         if not ids:
             return []
-        ids_param = ",".join(str(i) for i in ids[:200])
+        out: list[WorkItemInfo] = []
+        for start in range(0, len(ids), _MAX_IDS_PER_BATCH):
+            out.extend(await self._work_item_batch(ids[start : start + _MAX_IDS_PER_BATCH]))
+        return out
+
+    async def _work_item_batch(self, ids: list[int]) -> list[WorkItemInfo]:
+        ids_param = ",".join(str(i) for i in ids)
+        # errorPolicy=Omit is load-bearing: by default ADO fails the WHOLE request with 404
+        # when ANY single id is unreadable (deleted, moved to another project, or just
+        # wrong), so one stale link in a batch of 200 used to blank out all 200 — and the
+        # callers read that empty list as "none of these work items exist".
         resp = await self._http.get(
-            self._url(f"wit/workitems?ids={ids_param}&fields={_FIELDS}&{_API}"),
+            self._url(
+                f"wit/workitems?ids={ids_param}&fields={_FIELDS}&errorPolicy=Omit&{_API}"
+            ),
             headers=await self._auth.get_auth_header(),
         )
         if resp.status_code >= 400:
-            self._log.warning("get_work_items failed", status=resp.status_code)
+            # The response body is where ADO names the offending id ("TF401232: Work item
+            # 1234 does not exist"). Logging the status alone made this warning
+            # unactionable: it said something failed without saying which item or why.
+            self._log.warning(
+                "get_work_items failed", status=resp.status_code,
+                ids=ids if len(ids) <= 20 else f"{ids[:20]}… ({len(ids)} total)",
+                detail=_terse(resp.text),
+            )
             return []
         values = resp.json().get("value") or []
-        return [self._map(wi) for wi in values]
+        # With errorPolicy=Omit ADO returns a null in place of each id it could not read,
+        # so the array is positional and _map() would raise on those.
+        found = [self._map(wi) for wi in values if wi]
+        missing = sorted(set(ids) - {item.id for item in found})
+        if missing:
+            self._log.info(
+                "work items skipped — not readable in this project", ids=missing,
+                hint="deleted, moved to another project, or the PAT cannot see them",
+            )
+        return found
 
     async def get_work_item(self, work_item_id: int) -> WorkItemInfo | None:
         items = await self.get_work_items_by_ids([work_item_id])

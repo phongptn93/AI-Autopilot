@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from urllib.parse import urlsplit
 
 import httpx
 
-from ai_autopilot.config import Settings
+from ai_autopilot.config import Settings, WebhookTarget
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.notifications.base import (
     NotificationChannel,
@@ -40,34 +39,37 @@ class TeamsNotifier(NotificationChannel):
         the others — otherwise adding a second channel would make notifications less reliable
         than having one. So each post is awaited independently and failures are logged per
         URL, never raised."""
-        webhooks = self._config.teams_webhooks
-        if not webhooks:
+        targets = self._config.teams_webhook_targets
+        if not targets:
             return
         payload = self._payload(message)  # built once — identical for every channel
         results = await asyncio.gather(
-            *(self._post(url, payload) for url in webhooks), return_exceptions=True
+            *(self._post(target, payload) for target in targets), return_exceptions=True
         )
         sent = sum(1 for r in results if r is True)
-        if sent != len(webhooks):
+        if sent != len(targets):
+            # Name the channels that failed. "2 of 3 delivered" left you to guess which,
+            # and every Workflows URL shares the same host, so the host was no help.
+            failed = [t.label for t, r in zip(targets, results, strict=False) if r is not True]
             self._log.warning(
                 "teams notification partially delivered",
-                sent=sent, total=len(webhooks), title=message.title,
+                sent=sent, total=len(targets), failed=failed, title=message.title,
             )
         else:
             self._log.debug("teams notification sent", title=message.title, channels=sent)
 
-    async def _post(self, url: str, payload: dict) -> bool:
+    async def _post(self, target: WebhookTarget, payload: dict) -> bool:
         """True when this one webhook accepted the card. Never raises."""
         try:
-            resp = await self._http.post(url, json=payload)
+            resp = await self._http.post(target.url, json=payload)
         except httpx.HTTPError as exc:
-            # Log the webhook's HOST only: the full URL carries the token that authorises
-            # posting to the channel, so it must not land in the log.
-            self._log.warning("teams webhook error", host=_host(url), error=str(exc))
+            # Identify the channel by NAME (falling back to host): the full URL carries the
+            # token that authorises posting to it, so it must not land in the log.
+            self._log.warning("teams webhook error", channel=target.label, error=str(exc))
             return False
         if resp.status_code >= 400:
             self._log.warning(
-                "teams webhook failed", host=_host(url),
+                "teams webhook failed", channel=target.label,
                 status=resp.status_code, body=resp.text[:200],
             )
             return False
@@ -135,14 +137,6 @@ class TeamsNotifier(NotificationChannel):
                 }
             ],
         }
-
-
-def _host(url: str) -> str:
-    """Host of a webhook URL, for logs — the path and query hold the auth token."""
-    try:
-        return urlsplit(url).hostname or "?"
-    except ValueError:
-        return "?"
 
 
 def _mmss(seconds: float) -> str:

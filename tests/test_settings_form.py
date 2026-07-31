@@ -244,3 +244,48 @@ def test_full_export_is_actually_encrypted_and_round_trips():
     assert restored["ado_pat"] == "super-secret-pat"
     with pytest.raises(ValueError):
         settings_form.import_full_settings(blob, "wrong", set(Settings.model_fields))
+
+
+# ── Teams channel rows ────────────────────────────────────────────────────────
+
+def test_parse_webhook_channels_reads_name_url_and_active():
+    rows = settings_form.parse_webhook_channels({
+        "wh_count": "2",
+        "wh0_name": " #dev ", "wh0_url": " https://a.example/w/1 ", "wh0_active": "on",
+        "wh1_name": "#qc", "wh1_url": "https://b.example/w/2",      # active unticked
+    })
+    assert rows == [
+        {"name": "#dev", "url": "https://a.example/w/1", "active": True},
+        {"name": "#qc", "url": "https://b.example/w/2", "active": False},
+    ]
+
+
+def test_parse_webhook_channels_drops_the_blank_row_and_deletions():
+    """The page renders one empty row so a channel can be added without a round trip; an
+    untouched row must vanish rather than become an error."""
+    rows = settings_form.parse_webhook_channels({
+        "wh_count": "3",
+        "wh0_name": "#dev", "wh0_url": "https://a.example/w/1", "wh0_active": "on",
+        "wh1_name": "#gone", "wh1_url": "https://b.example/w/2", "wh1_delete": "on",
+        "wh2_name": "", "wh2_url": "",                              # the blank row
+    })
+    assert [r["name"] for r in rows] == ["#dev"]
+
+
+def test_parse_webhook_channels_keeps_a_named_row_only_when_it_has_a_url():
+    """A name with no URL notifies nothing, so it is not worth storing."""
+    assert settings_form.parse_webhook_channels(
+        {"wh_count": "1", "wh0_name": "#dev", "wh0_url": "   "}
+    ) == []
+
+
+def test_parse_webhook_channels_survives_a_bogus_count():
+    assert settings_form.parse_webhook_channels({}) == []
+    assert settings_form.parse_webhook_channels({"wh_count": "nope"}) == []
+
+
+def test_the_old_bare_url_list_is_no_longer_a_form_field():
+    """It must not be in FIELDS: parse_form would then emit an empty list for it and WIPE a
+    legacy multi-channel setup the first time anyone saved the page."""
+    assert "teams_webhook_urls" not in {f.key for f in settings_form.FIELDS}
+    assert "teams_webhook_urls" not in settings_form.parse_form({})

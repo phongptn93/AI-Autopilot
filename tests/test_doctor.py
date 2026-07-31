@@ -318,3 +318,32 @@ def test_a_full_email_or_name_is_not_flagged():
         auto_transition_assignee="phong.pham@nois.vn", command_user="Phong Pham",
     )
     assert not any("cannot identify one person" in t for t in _titles(found))
+
+
+def test_teams_channels_are_reported_by_name():
+    found = _diagnose(teams_webhook_url="", teams_webhook_channels=[
+        {"name": "#dev", "url": "https://a.example/w/1", "active": True},
+        {"name": "#qc", "url": "https://b.example/w/2", "active": False},
+    ])
+    ok = _titles(found, doctor.OK)
+    assert any("#dev" in t and "1 muted" in t for t in ok), ok
+
+
+def test_a_channel_with_a_name_but_no_url_is_flagged():
+    """It reads as configured and notifies nothing — the same dead-config shape as a state
+    that exists on no work-item type."""
+    found = _diagnose(teams_webhook_channels=[{"name": "#dev", "url": ""}])
+    assert "1 Teams channel(s) have no URL" in _titles(found, doctor.WARN)
+
+
+def test_a_truncated_channel_url_is_flagged():
+    found = _diagnose(teams_webhook_channels=[{"name": "#dev", "url": "a.example/w/1"}])
+    assert "1 Teams channel URL(s) are not https" in _titles(found, doctor.WARN)
+
+
+def test_muting_every_channel_is_called_out():
+    """Muting them all is indistinguishable from Teams being broken, so say it."""
+    found = _diagnose(teams_webhook_url="", teams_webhook_channels=[
+        {"name": "#dev", "url": "https://a.example/w/1", "active": False},
+    ])
+    assert "Every Teams channel is muted" in _titles(found, doctor.WARN)

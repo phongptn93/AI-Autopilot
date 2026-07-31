@@ -180,17 +180,60 @@ def check_dashboard_security(config: Settings) -> list[Finding]:
 
 
 def check_notifications(config: Settings) -> list[Finding]:
-    channels = len(config.teams_webhooks)
-    if channels or config.teams_agent_enabled:
-        label = f"{channels} Teams webhook(s)" if channels else "no webhook"
+    targets = config.teams_webhook_targets
+    muted = config.muted_teams_channels
+    out: list[Finding] = []
+
+    # A row with a name but no URL notifies nothing while looking configured — the same
+    # class of dead config as a state that exists on no work-item type.
+    nameless = [
+        str(e.get("name") or "(unnamed)")
+        for e in (config.teams_webhook_channels or [])
+        if isinstance(e, dict) and not str(e.get("url") or "").strip()
+    ]
+    if nameless:
+        out.append(Finding(
+            WARN, f"{len(nameless)} Teams channel(s) have no URL",
+            ", ".join(nameless),
+            "Paste the Workflows URL, or remove the row — as it stands the channel is "
+            "listed but nothing is ever posted to it.",
+        ))
+    broken = [
+        str(e.get("name") or "(unnamed)")
+        for e in (config.teams_webhook_channels or [])
+        if isinstance(e, dict) and (url := str(e.get("url") or "").strip())
+        and not url.lower().startswith("https://")
+    ]
+    if broken:
+        out.append(Finding(
+            WARN, f"{len(broken)} Teams channel URL(s) are not https",
+            ", ".join(broken),
+            "A Workflows webhook is always an https URL — check for a truncated paste.",
+        ))
+    if muted and not targets:
+        out.append(Finding(
+            WARN, "Every Teams channel is muted",
+            f"All of {', '.join(muted)} have Active off, and no other webhook is set.",
+            "Tick Active on the channel you want notified, or accept that Teams is off.",
+        ))
+
+    if targets or config.teams_agent_enabled:
+        named = [t.label for t in targets]
+        label = f"{len(targets)} Teams channel(s)" + (
+            f" ({', '.join(named)})" if named else ""
+        ) if targets else "no webhook"
+        if muted:
+            label += f" · {len(muted)} muted"
         bot = "two-way bot on" if config.teams_agent_enabled else "bot off"
-        return [Finding(OK, f"Notifications: {label}, {bot}")]
-    return [Finding(
+        out.append(Finding(OK, f"Notifications: {label}, {bot}"))
+        return out
+    out.append(Finding(
         WARN, "The autopilot cannot tell anyone anything",
         "No Teams webhook and no two-way bot.",
         "Add a Teams Workflows webhook URL (Notifications), or enable the bot. Otherwise "
         "results only appear on the dashboard and in ADO.",
-    )]
+    ))
+    return out
 
 
 def check_teams_bot(config: Settings) -> list[Finding]:

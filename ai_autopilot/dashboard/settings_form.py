@@ -321,11 +321,11 @@ FIELDS: tuple[Field, ...] = (
           "One-way channel: Teams Workflows \"Post to a channel when a webhook request is "
           "received\" URL. Started/completed/error notices and reviewer reminders post here. "
           "Blank = Teams notifications off."),
-    Field("teams_webhook_urls", "↳ Thêm channel khác (mỗi dòng 1 URL)", "list", "Notifications",
-          "Mọi thông báo sẽ được đăng vào TẤT CẢ các channel — dùng khi muốn báo song song "
-          "vào #dev, #qc, channel quản lý… mà không phải chạy thêm instance. URL trùng với ô "
-          "trên sẽ tự bỏ, nên không bị gửi 2 lần. Một channel lỗi không làm mất các channel "
-          "còn lại. ⚠️ URL chứa token cấp quyền đăng bài — đối xử như mật khẩu."),
+    # `teams_webhook_urls` (the old bare-URL textarea) is deliberately NOT a Field any more:
+    # the "📣 Teams channels" card above edits `teams_webhook_channels` instead, with a name
+    # and an active switch per channel. Leaving it out of FIELDS means parse_form never emits
+    # the key, so an existing value is preserved rather than wiped — it is still honoured by
+    # `teams_webhook_targets`, and the card is seeded from it so nothing is stranded.
     Field("smtp_host", "SMTP host", "text", "Notifications", "Blank = email off."),
     Field("smtp_port", "SMTP port", "int", "Notifications", "Default 587 (STARTTLS)."),
     Field("smtp_user", "SMTP user", "text", "Notifications"),
@@ -419,7 +419,8 @@ EXPORT_EXCLUDE = frozenset({
     "ado_pat", "oauth_app_id", "oauth_app_secret",
     "smtp_host", "smtp_port", "smtp_user", "smtp_password",
     "zalo_oa_access_token", "zalo_recipient_user_id",
-    "teams_webhook_url", "teams_webhook_urls", "email_to", "email_from",
+    "teams_webhook_url", "teams_webhook_urls", "teams_webhook_channels",
+    "email_to", "email_from",
     "teams_agent_app_id", "teams_agent_app_secret", "teams_agent_tenant_id",
     "tenants",              # each tenant embeds its own ado_pat
     "dashboard_auth_token", "dashboard_auth_password_hash", "webhook_secret",
@@ -590,6 +591,37 @@ def parse_repos(form: Mapping[str, Any]) -> list[str]:
     """
     all_repos = [r for r in str(form.get("_all_repos", "")).split(",") if r]
     return [r for r in all_repos if f"repo__{r}" in form]
+
+
+def parse_webhook_channels(form: Mapping[str, Any]) -> list[dict]:
+    """Collect the Teams channel rows from ``wh{i}_name`` / ``wh{i}_url`` / ``wh{i}_active``.
+
+    ``wh_count`` bounds ``i``. A row with a blank URL is dropped rather than reported: the
+    page always renders one empty row so a channel can be added without a round trip, and an
+    untouched empty row must not become an error. A ticked ``wh{i}_delete`` drops the row too.
+
+    ``active`` is written explicitly (not omitted when off) so the saved YAML states the
+    switch either way — a muted channel that merely *lacked* the key would read as an
+    oversight, and the default is on.
+    """
+    try:
+        count = int(str(form.get("wh_count", "0")))
+    except ValueError:
+        count = 0
+    out: list[dict] = []
+    for index in range(max(0, count)):
+        prefix = f"wh{index}_"
+        if form.get(f"{prefix}delete"):
+            continue
+        url = str(form.get(f"{prefix}url", "") or "").strip()
+        if not url:
+            continue
+        out.append({
+            "name": str(form.get(f"{prefix}name", "") or "").strip(),
+            "url": url,
+            "active": bool(form.get(f"{prefix}active")),
+        })
+    return out
 
 
 def save_to_yaml(path: Path, updates: Mapping[str, Any]) -> None:

@@ -14,6 +14,7 @@ YAML file is strongly recommended — see ``config.example.yaml``.
 
 from __future__ import annotations
 
+import contextlib
 import html
 import os
 import re
@@ -111,6 +112,33 @@ def match_command(text: str | None, commands: list[str] | tuple[str, ...]) -> st
         if cmd and low.startswith(cmd.lower()):
             return plain
     return None
+
+
+@dataclass(frozen=True)
+class WebhookTarget:
+    """One notification channel: a human-recognisable ``name`` and the URL to post to.
+
+    The name exists for the log. A Workflows URL is a long opaque token, so a failure could
+    only ever be reported by host — every channel in the same tenant looks identical there,
+    which made "which channel is broken?" unanswerable.
+    """
+
+    url: str
+    name: str = ""
+
+    @property
+    def label(self) -> str:
+        """What to put in a log line — never the URL, which carries the posting token."""
+        return self.name or _host(self.url) or "unnamed"
+
+
+def _host(url: str) -> str:
+    """Host of a URL, or '' — used to identify a webhook without logging its token."""
+    from urllib.parse import urlsplit
+
+    with contextlib.suppress(ValueError):
+        return urlsplit(url).hostname or ""
+    return ""
 
 
 @dataclass(frozen=True)
@@ -293,6 +321,8 @@ class TenantConfig(BaseModel):
     teams_webhook_url: str = ""
     # Per-tenant extra channels, mirroring Settings.teams_webhook_urls.
     teams_webhook_urls: list[str] = Field(default_factory=list)
+    # Per-tenant named channels, mirroring Settings.teams_webhook_channels.
+    teams_webhook_channels: list[Any] = Field(default_factory=list)
     allowed_users: list[str] = Field(default_factory=list)
     approver_users: list[str] = Field(default_factory=list)
     allowed_skills: list[str] = Field(default_factory=list)
@@ -922,6 +952,20 @@ class Settings(BaseSettings):
     # .env and per-tenant overrides, and changing its type would break every one of them.
     # Read them together via the ``teams_webhooks`` property, never individually.
     teams_webhook_urls: list[str] = Field(default_factory=list)
+    # Named channels — the shape the dashboard edits: one entry per channel, each with a
+    # ``name`` you'll recognise in a log line, its ``url``, and an ``active`` switch so a
+    # channel can be muted without losing its URL (the URL is a Workflows token you cannot
+    # get back once deleted, so "delete to mute" was the wrong affordance).
+    #
+    #   teams_webhook_channels:
+    #     - {name: "#dev",  url: "https://…", active: true}
+    #     - {name: "#qc",   url: "https://…", active: false}
+    #
+    # ``list[Any]`` rather than a typed model for the same reason as work_item_flows: a
+    # malformed hand-edit must not stop the autopilot from starting. Entries that aren't
+    # mappings are skipped, and doctor reports them. A bare string is accepted as a URL so
+    # pasting a plain list still works.
+    teams_webhook_channels: list[Any] = Field(default_factory=list)
 
     # ── Notifications: Zalo OA ──
     zalo_oa_access_token: str = ""
@@ -978,18 +1022,52 @@ class Settings(BaseSettings):
         return [t.strip() for t in (self.comment_advisory_commands or "").split(",") if t.strip()]
 
     @property
-    def teams_webhooks(self) -> list[str]:
-        """Every Teams webhook to post to — the single ``teams_webhook_url`` first, then
-        ``teams_webhook_urls``. Blanks dropped and duplicates removed while keeping order, so
-        the same channel listed in both places is not notified twice."""
+    def teams_webhook_targets(self) -> list[WebhookTarget]:
+        """Every Teams channel to post to, in order, as ``(name, url)``.
+
+        Three sources, oldest first so an existing setup keeps its behaviour:
+        ``teams_webhook_url`` (the original single channel), ``teams_webhook_channels``
+        (the named list the dashboard edits), then the legacy ``teams_webhook_urls``.
+
+        Inactive channels are dropped HERE, so no caller can forget to check the switch.
+        Duplicates are removed by URL while keeping the first name seen — listing the same
+        channel twice must not notify it twice, which is the whole reason this is one
+        property instead of three reads.
+        """
         seen: set[str] = set()
-        out: list[str] = []
-        for url in [self.teams_webhook_url, *self.teams_webhook_urls]:
+        out: list[WebhookTarget] = []
+
+        def add(url: str, name: str = "") -> None:
             url = (url or "").strip()
             if url and url not in seen:
                 seen.add(url)
-                out.append(url)
+                out.append(WebhookTarget(name=(name or "").strip(), url=url))
+
+        add(self.teams_webhook_url, "primary")
+        for entry in self.teams_webhook_channels or []:
+            if isinstance(entry, str):        # a plain pasted URL
+                add(entry)
+            elif isinstance(entry, dict) and entry.get("active", True):
+                add(str(entry.get("url") or ""), str(entry.get("name") or ""))
+        for url in self.teams_webhook_urls or []:
+            add(url)
         return out
+
+    @property
+    def teams_webhooks(self) -> list[str]:
+        """Just the URLs of :attr:`teams_webhook_targets` — kept so callers that only need
+        "how many / which URLs" don't have to know about names."""
+        return [t.url for t in self.teams_webhook_targets]
+
+    @property
+    def muted_teams_channels(self) -> list[str]:
+        """Names of channels switched off — reported by ``doctor`` so a muted channel is a
+        visible choice rather than a notification that quietly never arrives."""
+        return [
+            str(e.get("name") or e.get("url") or "(unnamed)")
+            for e in (self.teams_webhook_channels or [])
+            if isinstance(e, dict) and not e.get("active", True)
+        ]
 
     @property
     def command_user(self) -> str:

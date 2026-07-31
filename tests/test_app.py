@@ -782,3 +782,90 @@ def test_flow_page_still_renders_when_ado_is_unreachable(tmp_path, monkeypatch):
         page = client.get("/dashboard/flow")
     assert page.status_code == 200
     assert "read the work-item types from Azure DevOps" in page.text
+
+
+# ── Teams channel card (name / URL / active) ──────────────────────────────────
+
+_WH_A = "https://a.example/workflows/1?sig=aaa"
+_WH_B = "https://b.example/workflows/2?sig=bbb"
+
+
+def test_channel_card_saves_name_url_and_active(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        resp = client.post("/dashboard/settings", data={
+            "wh_count": "2",
+            "wh0_name": "#dev", "wh0_url": _WH_A, "wh0_active": "on",
+            "wh1_name": "#qc", "wh1_url": _WH_B,          # active unticked → muted
+        }, follow_redirects=False)
+        assert resp.status_code == 303
+        cfg = client.app.state.container.config
+        assert [(c["name"], c["active"]) for c in cfg.teams_webhook_channels] == [
+            ("#dev", True), ("#qc", False),
+        ]
+        # Only the active one is posted to, and it is identified by name.
+        assert cfg.teams_webhooks == [_WH_A]
+        assert [t.label for t in cfg.teams_webhook_targets] == ["#dev"]
+        assert cfg.muted_teams_channels == ["#qc"]
+
+    import yaml
+    saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    assert saved["teams_webhook_channels"][1]["url"] == _WH_B   # muted, URL still kept
+
+
+def test_the_card_is_seeded_from_the_legacy_bare_url_list(tmp_path, monkeypatch):
+    """An existing multi-channel setup has to appear in the new editor, not be invisible in
+    it — and saving absorbs it so the same channel isn't represented in two places."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        teams_webhook_url="", teams_webhook_urls=[_WH_A, _WH_B],
+    )
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings").text
+        assert _WH_A in page and _WH_B in page
+        assert 'name="wh_count" value="3"' in page       # 2 seeded rows + 1 blank
+
+        client.post("/dashboard/settings", data={
+            "wh_count": "3",
+            "wh0_name": "#dev", "wh0_url": _WH_A, "wh0_active": "on",
+            "wh1_name": "#qc", "wh1_url": _WH_B, "wh1_active": "on",
+        }, follow_redirects=False)
+        cfg = client.app.state.container.config
+        assert len(cfg.teams_webhook_channels) == 2
+        assert cfg.teams_webhook_urls == []              # absorbed, not duplicated
+        assert cfg.teams_webhooks == [_WH_A, _WH_B]      # delivery unchanged
+
+
+def test_saving_the_page_without_touching_channels_does_not_wipe_a_legacy_list(
+    tmp_path, monkeypatch
+):
+    """The trap this design avoids: had the old textarea stayed a form Field, one save of an
+    unrelated setting would have parsed a blank textarea as [] and silently dropped every
+    channel."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        teams_webhook_urls=[_WH_A],
+    )
+    with TestClient(create_app(settings)) as client:
+        # A save that carries no wh_* fields at all (e.g. a scripted POST of one setting).
+        client.post("/dashboard/settings", data={"ado_project": "P"}, follow_redirects=False)
+        cfg = client.app.state.container.config
+        assert cfg.teams_webhook_urls == [_WH_A]         # still there
+        assert cfg.teams_webhooks == [_WH_A]             # still delivered
+
+
+def test_deleting_a_channel_row_removes_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        teams_webhook_channels=[{"name": "#dev", "url": _WH_A, "active": True}],
+    )
+    with TestClient(create_app(settings)) as client:
+        client.post("/dashboard/settings", data={
+            "wh_count": "2",
+            "wh0_name": "#dev", "wh0_url": _WH_A, "wh0_active": "on", "wh0_delete": "on",
+        }, follow_redirects=False)
+        assert client.app.state.container.config.teams_webhook_channels == []

@@ -204,7 +204,9 @@ async def test_concurrent_scratch_same_repo_no_collision(agent_workspace: Path):
         await ex.release_scratch(b)
 
 
-async def test_run_in_workspace_serialises_same_repo(agent_workspace: Path, monkeypatch):
+async def test_run_in_workspace_serialises_same_repo(
+    agent_workspace: Path, monkeypatch, fake_claude
+):
     # Workspace mode checks out IN-PLACE in the shared repo, so two concurrent runs on the
     # SAME repo must be serialised (per-repo lock) — otherwise they corrupt the git index.
     import asyncio
@@ -224,21 +226,20 @@ async def test_run_in_workspace_serialises_same_repo(agent_workspace: Path, monk
     async def fake_release(ws):
         pass
 
-    async def fake_claude(prompt, cwd, repo=None, on_event=None, resume=None,
-                          disallowed_tools=None):
+    async def overlap_probe(prompt, cwd, **kwargs):
+        """Hold the slot long enough that a second concurrent run would be visible."""
         nonlocal active, max_active
         active += 1
         max_active = max(max_active, active)
         await asyncio.sleep(0.05)
         active -= 1
-        return SimpleNamespace(text="done", total_tokens=0, cost_usd=None, is_error=False)
 
     async def fake_has_changes(work_dir):
         return False  # → run returns right after _run_claude (where overlap is measured)
 
     monkeypatch.setattr(ex, "_acquire_workspace", fake_acquire)
     monkeypatch.setattr(ex, "_release_workspace", fake_release)
-    monkeypatch.setattr(ex, "_run_claude", fake_claude)
+    fake_claude(ex, side_effect=overlap_probe)
     monkeypatch.setattr(ex, "_has_changes", fake_has_changes)
 
     item = WorkItemInfo(id=1, title="t")
@@ -249,12 +250,10 @@ async def test_run_in_workspace_serialises_same_repo(agent_workspace: Path, monk
     assert max_active == 1  # never overlapped — the per-repo lock serialised them
 
 
-async def test_revise_read_only_skips_workspace(repo: Path, monkeypatch):
+async def test_revise_read_only_skips_workspace(repo: Path, monkeypatch, fake_claude):
     # Advisory commands (/review) change nothing, so revise(read_only=True) must
     # never pay the worktree add/remove lifecycle — no workspace is acquired and
     # the run succeeds purely on Claude's comment.
-    from types import SimpleNamespace
-
     from ai_autopilot.models import WorkItemInfo
 
     ex = _executor(use_worktrees=True, worktrees_dir=str(repo.parent / "wts"),
@@ -263,26 +262,20 @@ async def test_revise_read_only_skips_workspace(repo: Path, monkeypatch):
     async def fail_acquire(*args, **kwargs):
         raise AssertionError("read-only revise must not acquire a workspace")
 
-    ran = {}
-
-    async def fake_claude(prompt, cwd, repo=None, on_event=None, resume=None,
-                          disallowed_tools=None):
-        ran["cwd"] = cwd
-        ran["denied"] = disallowed_tools
-        return SimpleNamespace(text="findings posted", total_tokens=7, cost_usd=0.01,
-                               is_error=False)
-
     monkeypatch.setattr(ex, "_acquire_workspace", fail_acquire)
-    monkeypatch.setattr(ex, "_run_claude", fake_claude)
+    # output_tokens, not total_tokens: the real ClaudeRun DERIVES the total, so a fake that
+    # set it directly could satisfy a test the production type never would.
+    rec = fake_claude(ex, text="findings posted", output_tokens=7, cost_usd=0.01)
 
     item = WorkItemInfo(id=42, title="t")
     result = await ex.revise(item, "feature/be/42-thing", "review it", read_only=True)
 
     assert result.success is True
-    assert "Write" in ran["denied"] and "Edit" in ran["denied"]
+    assert "Write" in rec.last.disallowed_tools
+    assert "Edit" in rec.last.disallowed_tools
     assert result.branch_name == "feature/be/42-thing"
     assert result.cost_tokens == 7
-    assert ran["cwd"] == str(repo)          # ran in place, no worktree dir
+    assert rec.last.work_dir == str(repo)   # ran in place, no worktree dir
     assert not (repo.parent / "wts").exists()  # no worktree was ever created
 
 

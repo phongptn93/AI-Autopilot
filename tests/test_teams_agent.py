@@ -140,16 +140,12 @@ async def test_pasted_pr_link_with_review_runs_skill_review():
     assert "2470" in ctx.sent[0] and "codebase" in ctx.sent[0]
 
 
-async def test_executor_review_pr_runs_skill_without_vote(monkeypatch):
+async def test_executor_review_pr_runs_skill_without_vote(monkeypatch, fake_claude):
     from ai_autopilot.execution.auto_reviewer import AutoReviewer
     from ai_autopilot.execution.claude_executor import ClaudeExecutor
 
     cfg = Settings(teams_review_skill="review-pr")
     ex = ClaudeExecutor(cfg, AutoReviewer(cfg))
-    captured = {}
-
-    class _Run:
-        text = "Verdict: OK — 0 critical, 2 medium"
 
     async def fake_scratch(item_id, repos):
         return None
@@ -157,19 +153,13 @@ async def test_executor_review_pr_runs_skill_without_vote(monkeypatch):
     async def fake_release(run_dir):
         return None
 
-    async def fake_run(prompt, work_dir, repo=None, on_event=None, resume=None,
-                       disallowed_tools=None):
-        captured["prompt"] = prompt
-        captured["denied"] = disallowed_tools
-        return _Run()
-
     monkeypatch.setattr(ex, "_acquire_agent_scratch", fake_scratch)
     monkeypatch.setattr(ex, "release_scratch", fake_release)
-    monkeypatch.setattr(ex, "_run_claude", fake_run)
+    rec = fake_claude(ex, text="Verdict: OK — 0 critical, 2 medium")
 
     out = await ex.review_pr("Micro-Frontend", 2470, _PR_URL)
-    assert "/review-pr" in captured["prompt"] and _PR_URL in captured["prompt"]
-    assert "KHÔNG cast vote" in captured["prompt"]     # never votes
+    assert "/review-pr" in rec.last.prompt and _PR_URL in rec.last.prompt
+    assert "KHÔNG cast vote" in rec.last.prompt        # never votes
     assert out == "Verdict: OK — 0 critical, 2 medium"
 
 
@@ -1175,7 +1165,7 @@ async def test_digest_drops_the_oldest_pr_section_and_leads_with_pace():
 
 # ── Advisory runs must not be able to mutate, not merely be told not to ────────
 
-async def test_review_pr_denies_the_file_mutating_tools(monkeypatch):
+async def test_review_pr_denies_the_file_mutating_tools(monkeypatch, fake_claude):
     """The scratch worktree keeps a stray edit out of your checkout, but this run has Bash
     — so an edit it decided to "just fix" could be committed and pushed to the PR branch."""
     from ai_autopilot.execution.auto_reviewer import AutoReviewer
@@ -1183,27 +1173,21 @@ async def test_review_pr_denies_the_file_mutating_tools(monkeypatch):
 
     cfg = Settings(teams_review_skill="review-pr")
     ex = ClaudeExecutor(cfg, AutoReviewer(cfg))
-    seen = {}
 
     async def fake_scratch(item_id, repos):
         return None
 
-    async def fake_run(prompt, work_dir, repo=None, on_event=None, resume=None,
-                       disallowed_tools=None):
-        seen["denied"] = disallowed_tools
-        return SimpleNamespace(text="ok", total_tokens=0, cost_usd=0.0, session_id=None)
-
     monkeypatch.setattr(ex, "_acquire_agent_scratch", fake_scratch)
     monkeypatch.setattr(ex, "release_scratch", lambda d: asyncio.sleep(0))
-    monkeypatch.setattr(ex, "_run_claude", fake_run)
+    rec = fake_claude(ex, text="ok")
 
     await ex.review_pr("Micro-Frontend", 2470)
     for tool in ("Write", "Edit", "NotebookEdit"):
-        assert tool in seen["denied"], tool
-    assert "Bash" not in seen["denied"]        # the review needs `git diff`
+        assert tool in rec.last.disallowed_tools, tool
+    assert "Bash" not in rec.last.disallowed_tools   # the review needs `git diff`
 
 
-async def test_advisory_run_denies_mutators_without_a_checkout(monkeypatch):
+async def test_advisory_run_denies_mutators_without_a_checkout(monkeypatch, fake_claude):
     """This path has NO worktree to discard — it runs against the shared workspace, so the
     deny list is the only thing standing between an advisory command and your checkout."""
     from ai_autopilot.execution.auto_reviewer import AutoReviewer
@@ -1211,22 +1195,16 @@ async def test_advisory_run_denies_mutators_without_a_checkout(monkeypatch):
 
     cfg = Settings(workspace_directory=".")
     ex = ClaudeExecutor(cfg, AutoReviewer(cfg))
-    seen = {}
 
     async def fake_git(args, repo, check=True):
         return ""
 
-    async def fake_run(prompt, work_dir, repo=None, on_event=None, resume=None,
-                       disallowed_tools=None):
-        seen["denied"] = disallowed_tools
-        return SimpleNamespace(text="reviewed", total_tokens=0, cost_usd=0.0, session_id=None)
-
     monkeypatch.setattr(ex, "_git", fake_git)
-    monkeypatch.setattr(ex, "_run_claude", fake_run)
     monkeypatch.setattr(ex, "_resume_for", lambda repo, branch: asyncio.sleep(0))
     monkeypatch.setattr(ex, "_save_session", lambda repo, branch, run: asyncio.sleep(0))
+    rec = fake_claude(ex, text="reviewed")
 
     result = await ex._run_read_only(42, ".", "feature/be/42-x", "review this")
     assert result.success
     for tool in ("Write", "Edit", "NotebookEdit"):
-        assert tool in seen["denied"], tool
+        assert tool in rec.last.disallowed_tools, tool

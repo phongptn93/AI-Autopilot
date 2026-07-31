@@ -6,11 +6,12 @@ network except the ADO health check (which fails gracefully → 503).
 
 from __future__ import annotations
 
-from urllib.parse import unquote
+from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
 
+from ai_autopilot import dashboard
 from ai_autopilot.app import create_app
 from ai_autopilot.config import Settings
 from ai_autopilot.dashboard import settings_form
@@ -120,7 +121,9 @@ def test_import_full_restores_secrets(tmp_path, monkeypatch):
             files={"file": ("autopilot-config-full.enc", blob, "application/octet-stream")},
             follow_redirects=False,
         )
-        assert resp.status_code == 303 and "imported=1" in resp.headers["location"]
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/dashboard/settings"
+        assert resp.cookies["autopilot_flash"] == "imported_full"
         cfg = client.app.state.container.config
         assert cfg.ado_pat == "restore-me"      # secret WAS restored (unlike safe import)
         assert cfg.ado_project == "RP"
@@ -141,7 +144,8 @@ def test_import_full_wrong_password_reports_error(tmp_path, monkeypatch):
             files={"file": ("c.enc", blob, "application/octet-stream")},
             follow_redirects=False,
         )
-        assert resp.status_code == 303 and "import_error" in resp.headers["location"]
+        assert resp.status_code == 303
+        assert resp.cookies["autopilot_flash"] == "err_wrong_password"
         assert client.app.state.container.config.ado_pat == ""  # nothing applied
 
 
@@ -573,8 +577,10 @@ def test_full_export_is_refused_without_an_export_password(tmp_path):
     with TestClient(create_app(settings)) as client:
         resp = client.get("/dashboard/settings/export-full", follow_redirects=False)
         assert resp.status_code == 303
-        assert "import_error" in resp.headers["location"]
-        assert "config_export_password" in unquote(resp.headers["location"])
+        assert resp.cookies["autopilot_flash"] == "err_no_export_password"
+        # The refusal must name the setting to fix, not just say "no".
+        colour, message = dashboard.FLASH_MESSAGES["err_no_export_password"]
+        assert colour == "red" and "config_export_password" in message
 
 
 def test_full_export_works_once_a_password_is_set(tmp_path):
@@ -588,3 +594,37 @@ def test_full_export_works_once_a_password_is_set(tmp_path):
         assert resp.status_code == 200
         assert b"a-real-pat" not in resp.content              # encrypted, not plaintext
         assert b"a-real-pat" in security.decrypt_bytes(resp.content, "pw")
+
+
+# ── Outcome banners travel in a one-shot cookie, never in the URL ─────────────
+
+def test_saving_settings_reports_the_outcome_without_putting_it_in_the_url(tmp_path, monkeypatch):
+    """A `?saved=1` redirect makes the banner part of the address: refreshing replays
+    "saved" without saving, and the URL can be shared showing a save that never happened."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        resp = client.post(
+            "/dashboard/settings", data={"ado_project": "Flashy"}, follow_redirects=False
+        )
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/dashboard/settings"   # nothing in the query
+        assert resp.cookies["autopilot_flash"] == "saved"
+
+        # The banner shows once…
+        page = client.get("/dashboard/settings")
+        assert "Đã lưu và áp dụng" in page.text
+        # …and the GET clears the cookie, so a refresh is silent.
+        assert client.cookies.get("autopilot_flash") in (None, "")
+        assert "Đã lưu và áp dụng" not in client.get("/dashboard/settings").text
+
+
+def test_every_flash_redirect_uses_a_code_that_has_wording(tmp_path):
+    """_flash() with an unknown code sets no cookie, so the outcome would vanish
+    silently. Catch a typo'd code at test time rather than in a user's browser."""
+    import re
+
+    source = (Path(dashboard.__file__)).read_text(encoding="utf-8")
+    used = set(re.findall(r'_flash\(\s*"[^"]*"\s*,\s*"([^"]+)"', source))
+    assert used, "no _flash() call sites found — did the redirects move?"
+    assert used <= set(dashboard.FLASH_MESSAGES), used - set(dashboard.FLASH_MESSAGES)

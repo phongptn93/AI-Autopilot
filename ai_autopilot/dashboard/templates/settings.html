@@ -172,13 +172,13 @@
   </div>
 </div>
 
-{% for flag, msg, col in [
-    (saved, '✅ Settings saved and applied. Fields marked <em>restart</em> take effect after a restart.', 'green'),
-    (reloaded, '↻ Config reloaded from file into the running app.', 'green'),
-    (imported, '⬆ Config imported and applied. PAT and host trigger tag were not changed.', 'green')] %}
-  {% if flag %}<div class="card" style="border-color:var(--{{col}})"><div style="padding:13px 20px;color:var(--{{col}})">{{ msg|safe }}</div></div>{% endif %}
-{% endfor %}
-{% if import_error %}<div class="card" style="border-color:var(--red)"><div style="padding:13px 20px;color:var(--red)">⚠️ Import failed: {{ import_error }}</div></div>{% endif %}
+{# One-shot outcome banner. The wording comes from FLASH_MESSAGES server-side and arrives
+   in a cookie the GET clears, so a refresh does not replay it and the URL never carries it. #}
+{% if flash %}
+  <div class="card" style="border-color:var(--{{ flash[0] }})">
+    <div style="padding:13px 20px;color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+  </div>
+{% endif %}
 
 <!-- ── Active tags overview (read-only) ── -->
 <div class="card">

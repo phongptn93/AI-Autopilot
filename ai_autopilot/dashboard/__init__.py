@@ -31,6 +31,58 @@ _log = get_logger("dashboard")
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
+# ── Flash messages ────────────────────────────────────────────────────────────
+# The outcome of a POST used to travel in the query string of the redirect that follows
+# it (`/dashboard/settings?saved=1`, `?import_error=<text>`). The POST itself was always
+# correct; the problem is what the GET then carries:
+#
+#   • refreshing the page replays the banner, claiming a save that did not happen
+#   • the URL is bookmarkable and shareable WITH the banner, so it lies later
+#   • free-form error text has to be URL-encoded into it, which caps its length and
+#     leaves an unreadable address bar
+#
+# A one-shot cookie fixes all three: it is set on the POST response, consumed and cleared
+# on the next GET, and never appears in the URL. Only a short CODE travels — the wording
+# lives here, so nothing user-supplied is ever echoed back into the page.
+_FLASH_COOKIE = "autopilot_flash"
+
+FLASH_MESSAGES: dict[str, tuple[str, str]] = {
+    "saved": ("green", "✅ Đã lưu và áp dụng. Field có nhãn <em>restart</em> cần khởi động lại."),
+    "reloaded": ("green", "↻ Đã nạp lại cấu hình từ file vào tiến trình đang chạy."),
+    "imported": ("green", "⬆ Đã nạp và áp dụng cấu hình. PAT và trigger tag của máy này "
+                          "không đổi."),
+    "imported_full": ("green", "🔓 Đã restore cấu hình đầy đủ (kèm secret). Khởi động lại để "
+                               "áp dụng phần lồng nhau (tenants, repos)."),
+    "err_no_file": ("red", "⚠️ Chưa chọn tệp."),
+    "err_invalid": ("red", "⚠️ Tệp không hợp lệ hoặc không phải YAML cấu hình."),
+    "err_nothing": ("red", "⚠️ Tệp không chứa setting nào áp dụng được."),
+    "err_password": ("red", "⚠️ Cần mật khẩu của tệp."),
+    "err_wrong_password": ("red", "⚠️ Sai mật khẩu, hoặc tệp bị hỏng."),
+    "err_no_export_password": (
+        "red",
+        "⚠️ Chưa đặt <b>Full-export password</b> — file sẽ không được bảo vệ. Đặt "
+        "<code>config_export_password</code> ở mục <b>Web / Security</b> rồi export lại.",
+    ),
+}
+
+
+def _flash(url: str, code: str) -> RedirectResponse:
+    """Redirect to ``url`` carrying a one-shot ``code`` in a cookie, not the query string."""
+    response = RedirectResponse(url, status_code=303)
+    if code in FLASH_MESSAGES:
+        response.set_cookie(
+            _FLASH_COOKIE, code, max_age=30, httponly=True, samesite="lax",
+            path="/dashboard",
+        )
+    else:  # a code we don't have wording for would show nothing — fail loudly in the log
+        _log.error("unknown flash code — no banner will be shown", code=code)
+    return response
+
+
+def _take_flash(request: Request) -> tuple[str, str] | None:
+    """``(colour, message)`` for this request's flash, or None. Caller must clear it."""
+    return FLASH_MESSAGES.get(request.cookies.get(_FLASH_COOKIE) or "")
+
 _CATEGORY_LABELS = {
     "backendtask": ("BE", "cat-be"),
     "frontendtask": ("FE", "cat-fe"),
@@ -883,13 +935,7 @@ def create_dashboard_router() -> APIRouter:
         )
 
     @router.get("/settings", response_class=HTMLResponse)
-    async def settings_page(
-        request: Request,
-        saved: int = 0,
-        reloaded: int = 0,
-        imported: int = 0,
-        import_error: str = "",
-    ):
+    async def settings_page(request: Request):
         c: Container = request.app.state.container
         current = {
             f.key: getattr(c.config, f.key, "")
@@ -930,7 +976,8 @@ def create_dashboard_router() -> APIRouter:
             ado_states = await c.ado.get_states()
         except Exception:  # noqa: BLE001 — Settings must render even if ADO is down
             ado_states = []
-        return _TEMPLATES.TemplateResponse(
+        flash = _take_flash(request)
+        response = _TEMPLATES.TemplateResponse(
             request,
             "settings.html",
             _ctx(
@@ -941,10 +988,7 @@ def create_dashboard_router() -> APIRouter:
                 has_pat=has_pat,
                 secrets_set=secrets_set,
                 restart_keys=settings_form.RESTART_REQUIRED,
-                saved=bool(saved),
-                reloaded=bool(reloaded),
-                imported=bool(imported),
-                import_error=import_error,
+                flash=flash,
                 config_path=str(config_file_path()),
                 # Drives the full-export panel: without it the download is refused, so the
                 # UI says why up front instead of after a click that produces nothing.
@@ -955,6 +999,10 @@ def create_dashboard_router() -> APIRouter:
                 tag_overview=tag_overview,
             ),
         )
+        if flash is not None:
+            # One-shot: clear it now so a refresh shows the page without the banner.
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
 
     @router.post("/settings")
     async def save_settings(request: Request):
@@ -978,7 +1026,7 @@ def create_dashboard_router() -> APIRouter:
             target=", ".join(sorted(updates.keys()))[:300],
         )
 
-        return RedirectResponse(url="/dashboard/settings?saved=1", status_code=303)
+        return _flash("/dashboard/settings", "saved")
 
     @router.post("/settings/reload")
     async def reload_settings(request: Request):
@@ -987,7 +1035,7 @@ def create_dashboard_router() -> APIRouter:
         changed = settings_form.reload_from_file(c.config)
         c.ado.refresh()  # re-read org URL if it changed
         _log.info("config reloaded from file via dashboard", changed=changed)
-        return RedirectResponse(url="/dashboard/settings?reloaded=1", status_code=303)
+        return _flash("/dashboard/settings", "reloaded")
 
     @router.get("/settings/export")
     async def export_config(request: Request):
@@ -1012,12 +1060,7 @@ def create_dashboard_router() -> APIRouter:
             # anyone can reproduce — so the download would carry the ADO PAT and every
             # token with no real protection, while looking protected.
             _log.warning("full export refused — config_export_password is not set")
-            return RedirectResponse(
-                "/dashboard/settings?import_error="
-                + quote("Chưa đặt Full-export password — file sẽ không được bảo vệ. "
-                        "Đặt config_export_password (mục Web / Security) rồi export lại."),
-                status_code=303,
-            )
+            return _flash("/dashboard/settings", "err_no_export_password")
         blob = settings_form.export_full_encrypted(c.config, c.config.config_export_password)
         # Audit only the event — never the secret payload or the password.
         _log.warning("FULL config (with secrets) exported via dashboard — encrypted download")
@@ -1045,11 +1088,9 @@ def create_dashboard_router() -> APIRouter:
         upload = form.get("file")
         password = str(form.get("password", ""))
         if upload is None or not hasattr(upload, "read"):
-            return RedirectResponse("/dashboard/settings?import_error=No+file", status_code=303)
+            return _flash("/dashboard/settings", "err_no_file")
         if not password:
-            return RedirectResponse(
-                "/dashboard/settings?import_error=Password+required", status_code=303
-            )
+            return _flash("/dashboard/settings", "err_password")
         blob = await upload.read()
         try:
             updates = settings_form.import_full_settings(
@@ -1057,14 +1098,9 @@ def create_dashboard_router() -> APIRouter:
             )
         except (ValueError, yaml.YAMLError) as exc:
             _log.warning("full config import failed", error=str(exc))
-            return RedirectResponse(
-                "/dashboard/settings?import_error=Wrong+password+or+invalid+file",
-                status_code=303,
-            )
+            return _flash("/dashboard/settings", "err_wrong_password")
         if not updates:
-            return RedirectResponse(
-                "/dashboard/settings?import_error=Nothing+to+import", status_code=303
-            )
+            return _flash("/dashboard/settings", "err_nothing")
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
         c.ado.refresh()
@@ -1073,7 +1109,7 @@ def create_dashboard_router() -> APIRouter:
             actor="dashboard", source="dashboard", action="config.imported_full",
             detail=f"{len(updates)} keys restored (incl. secrets)",
         )
-        return RedirectResponse("/dashboard/settings?imported=1", status_code=303)
+        return _flash("/dashboard/settings", "imported_full")
 
     @router.post("/settings/import")
     async def import_config(request: Request):
@@ -1082,20 +1118,20 @@ def create_dashboard_router() -> APIRouter:
         form = await request.form()
         upload = form.get("file")
         if upload is None or not hasattr(upload, "read"):
-            return RedirectResponse("/dashboard/settings?import_error=No+file", status_code=303)
+            return _flash("/dashboard/settings", "err_no_file")
         raw = (await upload.read()).decode("utf-8", errors="replace")
         try:
             updates = settings_form.import_settings(raw, set(type(c.config).model_fields))
         except (ValueError, yaml.YAMLError) as exc:
             _log.warning("config import failed", error=str(exc))
-            return RedirectResponse("/dashboard/settings?import_error=Invalid+file", status_code=303)
+            return _flash("/dashboard/settings", "err_invalid")
         if not updates:
-            return RedirectResponse("/dashboard/settings?import_error=Nothing+to+import", status_code=303)
+            return _flash("/dashboard/settings", "err_nothing")
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
         c.ado.refresh()
         _log.info("config imported via dashboard", keys=sorted(updates.keys()))
-        return RedirectResponse("/dashboard/settings?imported=1", status_code=303)
+        return _flash("/dashboard/settings", "imported")
 
     return router
 

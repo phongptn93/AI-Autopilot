@@ -363,11 +363,20 @@ def parse_flow_form(form: Mapping[str, Any], all_types: list[str]) -> list[dict]
         }
         if comment:
             flow["comment"] = comment
-        rollup = [
-            line.strip()
-            for line in str(form.get(f"{prefix}rollup", "") or "").splitlines()
-            if line.strip()
-        ]
+        # Roll-up arrives as one hidden key + one select per CHILD STATE, not as free text:
+        # the editor shows a row for every state a child can be in, so an unmapped state is
+        # visible (a roll-up is held unless all of them are mapped) and a parent state the
+        # group doesn't have is unpickable. A row left "— not mapped —" produces no line.
+        rollup: list[str] = []
+        try:
+            rows = int(str(form.get(f"{prefix}rollup_count", "0")))
+        except ValueError:
+            rows = 0
+        for row in range(max(0, rows)):
+            child = str(form.get(f"{prefix}rollup_key{row}", "") or "").strip()
+            parent = str(form.get(f"{prefix}rollup_val{row}", "") or "").strip()
+            if child and parent:
+                rollup.append(f"{child} = {parent}")
         if rollup:
             flow["rollup"] = rollup
         flows.append(flow)

@@ -1146,6 +1146,7 @@ def create_dashboard_router() -> APIRouter:
         by_lower = {t.lower(): t for t in states_by_type}
         choices: list[list[str]] = []
         child_states: list[list[str]] = []
+        rollup_rows: list[list[dict]] = []
         for group in [*groups, {}]:
             names = [str(t).strip() for t in (group.get("types") or [])]
             resolved = [by_lower[n.lower()] for n in names if n.lower() in by_lower]
@@ -1157,11 +1158,43 @@ def create_dashboard_router() -> APIRouter:
             order = states_by_type.get(resolved[0], []) if resolved else []
             picked = common or set()
             choices.append([s for s in order if s in picked])
-            # A parent's children are of OTHER types — those are the states a roll-up line
-            # can name on its left-hand side.
-            child_states.append(sorted({
+            # A parent's children are of OTHER types, so a roll-up line keys on their states.
+            # Every project type would mean 17 rows here, 10 of them from Test Plan / Shared
+            # Steps / Code Review — types that are never a child of anything the autopilot
+            # runs. Since a roll-up is HELD until every listed state is mapped, showing those
+            # implies they must be mapped, which is both noise and wrong. So the rows the
+            # editor leads with are the states of types the autopilot actually manages (the
+            # ones in some other flow group); the rest stay reachable behind a toggle.
+            others = {t for f in groups for t in (f.get("types") or [])} - set(resolved)
+            likely = sorted({
+                s for t, st in states_by_type.items() if t in others for s in st
+            })
+            everything = sorted({
                 s for t, st in states_by_type.items() if t not in resolved for s in st
-            }))
+            })
+            if not likely:      # only one group configured — nothing to narrow to yet
+                likely, everything = everything, []
+            child_states.append(likely)
+
+            mapped = dict(
+                flows_mod.parse_rollup_entry(line) for line in (group.get("rollup") or [])
+            )
+            rows = [
+                {"child": k, "parent": mapped.get(k, ""), "unknown": False, "secondary": False}
+                for k in likely
+            ]
+            # A mapped state the project no longer has is kept and flagged rather than
+            # silently dropped on the next save — that is how the "Ready for Testing" typo
+            # survived unnoticed in the first place.
+            rows += [
+                {"child": k, "parent": v, "unknown": True, "secondary": False}
+                for k, v in mapped.items() if k not in likely and k not in everything
+            ]
+            rows += [
+                {"child": k, "parent": mapped.get(k, ""), "unknown": False, "secondary": True}
+                for k in everything if k not in likely
+            ]
+            rollup_rows.append(rows)
 
         every_state = {s for st in states_by_type.values() for s in st}
         return {
@@ -1170,6 +1203,7 @@ def create_dashboard_router() -> APIRouter:
             "claimed_by": claimed_by,
             "choices": choices,
             "child_states": child_states,
+            "rollup_rows": rollup_rows,
             "stages": flows_mod.STAGES,
             "stage_groups": flows_mod.STAGE_GROUPS,
             "stage_labels": flows_mod.STAGE_LABELS,

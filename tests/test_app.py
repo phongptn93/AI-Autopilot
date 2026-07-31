@@ -711,7 +711,9 @@ def test_saving_a_flow_applies_live_and_persists(tmp_path, monkeypatch):
             "flow0_state__on_deploy": "Ready to Testing",
             "flow1_name": "Requirement", "flow1_type__Requirement": "on",
             "flow1_state__on_merge": "Implement Done",
-            "flow1_rollup": "Ready to Testing = Implement Done",
+            "flow1_rollup_count": "2",
+            "flow1_rollup_key0": "Ready to Testing", "flow1_rollup_val0": "Implement Done",
+            "flow1_rollup_key1": "Closed", "flow1_rollup_val1": "",   # unmapped → no line
         }, follow_redirects=False)
         assert resp.status_code == 303
         assert resp.cookies["autopilot_flash"] == "flow_saved"

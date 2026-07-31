@@ -1,4 +1,23 @@
 {% extends "base.html" %}
+
+{# One roll-up row. A macro because it is rendered twice — the leading states and the
+   "other types" block — and two copies of a row containing a hidden index field is exactly
+   how the two halves would drift out of numbering. #}
+{% macro rollup_row(slot, index, r, choices) -%}
+<div class="fl-ru {{ 'gone' if r.unknown else '' }}">
+  <span class="k">{{ r.child }}{% if r.unknown %} ⚠{% endif %}</span>
+  <span class="to">→</span>
+  <input type="hidden" name="flow{{ slot }}_rollup_key{{ index }}" value="{{ r.child }}">
+  <select name="flow{{ slot }}_rollup_val{{ index }}" class="{{ '' if r.parent else 'unset' }}">
+    <option value="" {% if not r.parent %}selected{% endif %}>— not mapped —</option>
+    {% for s in choices %}<option value="{{ s }}" {% if r.parent == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    {% if r.parent and r.parent not in choices %}
+    <option value="{{ r.parent }}" selected>⚠ {{ r.parent }} — not on these types</option>
+    {% endif %}
+  </select>
+</div>
+{%- endmacro %}
+
 {% block content %}
 <style>
   /* ── State flow editor (scoped) ──
@@ -9,11 +28,14 @@
      state it overrides. What replaced it: one card per group, the configured path shown
      as an inline chain next to the controls that set it, and everything secondary behind
      a native <details>. */
-  .main{max-width:1180px}
+  .main{max-width:none}                 /* full width, same as Settings */
 
   .fl-top{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 16px;margin-bottom:5px}
   .fl-top h2{font-size:21px;font-weight:750;letter-spacing:-.02em}
-  .fl-lede{color:var(--text-muted);font-size:13px;line-height:1.65;max-width:74ch;margin:0 0 14px}
+  /* The page is full-width, so a 74ch column left the intro as a narrow ribbon with a lot of
+     empty space beside it. ~104ch still keeps a readable measure while filling the band. */
+  .fl-lede{color:var(--text-muted);font-size:13px;line-height:1.6;max-width:104ch;margin:0 0 14px}
+  .fl-lede a{color:var(--accent-hover)}
   .fl-lede code{font-family:var(--mono);font-size:11.5px;background:var(--bg-input);
     padding:1px 6px;border-radius:5px}
 
@@ -73,17 +95,26 @@
   details.fl-more > summary:hover{color:var(--text)}
   details.fl-more > summary .hint{font-weight:400;color:var(--text-dim);font-size:11.5px}
   .fl-more-body{padding:0 18px 16px}
-  .fl-more-body textarea{font-family:var(--mono);font-size:11.5px}
+
+  /* Parent roll-up: one row per child state, so an incomplete map is visible and an
+     invalid parent state is unpickable. This was a free-text textarea — the only control
+     on a page whose whole point is "you cannot configure what ADO would reject". */
+  .fl-ru-head,.fl-ru{display:grid;grid-template-columns:minmax(140px,1fr) 22px minmax(160px,1fr);
+    gap:10px;align-items:center}
+  .fl-ru-head{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--text-dim);padding:0 0 7px}
+  .fl-ru{padding:5px 0}
+  .fl-ru + .fl-ru{border-top:1px solid var(--border-soft)}
+  .fl-ru > .k{font-size:12.5px}
+  .fl-ru > .to{color:var(--text-dim);text-align:center;font-size:12px}
+  .fl-ru.gone > .k{color:var(--red)}
+  .fl-ru select{min-width:0;max-width:100%}
+  .fl-ru select.unset{color:var(--text-dim)}
 
   .fl-err{padding:12px 18px 16px}
   .fl-err ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:9px}
   .fl-err li{font-size:12.5px;line-height:1.6}
 
-  .savebar{position:sticky;bottom:0;z-index:20;display:flex;justify-content:flex-end;gap:12px;
-    align-items:center;background:rgba(10,11,15,.9);backdrop-filter:blur(8px);
-    border-top:1px solid var(--border-soft);padding:14px 4px;margin:8px -4px 0}
-  .savebar .hint{color:var(--text-dim);font-size:12px;margin-right:auto}
-  @media (prefers-color-scheme: light){ .savebar{background:rgba(255,255,255,.92)} }
   @media (max-width:640px){ .fl-row{grid-template-columns:1fr;gap:5px} }
 </style>
 
@@ -94,10 +125,11 @@
 </div>
 <p class="fl-lede">
   An ADO state belongs to a <b>work-item type</b> — <code>Ready to Deploy</code> exists on Bug
-  and Task but not on Requirement — so one state per stage for the whole project is rejected
-  outright for every type that lacks it. Group the types that share a lifecycle and give each
-  group its own states. A state this project cannot accept is refused here, not months later
-  one work item at a time.
+  and Task but not on Requirement — so one state for the whole project is rejected outright by
+  every type that lacks it. Group the types that share a lifecycle; each group gets its own
+  states, and anything this project would reject is refused here rather than months later, one
+  work item at a time. Saved with the rest of the config, so
+  <a href="/dashboard/settings">Settings → ⇅ Export / Import</a> carries it too.
 </p>
 
 <div class="fl-status">
@@ -250,18 +282,47 @@
         <span class="hint">{{ (g.rollup|length ~ ' rule' ~ ('' if g.rollup|length == 1 else 's')) if g.rollup else 'off' }}</span>
       </summary>
       <div class="fl-more-body">
-        <textarea name="flow{{ i }}_rollup" rows="4"
-          placeholder="Ready to Testing = Implement Done&#10;Active = Active">{% for line in (g.rollup or []) %}{{ line }}
-{% endfor %}</textarea>
-        <div class="form-help">
-          One <code>Child state = Parent state</code> per line. Applies when an item of THIS
-          group is a <b>parent</b>: it follows its least-advanced child, and is held unless
-          <b>every</b> child state has a line — one missing line stops the whole roll-up.
-          {% if g.types and child_states[i] %}
-          <br>Children can be in:
-          <span style="color:var(--text-muted)">{{ child_states[i]|join(' · ') }}</span>
+        {% set rows = rollup_rows[i] %}
+        {% if rows %}
+        <input type="hidden" name="flow{{ i }}_rollup_count" value="{{ rows|length }}">
+        <div class="fl-ru-head">
+          <span>When every child is at…</span><span></span><span>…move the parent to</span>
+        </div>
+        {# Leading rows: states of the types the autopilot manages — the plausible children.
+           `loop.index0` must index the WHOLE row list, since the parser walks 0..count-1,
+           so the secondary block continues the same numbering. #}
+        {% for r in rows if not r.secondary %}
+        {{ rollup_row(i, loop.index0, r, slot_choices) }}
+        {% endfor %}
+        {% set lead = rows|rejectattr('secondary')|list|length %}
+        {% if rows|selectattr('secondary')|list %}
+        <details class="fl-more" style="border-top:none;margin-top:8px">
+          <summary style="padding:9px 0">Other work-item types
+            <span class="hint">{{ rows|length - lead }} more states · rarely children</span>
+          </summary>
+          <div style="padding-bottom:4px">
+            {% for r in rows if r.secondary %}
+            {{ rollup_row(i, lead + loop.index0, r, slot_choices) }}
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+        <div class="form-help" style="margin-top:10px">
+          Applies when an item of THIS group is a <b>parent</b>: it follows its
+          least-advanced child, and is <b>held</b> unless every child state above is mapped —
+          one <i>not mapped</i> row stops the whole roll-up. Leave them all unmapped for off.
+          {% if rows|selectattr('unknown')|list %}
+          <br><span style="color:var(--red)">⚠ = that child state exists on no work-item type
+            in this project, so the line can never match. Set it to <i>not mapped</i> to drop
+            it.</span>
           {% endif %}
         </div>
+        {% else %}
+        <div class="form-help" style="margin:0">
+          Tick this group's work-item types first — the child states a roll-up can key on are
+          the states of the OTHER types.
+        </div>
+        {% endif %}
       </div>
     </details>
   </div>

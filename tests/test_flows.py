@@ -224,7 +224,12 @@ def test_parse_form_builds_a_group_with_all_eight_stages():
         "flow0_type__Bug": "on", "flow0_type__Task": "on",
         "flow0_state__on_merge": "Ready to Deploy",
         "flow0_state__review": "Ready to Review",
-        "flow0_rollup": "Ready to Testing = Implement Done\n\nActive = Active\n",
+        # Roll-up posts one hidden key + one select per child state, not free text — the
+        # editor shows a row for every state a child can be in.
+        "flow0_rollup_count": "3",
+        "flow0_rollup_key0": "Ready to Testing", "flow0_rollup_val0": "Implement Done",
+        "flow0_rollup_key1": "Active", "flow0_rollup_val1": "Active",
+        "flow0_rollup_key2": "Closed", "flow0_rollup_val2": "",      # left unmapped
     }, ALL_TYPES)
     assert len(parsed) == 1
     flow = parsed[0]

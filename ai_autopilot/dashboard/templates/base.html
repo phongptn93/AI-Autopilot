@@ -158,6 +158,17 @@
             width: 100%; max-width: 480px; }
         .form-input input[type=checkbox] { width: 18px; height: 18px; margin-top: 8px; }
         .form-help { color: var(--text-dim); font-size: 12px; margin-top: 6px; line-height: 1.5; }
+
+        /* ── Sticky save bar: one definition, like the controls above ──
+           Settings and the State flow page each carried their own copy. They had already
+           drifted — only one of them dimmed for a light colour scheme — which is exactly how
+           two pages that should look identical stop looking identical. */
+        .savebar { position: sticky; bottom: 0; z-index: 20; display: flex; align-items: center;
+            justify-content: flex-end; gap: 12px; background: rgba(10, 11, 15, .9);
+            backdrop-filter: blur(8px); border-top: 1px solid var(--border-soft);
+            padding: 14px 4px; margin: 8px -4px 0; }
+        .savebar .hint { color: var(--text-dim); font-size: 12px; margin-right: auto; }
+        @media (prefers-color-scheme: light) { .savebar { background: rgba(255, 255, 255, .92); } }
         .restart-badge { display: inline-block; background: var(--amber-bg); color: var(--amber);
             font-size: 10px; padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: middle; font-weight: 700; }
 

@@ -1,300 +1,306 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  /* ── State flow editor (scoped) ── */
-  .main{max-width:none}
-  .fl-head{display:flex;flex-wrap:wrap;align-items:flex-start;gap:14px;justify-content:space-between}
-  .fl-head h2{font-size:22px;font-weight:750;letter-spacing:-.02em}
-  .fl-sub{color:var(--text-muted);font-size:13px;margin-top:4px;max-width:78ch;line-height:1.6}
-  .fl-sub code{font-family:var(--mono);font-size:11.5px;background:var(--bg-input);padding:1px 6px;border-radius:5px}
-  .fl-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  /* ── State flow editor (scoped) ──
+     Deliberately built from the dashboard's own vocabulary (.card, .chip, .form-help,
+     .savebar) rather than a private one. The first version invented a lane grid 1060px
+     wide that scrolled sideways, printed the eight stage labels three times in three
+     different layouts, and gave a tag-override textbox the same visual weight as the
+     state it overrides. What replaced it: one card per group, the configured path shown
+     as an inline chain next to the controls that set it, and everything secondary behind
+     a native <details>. */
+  .main{max-width:1180px}
 
-  /* lane diagram */
-  .fl-diagram{overflow-x:auto;padding:4px 20px 18px}
-  .fl-lane{display:grid;grid-template-columns:170px repeat(8,minmax(112px,1fr));
-    gap:6px;align-items:stretch;min-width:1060px}
-  .fl-lane + .fl-lane{margin-top:6px}
-  .fl-lane-head{display:flex;flex-direction:column;justify-content:center;gap:3px;
-    padding:8px 10px;border-radius:var(--radius-sm);background:var(--bg-input);
-    border:1px solid var(--border-soft)}
-  .fl-lane-head b{font-size:12.5px;font-weight:650}
-  .fl-lane-head span{font-size:10.5px;color:var(--text-dim)}
-  .fl-stage-hd{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
-    color:var(--text-dim);padding:0 4px 4px;text-align:center}
-  .fl-node{display:flex;align-items:center;justify-content:center;text-align:center;
-    padding:9px 8px;border-radius:var(--radius-sm);font-size:11.5px;font-weight:600;
-    background:var(--accent-bg);color:var(--accent-hover);border:1px solid transparent;
-    word-break:break-word;line-height:1.35}
-  .fl-node.skip{background:transparent;color:var(--text-dim);border:1px dashed var(--border);
-    font-weight:500;font-style:italic}
-  .fl-node.legacyv{background:var(--amber-bg);color:var(--amber);border-color:transparent}
+  .fl-top{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 16px;margin-bottom:5px}
+  .fl-top h2{font-size:21px;font-weight:750;letter-spacing:-.02em}
+  .fl-lede{color:var(--text-muted);font-size:13px;line-height:1.65;max-width:74ch;margin:0 0 14px}
+  .fl-lede code{font-family:var(--mono);font-size:11.5px;background:var(--bg-input);
+    padding:1px 6px;border-radius:5px}
 
-  /* group cards */
-  .fl-group{border-top:1px solid var(--border-soft)}
-  .fl-group:first-of-type{border-top:none}
-  .fl-grp-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:15px 20px 9px}
-  .fl-grp-head input[type=text]{max-width:260px}
-  .fl-del{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-muted)}
-  .fl-lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
-    color:var(--text-dim);margin:0 20px 7px}
-  .fl-chips{display:flex;flex-wrap:wrap;gap:7px;padding:0 20px 13px}
-  .chip.taken{opacity:.45;text-decoration:line-through;cursor:not-allowed}
+  /* One compact status strip instead of a stack of full-width alert cards. */
+  .fl-status{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;
+    padding:11px 16px;margin-bottom:16px;border:1px solid var(--border-soft);
+    border-radius:var(--radius-sm);background:var(--bg-card);font-size:12.5px}
+  .fl-status .sep{width:1px;height:15px;background:var(--border);flex:none}
+  .fl-status b{font-weight:650}
+  .fl-note{color:var(--amber)}
+  .fl-note.bad{color:var(--red)}
 
-  .fl-rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));
-    gap:2px 26px;padding:2px 20px 8px}
-  .fl-row{display:grid;grid-template-columns:1fr;gap:6px;padding:10px 0;
-    border-bottom:1px solid var(--border-soft);min-width:0}
-  .fl-row > label{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600}
-  .fl-row-in{display:grid;grid-template-columns:1fr 118px auto;gap:8px;align-items:center}
-  .fl-row-in select,.fl-row-in input[type=text]{min-width:0;max-width:100%}
-  .fl-row-in .tog{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-dim);white-space:nowrap}
+  /* group card */
+  .fl-card{margin-bottom:16px}
+  .fl-card.ghost{border-style:dashed;background:transparent}
+  .fl-hd{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;
+    padding:14px 18px;border-bottom:1px solid var(--border-soft)}
+  .fl-name{font-size:14px;font-weight:650;max-width:230px}
+  .fl-hd .grow{flex:1 1 auto}
+  .fl-del{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-dim)}
+  .fl-del:hover{color:var(--red)}
 
-  .fl-rollup{padding:6px 20px 18px}
-  .fl-rollup textarea{font-family:var(--mono);font-size:12px}
+  /* the configured path, read left→right; wraps instead of scrolling */
+  .fl-path{display:flex;flex-wrap:wrap;align-items:center;gap:6px 3px;padding:12px 18px 2px}
+  .fl-step{display:inline-flex;align-items:center;gap:7px;padding:4px 10px 4px 8px;
+    border-radius:6px;background:var(--bg-input);border:1px solid var(--border-soft);
+    font-size:11.5px;line-height:1.3}
+  .fl-step i{font-style:normal;opacity:.75}
+  .fl-step b{font-weight:600}
+  .fl-arrow{color:var(--text-dim);font-size:12px;padding:0 3px;user-select:none}
+  .fl-path .empty{color:var(--text-dim);font-size:12px;font-style:italic}
 
-  /* `.chip`/`.chips`/`.chip-accent`/`.chip-amber` come from base.html; these variants are
-     defined per-page there, so this page needs its own copies. */
-  .chip.chip-red{background:var(--red-bg);color:var(--red);border-color:transparent}
-  .chip.chip-empty{background:transparent;color:var(--text-dim);border:1px dashed var(--border);font-style:italic}
-  .fl-fallback{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:13px}
-  .fl-fb{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
-  .fl-fb .k{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
-  .fl-fb .h{font-size:11.5px;line-height:1.45}
+  .fl-sec{padding:4px 18px 0}
+  .fl-sec > h4{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--text-dim);margin:14px 0 6px}
+  .fl-rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 28px}
+  .fl-row{display:grid;grid-template-columns:132px 1fr;gap:12px;align-items:center;
+    padding:7px 0;border-bottom:1px solid var(--border-soft);min-width:0}
+  .fl-row > label{font-size:12.5px;font-weight:550;color:var(--text-muted)}
+  .fl-row select,.fl-row input[type=text]{min-width:0;max-width:100%}
+  .fl-row select.set{color:var(--text)}
+  .fl-row select.unset{color:var(--text-dim)}
+  .fl-row .warn{border-color:var(--red)}
 
-  .fl-err{padding:14px 20px}
-  .fl-err ul{margin:0;padding-left:19px;display:flex;flex-direction:column;gap:8px}
-  .fl-err li{font-size:12.5px;line-height:1.6;color:var(--text)}
+  /* type picker */
+  .fl-types{padding:12px 18px 4px}
+  .chip.dim{opacity:.55}
+  .chip .owner{font-size:10px;color:var(--text-dim);margin-left:2px}
+
+  /* secondary settings, out of the way until wanted */
+  details.fl-more{border-top:1px solid var(--border-soft);margin-top:12px}
+  details.fl-more > summary{cursor:pointer;list-style:none;padding:11px 18px;
+    font-size:12px;font-weight:600;color:var(--text-muted);display:flex;align-items:center;gap:8px}
+  details.fl-more > summary::-webkit-details-marker{display:none}
+  details.fl-more > summary::before{content:"▸";color:var(--text-dim);font-size:10px}
+  details.fl-more[open] > summary::before{content:"▾"}
+  details.fl-more > summary:hover{color:var(--text)}
+  details.fl-more > summary .hint{font-weight:400;color:var(--text-dim);font-size:11.5px}
+  .fl-more-body{padding:0 18px 16px}
+  .fl-more-body textarea{font-family:var(--mono);font-size:11.5px}
+
+  .fl-err{padding:12px 18px 16px}
+  .fl-err ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:9px}
+  .fl-err li{font-size:12.5px;line-height:1.6}
 
   .savebar{position:sticky;bottom:0;z-index:20;display:flex;justify-content:flex-end;gap:12px;
     align-items:center;background:rgba(10,11,15,.9);backdrop-filter:blur(8px);
     border-top:1px solid var(--border-soft);padding:14px 4px;margin:8px -4px 0}
   .savebar .hint{color:var(--text-dim);font-size:12px;margin-right:auto}
-
-  @media (prefers-color-scheme: light){
-    .fl-diagram{background:transparent}
-    .savebar{background:rgba(255,255,255,.92)}
-  }
+  @media (prefers-color-scheme: light){ .savebar{background:rgba(255,255,255,.92)} }
+  @media (max-width:640px){ .fl-row{grid-template-columns:1fr;gap:5px} }
 </style>
 
-<div class="fl-head">
-  <div>
-    <h2>🔀 State flow per work-item type</h2>
-    <p class="fl-sub">
-      An ADO state belongs to a <b>type</b> — <code>Ready to Deploy</code> exists on Bug and Task
-      but not on Requirement — so one project-wide state per stage is rejected outright for every
-      type that doesn't define it. Group the types that share a lifecycle and give each group its
-      own states. Anything this project can't accept is refused here rather than failing later, one
-      work item at a time.
-    </p>
-  </div>
-  <div class="fl-meta">
-    <span class="badge {{ 'badge-success' if enabled else 'badge-retrying' }}">
-      <span class="badge-dot"></span>{{ 'Auto transitions on' if enabled else 'Auto transitions OFF' }}
-    </span>
-    {% if assignee %}<span class="chip">only for {{ assignee }}</span>{% endif %}
-    <a class="btn-ghost" href="/dashboard/settings#sec-repos" style="text-decoration:none">⚙️ Settings</a>
-  </div>
+<div class="fl-top">
+  <h2>🔀 State flow</h2>
+  <span class="badge {{ 'badge-success' if enabled else 'badge-retrying' }}">
+    <span class="badge-dot"></span>{{ 'on' if enabled else 'off' }}</span>
 </div>
+<p class="fl-lede">
+  An ADO state belongs to a <b>work-item type</b> — <code>Ready to Deploy</code> exists on Bug
+  and Task but not on Requirement — so one state per stage for the whole project is rejected
+  outright for every type that lacks it. Group the types that share a lifecycle and give each
+  group its own states. A state this project cannot accept is refused here, not months later
+  one work item at a time.
+</p>
 
-{% if not enabled %}
-<div class="card" style="border-color:var(--amber)">
-  <div style="padding:13px 20px;color:var(--amber);font-size:13px">
-    ⚠️ <b>Auto transitions are off</b>, so nothing here runs yet. Turn on
-    <b>Enable auto transitions</b> in Settings → <i>Auto transitions</i>. You can still configure
-    the flow now.
-  </div>
+<div class="fl-status">
+  <span><b>{{ groups|length }}</b> group{{ '' if groups|length == 1 else 's' }}</span>
+  <span class="sep"></span>
+  <span><b>{{ types|length - uncovered|length }}</b> of <b>{{ types|length }}</b> types covered</span>
+  {% if assignee %}<span class="sep"></span><span>only for <b>{{ assignee }}</b></span>{% endif %}
+  {% if not enabled %}
+  <span class="sep"></span>
+  <span class="fl-note">⚠️ Auto transitions are <b>off</b> — nothing here runs yet
+    (<a href="/dashboard/settings#sec-6" style="color:var(--amber)">turn on in Settings</a>).
+    You can still configure it.</span>
+  {% endif %}
+  {% if ado_down %}
+  <span class="sep"></span>
+  <span class="fl-note bad">⚠️ Couldn't read the work-item types from Azure DevOps — state
+    lists are empty and a save can only be checked for structure.</span>
+  {% endif %}
 </div>
-{% endif %}
-
-{% if ado_down %}
-<div class="card" style="border-color:var(--amber)">
-  <div style="padding:13px 20px;color:var(--amber);font-size:13px">
-    ⚠️ <b>Couldn't read the work-item types from Azure DevOps.</b> The type chips and the state
-    lists are empty, and a save can only be checked for structure — not against real states.
-    Check the connection in Settings, then reload.
-  </div>
-</div>
-{% endif %}
 
 {% if flash %}
-<div class="card" style="border-color:var(--{{ flash[0] }})">
-  <div style="padding:13px 20px;color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+<div class="card" style="border-color:var(--{{ flash[0] }});margin-bottom:16px">
+  <div style="padding:12px 18px;color:var(--{{ flash[0] }});font-size:13px">{{ flash[1]|safe }}</div>
 </div>
 {% endif %}
 
 {% if errors %}
-<div class="card" style="border-color:var(--red)">
+<div class="card" style="border-color:var(--red);margin-bottom:16px">
   <div class="card-header"><h3 style="color:var(--red)">⛔ Not saved — {{ errors|length }}
-    problem{{ 's' if errors|length != 1 else '' }} to fix</h3></div>
+    problem{{ 's' if errors|length != 1 else '' }} to fix</h3>
+    <span class="form-help" style="margin:0">What you typed is kept below.</span></div>
   <div class="fl-err"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
-</div>
-{% endif %}
-
-<!-- ── Flow diagram: one lane per group, labelled with that group's real states ── -->
-{% if groups %}
-<div class="card">
-  <div class="card-header"><h3>🗺️ What runs, per group</h3>
-    <span class="form-help" style="margin:0">Dashed = stage skipped.
-      {% if uncovered %}Amber = the flat fallback still in use.{% endif %}</span></div>
-  <div class="fl-diagram">
-    <div class="fl-lane">
-      <div></div>
-      {% for key, label, _ in stages %}<div class="fl-stage-hd">{{ label }}</div>{% endfor %}
-    </div>
-    {% for g in groups %}
-    <div class="fl-lane">
-      <div class="fl-lane-head">
-        <b>{{ g.name or '(unnamed)' }}</b>
-        <span>{{ (g.types or [])|join(' · ') }}</span>
-      </div>
-      {% for key, label, _ in stages %}
-        {% set v = (g.states or {}).get(key) %}
-        <div class="fl-node {{ '' if v else 'skip' }}">{{ v if v else 'skip' }}</div>
-      {% endfor %}
-    </div>
-    {% endfor %}
-    {% if uncovered %}
-    <div class="fl-lane">
-      <div class="fl-lane-head">
-        <b style="color:var(--amber)">No flow</b>
-        <span>{{ uncovered|join(' · ') }}</span>
-      </div>
-      {% for key, label, _ in stages %}
-        {% set v = legacy.get(key) %}
-        <div class="fl-node {{ 'legacyv' if v else 'skip' }}">{{ v if v else 'skip' }}</div>
-      {% endfor %}
-    </div>
-    {% endif %}
-  </div>
 </div>
 {% endif %}
 
 <form method="post" action="/dashboard/flow" autocomplete="off">
   <input type="hidden" name="flow_count" value="{{ groups|length + 1 }}">
-  <input type="hidden" name="_all_types" value="{{ types|join(',') }}">
 
-  <div class="card">
-    <div class="card-header"><h3>🧩 Groups</h3>
-      <span class="form-help" style="margin:0">One flow per type. Leave a state blank to skip that
-        stage. The empty group at the bottom is how you add another.</span></div>
+  {# Existing groups, then ONE ghost card — adding a group needs no round trip, and an
+     untouched blank card is dropped on save rather than reported as an error. #}
+  {% for i in range(groups|length + 1) %}
+  {% set g = groups[i] if i < groups|length else {} %}
+  {% set new = i >= groups|length %}
+  {% set gtypes = (g.types or [])|map('lower')|list %}
+  {% set slot_choices = choices[i] %}
 
-    {# Existing groups, then ONE blank slot — adding a group needs no round trip, and an
-       untouched blank slot is dropped on save rather than reported as an error. #}
-    {% for i in range(groups|length + 1) %}
-    {% set g = groups[i] if i < groups|length else {} %}
-    {% set gtypes = (g.types or [])|map('lower')|list %}
-    {% set slot_choices = choices[i] %}
-    <div class="fl-group">
-      <div class="fl-grp-head">
-        <input type="text" name="flow{{ i }}_name" value="{{ g.name or '' }}"
-               placeholder="{{ 'Group name' if i < groups|length else 'New group — name it, tick its types' }}">
-        {% if i < groups|length %}
-        <label class="fl-del">
-          <input type="checkbox" name="flow{{ i }}_delete"
-                 style="width:15px;height:15px;accent-color:var(--red)"> remove this group
-        </label>
+  <div class="card fl-card {{ 'ghost' if new else '' }}">
+    <div class="fl-hd">
+      <input class="fl-name" type="text" name="flow{{ i }}_name" value="{{ g.name or '' }}"
+             placeholder="{{ 'Group name' if not new else 'Add a group — name it, tick its types' }}">
+      <span class="grow"></span>
+      {% if not new %}
+      <label class="fl-del" title="delete this group">
+        <input type="checkbox" name="flow{{ i }}_delete"
+               style="width:14px;height:14px;accent-color:var(--red)"> delete
+      </label>
+      {% endif %}
+    </div>
+
+    {# The configured path, next to the controls that set it — not duplicated in a separate
+       diagram card at the top of the page, which is where it scrolled sideways before. #}
+    <div class="fl-path">
+      {% set ns = namespace(first=true) %}
+      {% for key, label, _ in stages %}
+        {% set v = (g.states or {}).get(key) %}
+        {% if v %}
+          {% if not ns.first %}<span class="fl-arrow">→</span>{% endif %}
+          {% set ns.first = false %}
+          <span class="fl-step"><i>{{ label.split(' ')[0] }}</i><b>{{ v }}</b></span>
         {% endif %}
-      </div>
+      {% endfor %}
+      {% if ns.first %}
+      <span class="empty">No states set yet — this group changes nothing.</span>
+      {% endif %}
+    </div>
 
-      <div class="fl-lbl">Work-item types</div>
+    <div class="fl-types">
       {% if types %}
-      <div class="fl-chips">
+      <div class="chips">
         {% for t in types %}
         {% set mine = t|lower in gtypes %}
         {% set owner = claimed_by.get(t|lower) %}
         {% set taken = owner is not none and not mine %}
         {# Marked, not disabled: a disabled box isn't submitted, so moving a type between
-           groups would need two saves. Ticking it in both is caught on save with a message
-           that names the other flow. #}
-        <label class="chip {{ 'chip-accent' if mine else '' }} {{ 'taken' if taken else '' }}"
-               {% if taken %}title="already in the &quot;{{ owner }}&quot; flow — untick it there in the same save"{% endif %}>
+           groups would need two saves. Ticking it in both is caught on save. #}
+        <label class="chip {{ 'chip-accent' if mine else '' }} {{ 'dim' if taken else '' }}"
+               {% if taken %}title="currently in the &quot;{{ owner }}&quot; group — untick it there in the same save"{% endif %}>
           <input type="checkbox" name="flow{{ i }}_type__{{ t }}" {% if mine %}checked{% endif %}
-                 style="width:15px;height:15px;accent-color:var(--accent)"> {{ t }}
+                 style="width:14px;height:14px;accent-color:var(--accent)">{{ t }}{% if taken %}<span class="owner">in {{ owner }}</span>{% endif %}
         </label>{% endfor %}
       </div>
       {% else %}
-      <div class="form-help" style="margin:0 20px 13px">No work-item types loaded from ADO.</div>
+      <div class="form-help" style="margin:0">No work-item types loaded from Azure DevOps.</div>
       {% endif %}
+    </div>
 
-      <div class="fl-lbl">Stages — state · tag override · comment</div>
+    {# Eight stages, split by WHEN they fire. As one flat list of eight identical rows this
+       was a wall with nothing to navigate by. #}
+    <div class="fl-sec">
+      {% for section, keys in stage_groups %}
+      <h4>{{ section }}</h4>
       <div class="fl-rows">
-        {# `choices[i]` is the intersection of the states EVERY ticked type defines,
-           computed server-side: a state half the group lacks is exactly the half-broken
-           rule this page exists to prevent. #}
-        {% set choices = slot_choices %}
-        {% for key, label, legacy_field in stages %}
+        {% for key in keys %}
+        {% set label = stage_labels[key] %}
         {% set cur = (g.states or {}).get(key, '') %}
+        {% set bad = cur and slot_choices and cur not in slot_choices %}
         <div class="fl-row">
           <label for="flow{{ i }}_state__{{ key }}">{{ label }}</label>
-          <div class="fl-row-in">
-            {% if choices %}
-            <select id="flow{{ i }}_state__{{ key }}" name="flow{{ i }}_state__{{ key }}">
-              <option value="" {% if not cur %}selected{% endif %}>— skip —</option>
-              {% for s in choices %}<option value="{{ s }}" {% if cur == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
-              {% if cur and cur not in choices %}
-              <option value="{{ cur }}" selected>⚠ {{ cur }} (not on these types)</option>
-              {% endif %}
-            </select>
-            {% else %}
-            <input type="text" id="flow{{ i }}_state__{{ key }}" name="flow{{ i }}_state__{{ key }}"
-                   value="{{ cur }}" placeholder="tick types above to pick a state">
-            {% endif %}
-            <input type="text" name="flow{{ i }}_tag__{{ key }}"
-                   value="{{ (g.tags or {}).get(key, '') }}" placeholder="tag">
-            <label class="tog" title="post a comment on the work item for this stage">
-              <input type="checkbox" name="flow{{ i }}_comment__{{ key }}"
-                     {% if (g.comment or {}).get(key, True) %}checked{% endif %}
-                     style="width:14px;height:14px;accent-color:var(--accent)">💬
-            </label>
-          </div>
+          {% if slot_choices %}
+          <select id="flow{{ i }}_state__{{ key }}" name="flow{{ i }}_state__{{ key }}"
+                  class="{{ 'set' if cur else 'unset' }} {{ 'warn' if bad else '' }}">
+            <option value="" {% if not cur %}selected{% endif %}>— skip this stage —</option>
+            {# Only states EVERY ticked type defines: a state half the group lacks is the
+               half-broken rule this page exists to prevent. #}
+            {% for s in slot_choices %}<option value="{{ s }}" {% if cur == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+            {% if bad %}<option value="{{ cur }}" selected>⚠ {{ cur }} — not on these types</option>{% endif %}
+          </select>
+          {% else %}
+          <input type="text" id="flow{{ i }}_state__{{ key }}" name="flow{{ i }}_state__{{ key }}"
+                 value="{{ cur }}" placeholder="tick types above to pick a state">
+          {% endif %}
         </div>
         {% endfor %}
       </div>
+      {% endfor %}
+    </div>
 
-      <div class="fl-lbl">Parent roll-up — one <code>Child state = Parent state</code> per line</div>
-      <div class="fl-rollup">
+    {% set tag_count = (g.tags or {})|length %}
+    <details class="fl-more" {% if tag_count %}open{% endif %}>
+      <summary>Tag &amp; comment per stage
+        <span class="hint">{{ tag_count ~ ' override' ~ ('' if tag_count == 1 else 's') if tag_count else 'defaults' }}</span>
+      </summary>
+      <div class="fl-more-body">
+        <div class="fl-rows">
+          {% for key, label, _ in stages %}
+          <div class="fl-row" style="grid-template-columns:132px 1fr 74px">
+            <label>{{ label }}</label>
+            <input type="text" name="flow{{ i }}_tag__{{ key }}"
+                   value="{{ (g.tags or {}).get(key, '') }}" placeholder="use the global tag">
+            <label class="fl-del" style="justify-content:flex-end" title="post a comment on the work item">
+              <input type="checkbox" name="flow{{ i }}_comment__{{ key }}"
+                     {% if (g.comment or {}).get(key, True) %}checked{% endif %}
+                     style="width:14px;height:14px;accent-color:var(--accent)"> note
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </details>
+
+    <details class="fl-more" {% if g.rollup %}open{% endif %}>
+      <summary>Parent roll-up
+        <span class="hint">{{ (g.rollup|length ~ ' rule' ~ ('' if g.rollup|length == 1 else 's')) if g.rollup else 'off' }}</span>
+      </summary>
+      <div class="fl-more-body">
         <textarea name="flow{{ i }}_rollup" rows="4"
           placeholder="Ready to Testing = Implement Done&#10;Active = Active">{% for line in (g.rollup or []) %}{{ line }}
 {% endfor %}</textarea>
         <div class="form-help">
-          Applies when a work item of THIS group is a <b>parent</b>: it follows its
-          least-advanced child. Every child state needs a line — one missing line holds the
-          whole roll-up, silently.
+          One <code>Child state = Parent state</code> per line. Applies when an item of THIS
+          group is a <b>parent</b>: it follows its least-advanced child, and is held unless
+          <b>every</b> child state has a line — one missing line stops the whole roll-up.
           {% if g.types and child_states[i] %}
-          <br>States the children (other types) can be in:
+          <br>Children can be in:
           <span style="color:var(--text-muted)">{{ child_states[i]|join(' · ') }}</span>
           {% endif %}
         </div>
       </div>
-    </div>
-    {% endfor %}
+    </details>
   </div>
+  {% endfor %}
 
   {% if uncovered %}
-  <div class="card" style="border-color:var(--amber)">
-    <div class="card-header"><h3>⚠️ Types with no flow ({{ uncovered|length }})</h3>
-      <span class="form-help" style="margin:0">These still use the single project-wide
-        settings — listed so "configured per type" never hides a type that isn't.</span></div>
-    <div style="padding:4px 20px 18px">
+  <div class="card fl-card" style="border-color:var(--amber)">
+    <div class="card-header"><h3>⚠️ {{ uncovered|length }} type{{ '' if uncovered|length == 1 else 's' }} with no group</h3>
+      <span class="form-help" style="margin:0">Listed so "configured per type" never hides a
+        type that isn't.</span></div>
+    <div style="padding:13px 18px 16px">
       <div class="chips" style="margin-bottom:11px">
         {% for t in uncovered %}<span class="chip">{{ t }}</span>{% endfor %}
       </div>
-      <div class="fl-fallback">
-        {% for key, label, legacy_field in stages %}
-        <div class="fl-fb">
-          <span class="k">{{ label }}</span>
-          {% if legacy.get(key) %}
-            <span class="chip {{ 'chip-red' if legacy_bad.get(key) else 'chip-amber' }}">{{ legacy.get(key) }}</span>
-            {% if legacy_bad.get(key) %}
-            <span class="h" style="color:var(--red)">exists on no work-item type — this
-              transition always fails</span>{% endif %}
-          {% else %}<span class="chip chip-empty">not set</span>{% endif %}
-        </div>
+      {# Not the eight stage labels again — just which flat values these types fall back to. #}
+      <div class="fl-path" style="padding:0">
+        {% set ns2 = namespace(first=true) %}
+        {% for key, label, _ in stages %}
+          {% set v = legacy.get(key) %}
+          {% if v %}
+            {% if not ns2.first %}<span class="fl-arrow">→</span>{% endif %}
+            {% set ns2.first = false %}
+            <span class="fl-step" {% if legacy_bad.get(key) %}style="border-color:var(--red)"{% endif %}>
+              <i>{{ label.split(' ')[0] }}</i><b>{{ v }}</b>
+              {% if legacy_bad.get(key) %}<span style="color:var(--red)">✗</span>{% endif %}
+            </span>
+          {% endif %}
         {% endfor %}
+        {% if ns2.first %}<span class="empty">No fallback states set — these types are never moved.</span>{% endif %}
       </div>
-      {% if legacy_rollup %}
-      <div class="form-help" style="margin-top:12px">Flat roll-up map:
-        <code>{{ legacy_rollup|join(' · ') }}</code></div>
+      {% if legacy_has_dead %}
+      {# Keep the phrase on one line: broken across a newline the rendered text still reads
+         fine, but nothing can grep or assert on it. #}
+      <div class="form-help" style="color:var(--red);margin-top:9px">
+        ✗ = that state exists on no work-item type in this project, so the transition always
+        fails. Give these types a group, or fix the value in Settings.</div>
       {% endif %}
     </div>
   </div>

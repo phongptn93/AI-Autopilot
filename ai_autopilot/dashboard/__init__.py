@@ -24,7 +24,7 @@ from ai_autopilot.dashboard import settings_form
 from ai_autopilot.data.entities import PipelineState
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services import planning_analyzer
-from ai_autopilot.services.pr_feedback import is_bot_branch, parse_work_item_id
+from ai_autopilot.services.pr_feedback import parse_work_item_id
 from ai_autopilot.skills_catalog import discover_skills
 from ai_autopilot.workspace import discover_repos
 
@@ -203,14 +203,29 @@ _REVIEWS_TTL = 30.0
 
 
 async def _pr_outcomes(c: Container) -> dict:
-    """Merged / active / abandoned counts of AUTOPILOT PRs (bot branch prefixes),
-    across every repo — the numerator for "is this actually shipping work"."""
+    """Merged / active / abandoned counts of the autopilot's OWN PRs, across every repo —
+    the denominator for "is this actually shipping work, and at what cost".
+
+    A PR is ours when its branch names a work item this autopilot has an execution record
+    for. It used to be "the branch starts with a bot prefix", which was wrong in both
+    directions and made the cost-per-PR figure meaningless:
+
+      * ``feature/`` and ``fix/`` are what the team names branches too, so on a real project
+        this counted 102 merged PRs when 7 were the autopilot's — reporting its cost per
+        shipped PR as 719k tokens instead of 10.5M, 14x too cheap.
+      * an agent-chosen prefix that isn't on the list (``dxfac/feature/6526-…``) was skipped
+        even though it was ours.
+
+    ``ok`` is False when the scan itself failed. Returning silent zeros made a throttled ADO
+    look identical to "you have never shipped anything" — 1 + 3N requests per uncached load
+    is enough that this does happen.
+    """
     now = time.monotonic()
     if _PR_OUTCOME_CACHE["data"] is not None and now - _PR_OUTCOME_CACHE["at"] < _PR_OUTCOME_TTL:
         return _PR_OUTCOME_CACHE["data"]
-    counts = {"merged": 0, "active": 0, "abandoned": 0}
-    prefixes = tuple(c.config.bot_branch_prefixes)
+    counts: dict = {"merged": 0, "active": 0, "abandoned": 0, "ok": True}
     try:
+        ours = await c.execution_repo.work_item_ids()
         for repo in await c.ado.get_repositories():
             rid = repo.get("id")
             if not rid:
@@ -221,13 +236,17 @@ async def _pr_outcomes(c: Container) -> dict:
                 ("abandoned", c.ado.get_abandoned_pull_requests),
             ):
                 for pr in await fetch(rid):
-                    if is_bot_branch(pr.get("sourceRefName", ""), prefixes):
+                    if parse_work_item_id(pr.get("sourceRefName", "")) in ours:
                         counts[key] += 1
     except Exception as exc:  # noqa: BLE001 — metrics must never break the page
         _log.warning("pr outcome scan failed", error=str(exc))
+        counts["ok"] = False
     decided = counts["merged"] + counts["abandoned"]
     counts["merge_rate"] = round(100 * counts["merged"] / decided) if decided else None
-    _PR_OUTCOME_CACHE.update(at=now, data=counts)
+    # A failed scan is not cached: the next load should retry rather than serve zeros for
+    # a full minute.
+    if counts["ok"]:
+        _PR_OUTCOME_CACHE.update(at=now, data=counts)
     return counts
 
 
@@ -1142,6 +1161,8 @@ def create_dashboard_router() -> APIRouter:
             "choices": choices,
             "child_states": child_states,
             "stages": flows_mod.STAGES,
+            "stage_groups": flows_mod.STAGE_GROUPS,
+            "stage_labels": flows_mod.STAGE_LABELS,
             "uncovered": flows_mod.uncovered_types(groups, states_by_type),
             "enabled": cfg.auto_transition_enabled,
             "assignee": cfg.auto_transition_assignee,
@@ -1150,11 +1171,14 @@ def create_dashboard_router() -> APIRouter:
             },
             # Flat states that exist on NO type always fail — the same class of dead
             # config as the roll-up typo, so it gets called out instead of just listed.
-            "legacy_bad": {
+            "legacy_bad": (legacy_bad := {
                 stage: bool(states_by_type and getattr(cfg, legacy, "")
                             and getattr(cfg, legacy) not in every_state)
                 for stage, _, legacy in flows_mod.STAGES
-            },
+            }),
+            # A plain flag rather than `legacy_bad.values()|select|list` in the template —
+            # that filter chain does work, it is just harder to read than `any()`.
+            "legacy_has_dead": any(legacy_bad.values()),
             "legacy_rollup": list(cfg.parent_rollup_map or []),
             "ado_down": not states_by_type,
         }

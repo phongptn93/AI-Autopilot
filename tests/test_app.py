@@ -689,14 +689,17 @@ def test_flow_page_names_the_types_no_flow_covers(tmp_path, monkeypatch):
         {"name": "Dev", "types": ["Bug", "Task"], "states": {}},
     ]) as client:
         text = client.get("/dashboard/flow").text
-    assert "Types with no flow" in text
+    # Assert the CLAIM (which types are uncovered), not the heading's prose — the wording
+    # changed once already in a redesign and took the test with it.
+    assert "with no group" in text
     assert "Requirement" in text and "Feature" in text
 
 
 def test_flow_page_flags_a_flat_state_that_exists_on_no_type(tmp_path, monkeypatch):
     with _flow_client(tmp_path, monkeypatch, on_merge_state="Ready for Testing") as client:
         text = client.get("/dashboard/flow").text
-    assert "exists on no work-item type" in text
+    assert "exists on no work-item type" in text      # the ✗ legend explains itself
+    assert "Ready for Testing" in text                # and names the dead value
 
 
 def test_saving_a_flow_applies_live_and_persists(tmp_path, monkeypatch):
@@ -869,3 +872,122 @@ def test_deleting_a_channel_row_removes_it(tmp_path, monkeypatch):
             "wh0_name": "#dev", "wh0_url": _WH_A, "wh0_active": "on", "wh0_delete": "on",
         }, follow_redirects=False)
         assert client.app.state.container.config.teams_webhook_channels == []
+
+
+# ── Autopilot PR metric: whose PRs are being counted ──────────────────────────
+
+class _FakeAdoPRs:
+    """Just enough ADO for _pr_outcomes; ``boom`` makes the scan fail."""
+
+    def __init__(self, completed=(), active=(), abandoned=(), boom=False):
+        self._sets = {"c": list(completed), "a": list(active), "x": list(abandoned)}
+        self._boom = boom
+
+    async def get_repositories(self):
+        if self._boom:
+            raise RuntimeError("ADO throttled")
+        return [{"id": "r1"}]
+
+    @staticmethod
+    def _prs(refs):
+        return [{"sourceRefName": f"refs/heads/{r}"} for r in refs]
+
+    async def get_completed_pull_requests(self, _rid):
+        return self._prs(self._sets["c"])
+
+    async def get_active_pull_requests(self, _rid):
+        return self._prs(self._sets["a"])
+
+    async def get_abandoned_pull_requests(self, _rid):
+        return self._prs(self._sets["x"])
+
+
+class _FakeExecRepoIds:
+    def __init__(self, ids):
+        self._ids = set(ids)
+
+    async def work_item_ids(self):
+        return self._ids
+
+
+async def _outcomes(ado, ids) -> dict:
+    from types import SimpleNamespace
+    dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)   # module-level cache
+    try:
+        return await dashboard._pr_outcomes(
+            SimpleNamespace(ado=ado, execution_repo=_FakeExecRepoIds(ids))
+        )
+    finally:
+        dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+
+
+async def test_only_prs_for_items_this_autopilot_ran_are_counted():
+    """The defect: counting any branch with a bot PREFIX caught the team's own feature/ and
+    fix/ branches. On a real project that read 102 merged PRs where 7 were the autopilot's,
+    reporting its cost per shipped PR as 719k tokens instead of 10.5M."""
+    counts = await _outcomes(
+        _FakeAdoPRs(completed=[
+            "feature/6935-goods-receipt",              # ours
+            "fix/6806-quantity-miscount",              # ours
+            "fix/project-detail-authz",                # a human's — no work-item id
+            "feature/dxticket-internal-filter",        # a human's
+            "feature/9999-someone-elses-item",         # has an id, but not one we ran
+        ]),
+        ids={6935, 6806},
+    )
+    assert counts["merged"] == 2
+    assert counts["ok"] is True
+
+
+async def test_an_agent_chosen_prefix_is_no_longer_missed():
+    """The same rule fixed the other direction: `dxfac/feature/6526-…` is the autopilot's
+    own PR but that prefix is not in bot_branch_prefixes, so it was skipped."""
+    counts = await _outcomes(
+        _FakeAdoPRs(completed=["dxfac/feature/6526-line-goods-return-multiselect"]),
+        ids={6526},
+    )
+    assert counts["merged"] == 1
+
+
+async def test_active_and_abandoned_use_the_same_rule():
+    counts = await _outcomes(
+        _FakeAdoPRs(
+            completed=["feature/1-a"], active=["feature/2-b", "fix/nope"],
+            abandoned=["feature/3-c"],
+        ),
+        ids={1, 2, 3},
+    )
+    assert (counts["merged"], counts["active"], counts["abandoned"]) == (1, 1, 1)
+    assert counts["merge_rate"] == 50            # 1 merged of 2 decided
+
+
+async def test_a_failed_scan_is_reported_not_shown_as_zero():
+    """Silent zeros made a throttled ADO look identical to "nothing has ever shipped"."""
+    counts = await _outcomes(_FakeAdoPRs(boom=True), ids={1})
+    assert counts["ok"] is False
+    assert counts["merged"] == 0                 # nothing counted…
+    assert dashboard._PR_OUTCOME_CACHE["data"] is None   # …and NOT cached, so it retries
+
+
+async def test_a_successful_scan_is_cached():
+    from types import SimpleNamespace
+    dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+    try:
+        c = SimpleNamespace(ado=_FakeAdoPRs(completed=["feature/1-a"]),
+                            execution_repo=_FakeExecRepoIds({1}))
+        await dashboard._pr_outcomes(c)
+        assert dashboard._PR_OUTCOME_CACHE["data"]["merged"] == 1
+        # A second call must not re-scan — swap in an ADO that would raise.
+        c.ado = _FakeAdoPRs(boom=True)
+        assert (await dashboard._pr_outcomes(c))["merged"] == 1
+    finally:
+        dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+
+
+def test_overview_says_so_when_the_pr_scan_failed(tmp_path, monkeypatch):
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    monkeypatch.setitem(dashboard._PR_OUTCOME_CACHE, "data", None)
+    with TestClient(create_app(settings)) as client:
+        client.app.state.container.ado.get_repositories = _FakeAdoPRs(boom=True).get_repositories
+        text = client.get("/dashboard").text
+    assert "couldn&#39;t reach Azure DevOps" in text or "couldn't reach Azure DevOps" in text

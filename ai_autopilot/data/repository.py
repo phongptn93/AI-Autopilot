@@ -260,6 +260,19 @@ class ExecutionRepository:
                 total=total, success=success, failed=failed, avg_duration=float(avg)
             )
 
+    async def work_item_ids(self) -> set[int]:
+        """Every work item this autopilot has actually run.
+
+        The authoritative answer to "is that PR ours?". Branch names are not: the prefix
+        list matches what humans name their branches too, and the agent sometimes picks a
+        prefix that isn't on the list at all.
+        """
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(func.distinct(ExecutionRecord.work_item_id))
+            )
+            return {int(r[0]) for r in rows if r[0] is not None}
+
     async def get_efficiency(self, trigger_tag: str | None = None) -> EfficiencyStats:
         """Aggregate effort figures for the Overview's efficiency cards."""
         conds = []

@@ -55,6 +55,15 @@ STAGES: tuple[tuple[str, str, str], ...] = (
     ("on_deploy", "🚀 Deployed", "on_deploy_state"),
 )
 
+# Presentation grouping for the editor. Eight equal rows read as a wall of identical
+# controls; the same eight split by WHEN they fire give the page a spine you can scan.
+# Keys must stay in sync with STAGES — asserted in tests.
+STAGE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("While working", ("in_progress", "review")),
+    ("Outcome", ("done", "report", "needs_human", "failed")),
+    ("After the PR lands", ("on_merge", "on_deploy")),
+)
+
 STAGE_KEYS: tuple[str, ...] = tuple(key for key, _, _ in STAGES)
 _LEGACY_FIELD: dict[str, str] = {key: legacy for key, _, legacy in STAGES}
 STAGE_LABELS: dict[str, str] = {key: label for key, label, _ in STAGES}

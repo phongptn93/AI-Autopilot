@@ -103,6 +103,7 @@ async def run_claude(
     max_turns: int | None = None,
     permission_mode: PermissionMode = "acceptEdits",
     allowed_tools: list[str] | None = None,
+    disallowed_tools: list[str] | None = None,
     setting_sources: list[str] | None = None,
     mcp_servers: dict | None = None,
     add_dirs: list[str] | None = None,
@@ -149,6 +150,12 @@ async def run_claude(
             # SDK default (all tools) in effect, which could burn the caller's single
             # max_turns on a tool call instead of returning the expected text/JSON.
             options.allowed_tools = allowed_tools
+        if disallowed_tools:
+            # A DENY list, not a narrower allow list: an advisory run still needs the
+            # workspace's skills, MCP servers and subagents, and enumerating all of those
+            # would break the moment one is added. Naming the mutators is precise about
+            # what is being prevented and survives new tools appearing.
+            options.disallowed_tools = disallowed_tools
         if model:
             options.model = model
         if max_turns and max_turns > 0:

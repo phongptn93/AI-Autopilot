@@ -42,6 +42,17 @@ from ai_autopilot.workspace import discover_repos, parse_repo_descriptions
 
 _log = get_logger("execution.claude_executor")
 
+# Tools an advisory run (/review, /qc, /security, auto-review) must not have. These runs
+# have no worktree to discard, so they execute against the SHARED workspace checkout — a
+# stray edit would land in whatever branch happens to be checked out, for a run whose whole
+# contract is to change nothing. Denying the mutators makes that structural instead of a
+# prompt instruction, on the path that runs unattended.
+#
+# Deliberately NOT here: Bash (the review needs `git diff`) and the MCP calls that post the
+# findings to the PR — those ARE the job. So this narrows the blast radius; it is not a
+# sandbox, which is why the caller still diffs `git status` around the run.
+_READ_ONLY_DENY = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
 _BRANCH_PREFIX = {
     TaskCategory.BUG: "fix",
     TaskCategory.FRONTEND_TASK: "feature/fe",
@@ -214,7 +225,12 @@ class ClaudeExecutor:
             "Cuối cùng trả về một tóm tắt NGẮN (verdict + số lượng finding theo severity)."
         )
         try:
-            run = await self._run_claude(prompt, run_dir, repo=run_dir)
+            # Same deny list as the advisory path. The scratch worktree keeps a stray edit
+            # out of YOUR checkout, but not out of the remote: this run has Bash, so an
+            # edit it decided to "just fix" could be committed and pushed to the PR branch.
+            run = await self._run_claude(
+                prompt, run_dir, repo=run_dir, disallowed_tools=list(_READ_ONLY_DENY)
+            )
             return (run.text or "").strip() or f"Đã review PR !{pr_id}."
         except TimeoutError:
             return f"Review PR !{pr_id} quá thời gian ({self._config.task_timeout_minutes} phút)."
@@ -716,6 +732,16 @@ class ClaudeExecutor:
         branch so ``origin/<branch>`` is diffable, run Claude in place, done. The
         working tree stays on whatever it was; the prompt directs the agent to
         inspect the fetched ref / ADO PR tools, never the files on disk.
+
+        Because there is no worktree to throw away, "changes nothing" is enforced by
+        DENYING the file-mutating tools (``_READ_ONLY_DENY``) rather than by asking in
+        the prompt. This is the same reasoning as the Teams chat path: safety belongs in
+        the tool surface, not in an instruction the agent could reasonably misread —
+        and this is the path that runs unattended, on every auto-review.
+
+        It is not a sandbox: ``Bash`` stays available because the review needs
+        ``git diff``, and a shell can write files. That is why the dirty-check below
+        remains — the deny list removes the likely accident, not every possibility.
         """
         started = time.monotonic()
         # Only the fetch touches .git — serialise it against worktree bookkeeping,
@@ -729,7 +755,10 @@ class ClaudeExecutor:
         )
         try:
             resume = await self._resume_for(repo, branch)
-            claude_run = await self._run_claude(prompt, claude_cwd, repo=repo, resume=resume)
+            claude_run = await self._run_claude(
+                prompt, claude_cwd, repo=repo, resume=resume,
+                disallowed_tools=list(_READ_ONLY_DENY),
+            )
             await self._save_session(repo, branch, claude_run)
             result = ExecutionResult.ok(item_id, prompt, claude_run.text)
             result.cost_tokens = claude_run.total_tokens
@@ -1093,7 +1122,7 @@ class ClaudeExecutor:
 
     async def _run_claude(
         self, prompt: str, work_dir: str, repo: str | None = None, on_event=None,
-        resume: str | None = None,
+        resume: str | None = None, disallowed_tools: list[str] | None = None,
     ) -> ClaudeRun:
         setting_sources: list[str] | None = None
         mcp_servers: dict | None = None
@@ -1113,6 +1142,7 @@ class ClaudeExecutor:
             max_turns=self._config.claude_max_turns or None,
             permission_mode=self._config.claude_permission_mode,  # type: ignore[arg-type]
             allowed_tools=self._config.claude_allowed_tools or None,
+            disallowed_tools=disallowed_tools,
             setting_sources=setting_sources,
             mcp_servers=mcp_servers,
             add_dirs=add_dirs,

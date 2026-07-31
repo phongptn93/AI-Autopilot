@@ -306,6 +306,26 @@ Run `ai-autopilot doctor` after changing these: it flags the combinations that r
 configured but can never fire (auto‑review with tracking off, a repeat‑reminder interval
 with reminders disabled, a `pr_bot_identity` with pasted quotes that will never match).
 
+### How a review is isolated
+
+| Path | Trigger | Checkout |
+|------|---------|----------|
+| `review_pr` | `/review <repo> <pr>` in Teams, or a pasted PR link | Scratch **git worktree**, removed afterwards |
+| Advisory command | `/review` `/qc` `/security` replied on a PR comment | **None** — `git fetch` the branch, review `origin/<branch>` in place |
+| Auto‑review | Bot added as a reviewer | Same as advisory |
+
+The advisory path skips the worktree on purpose: materialising a whole tree, then removing
+it, is most of the latency of a run that by contract changes nothing.
+
+All three **deny the file‑mutating tools** (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`)
+rather than only asking the agent not to change anything — advisory runs execute against
+the *shared* workspace checkout, and even the worktree path can `git push`, so the worktree
+isolates you from a stray edit but not the PR branch.
+
+It is **not** a sandbox: `Bash` stays available because the review needs `git diff`, and a
+shell can write files. The advisory path therefore also diffs `git status` around the run
+and warns if the checkout changed.
+
 ---
 
 ## 💬 Microsoft Teams bot

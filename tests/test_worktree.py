@@ -224,7 +224,8 @@ async def test_run_in_workspace_serialises_same_repo(agent_workspace: Path, monk
     async def fake_release(ws):
         pass
 
-    async def fake_claude(prompt, cwd, repo=None, on_event=None, resume=None):
+    async def fake_claude(prompt, cwd, repo=None, on_event=None, resume=None,
+                          disallowed_tools=None):
         nonlocal active, max_active
         active += 1
         max_active = max(max_active, active)
@@ -264,8 +265,10 @@ async def test_revise_read_only_skips_workspace(repo: Path, monkeypatch):
 
     ran = {}
 
-    async def fake_claude(prompt, cwd, repo=None, on_event=None, resume=None):
+    async def fake_claude(prompt, cwd, repo=None, on_event=None, resume=None,
+                          disallowed_tools=None):
         ran["cwd"] = cwd
+        ran["denied"] = disallowed_tools
         return SimpleNamespace(text="findings posted", total_tokens=7, cost_usd=0.01,
                                is_error=False)
 
@@ -276,6 +279,7 @@ async def test_revise_read_only_skips_workspace(repo: Path, monkeypatch):
     result = await ex.revise(item, "feature/be/42-thing", "review it", read_only=True)
 
     assert result.success is True
+    assert "Write" in ran["denied"] and "Edit" in ran["denied"]
     assert result.branch_name == "feature/be/42-thing"
     assert result.cost_tokens == 7
     assert ran["cwd"] == str(repo)          # ran in place, no worktree dir

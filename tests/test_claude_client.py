@@ -57,3 +57,23 @@ async def test_effort_defaults_split_by_workload():
     assert s.claude_effort_chat == "low"
     assert s.claude_effort_agentic == "medium"
     assert s.claude_effort_task == ""     # blank → unchanged
+
+
+async def test_disallowed_tools_reaches_the_sdk(monkeypatch):
+    """The deny list IS the advisory path's safety. If it silently failed to reach
+    ClaudeAgentOptions, "read-only" would quietly be prompt-only again."""
+    options = await _run(monkeypatch, disallowed_tools=["Write", "Edit"])
+    assert options.disallowed_tools == ["Write", "Edit"]
+
+
+async def test_no_deny_list_leaves_the_sdk_default(monkeypatch):
+    options = await _run(monkeypatch)
+    assert not options.disallowed_tools
+
+
+async def test_deny_list_is_independent_of_the_allow_list(monkeypatch):
+    """An advisory run still needs the workspace's skills, MCP servers and subagents, so it
+    passes NO allow list — the deny list must not depend on one being set."""
+    options = await _run(monkeypatch, disallowed_tools=["Write"])
+    assert options.disallowed_tools == ["Write"]
+    assert not options.allowed_tools

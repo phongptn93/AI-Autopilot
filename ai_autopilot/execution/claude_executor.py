@@ -64,6 +64,49 @@ class GitError(RuntimeError):
     """Raised when a git command exits non-zero."""
 
 
+def pretrust_claude_dir(path: str) -> bool:
+    """Pre-accept Claude Code's workspace-trust dialog for ``path``.
+
+    Claude Code keys trust by *absolute path* in ``~/.claude.json``
+    (``projects["<dir>"].hasTrustDialogAccepted``) and it does **not** inherit
+    from a parent directory. Every scratch we build is a brand-new path, so:
+
+    * an interactive session stops at "Do you trust the files in this folder?"
+      before it does anything — a prompt ``--permission-mode bypassPermissions``
+      does *not* answer, because workspace trust is a separate gate evaluated
+      first. An unattended Remote-Control session just sits there;
+    * a headless run silently treats the scratch as untrusted origin, which
+      drops the hooks/settings of the ``.claude`` we copied into it.
+
+    Seeding the flag is the alternative Claude Code itself documents ("...or set
+    projects[...].hasTrustDialogAccepted: true"). We only ever do this for a
+    directory we just created ourselves out of the operator's own workspace.
+
+    Best-effort: never raises — worst case is the old behaviour. Returns
+    ``True`` when the config now marks ``path`` as trusted.
+    """
+    cfg = Path.home() / ".claude.json"
+    try:
+        key = str(Path(path).resolve()).replace("\\", "/")
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        entry = data.setdefault("projects", {}).setdefault(key, {})
+        if entry.get("hasTrustDialogAccepted") is True:
+            return True
+        entry["hasTrustDialogAccepted"] = True
+        entry.setdefault("hasCompletedProjectOnboarding", True)
+        # Temp file + atomic replace: a live Claude Code session rewrites this
+        # same config, so it must never be observed half-written. UTF-8 with no
+        # BOM — a BOM makes the CLI's JSON.parse fail.
+        tmp = cfg.with_name(f".claude.json.autopilot-{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, cfg)
+        _log.info("pre-trusted Claude workspace", path=key)
+        return True
+    except Exception as exc:  # noqa: BLE001 — never block a launch on this
+        _log.warning("could not pre-trust Claude workspace", path=path, error=str(exc))
+        return False
+
+
 @dataclass
 class _Workspace:
     """An isolated checkout (git worktree or in-place branch) for one execution."""
@@ -174,6 +217,9 @@ class ClaudeExecutor:
         # user's main checkout; None → run in the shared workspace (disabled / no repos).
         scratch = await self._acquire_agent_scratch(item.id, repos)
         run_dir = scratch or workspace
+        # Trust the scratch so the .claude config we copied into it (hooks,
+        # settings) is actually honoured instead of skipped as untrusted origin.
+        pretrust_claude_dir(run_dir)
         try:
             clear_result(run_dir, item.id)
             activity.clear(workspace, item.id)  # activity stays in the real workspace (dashboard reads it)
@@ -450,6 +496,9 @@ class ClaudeExecutor:
         repos = self._allowed_repos(workspace)
         scratch = await self._acquire_agent_scratch(item.id, repos, stable=True)
         run_dir = scratch or workspace
+        # A fresh scratch is an unknown path to Claude Code — accept the workspace
+        # trust dialog up front, or this session blocks on it and never starts.
+        pretrust_claude_dir(run_dir)
         clear_result(run_dir, item.id)
         activity.clear(workspace, item.id)
 

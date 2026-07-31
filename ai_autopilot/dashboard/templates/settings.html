@@ -228,7 +228,13 @@
   <div class="card" id="sec-{{ loop.index }}">
     <div class="card-header"><h3>{{ section }}</h3>
       {% if section == 'Outcomes → tag + state' %}
-      <span class="form-help" style="margin:0">Per outcome: the ADO tag + state. Blank = skip. One place controls all tagging + transitions.</span>
+      <span class="form-help" style="margin:0">Per outcome: the ADO tag + state. Blank = skip.
+        These apply to work-item types no flow covers — per type, use
+        <a href="/dashboard/flow" style="color:var(--accent-hover)">🔀 State flow</a>.</span>
+      {% elif section == 'Auto transitions' %}
+      <span class="form-help" style="margin:0">The switch and the fallbacks live here; the
+        per-type states, actions and roll-up live on
+        <a href="/dashboard/flow" style="color:var(--accent-hover)">🔀 State flow</a>.</span>
       {% endif %}
     </div>
     <div class="field-grid">

@@ -13,9 +13,10 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 
 from ai_autopilot import metrics
-from ai_autopilot.config import match_command, matches_user
+from ai_autopilot.config import find_bot_mention, match_command, matches_user
 from ai_autopilot.container import Container
 from ai_autopilot.data import PipelineState
+from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.execution.pr_scorer import RunScore, ScoreInput, score_badge_html, score_run
 from ai_autopilot.execution.sdlc_plan import handoff_state, resolve_profile_name
 from ai_autopilot.logging_config import get_logger
@@ -343,11 +344,18 @@ class AdoPollerService:
                 return tag
         return None
 
-    async def _apply_outcome(self, item_id: int, outcome: str) -> None:
+    async def _apply_outcome(self, item: WorkItemInfo, outcome: str) -> None:
         """Apply the configured ADO tag + state for a pipeline outcome — clearing any other
         outcome tag first so the board never shows a stale one (see ``apply_outcome``).
-        Applies in every execution mode; blank tag/state or ``dry_run`` → skipped."""
-        await apply_outcome(self._c.ado, self._config, item_id, outcome)
+        Applies in every execution mode; blank tag/state or ``dry_run`` → skipped.
+
+        Takes the ITEM rather than its id so the work-item type is always available to
+        pick the per-type flow. An id-only signature let a call site silently fall back
+        to the flat project-wide state, which is the bug this indirection prevents.
+        """
+        await apply_outcome(
+            self._c.ado, self._config, item.id, outcome, item.work_item_type
+        )
 
     async def _reconcile_reopened(self) -> None:
         """Reopen items a human dragged back to a trigger state: clear their skip
@@ -457,10 +465,19 @@ class AdoPollerService:
         )
 
     async def _reconcile_human_replies(self) -> None:
-        """Pick up ``/ai`` command comments on this machine's items and act on them.
+        """Pick up command comments on this machine's items and act on them.
 
-        Trigger = an explicit ``comment_command`` (e.g. ``/ai fix the null check``), NOT any
-        comment — intentional and light. Scoping is multi-machine safe:
+        Trigger = an explicit ``comment_command`` (e.g. ``/ai fix the null check``) **or an
+        @mention of the bot** — not any comment, so this stays intentional and light.
+
+        The @mention half was missing: the same "@AI Autopilot xem lại chỗ này" that works
+        on a pull request did nothing on a work item, because this path only ever called
+        ``match_command`` (which requires a LEADING /command) and never received the bot
+        identity. Mentions now go through ``resolve_command``, the shared helper whose whole
+        purpose is that the advisory default for a bare mention can't be honoured in one
+        caller and forgotten in another — this was the caller that forgot it.
+
+        Scoping is multi-machine safe:
           • per-machine   — only items this machine's stream OWNS (``_owns_item``);
           • per-commenter — only commands from the user this machine acts for (``_is_my_user``);
           • idempotent    — the watermark is the id of the item's last BOT comment, so once
@@ -478,6 +495,9 @@ class AdoPollerService:
         except Exception as exc:  # noqa: BLE001
             self._log.warning("comment reconcile: fetch failed", error=str(exc))
             return
+        # None when comment_mention_enabled is off — the same switch the PR path uses, so
+        # mentions are enabled or disabled everywhere at once.
+        bot = await c.mention_identity()
         for item in tagged:
             if item.id in self._live or not self._owns_item(item):
                 continue  # not this machine's stream — or a live session steers it directly
@@ -492,19 +512,38 @@ class AdoPollerService:
             # replied after it (durable across restarts). _comment_seen dedups per session.
             bot_ids = [cm["id"] for cm in comments if cm.get("is_bot")]
             baseline = self._comment_seen.get(item.id, max(bot_ids) if bot_ids else 0)
-            # Unhandled /ai commands from THIS machine's user, oldest→newest.
-            cmds = [
-                (cm["id"], instr)
-                for cm in comments
-                if cm["id"] > baseline
-                and not cm.get("is_bot")
-                and self._is_my_user(cm.get("created_by_email"), cm.get("created_by"))
-                and (instr := match_command(cm["text"], cfg.comment_commands)) is not None
-            ]
+            # Unhandled commands from THIS machine's user, oldest→newest. A comment counts
+            # when it names a /command OR @mentions the bot.
+            cmds: list[tuple[int, str, bool]] = []
+            for cm in comments:
+                if (
+                    cm["id"] <= baseline
+                    or cm.get("is_bot")
+                    or not self._is_my_user(cm.get("created_by_email"), cm.get("created_by"))
+                ):
+                    continue
+                instr = match_command(cm["text"], cfg.comment_commands)
+                via_mention = False
+                if instr is None and bot is not None:
+                    instr = find_bot_mention(cm["text"], bot)
+                    via_mention = instr is not None
+                if instr:
+                    cmds.append((cm["id"], instr, via_mention))
             if not cmds:
                 continue
             self._comment_seen[item.id] = cmds[-1][0]
-            instruction = "\n\n".join(instr for _, instr in cmds)
+            # A bare @mention carries no command, but everything downstream is keyed on
+            # one — so infer it and fold it into the text, exactly as the PR path does.
+            parts: list[str] = []
+            for _, instr, via_mention in cmds:
+                if via_mention:
+                    cmd = {"instruction": instr, "via_mention": True}
+                    advisory = await resolve_command(cfg, cmd)
+                    instr = cmd["instruction"]
+                    self._log.info("work-item @mention resolved", id=item.id,
+                                   advisory=advisory, instruction=instr[:120])
+                parts.append(instr)
+            instruction = "\n\n".join(parts)
             rounds = self._comment_rounds.get(item.id, 0) + 1
             if rounds > cfg.max_comment_rounds:
                 # Tell the human ONCE that we've stopped, and how to force a fresh run.
@@ -608,7 +647,7 @@ class AdoPollerService:
             return
 
         await c.state_repo.set(item.id, PipelineState.IN_PROGRESS, title=item.title)
-        await self._apply_outcome(item.id, "in_progress")
+        await self._apply_outcome(item, "in_progress")
         await c.notifier.notify_started(item, "agent")
         record_id = await c.execution_repo.start_execution(
             item, "agent", trigger_tag=self._matched_tag(item)
@@ -644,7 +683,7 @@ class AdoPollerService:
         c = self._c
 
         await c.state_repo.set(item.id, PipelineState.IN_PROGRESS, title=item.title)
-        await self._apply_outcome(item.id, "in_progress")
+        await self._apply_outcome(item, "in_progress")
         await c.notifier.notify_started(item, "sdlc")
         record_id = await c.execution_repo.start_execution(
             item, "sdlc", trigger_tag=self._matched_tag(item)
@@ -706,7 +745,7 @@ class AdoPollerService:
         await c.state_repo.set(
             item.id, PipelineState.IN_PROGRESS, title=item.title, detail=f"live session: {session}"
         )
-        await self._apply_outcome(item.id, "in_progress")
+        await self._apply_outcome(item, "in_progress")
         record_id = await c.execution_repo.start_execution(
             item, f"interactive:{session}", trigger_tag=self._matched_tag(item)
         )
@@ -800,7 +839,7 @@ class AdoPollerService:
             c.retry_policy.record_success(item.id)  # escalated — not a retryable failure
             await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=result.error or "")
             # Hold the item (tag) + set state so the poller skips it until a human steps in.
-            await self._apply_outcome(item.id, "needs_human")
+            await self._apply_outcome(item, "needs_human")
             await c.ado.add_comment(
                 item.id,
                 "<div><b>🙋 ADO Autopilot — Needs human input</b><br/>"
@@ -819,7 +858,7 @@ class AdoPollerService:
                 await c.state_repo.set(
                     item.id, PipelineState.NEEDS_HUMAN, detail=f"run score {score.score}/100"
                 )
-                await self._apply_outcome(item.id, "needs_human")
+                await self._apply_outcome(item, "needs_human")
                 await c.ado.add_comment(
                     item.id,
                     score_badge_html(score)
@@ -831,7 +870,7 @@ class AdoPollerService:
             badge = score_badge_html(score) if score else ""
             if result.pr_url and cfg.pr_is_draft:
                 await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
-                await self._apply_outcome(item.id, "review")
+                await self._apply_outcome(item, "review")
                 await c.ado.add_comment(
                     item.id,
                     badge
@@ -841,14 +880,14 @@ class AdoPollerService:
                 await c.notifier.notify_completed(item, result)
             elif result.pr_url:
                 await c.state_repo.set(item.id, PipelineState.DONE, pr_url=result.pr_url)
-                await self._apply_outcome(item.id, "done")
+                await self._apply_outcome(item, "done")
                 if badge:
                     await c.ado.add_comment(item.id, badge)
                 await c.notifier.notify_completed(item, result)
             else:
                 # report mode: the agent commented a plan, no PR.
                 await c.state_repo.set(item.id, PipelineState.DONE)
-                await self._apply_outcome(item.id, "report")
+                await self._apply_outcome(item, "report")
                 await c.notifier.notify_completed(item, result)
             return
 
@@ -857,7 +896,7 @@ class AdoPollerService:
         exhausted = c.retry_policy.is_exhausted(item.id)
         await c.notifier.notify_completed(item, result)
         if exhausted:
-            await self._apply_outcome(item.id, "failed")
+            await self._apply_outcome(item, "failed")
             state = c.retry_policy.get_state(item.id)
             count = state.retry_count if state else cfg.max_retries
             self._log.error("gave up after retries", id=item.id, count=count)
@@ -900,7 +939,7 @@ class AdoPollerService:
             return
 
         await c.notifier.notify_started(item, skill)
-        await self._apply_outcome(item.id, "in_progress")
+        await self._apply_outcome(item, "in_progress")
         record_id = await c.execution_repo.start_execution(
             item, skill, trigger_tag=self._matched_tag(item)
         )
@@ -942,7 +981,7 @@ class AdoPollerService:
         if result.success:
             c.retry_policy.record_success(item.id)
             if cfg.pr_is_draft and result.pr_url:
-                await self._apply_outcome(item.id, "review")
+                await self._apply_outcome(item, "review")
                 await c.ado.add_comment(
                     item.id,
                     f'<b>🔍 PR created (draft)</b>, awaiting human review.<br/>'
@@ -950,14 +989,14 @@ class AdoPollerService:
                 )
                 await c.notifier.notify_completed(item, result)
             else:
-                await self._apply_outcome(item.id, "done" if result.pr_url else "report")
+                await self._apply_outcome(item, "done" if result.pr_url else "report")
                 await c.notifier.notify_completed(item, result)
         else:
             c.retry_policy.record_failure(item.id, result.error or "Unknown error")
             exhausted = c.retry_policy.is_exhausted(item.id)
             await c.notifier.notify_completed(item, result)
             if exhausted:
-                await self._apply_outcome(item.id, "failed")
+                await self._apply_outcome(item, "failed")
                 state = c.retry_policy.get_state(item.id)
                 count = state.retry_count if state else cfg.max_retries
                 self._log.error("gave up after retries", id=item.id, count=count)

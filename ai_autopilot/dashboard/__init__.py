@@ -6,6 +6,7 @@ import contextlib
 import json
 import secrets
 import time
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
@@ -15,7 +16,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from ai_autopilot import activity, security
+from ai_autopilot import activity, flows as flows_mod, security
 from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
@@ -53,6 +54,10 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                           "không đổi."),
     "imported_full": ("green", "🔓 Đã restore cấu hình đầy đủ (kèm secret). Khởi động lại để "
                                "áp dụng phần lồng nhau (tenants, repos)."),
+    "flow_saved": ("green", "✅ Đã lưu flow theo work item type và áp dụng ngay "
+                            "(không cần khởi động lại)."),
+    "flow_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
+                            "vẫn được giữ."),
     "err_no_file": ("red", "⚠️ Chưa chọn tệp."),
     "err_invalid": ("red", "⚠️ Tệp không hợp lệ hoặc không phải YAML cấu hình."),
     "err_nothing": ("red", "⚠️ Tệp không chứa setting nào áp dụng được."),
@@ -82,6 +87,33 @@ def _flash(url: str, code: str) -> RedirectResponse:
 def _take_flash(request: Request) -> tuple[str, str] | None:
     """``(colour, message)`` for this request's flash, or None. Caller must clear it."""
     return FLASH_MESSAGES.get(request.cookies.get(_FLASH_COOKIE) or "")
+
+
+# A rejected Flow save has to carry two things back to the GET: the reasons (free text,
+# one per problem) and the values the operator typed, so their work isn't thrown away.
+# Neither fits the flash cookie — a cookie is ~4KB and this is unbounded prose — so the
+# payload is held server-side under a random token and only the token travels.
+_FLOW_ERROR_COOKIE = "autopilot_flow_errors"
+_FLOW_REJECTS: OrderedDict[str, dict] = OrderedDict()
+_FLOW_REJECTS_MAX = 32   # bounded: this is a hand-off buffer, not storage
+
+
+def _flow_reject(errors: list[str], flows: list[dict]) -> RedirectResponse:
+    token = secrets.token_urlsafe(12)
+    _FLOW_REJECTS[token] = {"errors": errors, "flows": flows}
+    while len(_FLOW_REJECTS) > _FLOW_REJECTS_MAX:
+        _FLOW_REJECTS.popitem(last=False)
+    response = _flash("/dashboard/flow", "flow_invalid")
+    response.set_cookie(
+        _FLOW_ERROR_COOKIE, token, max_age=120, httponly=True, samesite="lax",
+        path="/dashboard",
+    )
+    return response
+
+
+def _take_flow_reject(request: Request) -> dict:
+    """The pending rejection for this request (``{}`` if none). Consumes it."""
+    return _FLOW_REJECTS.pop(request.cookies.get(_FLOW_ERROR_COOKIE) or "", {})
 
 _CATEGORY_LABELS = {
     "backendtask": ("BE", "cat-be"),
@@ -1027,6 +1059,124 @@ def create_dashboard_router() -> APIRouter:
         )
 
         return _flash("/dashboard/settings", "saved")
+
+    # ── Flow editor: per-work-item-type state transitions ────────────────────
+
+    async def _flow_context(request: Request, flows: list | None = None) -> dict:
+        """Everything flow.html renders, built from the project's REAL types + states.
+
+        ``flows`` overrides what is shown, so a rejected POST re-renders the values the
+        operator just typed instead of throwing their work away.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        try:
+            states_by_type = await c.ado.get_states_by_type()
+        except Exception:  # noqa: BLE001 — the page must render with ADO down
+            states_by_type = {}
+        current = flows if flows is not None else list(cfg.work_item_flows or [])
+        groups = [f for f in current if isinstance(f, dict)]
+        # Which flow (if any) already claims each type, so a chip can say who holds it
+        # rather than letting the operator create the ambiguity validation then rejects.
+        claimed_by: dict[str, str] = {}
+        for group in groups:
+            for type_name in (group.get("types") or []):
+                claimed_by.setdefault(str(type_name).strip().lower(),
+                                      str(group.get("name") or ""))
+
+        # Per rendered slot (existing groups + one blank), computed HERE rather than in the
+        # template: Jinja's `{% set %}` doesn't survive a loop iteration, so intersecting
+        # state lists in the markup silently produced the wrong answer.
+        by_lower = {t.lower(): t for t in states_by_type}
+        choices: list[list[str]] = []
+        child_states: list[list[str]] = []
+        for group in [*groups, {}]:
+            names = [str(t).strip() for t in (group.get("types") or [])]
+            resolved = [by_lower[n.lower()] for n in names if n.lower() in by_lower]
+            common: set[str] | None = None
+            for type_name in resolved:
+                states = set(states_by_type[type_name])
+                common = states if common is None else (common & states)
+            # Board order of the first ticked type, so the dropdown reads like the board.
+            order = states_by_type.get(resolved[0], []) if resolved else []
+            picked = common or set()
+            choices.append([s for s in order if s in picked])
+            # A parent's children are of OTHER types — those are the states a roll-up line
+            # can name on its left-hand side.
+            child_states.append(sorted({
+                s for t, st in states_by_type.items() if t not in resolved for s in st
+            }))
+
+        every_state = {s for st in states_by_type.values() for s in st}
+        return {
+            "types": sorted(states_by_type),
+            "groups": groups,
+            "claimed_by": claimed_by,
+            "choices": choices,
+            "child_states": child_states,
+            "stages": flows_mod.STAGES,
+            "uncovered": flows_mod.uncovered_types(groups, states_by_type),
+            "enabled": cfg.auto_transition_enabled,
+            "assignee": cfg.auto_transition_assignee,
+            "legacy": {
+                stage: getattr(cfg, legacy, "") for stage, _, legacy in flows_mod.STAGES
+            },
+            # Flat states that exist on NO type always fail — the same class of dead
+            # config as the roll-up typo, so it gets called out instead of just listed.
+            "legacy_bad": {
+                stage: bool(states_by_type and getattr(cfg, legacy, "")
+                            and getattr(cfg, legacy) not in every_state)
+                for stage, _, legacy in flows_mod.STAGES
+            },
+            "legacy_rollup": list(cfg.parent_rollup_map or []),
+            "ado_down": not states_by_type,
+        }
+
+    @router.get("/flow", response_class=HTMLResponse)
+    async def flow_page(request: Request):
+        flash = _take_flash(request)
+        rejected = _take_flow_reject(request)
+        response = _TEMPLATES.TemplateResponse(
+            request, "flow.html",
+            _ctx(request, "flow", flash=flash, errors=rejected.get("errors") or [],
+                 **await _flow_context(request, rejected.get("flows"))),
+        )
+        if flash is not None:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        if rejected:
+            response.delete_cookie(_FLOW_ERROR_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/flow")
+    async def save_flow(request: Request):
+        """Save the per-type flows — refusing anything ADO would reject.
+
+        Validation blocks the save rather than warning, because that is exactly how the
+        original bug survived: a state that existed on no work-item type sat in the
+        config for months, failing silently on every item it touched.
+        """
+        c: Container = request.app.state.container
+        form = await request.form()
+        try:
+            states_by_type = await c.ado.get_states_by_type()
+        except Exception:  # noqa: BLE001
+            states_by_type = {}
+        parsed = flows_mod.parse_flow_form(form, sorted(states_by_type))
+        errors = flows_mod.validate_flows(parsed, states_by_type)
+        if errors:
+            _log.info("flow config rejected", count=len(errors))
+            return _flow_reject(errors, parsed)
+
+        updates = {"work_item_flows": parsed}
+        settings_form.save_to_yaml(config_file_path(), updates)
+        settings_form.apply_to_config(c.config, updates)
+        _log.info("work-item flows updated via dashboard",
+                  groups=[f.get("name") for f in parsed])
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.flows_updated",
+            target=", ".join(str(f.get("name")) for f in parsed)[:300],
+        )
+        return _flash("/dashboard/flow", "flow_saved")
 
     @router.post("/settings/reload")
     async def reload_settings(request: Request):

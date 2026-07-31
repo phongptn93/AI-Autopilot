@@ -216,3 +216,80 @@ def test_pr_review_group_off_is_stated_not_warned():
     """Everything off is a legitimate configuration, not a problem to nag about."""
     found = _diagnose(feedback_loop_enabled=False, pr_reviewer_tracking_enabled=False)
     assert "PR review & feedback: off (both services disabled)" in _titles(found, doctor.OK)
+
+
+# ── State flows (auto transitions) ────────────────────────────────────────────
+
+def test_one_state_for_every_type_is_flagged():
+    """The live bug's class: on_merge_state is a single project-wide value, but an ADO
+    state belongs to a TYPE, so it is rejected for every type that lacks it — after which
+    the item is tagged done without having moved."""
+    found = _diagnose(auto_transition_enabled=True, on_merge_state="Ready to Deploy")
+    titles = _titles(found, doctor.WARN)
+    assert "Merge transition applies one state to every work-item type" in titles
+
+
+def test_grouped_flows_replace_that_warning():
+    found = _diagnose(
+        auto_transition_enabled=True, on_merge_state="Ready to Deploy",
+        work_item_flows=[
+            {"name": "Dev", "types": ["Bug", "Task"],
+             "states": {"on_merge": "Ready to Deploy"}},
+        ],
+    )
+    assert "Merge transition applies one state to every work-item type" not in _titles(found)
+    assert any("State flows: 1 group" in t for t in _titles(found, doctor.OK))
+
+
+def test_single_line_rollup_map_is_flagged_as_unable_to_match():
+    """The other half of the roll-up defect: a map needs a line per child state, so a
+    one-line map is held whenever any child is anywhere else — which is nearly always."""
+    found = _diagnose(
+        auto_transition_enabled=True,
+        parent_rollup_map=["Ready for Testing = Implement Done"],
+    )
+    assert "Parent roll-up in parent_rollup_map has a single line" in _titles(found, doctor.WARN)
+
+
+def test_a_complete_rollup_map_is_not_flagged():
+    found = _diagnose(auto_transition_enabled=True, parent_rollup_map=[
+        "Active = Active", "Ready to Review = Active", "Ready to Testing = Implement Done",
+    ])
+    assert not any("single line" in t for t in _titles(found))
+
+
+def test_flows_configured_while_auto_transitions_are_off():
+    found = _diagnose(auto_transition_enabled=False, work_item_flows=[
+        {"name": "Dev", "types": ["Bug"], "states": {"on_merge": "Closed"}},
+    ])
+    assert "1 state flow(s) configured but auto transitions are off" in _titles(found, doctor.WARN)
+
+
+def test_malformed_flow_config_is_an_error_not_a_crash():
+    """A hand-edited config must be reported, not take the process down — which is also
+    why work_item_flows is untyped at the pydantic layer."""
+    found = _diagnose(work_item_flows=["nonsense"])
+    assert "State flow config is malformed" in _titles(found, doctor.ERROR)
+
+
+def test_the_flow_check_stays_offline():
+    """The doctor's contract is no network. Whether a state exists on a type is a
+    question only ADO can answer, so that check belongs to the Flow page — this one must
+    not reach out, even given a state no project could have."""
+    import ai_autopilot.doctor as mod
+
+    calls = []
+    original = mod.flows_mod.validate_flows
+
+    def spy(flows, states_by_type):
+        calls.append(states_by_type)
+        return original(flows, states_by_type)
+
+    mod.flows_mod.validate_flows = spy
+    try:
+        doctor.check_state_flows(Settings(work_item_flows=[
+            {"name": "X", "types": ["Bug"], "states": {"on_merge": "No Such State"}},
+        ]))
+    finally:
+        mod.flows_mod.validate_flows = original
+    assert calls == [{}]      # structure only — no type information was fetched

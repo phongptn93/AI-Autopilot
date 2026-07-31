@@ -20,6 +20,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from ai_autopilot import flows as flows_mod
 from ai_autopilot.config import Settings
 
 ERROR, WARN, OK = "error", "warn", "ok"
@@ -410,10 +411,71 @@ def check_reviewer_reminders(config: Settings) -> list[Finding]:
     return [Finding(OK, f"Reviewer reminders: first at {first}h, then {cadence}")]
 
 
+def check_state_flows(config: Settings) -> list[Finding]:
+    """Auto-transition config that reads as working but can't be.
+
+    Deliberately offline, like every check here — whether a state exists on a given
+    work-item type is a question only Azure DevOps can answer, and /dashboard/flow asks
+    it there. What CAN be settled from the config alone is checked: structure, a type
+    claimed twice, and a roll-up map too short to ever match.
+    """
+    flows = [f for f in (config.work_item_flows or []) if isinstance(f, dict)]
+    out: list[Finding] = []
+
+    structural = flows_mod.validate_flows(config.work_item_flows or [], {})
+    out.extend(
+        Finding(ERROR, "State flow config is malformed", reason,
+                "Fix it at /dashboard/flow, which validates against the project's real "
+                "work-item types.")
+        for reason in structural
+    )
+
+    if flows and not config.auto_transition_enabled:
+        out.append(Finding(
+            WARN, f"{len(flows)} state flow(s) configured but auto transitions are off",
+            "auto_transition_enabled=false, so state_sync never starts.",
+            "Enable auto transitions in Settings, or delete the flows so the intent is clear.",
+        ))
+
+    if config.auto_transition_enabled and not flows and config.on_merge_state:
+        out.append(Finding(
+            WARN, "Merge transition applies one state to every work-item type",
+            f'on_merge_state="{config.on_merge_state}" is used for Bug, Requirement, '
+            "Feature — every type. An ADO state belongs to a type, so this is rejected "
+            "for every type that doesn't define it, and the item is then tagged done "
+            "without having moved.",
+            "Group your types at /dashboard/flow and give each group a state it has.",
+        ))
+
+    # A roll-up holds unless EVERY child state has a line, so a one-line map can only
+    # match if all children are always in that single state. That is how a map with one
+    # wrong entry stayed silently dead: it looked configured.
+    for label, entries in [
+        ("parent_rollup_map", list(config.parent_rollup_map or [])),
+        *[(f'flow "{f.get("name")}"', [str(x) for x in (f.get("rollup") or [])])
+          for f in flows],
+    ]:
+        if len(entries) == 1:
+            child, _ = flows_mod.parse_rollup_entry(entries[0])
+            out.append(Finding(
+                WARN, f"Parent roll-up in {label} has a single line",
+                f'Only "{child}" is mapped, so the roll-up is held whenever any child is '
+                "in any other state — which is nearly always.",
+                "Add a line for every state a child can be in (the Flow page lists them).",
+            ))
+
+    if flows and not out:
+        covered = sorted({str(t) for f in flows for t in (f.get("types") or [])})
+        out.append(Finding(
+            OK, f"State flows: {len(flows)} group(s) covering {', '.join(covered)}"
+        ))
+    return out
+
+
 CHECKS = (
     check_ado, check_trigger, check_workspace, check_concurrency, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_teams_bot,
-    check_command_hints, check_reviewer_reminders, check_pr_review,
+    check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
 )
 
 

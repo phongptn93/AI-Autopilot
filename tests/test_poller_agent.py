@@ -124,12 +124,20 @@ class _FakeSdlcState:
         self.cleared.append(work_item_id)
 
 
-def _poller(autonomy="assisted", exhausted=False) -> tuple[AdoPollerService, SimpleNamespace]:
-    cfg = Settings(workspace_directory=r"C:\ws", autonomy_level=autonomy)
+def _poller(
+    autonomy="assisted", exhausted=False, bot=None, **cfg_over
+) -> tuple[AdoPollerService, SimpleNamespace]:
+    cfg = Settings(workspace_directory=r"C:\ws", autonomy_level=autonomy, **cfg_over)
+
+    async def mention_identity():
+        # The real Container resolves this from ADO; None means "@mentions off", which is
+        # what every test that isn't about mentions wants.
+        return bot
+
     c = SimpleNamespace(
         config=cfg, ado=_FakeAdo(), notifier=_FakeNotifier(),
         retry_policy=_FakeRetry(exhausted), state_repo=_FakeState(),
-        sdlc_state_repo=_FakeSdlcState(),
+        sdlc_state_repo=_FakeSdlcState(), mention_identity=mention_identity,
         executor=_FakeExec(), execution_repo=_FakeExecRepo(), cost_tracker=_FakeCost(),
     )
     return AdoPollerService(c), c
@@ -546,3 +554,123 @@ async def test_ai_command_respects_toggle_off():
     c.ado.comments_by_item = {7: [_cmt(9, "/ai x", is_bot=False)]}
     await p._reconcile_human_replies()
     assert c.ado.removed == []                          # returned early, nothing touched
+
+
+# ── @mention on a WORK ITEM (parity with the PR path) ─────────────────────────
+
+_BOT_GUID = "11111111-2222-3333-4444-555555555555"
+
+
+def _mention_html(text: str, guid: str = _BOT_GUID, label: str = "AI Autopilot") -> str:
+    """A comment as ADO stores it when someone @mentions the bot."""
+    return (
+        f'<div><a href="#" data-vss-mention="version:2.0,{guid}">@{label}</a> {text}</div>'
+    )
+
+
+async def test_at_mention_on_a_work_item_is_handled():
+    """The asymmetry this closes: the same @mention that works on a pull request did
+    nothing on a work item, because this path only matched a LEADING /command."""
+    from ai_autopilot.config import BotIdentity
+
+    p, c = _poller(bot=BotIdentity(identity_id=_BOT_GUID, display_name="AI Autopilot"))
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot", c.config.review_tag])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(5, "bot", is_bot=True),
+        _cmt(6, _mention_html("xem lại chỗ này"), is_bot=False,
+             email="phong.pham@nois.vn"),
+    ]}
+    p._comment_seen[7] = 5
+
+    async def _fake_process(it):
+        pass
+
+    p._process = _fake_process
+    # The mention carries no command, so one is inferred — stub it so the test doesn't
+    # depend on a model call, and assert the inferred command reaches the brief.
+    import ai_autopilot.services.poller as poller_mod
+
+    async def _fake_resolve(cfg, cmd):
+        cmd["instruction"] = f"/review {cmd['instruction']}"
+        return True
+
+    original, poller_mod.resolve_command = poller_mod.resolve_command, _fake_resolve
+    try:
+        await p._reconcile_human_replies()
+    finally:
+        poller_mod.resolve_command = original
+
+    assert item.pending_comment is not None
+    assert "xem lại chỗ này" in item.pending_comment
+    assert item.pending_comment.startswith("/review")   # inferred, advisory by default
+
+
+async def test_a_mention_of_someone_else_is_ignored():
+    """Tagging a colleague on the item must not wake the autopilot."""
+    from ai_autopilot.config import BotIdentity
+
+    p, c = _poller(bot=BotIdentity(identity_id=_BOT_GUID, display_name="AI Autopilot"))
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot"])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(6, _mention_html("giúp mình với", guid="99999999-8888-7777-6666-555555555555",
+                              label="Someone Else"),
+             is_bot=False, email="phong.pham@nois.vn"),
+    ]}
+    await p._reconcile_human_replies()
+    assert item.pending_comment is None
+
+
+async def test_mentions_are_off_when_the_shared_switch_is_off():
+    """comment_mention_enabled gates the PR path and this one together — the container
+    returns no identity, so a mention simply isn't a trigger."""
+    p, c = _poller(bot=None)          # mention_identity() → None
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot"])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(6, _mention_html("xem lại"), is_bot=False, email="phong.pham@nois.vn"),
+    ]}
+    await p._reconcile_human_replies()
+    assert item.pending_comment is None
+
+
+async def test_a_slash_command_still_wins_over_mention_inference():
+    """A named command must be taken literally — no inference, no advisory downgrade."""
+    from ai_autopilot.config import BotIdentity
+
+    p, c = _poller(bot=BotIdentity(identity_id=_BOT_GUID, display_name="AI Autopilot"))
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot"])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(6, "/ai sửa null check", is_bot=False, email="phong.pham@nois.vn"),
+    ]}
+
+    async def _fake_process(it):
+        pass
+
+    p._process = _fake_process
+    import ai_autopilot.services.poller as poller_mod
+
+    called = []
+
+    async def _spy(cfg, cmd):
+        called.append(cmd)
+        return True
+
+    original, poller_mod.resolve_command = poller_mod.resolve_command, _spy
+    try:
+        await p._reconcile_human_replies()
+    finally:
+        poller_mod.resolve_command = original
+
+    assert item.pending_comment == "/ai sửa null check"
+    assert called == []          # inference is only for bare mentions

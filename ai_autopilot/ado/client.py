@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -25,6 +26,10 @@ _API = "api-version=7.1"
 # ADO's cap on the ids= batch GET. Anything past this must be a second request, not
 # dropped: silently returning the first 200 of 300 ids reads as "the other 100 don't exist".
 _MAX_IDS_PER_BATCH = 200
+# The work-item type → state map costs 1 + N requests to build (19 on a stock process
+# template) and only changes when someone edits the process, so a short cache turns
+# every reader of it into a free lookup.
+_TYPE_STATE_TTL_SECONDS = 300.0
 
 
 def _terse(body: str, limit: int = 300) -> str:
@@ -74,10 +79,13 @@ class AdoClient:
         self._config = config
         self._log = get_logger("ado.client")
         self._base = config.ado_organization.rstrip("/")
+        # (fetched_at, {type: [state dicts]}) — see _type_states.
+        self._type_states: tuple[float, dict[str, list[dict]]] | None = None
 
     def refresh(self) -> None:
         """Re-read the organization URL after a live config change."""
         self._base = self._config.ado_organization.rstrip("/")
+        self._type_states = None  # a different org/project has different types
 
     async def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         headers = await self._auth.get_auth_header()
@@ -295,32 +303,11 @@ class AdoClient:
         """State name → ADO state category (``Proposed``/``InProgress``/``Resolved``/
         ``Completed``/``Removed``). Best-effort — ``{}`` on any error."""
         out: dict[str, str] = {}
-        try:
-            resp = await self._http.get(
-                self._url(f"wit/workitemtypes?{_API}"), headers=await self._auth.get_auth_header()
-            )
-            if resp.status_code >= 400:
-                self._log.warning("get_state_categories: list types failed", status=resp.status_code)
-                return {}
-            types = [
-                t["name"]
-                for t in (resp.json().get("value") or [])
-                if t.get("name") and not t.get("isDisabled")
-            ]
-            for type_name in types:
-                sresp = await self._http.get(
-                    self._url(f"wit/workitemtypes/{quote(type_name, safe='')}/states?{_API}"),
-                    headers=await self._auth.get_auth_header(),
-                )
-                if sresp.status_code >= 400:
-                    continue
-                for s in sresp.json().get("value") or []:
-                    name = s.get("name")
-                    if name and name not in out:
-                        out[name] = s.get("stateCategory", "")
-        except httpx.HTTPError as exc:
-            self._log.warning("get_state_categories request error", error=str(exc))
-            return {}
+        for states in (await self._type_state_map()).values():
+            for s in states:
+                name = s.get("name")
+                if name and name not in out:
+                    out[name] = s.get("stateCategory", "")
         return out
 
     async def get_work_items_by_ids(self, ids: list[int]) -> list[WorkItemInfo]:
@@ -422,7 +409,14 @@ class AdoClient:
         patch = [{"op": "replace", "path": "/fields/System.State", "value": new_state}]
         resp = await self._patch(work_item_id, patch)
         if resp.status_code >= 400:
-            self._log.warning("update_state failed", id=work_item_id, status=resp.status_code)
+            # Name the state and quote ADO's reason. Logging only the status made the
+            # commonest cause — a state that does not exist on THIS item's type — look
+            # like a generic API failure, so a transition could fail on every item of a
+            # type for months without anyone being able to tell why from the log.
+            self._log.warning(
+                "update_state failed", id=work_item_id, state=new_state,
+                status=resp.status_code, detail=_terse(resp.text),
+            )
         return resp.status_code < 400
 
     async def _update_tags_atomic(self, work_item_id: int, mutate, *, what: str) -> bool:
@@ -772,28 +766,34 @@ class AdoClient:
             return False
         return True
 
-    # ── Work-item states (for the Settings picker) ──────────────────────────
+    # ── Work-item states (for the Settings picker + the Flow editor) ─────────
 
-    async def get_states(self) -> list[str]:
-        """Distinct work-item states configured in the project, board-ordered.
+    async def _type_state_map(self) -> dict[str, list[dict]]:
+        """``{work-item type: [raw state dicts]}`` for the project, briefly cached.
 
-        Best-effort: returns ``[]`` on any error (offline / bad PAT) so the
-        Settings page can always render with a manual-entry fallback. Fetches the
-        project's work-item types then each type's states, aggregating distinct
-        names ordered by state category (Proposed → InProgress → Resolved →
-        Completed → Removed) then the type-defined order.
+        This is the primitive the three public readers share. It matters that the
+        per-type grouping is preserved here: ADO states belong to a TYPE, and every
+        caller that flattened them lost the only fact that makes a transition valid or
+        invalid (``Ready to Deploy`` exists on Bug and Task but on no other type, so a
+        single project-wide state list cannot tell you whether setting it will 400).
+
+        One walk costs 1 + N requests (19 on a stock process template), which is why
+        the result is cached rather than re-fetched per reader. Best-effort throughout:
+        an error yields ``{}`` (or omits the failing type) so the pages that depend on
+        this still render with a manual-entry fallback.
         """
-        # Lower rank = shown first.
-        cat_rank = {"Proposed": 0, "InProgress": 1, "Resolved": 2, "Completed": 3, "Removed": 4}
-        # name → (category_rank, order) — keep the strongest (lowest) seen.
-        seen: dict[str, tuple[int, int]] = {}
+        cached = self._type_states
+        if cached is not None and time.monotonic() - cached[0] < _TYPE_STATE_TTL_SECONDS:
+            return cached[1]
+        out: dict[str, list[dict]] = {}
         try:
             resp = await self._http.get(
                 self._url(f"wit/workitemtypes?{_API}"), headers=await self._auth.get_auth_header()
             )
             if resp.status_code >= 400:
-                self._log.warning("get_states: list types failed", status=resp.status_code)
-                return []
+                self._log.warning("list work-item types failed", status=resp.status_code,
+                                  detail=_terse(resp.text))
+                return {}
             types = [
                 t["name"]
                 for t in (resp.json().get("value") or [])
@@ -805,17 +805,45 @@ class AdoClient:
                     headers=await self._auth.get_auth_header(),
                 )
                 if sresp.status_code >= 400:
+                    self._log.warning("list states failed for type", type=type_name,
+                                      status=sresp.status_code)
                     continue
-                for s in sresp.json().get("value") or []:
-                    name = s.get("name")
-                    if not name:
-                        continue
-                    key = (cat_rank.get(s.get("stateCategory", ""), 9), int(s.get("order", 0)))
-                    if name not in seen or key < seen[name]:
-                        seen[name] = key
+                out[type_name] = [s for s in (sresp.json().get("value") or []) if s.get("name")]
         except httpx.HTTPError as exc:
-            self._log.warning("get_states request error", error=str(exc))
-            return []
+            self._log.warning("work-item type/state request error", error=str(exc))
+            return {}
+        self._type_states = (time.monotonic(), out)
+        return out
+
+    async def get_states_by_type(self) -> dict[str, list[str]]:
+        """``{work-item type: [state names]}`` in the type's own board order.
+
+        The Flow editor and its validation both need this: a state is only settable on
+        the types that actually define it.
+        """
+        return {
+            type_name: [s["name"] for s in sorted(states, key=lambda s: int(s.get("order", 0)))]
+            for type_name, states in (await self._type_state_map()).items()
+        }
+
+    async def get_states(self) -> list[str]:
+        """Distinct work-item states configured in the project, board-ordered.
+
+        Best-effort: returns ``[]`` on any error (offline / bad PAT) so the
+        Settings page can always render with a manual-entry fallback. Aggregates
+        distinct names across every type, ordered by state category (Proposed →
+        InProgress → Resolved → Completed → Removed) then the type-defined order.
+        """
+        # Lower rank = shown first.
+        cat_rank = {"Proposed": 0, "InProgress": 1, "Resolved": 2, "Completed": 3, "Removed": 4}
+        # name → (category_rank, order) — keep the strongest (lowest) seen.
+        seen: dict[str, tuple[int, int]] = {}
+        for states in (await self._type_state_map()).values():
+            for s in states:
+                name = s["name"]
+                key = (cat_rank.get(s.get("stateCategory", ""), 9), int(s.get("order", 0)))
+                if name not in seen or key < seen[name]:
+                    seen[name] = key
         return [name for name, _ in sorted(seen.items(), key=lambda kv: (kv[1], kv[0]))]
 
     # ── Field mapping ───────────────────────────────────────────────────────

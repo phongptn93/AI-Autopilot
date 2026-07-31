@@ -6,6 +6,7 @@ network except the ADO health check (which fails gracefully → 503).
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -628,3 +629,156 @@ def test_every_flash_redirect_uses_a_code_that_has_wording(tmp_path):
     used = set(re.findall(r'_flash\(\s*"[^"]*"\s*,\s*"([^"]+)"', source))
     assert used, "no _flash() call sites found — did the redirects move?"
     assert used <= set(dashboard.FLASH_MESSAGES), used - set(dashboard.FLASH_MESSAGES)
+
+
+# ── Flow editor: refuses what Azure DevOps would reject ───────────────────────
+
+_FLOW_STATES = {
+    "Bug": ["Proposed", "Active", "Ready to Review", "Ready to Deploy", "Ready to Testing",
+            "Closed"],
+    "Task": ["Proposed", "Active", "Ready to Review", "Ready to Deploy", "Ready to Testing",
+             "Closed"],
+    "Requirement": ["Proposed", "Active", "QC Fails", "Implement Done", "Testing", "Closed"],
+    "Feature": ["Proposed", "Active", "Resolved", "Closed"],
+}
+
+
+@contextlib.contextmanager
+def _flow_client(tmp_path, monkeypatch, **settings_over):
+    """An entered TestClient whose ADO returns ``_FLOW_STATES``.
+
+    A context manager rather than a plain factory: entering the client is what builds the
+    container, so the stub has to be installed inside — returning a pre-entered client and
+    re-entering it in the test rebuilt the container and silently discarded the stub.
+    """
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}", **settings_over
+    )
+    with TestClient(create_app(settings)) as client:
+        async def states_by_type():
+            return _FLOW_STATES
+
+        client.app.state.container.ado.get_states_by_type = states_by_type
+        yield client
+
+
+def test_flow_page_offers_only_states_the_selected_types_have(tmp_path, monkeypatch):
+    """The core guarantee: a Requirement group must not be able to pick 'Ready to Deploy',
+    because ADO rejects it — which is how the live bug shipped."""
+    with _flow_client(tmp_path, monkeypatch, work_item_flows=[
+        {"name": "Dev", "types": ["Bug", "Task"], "states": {"on_merge": "Ready to Deploy"}},
+        {"name": "Req", "types": ["Requirement"], "states": {"on_merge": "Implement Done"}},
+    ]) as client:
+        page = client.get("/dashboard/flow")
+    assert page.status_code == 200
+
+    import re
+    req = re.search(r'name="flow1_state__on_merge".*?</select>', page.text, re.S).group(0)
+    options = re.findall(r'value="([^"]*)"', req)
+    assert "Implement Done" in options
+    assert "Ready to Deploy" not in options       # not a Requirement state
+    dev = re.search(r'name="flow0_state__on_merge".*?</select>', page.text, re.S).group(0)
+    assert "Ready to Deploy" in re.findall(r'value="([^"]*)"', dev)
+
+
+def test_flow_page_names_the_types_no_flow_covers(tmp_path, monkeypatch):
+    """An uncovered type silently keeps the old project-wide behaviour, so the page has to
+    say so rather than imply everything is configured per type."""
+    with _flow_client(tmp_path, monkeypatch, work_item_flows=[
+        {"name": "Dev", "types": ["Bug", "Task"], "states": {}},
+    ]) as client:
+        text = client.get("/dashboard/flow").text
+    assert "Types with no flow" in text
+    assert "Requirement" in text and "Feature" in text
+
+
+def test_flow_page_flags_a_flat_state_that_exists_on_no_type(tmp_path, monkeypatch):
+    with _flow_client(tmp_path, monkeypatch, on_merge_state="Ready for Testing") as client:
+        text = client.get("/dashboard/flow").text
+    assert "exists on no work-item type" in text
+
+
+def test_saving_a_flow_applies_live_and_persists(tmp_path, monkeypatch):
+    with _flow_client(tmp_path, monkeypatch) as client:
+        resp = client.post("/dashboard/flow", data={
+            "flow_count": "2",
+            "flow0_name": "Dev items", "flow0_type__Bug": "on", "flow0_type__Task": "on",
+            "flow0_state__on_merge": "Ready to Deploy",
+            "flow0_state__on_deploy": "Ready to Testing",
+            "flow1_name": "Requirement", "flow1_type__Requirement": "on",
+            "flow1_state__on_merge": "Implement Done",
+            "flow1_rollup": "Ready to Testing = Implement Done",
+        }, follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.cookies["autopilot_flash"] == "flow_saved"
+
+        # Applied to the RUNNING config — state_sync picks it up without a restart.
+        cfg = client.app.state.container.config
+        assert [f["name"] for f in cfg.work_item_flows] == ["Dev items", "Requirement"]
+        from ai_autopilot.flows import resolve_state
+        assert resolve_state(cfg, "on_merge", "Requirement") == "Implement Done"
+        assert resolve_state(cfg, "on_merge", "Task") == "Ready to Deploy"
+
+    import yaml
+    saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    assert len(saved["work_item_flows"]) == 2
+    assert saved["work_item_flows"][1]["rollup"] == ["Ready to Testing = Implement Done"]
+
+
+def test_saving_a_state_the_type_lacks_is_refused_and_keeps_the_input(tmp_path, monkeypatch):
+    """Blocking the save is the whole point: warning would have let the original bug sit
+    in the config exactly as it did."""
+    with _flow_client(tmp_path, monkeypatch) as client:
+        resp = client.post("/dashboard/flow", data={
+            "flow_count": "1", "flow0_name": "Req", "flow0_type__Requirement": "on",
+            "flow0_state__on_merge": "Ready to Deploy",
+        }, follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.cookies["autopilot_flash"] == "flow_invalid"
+        assert client.app.state.container.config.work_item_flows == []   # nothing saved
+
+        page = client.get("/dashboard/flow").text
+        assert "Not saved" in page
+        assert "Ready to Deploy" in page and "Requirement" in page
+        assert 'value="Req"' in page                     # the typed name survived
+        assert "not on these types" in page              # and the rejected value is visible
+
+    assert not (tmp_path / "config.yaml").exists()       # never written
+
+
+def test_saving_a_type_into_two_flows_is_refused(tmp_path, monkeypatch):
+    with _flow_client(tmp_path, monkeypatch) as client:
+        resp = client.post("/dashboard/flow", data={
+            "flow_count": "2",
+            "flow0_name": "A", "flow0_type__Bug": "on",
+            "flow1_name": "B", "flow1_type__Bug": "on",
+        }, follow_redirects=False)
+        assert resp.cookies["autopilot_flash"] == "flow_invalid"
+        assert "in two flows" in client.get("/dashboard/flow").text
+
+
+def test_the_blank_slot_lets_a_group_be_added_without_erroring(tmp_path, monkeypatch):
+    """The page renders one empty group so adding another needs no round trip; submitting
+    it untouched must be a no-op, not a validation failure."""
+    with _flow_client(tmp_path, monkeypatch) as client:
+        page = client.get("/dashboard/flow").text
+        assert 'name="flow_count" value="1"' in page      # 0 groups + 1 blank slot
+        resp = client.post(
+            "/dashboard/flow", data={"flow_count": "1"}, follow_redirects=False
+        )
+        assert resp.cookies["autopilot_flash"] == "flow_saved"
+        assert client.app.state.container.config.work_item_flows == []
+
+
+def test_flow_page_still_renders_when_ado_is_unreachable(tmp_path, monkeypatch):
+    """Configuration pages must not go blank because the network is down."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        async def boom():
+            raise RuntimeError("ADO down")
+        client.app.state.container.ado.get_states_by_type = boom
+        page = client.get("/dashboard/flow")
+    assert page.status_code == 200
+    assert "read the work-item types from Azure DevOps" in page.text

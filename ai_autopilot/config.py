@@ -20,6 +20,7 @@ import re
 import socket
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 from pydantic_settings import (
@@ -422,6 +423,21 @@ class Settings(BaseSettings):
     # work items assigned to this person (name/email substring, case-insensitive).
     # Blank = any assignee.
     auto_transition_assignee: str = ""
+    # Per-work-item-type state flows. ADO states belong to a TYPE ("Ready to Deploy"
+    # exists on Bug/Task but not Requirement), so a single project-wide state for a
+    # lifecycle stage is rejected outright for the types that don't define it — and the
+    # only states safe to share are the ones every type has, which flattens the flow.
+    # A flow names a group of types and the state each stage sets for them; empty list
+    # = every stage falls back to the flat fields below. Edited at /dashboard/flow,
+    # validated against the project's real types. See ai_autopilot/flows.py.
+    #
+    # Deliberately `list[Any]`, not `list[dict]`: a typed list makes pydantic reject a
+    # malformed hand-edit at load, which would stop the autopilot from starting at all
+    # over a config typo. The resolvers skip entries that aren't mappings, and
+    # flows.validate_flows reports them in the editor and in `doctor` — a far better
+    # place to learn about it than a boot loop.
+    work_item_flows: list[Any] = Field(default_factory=list)
+    # Flat fallbacks, used for any type no flow claims.
     on_merge_state: str = ""
     # Parent roll-up: an ordered "child state = parent state" map, e.g.
     # ["Active = Active", "Ready for Testing = Impl Done"]. Child and parent are

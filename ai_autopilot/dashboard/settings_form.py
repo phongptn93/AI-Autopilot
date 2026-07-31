@@ -105,21 +105,26 @@ FIELDS: tuple[Field, ...] = (
           "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready to deploy => @Ready to Deploy'."),
     # ── Auto transitions ──
     Field("auto_transition_enabled", "Enable auto transitions", "bool", "Auto transitions",
-          "Move the work item when its PR is merged, and roll a parent forward when all its "
-          "children are done."),
+          "Move the work item when its PR is merged, mark it deployed when a deploy build "
+          "succeeds, and roll a parent forward as its children progress. Which state each "
+          "step sets is configured PER WORK-ITEM TYPE on the State flow page."),
     Field("auto_transition_assignee", "Only for assignee (auto transitions)", "text", "Auto transitions",
           "Restrict auto transitions to work items assigned to this person (name/email substring). "
           "Blank = any assignee. Does not affect normal task processing."),
-    Field("on_merge_state", "On PR merged → state", "stateone", "Auto transitions",
-          "State to set when a PR the autopilot opened is merged (also marks it done). Blank = "
-          "only tag done, don't change state."),
-    Field("parent_rollup_map", "Parent roll-up (child = parent)", "list", "Auto transitions",
+    Field("on_merge_state", "On PR merged → state (fallback)", "stateone", "Auto transitions",
+          "State to set when a PR the autopilot opened is merged (also marks it done). Used only "
+          "for types NO flow covers — an ADO state belongs to a type, so one value here is "
+          "rejected for every type that lacks it. Configure per type at /dashboard/flow."),
+    Field("parent_rollup_map", "Parent roll-up (child = parent, fallback)", "list",
+          "Auto transitions",
           "One 'Child state = Parent state' per line, in progression order, e.g. "
-          "'Ready for Testing = Impl Done'. The parent follows its least-advanced child; when all "
-          "children reach a child-state, the parent moves to the mapped parent-state."),
-    Field("on_deploy_state", "On deploy success → state", "stateone", "Auto transitions",
-          "When a deploy pipeline build succeeds, move items sitting in 'On PR merged → state' to "
-          "this state. Blank = deploy monitor off."),
+          "'Ready to Testing = Implement Done'. The parent follows its least-advanced child, and "
+          "is HELD unless every child state has a line — so a one-line map never fires. Per-type "
+          "roll-up lives on the parent's flow at /dashboard/flow."),
+    Field("on_deploy_state", "On deploy success → state (fallback)", "stateone",
+          "Auto transitions",
+          "When a deploy pipeline build succeeds, move items sitting in their merge state to "
+          "this state. Blank = deploy monitor off. Per-type values at /dashboard/flow."),
     Field("deploy_pipeline_id", "Deploy pipeline id", "int", "Auto transitions",
           "ADO build definition id of the deploy pipeline. 0 = watch any successful build on the branch."),
     Field("deploy_branch", "Deploy branch", "text", "Auto transitions",

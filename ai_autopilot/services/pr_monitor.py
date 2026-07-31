@@ -244,12 +244,18 @@ class PrMonitorService:
             if k in active_branches or v.locked()
         }
 
-    async def _apply_outcome(self, work_item_id: int, outcome: str) -> None:
+    async def _apply_outcome(self, item: object, outcome: str) -> None:
         """Apply a pipeline outcome's tag + state to the work item (clearing stale outcome
         tags) so the board reflects it's working (``in_progress``) then back in ``review``.
-        Best-effort — never blocks the loop."""
+        Best-effort — never blocks the loop.
+
+        Takes the item, not its id, so the work-item type selects the per-type flow —
+        an ADO state is only settable on the types that define it."""
         with contextlib.suppress(Exception):
-            await apply_outcome(self._c.ado, self._config, work_item_id, outcome)
+            await apply_outcome(
+                self._c.ado, self._config, item.id, outcome,
+                getattr(item, "work_item_type", "") or "",
+            )
 
     async def _related_draft_prs(
         self, work_item_id: int, exclude_pr_id: int
@@ -385,7 +391,7 @@ class PrMonitorService:
             return
         # Live conversation on this PR → fast lane, so the NEXT reply lands in seconds.
         self._mark_hot(repo_id, repo_name, pr)
-        await self._apply_outcome(work_item_id, "in_progress")  # board: working again
+        await self._apply_outcome(item, "in_progress")  # board: working again
         for cmd, revision in to_run:
             self._spawn(
                 self._handle_command(
@@ -523,7 +529,7 @@ class PrMonitorService:
                 # changes code → then move the item to review + assess draft PRs.
                 await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "fixed")
                 if not advisory:
-                    await self._apply_outcome(work_item_id, "review")
+                    await self._apply_outcome(item, "review")
                     await self._adjust_related_drafts(work_item_id, pr_id, cmd["instruction"])
             else:
                 # Back to Active so the PR still flags the thread as needing attention.

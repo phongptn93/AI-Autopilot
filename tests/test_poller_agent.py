@@ -84,6 +84,10 @@ class _FakeCost:
 class _FakeNotifier:
     def __init__(self):
         self.completed: list[bool] = []
+        self.started: list[tuple[int, str, bool]] = []   # (item id, skill, posted a comment)
+
+    async def notify_started(self, item, skill, *, post_comment=True):
+        self.started.append((item.id, skill, post_comment))
 
     async def notify_completed(self, item, result):
         self.completed.append(result.success)
@@ -332,6 +336,26 @@ async def test_dispatch_interactive_tracks_live_session():
     assert (7, c.config.live_tag) in c.ado.tags               # live tag → no re-dispatch on restart
     assert (7, PipelineState.IN_PROGRESS) in c.state_repo.calls
     assert any("Live session started" in t for _, t in c.ado.comments)
+
+
+async def test_an_interactive_dispatch_broadcasts_the_start():
+    """Only this execution mode skipped notify_started, so on an interactive machine Teams
+    got a "completed" card with no "started" card before it."""
+    p, c = _poller()
+    c.executor = _FakeExec(dispatch=(True, "autopilot-7"))
+    await p._dispatch_interactive(_item())
+    assert c.notifier.started == [(7, "interactive:autopilot-7", False)]
+    # post_comment=False: the richer "Live session started" comment is already there, and a
+    # second generic one would be duplicate noise on the work item.
+    assert sum("Đã nhận việc" in t for _, t in c.ado.comments) == 0
+    assert sum("Live session started" in t for _, t in c.ado.comments) == 1
+
+
+async def test_a_failed_launch_does_not_announce_a_start():
+    p, c = _poller()
+    c.executor = _FakeExec(dispatch=(False, None))
+    await p._dispatch_interactive(_item())
+    assert c.notifier.started == []
 
 
 async def test_orphan_interactive_session_finalized_after_restart():

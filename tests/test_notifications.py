@@ -174,3 +174,39 @@ def test_a_channel_with_no_name_still_gets_a_safe_label():
     s = Settings(teams_webhook_url="", teams_webhook_channels=[{"url": _A}])
     label = s.teams_webhook_targets[0].label
     assert label == "a.example" and "sig" not in label
+
+
+# ── What the card actually tells you ──────────────────────────────────────────
+
+def _item(**kw):
+    base = dict(id=42, title="Thing", work_item_type="Task")
+    return WorkItemInfo(**{**base, **kw})
+
+
+def test_the_card_names_who_the_item_is_for():
+    """On a shared channel the card said what was done and to which item, but never for
+    whom — a reader could not tell whose work it was."""
+    msg = NotificationMessage(
+        work_item=_item(assigned_to="Phong Pham (Industrial - Head of P&T)"),
+        type=NotificationType.COMPLETED,
+        result=ExecutionResult.ok(42, "agent", "done"),
+    )
+    facts = TeamsNotifier._payload(msg)["attachments"][0]["content"]["body"][1]["facts"]
+    assert {"title": "Assignee", "value": "Phong Pham (Industrial - Head of P&T)"} in facts
+    assert "For: Phong Pham" in msg.summary          # the other channels too
+
+
+def test_the_assignee_falls_back_to_the_email_then_to_unassigned():
+    assert NotificationMessage(
+        work_item=_item(assigned_to_email="que.phan@nois.vn"),
+        type=NotificationType.STARTED,
+    ).assignee == "que.phan@nois.vn"
+    assert NotificationMessage(work_item=_item(), type=NotificationType.STARTED).assignee \
+        == "unassigned"
+
+
+def test_a_started_card_carries_no_duration():
+    """There is nothing to measure yet, so the fact is absent rather than shown as 0:00."""
+    msg = NotificationMessage(work_item=_item(), type=NotificationType.STARTED, skill="agent")
+    facts = TeamsNotifier._payload(msg)["attachments"][0]["content"]["body"][1]["facts"]
+    assert not any(f["title"] == "Duration" for f in facts)

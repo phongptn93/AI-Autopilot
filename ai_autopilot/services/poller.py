@@ -755,6 +755,11 @@ class AdoPollerService:
             "<div><b>🎮 Live session started</b><br/>Remote Control enabled — open claude.ai "
             f"and attach to session <code>{session}</code> to watch or steer it.</div>",
         )
+        # Broadcast the start to Teams/Zalo/email as every other execution mode does. This
+        # path only ever wrote the ADO comment above, so on an interactive machine a
+        # "completed" card arrived with no "started" card before it. `post_comment=False`
+        # because the comment right above already says it, with the session id.
+        await c.notifier.notify_started(item, f"interactive:{session}", post_comment=False)
         self._log.info("interactive session dispatched", id=item.id, session=session)
 
     async def _finalize_live_sessions(self) -> None:

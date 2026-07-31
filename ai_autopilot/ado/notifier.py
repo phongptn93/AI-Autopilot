@@ -34,7 +34,16 @@ class AdoNotifier:
         self._channels = channels
         self._log = get_logger("ado.notifier")
 
-    async def notify_started(self, item: WorkItemInfo, skill: str) -> None:
+    async def notify_started(
+        self, item: WorkItemInfo, skill: str, *, post_comment: bool = True
+    ) -> None:
+        """Announce that work has begun: an ADO comment plus the notification channels.
+
+        ``post_comment=False`` is for callers that already wrote their own richer comment on
+        the item (the interactive path names the Remote-Control session). They still need the
+        broadcast — that path used to skip this method entirely, so Teams got a "completed"
+        card with no "started" card before it.
+        """
         now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         comment = (
             "<div><b>▶️ Đã nhận việc — bắt đầu xử lý tự động</b><br/><ul>"
@@ -46,7 +55,8 @@ class AdoNotifier:
         if self._config.dry_run:
             self._log.info("[DRY-RUN] would comment: started", id=item.id)
             return
-        await self._ado.add_comment(item.id, comment)
+        if post_comment:
+            await self._ado.add_comment(item.id, comment)
         # NOTE: ADO ``System.State`` transitions are driven by the poller's pipeline
         # stages (see AdoPollerService._apply_ado_state), so they apply uniformly
         # across interactive / assisted / unattended — not just here.

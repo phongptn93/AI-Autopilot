@@ -57,3 +57,32 @@ async def test_stats_and_recent_filter_by_trigger_tag(repo):
 
     # None / "all" → everything, including the untagged legacy row.
     assert len(await repo.get_recent()) == 4
+
+
+async def test_a_wallclock_duration_is_written_back_onto_the_result(repo):
+    """The interactive path never times itself, so ExecutionResult.duration_seconds stays
+    0.0. The DB row was corrected from started_at — but only the row, so History showed a
+    real duration while the Teams card, which reads the result object and is notified after
+    this call, showed 0:00 for every interactive run."""
+    item = WorkItemInfo(id=7, title="t")
+    rid = await repo.start_execution(item, "interactive:autopilot-7")
+    result = ExecutionResult.ok(7, "agent", "done")
+    assert result.duration_seconds == 0.0            # nothing measured it
+
+    await repo.complete_execution(rid, result)
+
+    assert result.duration_seconds > 0.0             # the result now agrees with the row
+    recent = await repo.get_recent(1)
+    assert recent[0].duration_seconds == pytest.approx(result.duration_seconds)
+
+
+async def test_a_measured_duration_is_left_alone(repo):
+    """A path that timed itself must not have its number replaced by wall-clock, which
+    includes queueing and would silently inflate it."""
+    item = WorkItemInfo(id=8, title="t")
+    rid = await repo.start_execution(item, "agent")
+    result = ExecutionResult.ok(8, "agent", "done")
+    result.duration_seconds = 12.5
+    await repo.complete_execution(rid, result)
+    assert result.duration_seconds == 12.5
+    assert (await repo.get_recent(1))[0].duration_seconds == pytest.approx(12.5)

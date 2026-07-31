@@ -97,6 +97,11 @@ class ExecutionRepository:
                 if start.tzinfo is None:
                     start = start.replace(tzinfo=UTC)
                 record.duration_seconds = max(0.0, (now - start).total_seconds())
+                # Write it back onto the result too. Only the DB row was corrected, so
+                # History showed a real duration while the Teams card — which reads the
+                # result object, and is notified after this call — showed 0:00 for every
+                # interactive run. One number, one place it is computed.
+                result.duration_seconds = record.duration_seconds
             if result.cost_tokens:
                 record.cost_tokens = result.cost_tokens
             await session.commit()

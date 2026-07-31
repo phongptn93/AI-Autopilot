@@ -82,11 +82,15 @@ class TeamsNotifier(NotificationChannel):
             color = "good" if message.result and message.result.success else "attention"
         color = color or "default"
 
+        item = message.work_item
         facts: list[dict[str, str]] = [
-            {"title": "Work Item", "value": f"#{message.work_item.id} {message.work_item.title}"},
-            {"title": "Type", "value": message.work_item.work_item_type},
-            {"title": "Category", "value": str(message.work_item.category)},
+            {"title": "Work Item", "value": f"#{item.id} {item.title}"},
+            {"title": "Type", "value": item.work_item_type},
+            {"title": "Category", "value": str(item.category)},
         ]
+        # Who the item belongs to. On a shared channel the card said what was done and to
+        # which item, but never for whom — so nobody reading it could tell whose work it was.
+        facts.append({"title": "Assignee", "value": message.assignee})
         if message.skill:
             facts.append({"title": "Skill", "value": message.skill})
         if message.result is not None:

@@ -45,10 +45,21 @@ class NotificationMessage:
         return f"📋 #{wid}"
 
     @property
+    def assignee(self) -> str:
+        """Who the item belongs to — display name, else email, else "unassigned".
+
+        On a shared channel a notice said what happened and to which item but never for
+        whom, so a reader could not tell whose work it was."""
+        item = self.work_item
+        return (item.assigned_to or "").strip() or (item.assigned_to_email or "").strip() \
+            or "unassigned"
+
+    @property
     def summary(self) -> str:
         item = self.work_item
         if self.type is NotificationType.STARTED:
-            return f"**{item.title}**\nSkill: `{self.skill}` | Category: {item.category}"
+            return (f"**{item.title}**\nSkill: `{self.skill}` | Category: {item.category}"
+                    f" | For: {self.assignee}")
         if self.type is NotificationType.COMPLETED and self.result and self.result.success:
             r = self.result
             duration = _mmss(r.duration_seconds)
@@ -57,7 +68,8 @@ class NotificationMessage:
                 extra += f"\nPR: {r.pr_url}"
             if r.files_changed:
                 extra += f"\nFiles: {len(r.files_changed)} changed"
-            return f"**{item.title}**\nSkill: `{r.skill_used}` | Duration: {duration}{extra}"
+            return (f"**{item.title}**\nSkill: `{r.skill_used}` | Duration: {duration}"
+                    f" | For: {self.assignee}{extra}")
         if self.type is NotificationType.COMPLETED:
             skill = self.result.skill_used if self.result else ""
             error = self.result.error if self.result else ""

@@ -54,7 +54,14 @@ FIELDS: tuple[Field, ...] = (
           "(e.g. 'ai-autopilot' shared across a team). Blank = off."),
     Field("assignee_trigger_user", "↳ handled by (assignee)", "text", "Tags & Trigger",
           "Assignee (name/email) this machine claims for the shared tag above. "
-          "Blank = use the auto-transition assignee."),
+          "Blank = use the auto-transition assignee. This is also the OWNER: the account "
+          "whose /commands and @mentions this machine obeys by default."),
+    Field("command_users", "↳ others allowed to command", "list", "Tags & Trigger",
+          "Extra accounts (email or full name, one per line) that may issue /commands and "
+          "@mentions on a PR — a teammate reviewing your PR can ask for a fix without it "
+          "being refused. Does NOT change whose work items get picked up. Owner blank AND "
+          "this list empty = anyone may command. Use a full email; a lone first name matches "
+          "nobody (see doctor)."),
     Field("trigger_states", "Trigger states", "stateset", "Tags & Trigger",
           "ADO states eligible for processing — tick from your board, or add custom ones below."),
     Field("reprocess_on_reopen", "Reprocess when reopened", "bool", "Tags & Trigger",

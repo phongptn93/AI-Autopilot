@@ -13,7 +13,7 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 
 from ai_autopilot import metrics
-from ai_autopilot.config import find_bot_mention, match_command, matches_user
+from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.data import PipelineState
 from ai_autopilot.execution.feedback_handler import resolve_command
@@ -447,9 +447,9 @@ class AdoPollerService:
             asyncio.create_task(self._process(item))
 
     def _is_my_user(self, email: str | None, name: str | None) -> bool:
-        """True if the identity is the user THIS machine acts for — so on a multi-machine
-        setup each person's own machine handles only their own commands."""
-        return matches_user(email, name, self._config.command_user)
+        """True if the identity may command THIS machine — its owner, or anyone listed in
+        ``command_users``. Blank owner and empty list = anyone."""
+        return matches_any_user(email, name, self._config.effective_command_users)
 
     def _owns_item(self, item: WorkItemInfo) -> bool:
         """True if this machine's stream owns the item — mirrors the main poll's candidate

@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from ai_autopilot.config import Settings, is_ambiguous_user, matches_user
+from ai_autopilot.config import (
+    Settings,
+    describe_users,
+    is_ambiguous_user,
+    matches_any_user,
+    matches_user,
+)
 
 
 def test_effective_trigger_tags_dedupes_and_drops_blanks():
@@ -67,3 +73,65 @@ def test_is_ambiguous_user_flags_only_the_unusable_shape():
     assert is_ambiguous_user("Phong Pham") is False       # two words identify a person
     assert is_ambiguous_user("phong@nois.vn") is False    # an email is unique
     assert is_ambiguous_user("") is False                 # blank = unrestricted, not ambiguous
+
+
+# ── Who may issue commands ────────────────────────────────────────────────────
+
+def test_extra_accounts_may_command_without_changing_who_owns_the_work():
+    """A pull request is shared: a colleague reviewing it must be able to ask for a fix.
+    Scoping commands to one account refused them with "I only take orders from …" — right
+    for deciding whose work ITEMS this machine picks up, wrong for who may ask it something."""
+    cfg = Settings(
+        assignee_trigger_user="phong.pham@nois.vn",
+        command_users=["que.phan@nois.vn", "Nhi Phan"],
+    )
+    allowed = cfg.effective_command_users
+    assert allowed == ["phong.pham@nois.vn", "que.phan@nois.vn", "Nhi Phan"]
+    assert matches_any_user("que.phan@nois.vn", "Que Phan", allowed) is True
+    assert matches_any_user(None, "Nhi Phan (QC)", allowed) is True      # decorated name
+    assert matches_any_user("someone.else@nois.vn", "Someone Else", allowed) is False
+    # Item ownership is a different question and is untouched by the roster.
+    assert cfg.command_user == "phong.pham@nois.vn"
+
+
+def test_the_owner_is_always_allowed_and_never_duplicated():
+    cfg = Settings(
+        assignee_trigger_user="phong.pham@nois.vn",
+        command_users=["phong.pham@nois.vn", "  ", "que.phan@nois.vn"],
+    )
+    assert cfg.effective_command_users == ["phong.pham@nois.vn", "que.phan@nois.vn"]
+
+
+def test_no_owner_and_no_list_means_anyone_may_command():
+    """Single-machine setups leave both blank; that has to keep meaning "everyone", not
+    "nobody" — inverting it would silently stop the bot answering anyone."""
+    cfg = Settings(assignee_trigger_user="", auto_transition_assignee="", command_users=[])
+    assert cfg.effective_command_users == []
+    assert matches_any_user("anyone@x.vn", "Anyone", cfg.effective_command_users) is True
+
+
+def test_extras_alone_are_enough_when_there_is_no_owner():
+    cfg = Settings(
+        assignee_trigger_user="", auto_transition_assignee="",
+        command_users=["que.phan@nois.vn"],
+    )
+    assert cfg.effective_command_users == ["que.phan@nois.vn"]
+    assert matches_any_user("que.phan@nois.vn", "Que", cfg.effective_command_users) is True
+    assert matches_any_user("other@nois.vn", "Other", cfg.effective_command_users) is False
+
+
+def test_an_ambiguous_entry_in_the_roster_still_matches_nobody():
+    """The strict rule for a lone word applies per entry, so one bad entry cannot widen
+    the roster to a colleague who merely shares a first name."""
+    allowed = Settings(command_users=["Phong"]).effective_command_users
+    assert matches_any_user("phong.nguyen@nois.vn", "Phong Nguyen", allowed) is False
+
+
+def test_the_refusal_names_everyone_allowed_and_stays_bounded():
+    """Quoting only the owner read as "ask that person" to a reader who is on the list
+    under a different address."""
+    assert describe_users(["a@x.vn", "b@x.vn"]) == "a@x.vn · b@x.vn"
+    long = [f"u{i}@x.vn" for i in range(7)]
+    shown = describe_users(long)
+    assert shown.startswith("u0@x.vn · u1@x.vn") and "(+3 nữa)" in shown
+    assert describe_users([]) == ""

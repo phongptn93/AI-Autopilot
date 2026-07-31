@@ -674,3 +674,35 @@ async def test_a_slash_command_still_wins_over_mention_inference():
 
     assert item.pending_comment == "/ai sửa null check"
     assert called == []          # inference is only for bare mentions
+
+
+async def test_a_listed_teammate_can_command_this_machine():
+    """The gate that refused a colleague's /ai on a shared PR."""
+    p, c = _poller(command_users=["que.phan@nois.vn"])
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot"])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(6, "/ai sửa null check", is_bot=False, email="que.phan@nois.vn"),
+    ]}
+
+    async def _fake_process(it):
+        pass
+
+    p._process = _fake_process
+    await p._reconcile_human_replies()
+    assert item.pending_comment == "/ai sửa null check"
+
+
+async def test_someone_not_on_the_roster_is_still_ignored():
+    p, c = _poller(command_users=["que.phan@nois.vn"])
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot"])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(6, "/ai đổi hết đi", is_bot=False, email="stranger@elsewhere.vn"),
+    ]}
+    await p._reconcile_human_replies()
+    assert item.pending_comment is None

@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 
 from ai_autopilot import metrics
-from ai_autopilot.config import matches_user
+from ai_autopilot.config import describe_users, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.logging_config import get_logger
@@ -647,7 +647,7 @@ class ReviewerTrackerService:
         )
         if not commands:
             return
-        claimed = cfg.command_user
+        claimed = cfg.effective_command_users
         handled = await cmd_repo.handled_comments(pr_id)
         branch = pr.get("sourceRefName", "").removeprefix("refs/heads/")
         item = await self._pr_work_item(pr)
@@ -660,11 +660,12 @@ class ReviewerTrackerService:
                 self._log.info("[DRY-RUN] would handle PR command", pr=pr_id, cmd=cmd["instruction"][:60])
                 await cmd_repo.mark_handled(pr_id, cid)
                 continue
-            if not matches_user(cmd["author_email"], cmd["author_name"], claimed):
+            if not matches_any_user(cmd["author_email"], cmd["author_name"], claimed):
                 await cmd_repo.mark_handled(pr_id, cid)
                 self._spawn(self._reply(repo_id, pr_id, cmd["thread_id"],
-                    f"<div>🔒 Tôi chỉ nhận lệnh từ <b>{claimed}</b> trên máy này — nhờ đúng "
-                    "người reply để tôi tiếp nhận.</div>"))
+                    f"<div>🔒 Trên máy này tôi chỉ nhận lệnh từ: "
+                    f"<b>{describe_users(claimed)}</b> — nhờ đúng người reply để tôi "
+                    "tiếp nhận.</div>"))
                 continue
             await cmd_repo.mark_handled(pr_id, cid)
             # A bare @mention gets its command inferred here (advisory by default) and

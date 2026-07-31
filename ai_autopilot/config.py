@@ -272,6 +272,35 @@ def is_ambiguous_user(claimed: str) -> bool:
     return bool(c) and "@" not in c and len(c.split()) == 1
 
 
+def describe_users(claimed: list[str] | tuple[str, ...], limit: int = 4) -> str:
+    """The allowed-commander roster for a refusal message, bounded.
+
+    Lives here rather than in one of the two services that print it, so the PR babysitter
+    and the reviewer tracker can't drift into wording the same refusal differently.
+    """
+    shown = list(claimed[:limit])
+    rest = len(claimed) - len(shown)
+    return " · ".join(shown) + (f" (+{rest} nữa)" if rest > 0 else "")
+
+
+def matches_any_user(
+    email: str | None, name: str | None, claimed: list[str] | tuple[str, ...]
+) -> bool:
+    """True if the identity matches ANY of the ``claimed`` accounts.
+
+    An empty list means unrestricted, matching :func:`matches_user` with a blank value — so
+    "nobody configured" keeps meaning "everyone allowed" rather than "nobody allowed".
+
+    This exists because a team shares a pull request: scoping commands to one account meant a
+    colleague's ``/ai`` was refused with "I only take orders from …", which is right for
+    deciding whose WORK ITEMS this machine picks up but wrong for who may ask it a question.
+    """
+    entries = [c for c in (claimed or []) if (c or "").strip()]
+    if not entries:
+        return True
+    return any(matches_user(email, name, c) for c in entries)
+
+
 def matches_user(email: str | None, name: str | None, claimed: str) -> bool:
     """True if the identity (email/display name) matches the ``claimed`` user — used so, on
     a multi-machine setup, each person's own machine handles only their own commands. A
@@ -420,6 +449,14 @@ class Settings(BaseSettings):
     # The assignee (name/email substring) this machine claims for the shared tag.
     # Blank → falls back to ``auto_transition_assignee``.
     assignee_trigger_user: str = ""
+    # Additional accounts allowed to issue /commands and @mentions, beyond the machine's
+    # owner. A pull request is shared, so scoping commands to one person meant a colleague's
+    # "/ai fix this" was refused with "I only take orders from …" — correct for deciding
+    # whose work ITEMS this machine picks up, wrong for who may ask it to do something on a
+    # PR it already owns. Each entry is an email or a full name, matched like the owner
+    # (see matches_user). Read via ``effective_command_users``, never on its own.
+    # Empty owner AND empty list = anyone may command (single-machine default).
+    command_users: list[str] = Field(default_factory=list)
     processed_tag: str = "autopilot-done"
     review_tag: str = "autopilot-review"
     # Applied when the agent escalates (needs_human); these items are held — the
@@ -1072,9 +1109,26 @@ class Settings(BaseSettings):
     @property
     def command_user(self) -> str:
         """The user THIS machine acts for — ``assignee_trigger_user`` falling back to
-        ``auto_transition_assignee``. Scopes /commands and @mentions to one person so, on a
-        multi-machine setup, each person's machine handles only their own."""
+        ``auto_transition_assignee``. This is the machine's OWNER: the identity the bot posts
+        under, and the primary account whose /commands it obeys.
+
+        For "who else may command it", read ``effective_command_users`` — never this alone."""
         return self.assignee_trigger_user or self.auto_transition_assignee
+
+    @property
+    def effective_command_users(self) -> list[str]:
+        """Every account allowed to issue /commands and @mentions — the owner plus
+        ``command_users``. De-duplicated, blanks dropped, order kept.
+
+        Empty (no owner and no extras) = unrestricted, which is what a single-machine setup
+        wants. Mirrors ``effective_trigger_tags``: a primary scalar plus an extras list,
+        read through one property so no gate can consult half of it."""
+        out: list[str] = []
+        for user in [self.command_user, *(self.command_users or [])]:
+            u = (user or "").strip()
+            if u and u not in out:
+                out.append(u)
+        return out
 
     @property
     def command_catalog(self) -> list[tuple[str, bool, str]]:

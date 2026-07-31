@@ -11,7 +11,7 @@ import asyncio
 import contextlib
 import time
 
-from ai_autopilot.config import match_command, matches_user
+from ai_autopilot.config import describe_users, match_command, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.logging_config import get_logger
@@ -348,7 +348,7 @@ class PrMonitorService:
         if not commands:
             return
 
-        claimed = cfg.command_user
+        claimed = cfg.effective_command_users
         handled = await self._get_handled(pr_id)
         branch = source_ref.removeprefix("refs/heads/")
         to_run: list[tuple[dict, int]] = []
@@ -356,7 +356,7 @@ class PrMonitorService:
             cid = cmd["comment_id"]
             if cid in handled:
                 continue
-            if not matches_user(cmd["author_email"], cmd["author_name"], claimed):
+            if not matches_any_user(cmd["author_email"], cmd["author_name"], claimed):
                 # Someone else's command: don't run it, but don't ghost them either —
                 # say who drives this autopilot. The signed reply doubles as the durable
                 # handled mark (command_threads skips bot-answered commands), so one
@@ -430,13 +430,16 @@ class PrMonitorService:
             )
 
     async def _reply_unauthorized(
-        self, repo_id: str, pr_id: int, thread_id: int, claimed: str
+        self, repo_id: str, pr_id: int, thread_id: int, claimed: list[str]
     ) -> None:
+        # Name EVERYONE allowed, not just the owner: with several accounts permitted, a
+        # refusal quoting one of them reads as "ask that person" when the reader may
+        # already be on the list under a different address.
         with contextlib.suppress(Exception):
             await self._c.ado.reply_to_pull_request_thread(
                 repo_id, pr_id, thread_id,
-                f"<div>🔒 Tôi chỉ nhận lệnh từ <b>{claimed}</b> trên máy này — nhờ đúng "
-                "người reply để tôi xử lý.</div>",
+                f"<div>🔒 Trên máy này tôi chỉ nhận lệnh từ: <b>{describe_users(claimed)}</b> — "
+                "nhờ đúng người reply để tôi xử lý.</div>",
             )
 
     async def _reply_capped(self, repo_id: str, pr_id: int, thread_id: int) -> None:

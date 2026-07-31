@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ai_autopilot import flows as flows_mod
-from ai_autopilot.config import Settings, is_ambiguous_user
+from ai_autopilot.config import Settings, describe_users, is_ambiguous_user
 
 ERROR, WARN, OK = "error", "warn", "ok"
 ERROR_ICON, WARN_ICON, OK_ICON = "❌", "⚠️ ", "✅"
@@ -462,14 +462,24 @@ def check_assignee_scoping(config: Settings) -> list[Finding]:
     value, which means it very likely matches NOBODY — visible here rather than as an
     autopilot that mysteriously stopped picking anything up.
     """
-    fields = (
-        ("auto_transition_assignee", "auto transitions"),
-        ("assignee_trigger_user", "the shared assignee trigger tag"),
-        ("command_user", "/commands and @mentions"),
-    )
+    # (label, what it scopes, value) — the value is carried rather than re-derived from the
+    # label, so the list entries don't need their index parsed back out of a string.
+    fields: list[tuple[str, str, str]] = [
+        (key, what, (getattr(config, key, "") or "").strip())
+        for key, what in (
+            ("auto_transition_assignee", "auto transitions"),
+            ("assignee_trigger_user", "the shared assignee trigger tag"),
+            ("command_user", "/commands and @mentions"),
+        )
+    ]
+    # Every extra commander is checked too — an unusable entry there fails the same way,
+    # and is easier to miss because the list is edited less often than the owner.
+    fields += [
+        (f"command_users[{i}]", "/commands and @mentions", (value or "").strip())
+        for i, value in enumerate(config.command_users or [])
+    ]
     out: list[Finding] = []
-    for key, what in fields:
-        value = (getattr(config, key, "") or "").strip()
+    for key, what, value in fields:
         if not is_ambiguous_user(value):
             continue
         out.append(Finding(
@@ -479,6 +489,15 @@ def check_assignee_scoping(config: Settings) -> list[Finding]:
             "strictly — it must equal the display name or the email local part, and will "
             "otherwise match nobody.",
             "Use the full email (e.g. phong.pham@nois.vn), or the full display name.",
+        ))
+    roster = config.effective_command_users
+    if roster:
+        out.append(Finding(
+            OK, f"Commands accepted from: {describe_users(roster, limit=6)}"
+        ))
+    else:
+        out.append(Finding(
+            OK, "Commands accepted from anyone (no owner or command_users configured)"
         ))
     return out
 

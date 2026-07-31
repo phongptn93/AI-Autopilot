@@ -29,16 +29,22 @@
   .chip-red{background:var(--red-bg);color:var(--red);border-color:transparent}
   .chip-empty{background:transparent;color:var(--text-dim);border:1px dashed var(--border);font-style:italic}
 
-  /* Teams channel rows: name · url · active · delete */
+  /* Teams channel rows: name · url · active · delete. Inside the Notifications section, so
+     it inherits the section's padding and the inputs inherit base.html's control styling. */
+  .wh-block{padding:14px 20px 4px;border-bottom:1px solid var(--border-soft)}
+  .wh-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:11px}
+  .wh-title b{font-size:13px;font-weight:650}
   .wh-head,.wh-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(220px,3fr) 62px 58px;
     gap:10px;align-items:center}
   .wh-head{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
     color:var(--text-dim);padding:0 2px 7px}
   .wh-head span:nth-child(3),.wh-head span:nth-child(4){text-align:center}
-  .wh-row{padding:7px 0;border-bottom:1px solid var(--border-soft)}
+  .wh-row{padding:6px 0}
+  .wh-row + .wh-row{border-top:1px solid var(--border-soft)}
   .wh-row input[type=text]{min-width:0;max-width:100%}
-  .wh-row input[name$=_url]{font-family:var(--mono);font-size:11.5px}
+  .wh-row input[name$=_url]{font-family:var(--mono);font-size:12px}
   .wh-tog{display:flex;align-items:center;justify-content:center;gap:5px}
+  .wh-del{font-size:11px;color:var(--text-dim)}
   @media (max-width:720px){
     .wh-head{display:none}
     .wh-row{grid-template-columns:1fr 1fr;gap:7px}
@@ -218,7 +224,6 @@
   <!-- section quick-nav (navigation only; Save lives in the sticky bar below) -->
   <div class="set-nav">
     <a class="set-tab" href="#sec-repos">Repos</a>
-    <a class="set-tab" href="#sec-channels">Teams channels</a>
     {% for section, fields in sections %}<a class="set-tab" href="#sec-{{ loop.index }}">{{ section }}</a>{% endfor %}
   </div>
 
@@ -232,56 +237,10 @@
       <div class="chips">
         {% for r in repos %}{% set on = (not allowed_repos) or (r|lower in allowed_repos) %}
         <label class="chip {{ 'chip-accent' if on else '' }}">
-          <input type="checkbox" name="repo__{{ r }}" {% if on %}checked{% endif %}
-                 style="width:15px;height:15px;accent-color:var(--accent)"> {{ r }}
+          <input type="checkbox" name="repo__{{ r }}" {% if on %}checked{% endif %} class="chk"> {{ r }}
         </label>{% endfor %}
       </div>
       {% else %}<div class="form-help" style="margin:0">No git repos found. Set the Workspace directory first.</div>{% endif %}
-    </div>
-  </div>
-
-  <!-- ── Teams channels: name / URL / active, one row each ── -->
-  <div class="card" id="sec-channels">
-    <div class="card-header"><h3>📣 Teams channels</h3>
-      <span class="form-help" style="margin:0">Every notice posts to all ACTIVE channels.
-        {{ webhook_active_count }} active{% if muted_channels %} ·
-        {{ muted_channels|length }} muted ({{ muted_channels|join(', ') }}){% endif %}.</span></div>
-    <div style="padding:6px 20px 18px">
-      <input type="hidden" name="wh_count" value="{{ webhook_channels|length + 1 }}">
-      <div class="wh-head">
-        <span>Name</span><span>Webhook URL</span><span>Active</span><span></span>
-      </div>
-      {# Existing rows, then ONE blank row — adding a channel needs no round trip, and a
-         blank row is dropped on save rather than reported as an error. #}
-      {% for i in range(webhook_channels|length + 1) %}
-      {% set ch = webhook_channels[i] if i < webhook_channels|length else none %}
-      <div class="wh-row">
-        <input type="text" name="wh{{ i }}_name" value="{{ ch.name if ch else '' }}"
-               placeholder="{{ '#dev' if ch else 'name this channel' }}" autocomplete="off">
-        <input type="text" name="wh{{ i }}_url" value="{{ ch.url if ch else '' }}"
-               placeholder="https://…/workflows/…" autocomplete="off" spellcheck="false">
-        <label class="wh-tog" title="off = keep the URL, stop notifying">
-          <input type="checkbox" name="wh{{ i }}_active"
-                 {% if ch is none or ch.active %}checked{% endif %}
-                 style="width:16px;height:16px;accent-color:var(--green)">
-        </label>
-        {% if ch %}
-        <label class="wh-tog" title="remove this channel — the Workflows URL cannot be recovered">
-          <input type="checkbox" name="wh{{ i }}_delete"
-                 style="width:15px;height:15px;accent-color:var(--red)">
-          <span style="font-size:11px;color:var(--text-dim)">del</span>
-        </label>
-        {% else %}<span></span>{% endif %}
-      </div>
-      {% endfor %}
-      <div class="form-help" style="margin-top:11px">
-        Teams Workflows → <i>"Post to a channel when a webhook request is received"</i>.
-        Unticking <b>Active</b> mutes a channel but keeps its URL — a Workflows URL cannot be
-        recovered once the flow is deleted, so deleting a row is the destructive option.
-        The single <b>MS Teams webhook URL</b> field below still works and is posted to first;
-        a channel listed twice is only notified once.
-        ⚠️ The URL carries a token that authorises posting — treat it like a password.
-      </div>
     </div>
   </div>
 
@@ -298,6 +257,52 @@
         <a href="/dashboard/flow" style="color:var(--accent-hover)">🔀 State flow</a>.</span>
       {% endif %}
     </div>
+
+    {# The Teams channel list renders INSIDE Notifications, above that section's fields.
+       It used to be a card of its own near the top of the page while a single "MS Teams
+       webhook URL" field stayed down here — two controls for one setting, in two places,
+       with nothing to say which applied. #}
+    {% if section == 'Notifications' %}
+    <div class="wh-block">
+      <div class="wh-title">
+        <b>📣 Channels</b>
+        <span class="form-help" style="margin:0">Every notice posts to all ACTIVE channels.
+          {{ webhook_active_count }} active{% if muted_channels %} ·
+          {{ muted_channels|length }} muted ({{ muted_channels|join(', ') }}){% endif %}.</span>
+      </div>
+      <input type="hidden" name="wh_count" value="{{ webhook_channels|length + 1 }}">
+      <div class="wh-head"><span>Name</span><span>Webhook URL</span><span>Active</span><span></span></div>
+      {# Existing rows, then ONE blank row — adding a channel needs no round trip, and a
+         blank row is dropped on save rather than reported as an error. #}
+      {% for i in range(webhook_channels|length + 1) %}
+      {% set ch = webhook_channels[i] if i < webhook_channels|length else none %}
+      <div class="wh-row">
+        <input type="text" name="wh{{ i }}_name" value="{{ ch.name if ch else '' }}"
+               placeholder="{{ '#dev' if ch else 'name this channel' }}" autocomplete="off">
+        <input type="text" name="wh{{ i }}_url" value="{{ ch.url if ch else '' }}"
+               placeholder="https://…/workflows/…" autocomplete="off" spellcheck="false">
+        <label class="wh-tog" title="off = keep the URL, stop notifying">
+          <input type="checkbox" name="wh{{ i }}_active" class="chk"
+                 {% if ch is none or ch.active %}checked{% endif %}>
+        </label>
+        {% if ch %}
+        <label class="wh-tog" title="remove this channel — the Workflows URL cannot be recovered">
+          <input type="checkbox" name="wh{{ i }}_delete" class="chk chk-red">
+          <span class="wh-del">del</span>
+        </label>
+        {% else %}<span></span>{% endif %}
+      </div>
+      {% endfor %}
+      <div class="form-help" style="margin-top:10px">
+        Teams Workflows → <i>"Post to a channel when a webhook request is received"</i>.
+        Unticking <b>Active</b> mutes a channel but keeps its URL — a Workflows URL cannot be
+        recovered once the flow is deleted, so deleting a row is the destructive option.
+        A channel listed twice is only notified once.
+        ⚠️ The URL carries a token that authorises posting — treat it like a password.
+      </div>
+    </div>
+    {% endif %}
+
     <div class="field-grid">
       {% for f in fields %}
       {% set wide = f.kind in ('list','map','stateset') %}
@@ -329,8 +334,7 @@
             <div class="chips">
               {% for s in candidates %}{% if s not in seen %}{% set _ = seen.append(s) %}
               <label class="chip {{ 'chip-accent' if s in selected else '' }}">
-                <input type="checkbox" name="{{ f.key }}__{{ s }}" {% if s in selected %}checked{% endif %}
-                       style="width:15px;height:15px;accent-color:var(--accent)"> {{ s }}
+                <input type="checkbox" name="{{ f.key }}__{{ s }}" {% if s in selected %}checked{% endif %} class="chk"> {{ s }}
               </label>{% endif %}{% endfor %}
             </div>{% endif %}
             <textarea name="{{ f.key }}__manual" rows="1" placeholder="Add custom states (comma or newline)" style="margin-top:8px"></textarea>

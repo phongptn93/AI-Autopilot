@@ -324,15 +324,15 @@ FIELDS: tuple[Field, ...] = (
           "State the Start action moves an item to (so the poller picks it up) if it isn't "
           "already in a trigger state. Blank = the first trigger state."),
     # ── Notifications ──
-    Field("teams_webhook_url", "MS Teams webhook URL", "password", "Notifications",
-          "One-way channel: Teams Workflows \"Post to a channel when a webhook request is "
-          "received\" URL. Started/completed/error notices and reviewer reminders post here. "
-          "Blank = Teams notifications off."),
-    # `teams_webhook_urls` (the old bare-URL textarea) is deliberately NOT a Field any more:
-    # the "📣 Teams channels" card above edits `teams_webhook_channels` instead, with a name
-    # and an active switch per channel. Leaving it out of FIELDS means parse_form never emits
-    # the key, so an existing value is preserved rather than wiped — it is still honoured by
-    # `teams_webhook_targets`, and the card is seeded from it so nothing is stranded.
+    # Neither `teams_webhook_url` nor `teams_webhook_urls` is a Field. Both are edited as
+    # rows of the "📣 Teams channels" card, which renders INSIDE this section — one list, in
+    # one place. Having a single-URL field here as well as the card meant two controls for
+    # the same setting, in two parts of the page, with no way to tell which one applied.
+    #
+    # Keeping them out of FIELDS is also what protects them: parse_form emits a key for every
+    # Field, so a `list` field would have parsed an untouched empty textarea as [] and wiped
+    # an existing multi-channel setup on the first save of any unrelated setting. They stay
+    # honoured by `teams_webhook_targets`, seed the card, and are absorbed into it on save.
     Field("smtp_host", "SMTP host", "text", "Notifications", "Blank = email off."),
     Field("smtp_port", "SMTP port", "int", "Notifications", "Default 587 (STARTTLS)."),
     Field("smtp_user", "SMTP user", "text", "Notifications"),

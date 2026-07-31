@@ -3,9 +3,9 @@
 <style>
   .main { max-width: none; }
   .hist-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0; }
-  .hf-input { background:var(--bg-input,#0c0d12); color:var(--text); border:1px solid var(--border,#23232b);
-    border-radius:8px; padding:6px 10px; font-size:13px; font-family:inherit; }
-  .hf-input:focus { outline:none; border-color:var(--accent,#6366f1); }
+  /* Looks come from base.html — this page had its own copy with a hardcoded radius and
+     no focus ring. Only the denser padding for a compact filter row is kept. */
+  .hf-input { padding:6px 10px; font-size:13px; }
   .hist-pager { display:flex; align-items:center; justify-content:space-between; gap:14px;
     padding:14px 22px; border-top:1px solid var(--border-soft); flex-wrap:wrap; }
   .hist-pager .pginfo { color:var(--text-muted); font-size:13px; }

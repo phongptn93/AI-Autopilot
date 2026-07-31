@@ -1027,9 +1027,7 @@ def create_dashboard_router() -> APIRouter:
             ado_states = await c.ado.get_states()
         except Exception:  # noqa: BLE001 — Settings must render even if ADO is down
             ado_states = []
-        # Rows for the Teams channel card. Seeded from the legacy bare-URL list when the
-        # named list is still empty, so an existing multi-channel setup appears in the new
-        # editor instead of being invisible in it.
+        # Rows for the Teams channel card — the ONE editor for Teams notifications.
         channels = [
             {"name": str(e.get("name") or ""), "url": str(e.get("url") or ""),
              "active": bool(e.get("active", True))}
@@ -1039,9 +1037,18 @@ def create_dashboard_router() -> APIRouter:
             for e in (cfg.teams_webhook_channels or []) if isinstance(e, str) and e.strip()
         ]
         if not channels:
+            # Seed from the two legacy settings so an existing setup appears in the editor
+            # rather than being invisible in it. `teams_webhook_url` becomes an ordinary row
+            # named "primary": a row that behaved differently from its neighbours would be
+            # the same inconsistency this card was meant to remove.
+            legacy_urls = [
+                (name, url) for name, url in
+                [("primary", cfg.teams_webhook_url), *(("", u) for u in cfg.teams_webhook_urls)]
+                if (url or "").strip()
+            ]
             channels = [
-                {"name": "", "url": url, "active": True}
-                for url in (cfg.teams_webhook_urls or []) if url.strip()
+                {"name": name, "url": url.strip(), "active": True}
+                for name, url in legacy_urls
             ]
 
         flash = _take_flash(request)
@@ -1082,12 +1089,15 @@ def create_dashboard_router() -> APIRouter:
         updates = settings_form.parse_form(form)
         updates["allowed_repos"] = settings_form.parse_repos(form)
         updates["teams_webhook_channels"] = settings_form.parse_webhook_channels(form)
-        # The card is seeded from the legacy bare-URL list, so once it has been saved that
-        # list has been absorbed — clearing it stops the same channel being represented in
-        # two places (harmless for delivery, since targets dedup by URL, but confusing to
-        # edit: removing a row would not remove the channel).
-        if updates["teams_webhook_channels"] and c.config.teams_webhook_urls:
-            updates["teams_webhook_urls"] = []
+        # The card is seeded from both legacy settings, so once it has been saved they have
+        # been absorbed — clearing them stops the same channel existing in two places.
+        # Delivery would be unaffected either way (targets dedup by URL), but editing would
+        # not: removing a row would not remove the channel.
+        if updates["teams_webhook_channels"]:
+            if c.config.teams_webhook_urls:
+                updates["teams_webhook_urls"] = []
+            if c.config.teams_webhook_url:
+                updates["teams_webhook_url"] = ""
 
         # The dashboard password is entered raw but stored ONLY as a PBKDF2 hash.
         # Pop the raw value so it never reaches config.yaml or the live config.

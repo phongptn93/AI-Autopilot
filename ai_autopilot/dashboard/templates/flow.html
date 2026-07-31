@@ -151,8 +151,7 @@
       <span class="grow"></span>
       {% if not new %}
       <label class="fl-del" title="delete this group">
-        <input type="checkbox" name="flow{{ i }}_delete"
-               style="width:14px;height:14px;accent-color:var(--red)"> delete
+        <input type="checkbox" name="flow{{ i }}_delete" class="chk-sm chk-red"> delete
       </label>
       {% endif %}
     </div>
@@ -185,8 +184,7 @@
            groups would need two saves. Ticking it in both is caught on save. #}
         <label class="chip {{ 'chip-accent' if mine else '' }} {{ 'dim' if taken else '' }}"
                {% if taken %}title="currently in the &quot;{{ owner }}&quot; group — untick it there in the same save"{% endif %}>
-          <input type="checkbox" name="flow{{ i }}_type__{{ t }}" {% if mine %}checked{% endif %}
-                 style="width:14px;height:14px;accent-color:var(--accent)">{{ t }}{% if taken %}<span class="owner">in {{ owner }}</span>{% endif %}
+          <input type="checkbox" name="flow{{ i }}_type__{{ t }}" {% if mine %}checked{% endif %} class="chk-sm">{{ t }}{% if taken %}<span class="owner">in {{ owner }}</span>{% endif %}
         </label>{% endfor %}
       </div>
       {% else %}
@@ -239,8 +237,7 @@
                    value="{{ (g.tags or {}).get(key, '') }}" placeholder="use the global tag">
             <label class="fl-del" style="justify-content:flex-end" title="post a comment on the work item">
               <input type="checkbox" name="flow{{ i }}_comment__{{ key }}"
-                     {% if (g.comment or {}).get(key, True) %}checked{% endif %}
-                     style="width:14px;height:14px;accent-color:var(--accent)"> note
+                     {% if (g.comment or {}).get(key, True) %}checked{% endif %} class="chk-sm"> note
             </label>
           </div>
           {% endfor %}

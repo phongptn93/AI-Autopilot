@@ -128,14 +128,35 @@
             padding: 15px 0; border-bottom: 1px solid var(--border-soft); }
         .form-row:last-child { border-bottom: none; }
         .form-row label { color: var(--text); font-size: 13px; font-weight: 600; padding-top: 8px; }
-        .form-input input[type=text], .form-input input[type=password], .form-input input[type=number],
-        .form-input select, .form-input textarea { width: 100%; max-width: 480px; background: var(--bg-input);
-            color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm);
-            padding: 9px 12px; font-size: 13.5px; font-family: inherit; transition: border-color .12s, box-shadow .12s; }
-        .form-input textarea { min-height: 64px; resize: vertical; line-height: 1.5; }
-        .form-input input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); margin-top: 8px; }
-        .form-input input:focus, .form-input select:focus, .form-input textarea:focus { outline: none;
+        /* ── Form controls: ONE definition, at element level ──
+           These rules used to live only under `.form-input`, so every page that laid out its
+           own inputs got browser defaults — a white box with a native border on a dark
+           dashboard. Each page then re-declared the look under its own class (.pf-input,
+           .hf-input), which is how four different paddings, two radii and a missing focus
+           ring ended up shipping. Styling the elements themselves means a new input is
+           correct by default and there is one place to change it. `.form-input` below keeps
+           only what is about LAYOUT, not looks. */
+        input[type=text], input[type=password], input[type=number], input[type=date],
+        input[type=search], input[type=email], select, textarea {
+            background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); padding: 9px 12px; font-size: 13.5px;
+            font-family: inherit; transition: border-color .12s, box-shadow .12s; }
+        textarea { min-height: 64px; resize: vertical; line-height: 1.5; }
+        input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+        input:focus, select:focus, textarea:focus { outline: none;
             border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+        input::placeholder, textarea::placeholder { color: var(--text-dim); }
+        input:disabled, select:disabled, textarea:disabled { opacity: .55; cursor: not-allowed; }
+        /* A compact checkbox for chips and dense rows — a class, so the size isn't repeated
+           as an inline style at every call site. */
+        .chk { width: 15px; height: 15px; }
+        .chk-sm { width: 14px; height: 14px; }
+        .chk-red { accent-color: var(--red); }
+
+        .form-input input[type=text], .form-input input[type=password],
+        .form-input input[type=number], .form-input select, .form-input textarea {
+            width: 100%; max-width: 480px; }
+        .form-input input[type=checkbox] { width: 18px; height: 18px; margin-top: 8px; }
         .form-help { color: var(--text-dim); font-size: 12px; margin-top: 6px; line-height: 1.5; }
         .restart-badge { display: inline-block; background: var(--amber-bg); color: var(--amber);
             font-size: 10px; padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: middle; font-weight: 700; }

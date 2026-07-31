@@ -991,3 +991,69 @@ def test_overview_says_so_when_the_pr_scan_failed(tmp_path, monkeypatch):
         client.app.state.container.ado.get_repositories = _FakeAdoPRs(boom=True).get_repositories
         text = client.get("/dashboard").text
     assert "couldn&#39;t reach Azure DevOps" in text or "couldn't reach Azure DevOps" in text
+
+
+def test_teams_is_configured_in_exactly_one_place(tmp_path, monkeypatch):
+    """There were two controls for one setting: a "MS Teams webhook URL" field in the
+    Notifications grid AND a channels card elsewhere on the page, with nothing to say which
+    applied. The card is now the only editor, and it renders inside Notifications."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        teams_webhook_url=_WH_A,
+    )
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings").text
+
+    # No standalone field for either legacy setting…
+    assert 'name="teams_webhook_url"' not in page
+    assert 'name="teams_webhook_urls"' not in page
+    assert "teams_webhook_url" not in {f.key for f in settings_form.FIELDS}
+    # …and the single URL appears as an ordinary row of the card, seeded and named.
+    assert 'name="wh0_url"' in page and _WH_A in page
+    assert 'value="primary"' in page
+    # The card sits inside the Notifications section, not in a card of its own elsewhere.
+    notif = page.index("Notifications")
+    assert notif < page.index('name="wh_count"') < page.index('name="smtp_host"')
+
+
+def test_saving_absorbs_the_single_url_into_the_list(tmp_path, monkeypatch):
+    """Once the card owns the value, the scalar is cleared — otherwise deleting the row
+    would not stop the notification, because the scalar would still supply it."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        teams_webhook_url=_WH_A,
+    )
+    with TestClient(create_app(settings)) as client:
+        client.post("/dashboard/settings", data={
+            "wh_count": "1", "wh0_name": "primary", "wh0_url": _WH_A, "wh0_active": "on",
+        }, follow_redirects=False)
+        cfg = client.app.state.container.config
+        assert cfg.teams_webhook_url == ""                     # absorbed
+        assert [c["name"] for c in cfg.teams_webhook_channels] == ["primary"]
+        assert cfg.teams_webhooks == [_WH_A]                   # delivery unchanged
+
+        # And now deleting the row really does stop notifying.
+        client.post("/dashboard/settings", data={
+            "wh_count": "1", "wh0_name": "primary", "wh0_url": _WH_A,
+            "wh0_active": "on", "wh0_delete": "on",
+        }, follow_redirects=False)
+        cfg = client.app.state.container.config
+        assert cfg.teams_webhook_channels == [] and cfg.teams_webhooks == []
+
+
+def test_every_form_control_gets_the_dashboard_styling(tmp_path, monkeypatch):
+    """The inputs I added first were outside `.form-input`, the only place the styling was
+    scoped, so they rendered as native white boxes on a dark page. The rules are now at
+    element level in base.html — assert they are there rather than per-page copies."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings").text
+    # Element-level selector, not `.form-input input[...]`.
+    assert "input[type=text], input[type=password]" in page
+    assert "input:focus, select:focus, textarea:focus" in page
+    # The compact-checkbox utility replaced the repeated inline sizing.
+    assert 'class="chk"' in page
+    assert 'style="width:15px;height:15px' not in page

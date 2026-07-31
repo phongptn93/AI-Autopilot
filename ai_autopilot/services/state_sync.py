@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 
+from ai_autopilot.config import matches_user
 from ai_autopilot.container import Container
 from ai_autopilot.flows import (
     resolve_rollup,
@@ -245,13 +246,16 @@ class StateSyncService:
         return any(t.lower() in item_tags for t in self._config.effective_trigger_tags)
 
     def _assignee_ok(self, item: WorkItemInfo) -> bool:
-        """The auto-transition assignee gate: item must be assigned to the
-        configured person — matched against the display name OR the email/uniqueName
-        (substring, case-insensitive). Blank config → any assignee."""
-        who = (self._config.auto_transition_assignee or "").strip().lower()
-        if not who:
-            return True
-        return who in (item.assigned_to or "").lower() or who in (item.assigned_to_email or "").lower()
+        """The auto-transition assignee gate: the item must be assigned to the configured
+        person. Blank config → any assignee.
+
+        Delegates to ``matches_user`` instead of doing its own substring test — this was a
+        second copy of the same rule, so the "a lone first name claims a colleague's items"
+        problem had to be fixed in two places or not at all.
+        """
+        return matches_user(
+            item.assigned_to_email, item.assigned_to, self._config.auto_transition_assignee
+        )
 
     async def _handle_merged_pr(self, pr: dict) -> None:
         c, cfg = self._c, self._config

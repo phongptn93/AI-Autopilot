@@ -234,13 +234,39 @@ def _render_command_hint(action: list[str], advise: list[str], *, html_out: bool
     return f"<sub>{body}</sub>" if html_out else body
 
 
+def is_ambiguous_user(claimed: str) -> bool:
+    """True when ``claimed`` is a single bare word — a value that cannot identify a person.
+
+    "Phong" appears in *Phong Pham* and in *Phong Nguyen*, so as a substring it claims both
+    people's work. An email, or a name with more than one word, does not have that problem.
+    """
+    c = (claimed or "").strip()
+    return bool(c) and "@" not in c and len(c.split()) == 1
+
+
 def matches_user(email: str | None, name: str | None, claimed: str) -> bool:
     """True if the identity (email/display name) matches the ``claimed`` user — used so, on
     a multi-machine setup, each person's own machine handles only their own commands. A
-    blank ``claimed`` (single machine / unrestricted) matches everyone. Case-insensitive
-    substring so an email or a name fragment both work."""
+    blank ``claimed`` (single machine / unrestricted) matches everyone.
+
+    An email or a multi-word name matches as a case-insensitive SUBSTRING, which is what
+    makes real ADO identities work: configuring ``Phong Pham`` has to match the display
+    name ADO actually returns, *"Phong Pham (Industrial - Head of P&T)"*.
+
+    A single bare word is different. Substring-matching ``Phong`` also matched *Phong
+    Nguyen*, so this machine would pick up a colleague's work items and run an agent on
+    them. There is no string rule that can tell those two people apart, so a lone word must
+    IDENTIFY the person rather than appear inside them: it has to equal the display name or
+    the email's local part. Erring toward matching nobody is the safe direction — the
+    autopilot idles instead of acting on someone else's item, and ``doctor`` says why.
+    """
     c = (claimed or "").strip().lower()
-    return not c or c in f"{email or ''} {name or ''}".lower()
+    if not c:
+        return True
+    if not is_ambiguous_user(c):
+        return c in f"{email or ''} {name or ''}".lower()
+    local = (email or "").split("@")[0].strip().lower()
+    return c == local or c == (name or "").strip().lower()
 
 
 class RepoConfig(BaseModel):

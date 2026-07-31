@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ai_autopilot import flows as flows_mod
-from ai_autopilot.config import Settings
+from ai_autopilot.config import Settings, is_ambiguous_user
 
 ERROR, WARN, OK = "error", "warn", "ok"
 ERROR_ICON, WARN_ICON, OK_ICON = "❌", "⚠️ ", "✅"
@@ -411,6 +411,35 @@ def check_reviewer_reminders(config: Settings) -> list[Finding]:
     return [Finding(OK, f"Reviewer reminders: first at {first}h, then {cadence}")]
 
 
+def check_assignee_scoping(config: Settings) -> list[Finding]:
+    """Assignee values that cannot identify one person.
+
+    These fields decide whose work items THIS machine acts on. A lone first name matched by
+    substring claimed every colleague who shares it; matching is now strict for such a
+    value, which means it very likely matches NOBODY — visible here rather than as an
+    autopilot that mysteriously stopped picking anything up.
+    """
+    fields = (
+        ("auto_transition_assignee", "auto transitions"),
+        ("assignee_trigger_user", "the shared assignee trigger tag"),
+        ("command_user", "/commands and @mentions"),
+    )
+    out: list[Finding] = []
+    for key, what in fields:
+        value = (getattr(config, key, "") or "").strip()
+        if not is_ambiguous_user(value):
+            continue
+        out.append(Finding(
+            WARN, f'{key}="{value}" cannot identify one person',
+            f"It scopes {what}. A single bare word appears in every colleague who shares "
+            f'it ("Phong" is in both "Phong Pham" and "Phong Nguyen"), so it is matched '
+            "strictly — it must equal the display name or the email local part, and will "
+            "otherwise match nobody.",
+            "Use the full email (e.g. phong.pham@nois.vn), or the full display name.",
+        ))
+    return out
+
+
 def check_state_flows(config: Settings) -> list[Finding]:
     """Auto-transition config that reads as working but can't be.
 
@@ -476,6 +505,7 @@ CHECKS = (
     check_ado, check_trigger, check_workspace, check_concurrency, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
+    check_assignee_scoping,
 )
 
 

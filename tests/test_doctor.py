@@ -293,3 +293,28 @@ def test_the_flow_check_stays_offline():
     finally:
         mod.flows_mod.validate_flows = original
     assert calls == [{}]      # structure only — no type information was fetched
+
+
+def test_a_lone_first_name_in_an_assignee_field_is_flagged():
+    """It now matches strictly, so it very likely matches nobody — which shows up as an
+    autopilot that mysteriously stopped picking work up. Say it here instead."""
+    found = _diagnose(auto_transition_assignee="Phong")
+    titles = _titles(found, doctor.WARN)
+    assert 'auto_transition_assignee="Phong" cannot identify one person' in titles
+    detail = next(f for f in found if f.title in titles and "Phong" in f.title)
+    assert "phong.pham@nois.vn" in detail.fix or "full email" in detail.fix
+
+
+def test_every_assignee_field_is_checked_not_just_one():
+    found = _diagnose(
+        auto_transition_assignee="Phong", assignee_trigger_user="Nhi", command_user="Que",
+    )
+    flagged = [t for t in _titles(found, doctor.WARN) if "cannot identify one person" in t]
+    assert len(flagged) == 3
+
+
+def test_a_full_email_or_name_is_not_flagged():
+    found = _diagnose(
+        auto_transition_assignee="phong.pham@nois.vn", command_user="Phong Pham",
+    )
+    assert not any("cannot identify one person" in t for t in _titles(found))

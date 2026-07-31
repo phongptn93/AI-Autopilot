@@ -143,6 +143,11 @@ class AdoClient:
                 or ""
             ).strip().replace("'", "''")
             if user:
+                # Note the two CONTAINS mean different things here. On System.Tags, ADO
+                # matches a WHOLE tag (verified: 'phong-autop' matches nothing while
+                # 'phong-autopilot' matches). On System.AssignedTo it is a real substring,
+                # so this clause can over-fetch — `matches_user` is the authoritative gate
+                # and rejects the extras, which is the safe order (over-fetch, then narrow).
                 parts.append(
                     f"([System.Tags] CONTAINS '{atag}' "
                     f"AND [System.AssignedTo] CONTAINS '{user}')"

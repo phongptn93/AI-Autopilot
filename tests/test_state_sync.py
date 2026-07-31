@@ -98,16 +98,33 @@ async def test_merge_detects_bugfix_branch():
 
 
 async def test_merge_respects_assignee_filter():
-    svc, c = _svc_shared(on_merge_state="Ready for Review", auto_transition_assignee="Phong")
+    # A FULL name, not the bare "Phong" this once used: a lone first name is ambiguous
+    # (it is inside "Phong Pham" and "Phong Nguyen" alike) and is now matched strictly.
+    # The filter itself is what's under test, so it gets a value that can identify someone.
+    svc, c = _svc_shared(
+        on_merge_state="Ready for Review", auto_transition_assignee="Phong Pham"
+    )
     c.ado.completed = [{"pullRequestId": 5, "sourceRefName": "refs/heads/feature/be/42-thing"}]
     # assigned to someone else → skipped
     c.ado.items[42] = _wi(42, state="Active", tags=["autopilot"], assigned_to="Someone Else")
     await svc._scan()
     assert c.ado.states == []
-    # assigned to Phong → transitioned (substring match)
-    c.ado.items[42] = _wi(42, state="Active", tags=["autopilot"], assigned_to="Phong Pham")
+    # the real ADO display name carries a title, so this still matches as a substring
+    c.ado.items[42] = _wi(42, state="Active", tags=["autopilot"],
+                          assigned_to="Phong Pham (Industrial - Head of P&T)")
     await svc._scan()
     assert (42, "Ready for Review") in c.ado.states
+
+
+async def test_merge_does_not_transition_a_colleague_who_shares_a_first_name():
+    """The defect, at the transition boundary: auto_transition_assignee="Phong" used to
+    match "Phong Nguyen" too, so this machine moved a colleague's work item."""
+    svc, c = _svc_shared(on_merge_state="Ready for Review", auto_transition_assignee="Phong")
+    c.ado.completed = [{"pullRequestId": 5, "sourceRefName": "refs/heads/feature/be/42-thing"}]
+    c.ado.items[42] = _wi(42, state="Active", tags=["autopilot"], assigned_to="Phong Nguyen")
+    await svc._scan()
+    assert c.ado.states == []      # not ours — left alone
+    assert c.ado.tags == []
 
 
 async def test_merge_assignee_matches_email():

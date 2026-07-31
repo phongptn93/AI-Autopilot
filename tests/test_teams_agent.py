@@ -743,8 +743,14 @@ async def test_digest_sends_to_every_stored_conversation():
         async def prs_ready_to_merge(self): return []
         async def team_overview(self, limit=10): return []
 
+    # A real Container always carries `.config` — the digest reads it to build the ADO
+    # links, so the fake has to as well rather than the code guarding with getattr.
+    container = SimpleNamespace(config=Settings(
+        ado_organization="https://dev.azure.com/org", ado_project="Proj",
+    ))
+
     await teams_agent._send_digest(
-        container=SimpleNamespace(), app=_App(), adapter=None,
+        container=container, app=_App(), adapter=None,
         reviewer_tracker=_EmptyTracker(), storage=storage,
         message_factory=SimpleNamespace(text=lambda t: SimpleNamespace(text=t)),
         window_hours=24,
@@ -1075,3 +1081,91 @@ def test_overlong_conversation_id_is_hashed_to_fit_the_column():
     )
     assert key.startswith("sha256:") and len(key) <= 200
     assert teams_agent._conversation_key(SimpleNamespace(conversation=None)) == ""
+
+
+# ── Digest formatting: clickable ids, no dead-weight rows ─────────────────────
+
+_LINK_CFG = Settings(
+    ado_organization="https://dev.azure.com/org/", ado_project="Track", code_project="Code",
+)
+
+
+def test_pr_and_work_item_ids_are_clickable():
+    """An id the reader has to copy and search for is not a report. PRs resolve against
+    `code_project` and work items against `ado_project` — they are often different."""
+    pr = [{"id": 1400, "repo": "Micro-Frontend", "title": "fix: unlock picker", "author": "Dat"}]
+    out = teams_agent._format_pr_stub_list(pr, _LINK_CFG)
+    assert "[!1400](https://dev.azure.com/org/Code/_git/Micro-Frontend/pullrequest/1400)" in out
+
+    items = [SimpleNamespace(id=7188, title="tồn khả dụng")]
+    wi = teams_agent._fmt_wi_list(items, cfg=_LINK_CFG)
+    assert "[#7188](https://dev.azure.com/org/Track/_workitems/edit/7188)" in wi
+
+
+def test_formatters_degrade_to_plain_ids_without_config():
+    """Every formatter is also called from paths that have no Settings to hand; they must
+    still render, just without links."""
+    pr = [{"id": 9, "repo": "R", "title": "t", "author": "a"}]
+    assert "!9" in teams_agent._format_pr_stub_list(pr)
+    assert "](" not in teams_agent._format_pr_stub_list(pr)
+
+
+def test_zero_vote_counters_are_omitted():
+    """"✅0 ⏳0 ⛔0" on every row is three glyphs of noise; only non-zero counters earn space."""
+    rows = [
+        {"id": 1, "repo": "R", "title": "t", "author": "a", "age_days": 5,
+         "is_draft": False, "approved": 0, "pending": 0, "blocked": 0},
+        {"id": 2, "repo": "R", "title": "t", "author": "a", "age_days": 5,
+         "is_draft": False, "approved": 0, "pending": 2, "blocked": 1},
+    ]
+    first, second = teams_agent._format_team_overview(rows, _LINK_CFG).split("\n")
+    assert "✅" not in first and "⏳" not in first and "⛔" not in first
+    assert "⏳2 ⛔1" in second and "✅" not in second
+
+
+def test_long_titles_are_trimmed_to_one_line():
+    long = "x" * 200
+    assert len(teams_agent._short(long)) < 70
+    assert teams_agent._short("short").endswith("short")   # untouched when it fits
+
+
+async def test_digest_drops_the_oldest_pr_section_and_leads_with_pace():
+    """The oldest-active-PR list was 10 rows of unchanged text every cycle, which pushed
+    the numbers off the first screen. `/team` still shows it on demand."""
+    sent: list[str] = []
+
+    class _Tracker:
+        async def new_prs_since(self, cutoff): return [{}] * 17
+        async def merged_prs_since(self, cutoff): return []
+        async def tickets_logged_since(self, cutoff): return []
+        async def prs_ready_to_merge(self):
+            return [{"id": 1400, "repo": "MF", "title": "fix", "author": "Dat"}]
+        async def team_overview(self, limit=10):
+            raise AssertionError("digest must not fetch the oldest-PR list any more")
+
+    class _Repo:
+        async def get_stats(self, since): return SimpleNamespace(total=4, success=3, failed=0)
+
+    # One conversation so the send loop runs and we can read the rendered body; the
+    # conversation object is only passed through, so a sentinel is enough.
+    class _Storage:
+        async def all_keys(self): return ["k"]
+        async def read(self, keys, target_cls=None): return {"k": object()}
+
+    class _Proactive:
+        async def send_activity(self, adapter, conversation, activity):
+            sent.append(activity.text)
+
+    await teams_agent._send_digest(
+        container=SimpleNamespace(config=_LINK_CFG, execution_repo=_Repo()),
+        app=SimpleNamespace(proactive=_Proactive()), adapter=None,
+        reviewer_tracker=_Tracker(), storage=_Storage(),
+        message_factory=SimpleNamespace(text=lambda t: SimpleNamespace(text=t)),
+        window_hours=5,
+    )
+    assert len(sent) == 1
+    body = sent[0]
+    assert "PR active cũ nhất" not in body
+    assert body.index("Nhịp độ") < body.index("Sẵn sàng merge")
+    assert "17 mới mở" in body
+    assert "/team" in body   # pointer to where the dropped list now lives

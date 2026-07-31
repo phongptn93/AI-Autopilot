@@ -28,7 +28,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from ai_autopilot.config import Settings
 from ai_autopilot.container import Container
@@ -446,11 +446,45 @@ async def _digest_loop(
 
 # ── Full daily digest — activity stats + team standup + PR sections ──────────
 
-def _fmt_wi_list(items: list, limit: int = 5) -> str:
+def _short(text: str, limit: int = 62) -> str:
+    """Trim a title so a digest line stays one line in Teams. Titles here come from ADO
+    and routinely run past 100 chars, which wraps into three lines and buries the id."""
+    text = (text or "").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _wi_link(cfg, wid: int, label: str = "") -> str:
+    """Markdown link to a work item. Teams renders `[label](url)` in bot messages, so this
+    is what makes an id clickable — without it a reader has to copy the number and search."""
+    label = label or f"#{wid}"
+    if cfg is None:
+        return label
+    org = (cfg.ado_organization or "").rstrip("/")
+    project = cfg.ado_project or ""
+    if not (org and project):
+        return label
+    return f"[{label}]({org}/{quote(project, safe='')}/_workitems/edit/{wid})"
+
+
+def _pr_link(cfg, repo: str, pr_id: int, label: str = "") -> str:
+    """Markdown link to a pull request. Uses ``code_project`` when set — PRs live in the
+    code project, which is not always the project work items are tracked in."""
+    label = label or f"!{pr_id}"
+    if cfg is None:
+        return label
+    org = (cfg.ado_organization or "").rstrip("/")
+    project = cfg.code_project or cfg.ado_project or ""
+    if not (org and project and repo and pr_id):
+        return label
+    return (f"[{label}]({org}/{quote(project, safe='')}/_git/"
+            f"{quote(repo, safe='')}/pullrequest/{pr_id})")
+
+
+def _fmt_wi_list(items: list, limit: int = 5, cfg=None) -> str:
     shown = items[:limit]
-    text = ", ".join(f"#{it.id} {it.title}" for it in shown)
+    text = " · ".join(_wi_link(cfg, it.id) for it in shown)
     extra = len(items) - limit
-    return text + (f" (+{extra} nữa)" if extra > 0 else "")
+    return text + (f" _(+{extra} nữa)_" if extra > 0 else "")
 
 
 async def _active_pr_work_item_map(container: Container) -> dict[int, dict]:
@@ -508,7 +542,7 @@ async def _team_standup(container: Container, cutoff: datetime) -> dict[str, dic
     return by_person
 
 
-def _format_standup(by_person: dict[str, dict[str, list]]) -> str:
+def _format_standup(by_person: dict[str, dict[str, list]], cfg=None) -> str:
     lines = []
     for person, buckets in sorted(by_person.items()):
         done = buckets["done"]
@@ -517,21 +551,25 @@ def _format_standup(by_person: dict[str, dict[str, list]]) -> str:
         if not (done or merge_pending or active or todo):
             continue
         lines.append(f"**{person}**")
-        if done:
-            lines.append(f"  ✅ Hoàn thành: {_fmt_wi_list(done)}")
-        if merge_pending:
-            lines.append(f"  ⏳ Hoàn thành, chờ merge PR: {_fmt_wi_list(merge_pending)}")
-        if active:
-            lines.append(f"  🔧 Đang làm: {_fmt_wi_list(active)}")
-        if todo:
-            lines.append(f"  📋 Chưa làm: {_fmt_wi_list(todo)}")
-    return "\n".join(lines) if lines else "(không có work item nào thay đổi trong khoảng này)"
+        for icon, label, group in (
+            ("⏳", "Chờ merge", merge_pending),   # most actionable first
+            ("✅", "Xong", done),
+            ("🔧", "Đang làm", active),
+            ("📋", "Chưa làm", todo),
+        ):
+            if group:
+                lines.append(f"- {icon} {label} — {_fmt_wi_list(group, cfg=cfg)}")
+    return "\n".join(lines) if lines else "_Không có work item nào thay đổi trong khoảng này._"
 
 
-def _format_pr_stub_list(prs: list[dict]) -> str:
+def _format_pr_stub_list(prs: list[dict], cfg=None) -> str:
     if not prs:
-        return "(không có)"
-    return "\n".join(f"- !{p['id']} {p['repo']} — {p['title']} · {p['author']}" for p in prs)
+        return "_Không có._"
+    return "\n".join(
+        f"- {_pr_link(cfg, p['repo'], p['id'])} **{p['repo']}** — {_short(p['title'])} "
+        f"· _{p['author']}_"
+        for p in prs
+    )
 
 
 async def _send_digest(
@@ -544,75 +582,72 @@ async def _send_digest(
     (interval < 24h). The default here only covers direct/manual calls."""
     cutoff = datetime.now(UTC) - timedelta(hours=window_hours)
     window_label = f"{window_hours}h"
-    parts: list[str] = [f"📊 **Digest — AI Autopilot ({window_label} qua)**"]
+    cfg = container.config
+    now_label = datetime.now(UTC).astimezone().strftime("%d/%m %H:%M")
+    parts: list[str] = [
+        f"# 📊 AI Autopilot — Digest\n_{now_label} · {window_label} qua_",
+    ]
 
-    # 1. Autopilot execution activity.
+    # ── Pace: the three counters read together, not as three separate headlines. A
+    #    digest whose first screen is all section titles hides the numbers.
+    pace: list[str] = []
     try:
         stats = await container.execution_repo.get_stats(since=cutoff)
-        parts.append(
-            f"🤖 **Hoạt động autopilot ({window_label})**: {stats.total} task · "
-            f"✅ {stats.success} thành công · ❌ {stats.failed} thất bại"
+        pace.append(
+            f"- 🤖 **Autopilot** — {stats.total} task · ✅ {stats.success} · ❌ {stats.failed}"
         )
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: execution stats failed", error=str(exc))
-
-    # 2. Auto-review + reminders sent — from the reviewer tracker's own records.
+    try:
+        new_prs = await reviewer_tracker.new_prs_since(cutoff)
+        merged_prs = await reviewer_tracker.merged_prs_since(cutoff)
+        pace.append(
+            f"- 🔀 **Pull request** — {len(new_prs)} mới mở · {len(merged_prs)} đã merge"
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("digest: PR activity failed", error=str(exc))
     try:
         reviewer_repo = getattr(container, "pr_reviewer_repo", None)
         if reviewer_repo is not None:
             reviewed_n = await reviewer_repo.count_reviewed_since(cutoff)
             reminded_n = await reviewer_repo.count_reminded_since(cutoff)
-            parts.append(
-                f"🔍 **Reviewer tracking ({window_label})**: bot tự review {reviewed_n} PR · "
-                f"👋 nhắc {reminded_n} reviewer quá hạn"
+            pace.append(
+                f"- 🔍 **Bot review** — {reviewed_n} PR tự review · {reminded_n} lượt nhắc"
             )
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: reviewer stats failed", error=str(exc))
+    if pace:
+        parts.append("**⚡ Nhịp độ**\n" + "\n".join(pace))
 
-    # 3. New / merged PRs.
+    # ── Needs a decision now. Ready-to-merge leads because it is the only section where
+    #    the reader's next action is obvious.
     try:
-        new_prs = await reviewer_tracker.new_prs_since(cutoff)
-        merged_prs = await reviewer_tracker.merged_prs_since(cutoff)
-        parts.append(
-            f"🔀 **PR ({window_label})**: {len(new_prs)} mới mở · {len(merged_prs)} đã merge"
-        )
+        ready = await reviewer_tracker.prs_ready_to_merge()
+        if ready:
+            parts.append(
+                f"**✅ Sẵn sàng merge** ({len(ready)})\n{_format_pr_stub_list(ready, cfg)}"
+            )
     except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: PR activity failed", error=str(exc))
+        _log.warning("digest: ready-to-merge failed", error=str(exc))
 
-    # 4. Tickets logged via /log.
     try:
         logged = await reviewer_tracker.tickets_logged_since(cutoff)
         if logged:
             parts.append(
-                f"📝 **Ticket log qua Teams ({window_label})**: {_fmt_wi_list(logged, limit=10)}"
+                f"**📝 Ticket tạo qua Teams** ({len(logged)})\n"
+                f"{_fmt_wi_list(logged, limit=10, cfg=cfg)}"
             )
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: logged tickets failed", error=str(exc))
 
-    # 5. PRs ready to merge (not time-boxed — this is a current snapshot).
-    try:
-        ready = await reviewer_tracker.prs_ready_to_merge()
-        parts.append(f"✅ **PR sẵn sàng merge** ({len(ready)})\n{_format_pr_stub_list(ready)}")
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: ready-to-merge failed", error=str(exc))
-
-    # 6. Oldest active PRs (current snapshot — what's stuck).
-    try:
-        oldest = await reviewer_tracker.team_overview(limit=10)
-        parts.append(
-            f"🕰️ **PR active cũ nhất** ({len(oldest)})\n{_format_team_overview(oldest)}"
-        )
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: team overview failed", error=str(exc))
-
-    # 7. Work items by person, changed within the window — done / merge-pending /
-    #    active / todo. Same cutoff as every other section above.
+    # ── Who moved what, within the same window as every counter above.
     try:
         standup = await _team_standup(container, cutoff)
-        parts.append(f"👤 **Work item theo người ({window_label})**\n{_format_standup(standup)}")
+        parts.append(f"**👤 Theo người** ({window_label})\n{_format_standup(standup, cfg)}")
     except Exception as exc:  # noqa: BLE001
         _log.warning("digest: standup failed", error=str(exc))
 
+    parts.append("_`/team` xem PR tắc lâu nhất · `/queue` việc đang chờ người._")
     text = "\n\n".join(parts)
     # Read with the keys EXACTLY as stored. ``all_keys`` returns the SDK's own storage
     # keys, which are already prefixed ("proactive/conversations/<id>"); passing one to
@@ -949,16 +984,23 @@ def _slash_help(text: str) -> str | None:
     return f"⚠️ Không có lệnh `{word}`.{suggestion} Gõ `/help` để xem lệnh có sẵn."
 
 
-def _format_team_overview(prs: list[dict]) -> str:
+def _format_team_overview(prs: list[dict], cfg=None) -> str:
     if not prs:
-        return "(không có PR active nào)"
+        return "_Không có PR active nào._"
     lines = []
     for pr in prs:
         age = f"{pr['age_days']}d" if pr["age_days"] is not None else "?"
-        draft = " (draft)" if pr["is_draft"] else ""
+        draft = " _(draft)_" if pr["is_draft"] else ""
+        # Only show the vote counters that are non-zero: "✅0 ⏳0 ⛔0" on every row is
+        # three glyphs of noise that make the rows hard to scan for the one that differs.
+        votes = " ".join(
+            f"{icon}{pr[key]}" for icon, key in (("✅", "approved"), ("⏳", "pending"),
+                                                 ("⛔", "blocked")) if pr[key]
+        )
         lines.append(
-            f"- !{pr['id']} {pr['repo']}{draft} — {pr['title']} · {pr['author']} · "
-            f"{age} tuổi · ✅{pr['approved']} ⏳{pr['pending']} ⛔{pr['blocked']}"
+            f"- {_pr_link(cfg, pr['repo'], pr['id'])} **{pr['repo']}**{draft} — "
+            f"{_short(pr['title'])} · _{pr['author']}_ · {age}"
+            + (f" · {votes}" if votes else "")
         )
     return "\n".join(lines)
 
@@ -1008,7 +1050,7 @@ async def _handle_command(
         return
     if word == "/team":
         prs = await reviewer_tracker.team_overview()
-        bullets = _format_team_overview(prs)
+        bullets = _format_team_overview(prs, config)
         await context.send_activity(
             f"👥 **Team overview — PR active, cũ nhất trước** ({len(prs)})\n{bullets}"
         )
@@ -1519,7 +1561,7 @@ async def _answer_freeform(
     try:
         sections.append(
             "Tổng quan PR của team (cũ nhất trước):\n"
-            + _format_team_overview(await reviewer_tracker.team_overview())
+            + _format_team_overview(await reviewer_tracker.team_overview(), config)
         )
     except Exception as exc:  # noqa: BLE001
         _log.warning("freeform: team overview failed", error=_fmt_exc(exc))
@@ -1824,7 +1866,7 @@ async def _classify_and_reply(
         await context.send_activity(await _phrase_natural(config, text, bullets))
     elif intent == "team_overview":
         prs = await reviewer_tracker.team_overview()
-        bullets = _format_team_overview(prs)
+        bullets = _format_team_overview(prs, config)
         await context.send_activity(await _phrase_natural(config, text, bullets))
     elif intent == "status":
         await context.send_activity(

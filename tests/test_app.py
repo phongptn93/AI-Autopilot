@@ -6,6 +6,8 @@ network except the ADO health check (which fails gracefully → 503).
 
 from __future__ import annotations
 
+from urllib.parse import unquote
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -463,3 +465,126 @@ def test_webhook_ignores_bot_and_chatter(client: TestClient):
     assert r1.json() == {"ignored": "bot comment"}
     assert r2.json() == {"ignored": "not a command"}
     assert fake.kicks == []
+
+
+# ── Login page (replaces the browser's Basic-auth popup) ──────────────────────
+
+_HTML = {"accept": "text/html,application/xhtml+xml"}
+
+
+def _locked_app(tmp_path, password="s3cret"):
+    from ai_autopilot import security
+    return Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        dashboard_auth_password_hash=security.hash_password(password),
+    )
+
+
+def test_browser_is_redirected_to_the_login_page_not_a_popup(tmp_path):
+    """`WWW-Authenticate: Basic` is exactly what makes the browser show its native
+    credential popup, so an HTML request must not receive it."""
+    with TestClient(create_app(_locked_app(tmp_path))) as client:
+        resp = client.get("/dashboard/board", headers=_HTML, follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/dashboard/login?next=%2Fdashboard%2Fboard"
+        assert "www-authenticate" not in resp.headers
+
+
+def test_non_html_callers_still_get_a_plain_401(tmp_path):
+    """curl / probes / scripts cannot render a login page; they keep the machine-readable
+    answer, and Basic auth keeps working for them."""
+    with TestClient(create_app(_locked_app(tmp_path))) as client:
+        resp = client.get("/dashboard", follow_redirects=False)
+        assert resp.status_code == 401
+        assert resp.headers["www-authenticate"].startswith("Basic")
+        assert client.get("/dashboard", auth=("x", "s3cret")).status_code == 200
+
+
+def test_login_page_is_reachable_while_locked(tmp_path):
+    with TestClient(create_app(_locked_app(tmp_path))) as client:
+        resp = client.get("/dashboard/login", headers=_HTML)
+        assert resp.status_code == 200
+        assert 'name="password"' in resp.text
+        assert 'name="next"' in resp.text
+
+
+def test_wrong_password_reports_401_and_sets_no_cookie(tmp_path):
+    from ai_autopilot import security
+    with TestClient(create_app(_locked_app(tmp_path))) as client:
+        resp = client.post("/dashboard/login", data={"password": "nope", "next": "/dashboard"},
+                           headers=_HTML, follow_redirects=False)
+        assert resp.status_code == 401           # a failed login is not a page view
+        assert "Mật khẩu không đúng" in resp.text
+        assert security.SESSION_COOKIE not in resp.cookies
+
+
+def test_correct_password_sets_a_session_that_grants_access(tmp_path):
+    from ai_autopilot import security
+    with TestClient(create_app(_locked_app(tmp_path))) as client:
+        resp = client.post("/dashboard/login",
+                           data={"password": "s3cret", "next": "/dashboard/board"},
+                           headers=_HTML, follow_redirects=False)
+        assert resp.status_code == 303 and resp.headers["location"] == "/dashboard/board"
+        assert client.cookies.get(security.SESSION_COOKIE)
+        # The cookie alone is now enough — no Authorization header.
+        assert client.get("/dashboard", headers=_HTML).status_code == 200
+
+
+def test_next_cannot_be_used_as_an_open_redirect(tmp_path):
+    """`next` is attacker-controllable. `//evil.example` is a scheme-relative URL that a
+    browser follows off-site, yet it still "starts with a slash"."""
+    with TestClient(create_app(_locked_app(tmp_path))) as client:
+        for hostile in ("//evil.example", "https://evil.example", "/etc/passwd",
+                        "/dashboard//evil.example"):
+            resp = client.post("/dashboard/login",
+                               data={"password": "s3cret", "next": hostile},
+                               headers=_HTML, follow_redirects=False)
+            assert resp.headers["location"] == "/dashboard", hostile
+
+
+def test_logout_ends_the_session(tmp_path):
+    with TestClient(create_app(_locked_app(tmp_path))) as client:
+        client.post("/dashboard/login", data={"password": "s3cret", "next": "/dashboard"},
+                    headers=_HTML, follow_redirects=False)
+        assert client.get("/dashboard", headers=_HTML).status_code == 200
+        out = client.post("/dashboard/logout", headers=_HTML, follow_redirects=False)
+        assert out.status_code == 303 and out.headers["location"] == "/dashboard/login"
+        again = client.get("/dashboard", headers=_HTML, follow_redirects=False)
+        assert again.status_code == 303 and "login" in again.headers["location"]
+
+
+def test_login_page_steps_aside_when_no_password_is_set(tmp_path):
+    """With the dashboard open, a login form would be a control that authenticates nothing."""
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        resp = client.get("/dashboard/login", headers=_HTML, follow_redirects=False)
+        assert resp.status_code == 303 and resp.headers["location"] == "/dashboard"
+
+
+# ── Full export must refuse to produce an unprotected file ────────────────────
+
+def test_full_export_is_refused_without_an_export_password(tmp_path):
+    """Encrypting under "" yields a valid-looking .enc whose key anyone can reproduce —
+    the PAT and every token would ship with no real protection, while looking protected."""
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        ado_pat="a-real-pat", config_export_password="",
+    )
+    with TestClient(create_app(settings)) as client:
+        resp = client.get("/dashboard/settings/export-full", follow_redirects=False)
+        assert resp.status_code == 303
+        assert "import_error" in resp.headers["location"]
+        assert "config_export_password" in unquote(resp.headers["location"])
+
+
+def test_full_export_works_once_a_password_is_set(tmp_path):
+    from ai_autopilot import security
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        ado_pat="a-real-pat", config_export_password="pw",
+    )
+    with TestClient(create_app(settings)) as client:
+        resp = client.get("/dashboard/settings/export-full")
+        assert resp.status_code == 200
+        assert b"a-real-pat" not in resp.content              # encrypted, not plaintext
+        assert b"a-real-pat" in security.decrypt_bytes(resp.content, "pw")

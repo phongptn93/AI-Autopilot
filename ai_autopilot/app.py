@@ -8,8 +8,10 @@ import binascii
 import contextlib
 import secrets
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from ai_autopilot import health, security
@@ -49,6 +51,40 @@ def _dashboard_auth_ok(header: str | None, config: Settings) -> bool:
         return True
     return bool(config.dashboard_auth_token) and secrets.compare_digest(
         password, config.dashboard_auth_token
+    )
+
+
+def _dashboard_authenticated(request: Request, config: Settings) -> bool:
+    """Either a valid session cookie (browsers) or HTTP Basic (scripts, curl, probes).
+
+    Basic stays supported deliberately: the login page is for people, but automation that
+    already sends `-u :password` should not break because the UI got nicer.
+    """
+    if security.verify_session_token(request.cookies.get(security.SESSION_COOKIE), config):
+        return True
+    return _dashboard_auth_ok(request.headers.get("authorization"), config)
+
+
+def _dashboard_challenge(request: Request) -> Response:
+    """Send a browser to the login page; answer everything else with a plain 401.
+
+    A `WWW-Authenticate: Basic` response is what makes the browser throw up its native
+    credential popup — so returning it here would defeat the login page entirely. It is
+    only sent when the caller did not ask for HTML, where the popup cannot appear and a
+    machine-readable 401 is the useful answer.
+    """
+    wants_html = "text/html" in (request.headers.get("accept") or "")
+    if request.method == "GET" and wants_html:
+        target = request.url.path
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return RedirectResponse(
+            f"/dashboard/login?next={quote(target, safe='')}", status_code=303
+        )
+    return Response(
+        status_code=401,
+        content="authentication required",
+        headers={"WWW-Authenticate": 'Basic realm="AI Autopilot"'},
     )
 
 
@@ -173,12 +209,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return Response(status_code=401, content="unauthorized")
         dashboard_locked = bool(config.dashboard_auth_password_hash or config.dashboard_auth_token)
         if dashboard_locked and path.startswith("/dashboard"):
-            if not _dashboard_auth_ok(request.headers.get("authorization"), config):
-                return Response(
-                    status_code=401,
-                    content="authentication required",
-                    headers={"WWW-Authenticate": 'Basic realm="AI Autopilot"'},
-                )
+            # The login page itself must stay reachable while locked, or there is no way in.
+            if path.rstrip("/") != "/dashboard/login" and not _dashboard_authenticated(
+                request, config
+            ):
+                return _dashboard_challenge(request)
         return await call_next(request)
 
     @app.get("/health")

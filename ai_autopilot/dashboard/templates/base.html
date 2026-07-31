@@ -49,6 +49,10 @@
             width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
         .sidebar-foot { margin-top: auto; padding: 12px 12px 2px; color: var(--text-dim); font-size: 11px;
             border-top: 1px solid var(--border-soft); display: flex; align-items: center; gap: 7px; }
+        .logout-form { margin-left: auto; }
+        .logout-form button { background: none; border: 0; padding: 2px 4px; cursor: pointer;
+            color: var(--text-dim); font-family: inherit; font-size: 11px; border-radius: 5px; }
+        .logout-form button:hover { color: var(--red); background: var(--red-bg); }
         .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
             box-shadow: 0 0 0 0 rgba(46,204,113,.5); animation: pulse 2.4s infinite; }
         @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(46,204,113,.5)} 70%{box-shadow:0 0 0 6px rgba(46,204,113,0)} 100%{box-shadow:0 0 0 0 rgba(46,204,113,0)} }
@@ -166,7 +170,15 @@
             <a class="nav-link {{ 'active' if active == 'settings' else '' }}" href="/dashboard/settings"><span class="ico">🛠️</span> Settings</a>
             <a class="nav-link {{ 'active' if active == 'capabilities' else '' }}" href="/dashboard/capabilities"><span class="ico">✨</span> Capabilities</a>
         </nav>
-        <div class="sidebar-foot"><span class="live-dot"></span> autopilot online · v{{ version }}</div>
+        <div class="sidebar-foot">
+            <span class="live-dot"></span> autopilot online · v{{ version }}
+            {% if dashboard_locked %}
+            <!-- POST, not a link: a GET logout can be triggered by any embedded image. -->
+            <form method="post" action="/dashboard/logout" class="logout-form">
+                <button type="submit" title="Đăng xuất">Đăng xuất</button>
+            </form>
+            {% endif %}
+        </div>
     </aside>
     <main class="main">
         {% block content %}{% endblock %}

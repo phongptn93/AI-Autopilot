@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Đăng nhập · AI Autopilot</title>
+    <style>
+        /* Standalone: the login page must render before the app shell is reachable, so it
+           carries its own copy of the tokens rather than extending base.html. */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0a0b0f; --bg-card: #14161e; --bg-input: #0c0d12;
+            --border: #23262f; --border-soft: #1b1d25;
+            --text: #e6e7eb; --text-muted: #8a8d99; --text-dim: #565963;
+            --accent: #6366f1; --accent-hover: #818cf8; --accent-bg: rgba(99,102,241,.13);
+            --red: #f0526a; --red-bg: rgba(240,82,106,.13);
+            --radius: 14px; --radius-sm: 9px;
+            --shadow: 0 1px 3px rgba(0,0,0,.4), 0 18px 48px rgba(0,0,0,.35);
+            --mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+            --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+        body {
+            font-family: var(--sans); background: var(--bg); color: var(--text);
+            font-size: 14px; line-height: 1.55; min-height: 100vh;
+            display: grid; place-items: center; padding: 24px;
+            background-image:
+                radial-gradient(900px 500px at 50% -20%, rgba(99,102,241,.10), transparent 65%);
+        }
+        ::selection { background: var(--accent-bg); }
+
+        .card {
+            width: 100%; max-width: 380px; background: var(--bg-card);
+            border: 1px solid var(--border); border-radius: var(--radius);
+            box-shadow: var(--shadow); padding: 32px 30px 28px;
+        }
+        .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 26px; }
+        .mark {
+            width: 38px; height: 38px; flex: none; border-radius: 11px;
+            background: linear-gradient(145deg, var(--accent), #4f46c9);
+            display: grid; place-items: center; font-size: 19px;
+            box-shadow: 0 4px 14px rgba(99,102,241,.32);
+        }
+        .brand h1 { font-size: 15.5px; font-weight: 640; letter-spacing: -.01em; }
+        .brand p { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+
+        label { display: block; font-size: 12px; color: var(--text-muted);
+            margin-bottom: 7px; font-weight: 520; }
+        .field { position: relative; }
+        input[type=password], input[type=text] {
+            width: 100%; padding: 11px 42px 11px 13px; font-size: 14px;
+            font-family: var(--sans); color: var(--text);
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); outline: none;
+            transition: border-color .15s, box-shadow .15s;
+        }
+        input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+        .peek {
+            position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
+            background: none; border: 0; cursor: pointer; padding: 7px 9px;
+            color: var(--text-dim); font-size: 14px; line-height: 1; border-radius: 7px;
+        }
+        .peek:hover { color: var(--text-muted); background: rgba(255,255,255,.04); }
+        .peek:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+        button[type=submit] {
+            width: 100%; margin-top: 18px; padding: 11px 14px; font-size: 14px;
+            font-weight: 580; font-family: var(--sans); color: #fff; cursor: pointer;
+            background: var(--accent); border: 0; border-radius: var(--radius-sm);
+            transition: background .15s, transform .06s;
+        }
+        button[type=submit]:hover { background: var(--accent-hover); }
+        button[type=submit]:active { transform: translateY(1px); }
+        button[type=submit]:focus-visible { outline: 2px solid var(--accent-hover);
+            outline-offset: 2px; }
+
+        .error {
+            display: flex; gap: 9px; align-items: flex-start;
+            background: var(--red-bg); border: 1px solid rgba(240,82,106,.3);
+            color: var(--text); border-radius: var(--radius-sm);
+            padding: 10px 12px; font-size: 13px; margin-bottom: 18px;
+        }
+        .error b { color: var(--red); font-weight: 600; }
+
+        footer {
+            margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border-soft);
+            display: flex; justify-content: space-between; gap: 12px;
+            font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+        }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <div class="brand">
+            <div class="mark">🤖</div>
+            <div>
+                <h1>AI Autopilot</h1>
+                <p>Trang quản lý</p>
+            </div>
+        </div>
+
+        {% if error %}
+        <div class="error" role="alert"><b>✕</b><span>{{ error }}</span></div>
+        {% endif %}
+
+        <form method="post" action="/dashboard/login" autocomplete="off">
+            <input type="hidden" name="next" value="{{ next }}" />
+            <label for="password">Mật khẩu</label>
+            <div class="field">
+                <!-- autofocus so the only field on the page is ready to type into -->
+                <input id="password" name="password" type="password" required autofocus
+                       autocomplete="current-password" placeholder="••••••••" />
+                <button type="button" class="peek" id="peek" aria-label="Hiện mật khẩu"
+                        aria-pressed="false">👁</button>
+            </div>
+            <button type="submit">Đăng nhập</button>
+        </form>
+
+        <footer>
+            <span>v{{ version }}</span>
+            <span>Phiên giữ 12 giờ</span>
+        </footer>
+    </main>
+
+    <script>
+        // Progressive enhancement only: without JS the field stays a normal password input.
+        (function () {
+            var btn = document.getElementById('peek'), input = document.getElementById('password');
+            if (!btn || !input) return;
+            btn.addEventListener('click', function () {
+                var show = input.type === 'password';
+                input.type = show ? 'text' : 'password';
+                btn.setAttribute('aria-pressed', String(show));
+                btn.setAttribute('aria-label', show ? 'Ẩn mật khẩu' : 'Hiện mật khẩu');
+                input.focus();
+            });
+        })();
+    </script>
+</body>
+</html>

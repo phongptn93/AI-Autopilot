@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import secrets
+import time
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.hashes import SHA256
@@ -115,6 +117,53 @@ def verify_password(password: str, stored: str) -> bool:
         return False
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
     return secrets.compare_digest(digest, expected)
+
+
+# ── Dashboard session cookie ──────────────────────────────────────────────────
+# A signed, self-contained token: no server-side session store, so it survives a
+# restart and works with more than one worker. The signing key is DERIVED from the
+# configured password, which means changing the password invalidates every existing
+# session for free — the property you actually want after a credential rotation.
+
+SESSION_COOKIE = "autopilot_session"
+SESSION_TTL_HOURS = 12
+
+
+def _session_key(config: Settings) -> bytes | None:
+    secret = config.dashboard_auth_password_hash or config.dashboard_auth_token or ""
+    if not secret:
+        return None  # no password configured → the dashboard is open, sessions are moot
+    return hashlib.sha256(b"ai-autopilot.session.v1:" + secret.encode("utf-8")).digest()
+
+
+def make_session_token(config: Settings, *, ttl_hours: int = SESSION_TTL_HOURS,
+                       now: float | None = None) -> str:
+    """Signed ``<expiry>.<hmac>`` cookie value. Empty string if no password is set."""
+    key = _session_key(config)
+    if key is None:
+        return ""
+    expiry = str(int((now if now is not None else time.time()) + ttl_hours * 3600))
+    signature = hmac.new(key, expiry.encode(), hashlib.sha256).hexdigest()
+    return f"{expiry}.{signature}"
+
+
+def verify_session_token(token: str | None, config: Settings,
+                         *, now: float | None = None) -> bool:
+    """True if ``token`` was signed for this password and has not expired.
+
+    Never raises — a malformed cookie is simply not a valid session. Signature is
+    checked BEFORE the expiry so a tampered expiry cannot extend a session.
+    """
+    key = _session_key(config)
+    if key is None or not token:
+        return False
+    expiry_s, _, signature = token.partition(".")
+    if not signature or not expiry_s.isdigit():
+        return False
+    expected = hmac.new(key, expiry_s.encode(), hashlib.sha256).hexdigest()
+    if not secrets.compare_digest(signature, expected):
+        return False
+    return int(expiry_s) > (now if now is not None else time.time())
 
 
 # ── Config encryption (cryptography / Fernet) ─────────────────────────────────

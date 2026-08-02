@@ -63,6 +63,37 @@ def test_configured_bot_on_a_public_host_passes():
     assert "Teams bot configuration complete" in _titles(found, doctor.OK)
 
 
+def test_digest_time_that_is_not_a_time_is_an_error():
+    """A typo here doesn't fail loudly — the loop just refuses to run and the digest
+    never arrives — so doctor is the only place it becomes visible."""
+    found = _diagnose(
+        teams_agent_enabled=True, teams_agent_app_id="id", teams_agent_app_secret="s",
+        teams_agent_tenant_id="t", health_host="0.0.0.0", teams_agent_digest_at="9am",
+    )
+    assert "Digest time is not a time of day" in _titles(found, doctor.ERROR)
+    ok = _diagnose(
+        teams_agent_enabled=True, teams_agent_app_id="id", teams_agent_app_secret="s",
+        teams_agent_tenant_id="t", health_host="0.0.0.0", teams_agent_digest_at="09:00",
+    )
+    assert "Digest time is not a time of day" not in _titles(ok)
+
+
+def test_digest_with_both_a_time_and_an_interval_says_which_one_wins():
+    found = _diagnose(
+        teams_agent_enabled=True, teams_agent_app_id="id", teams_agent_app_secret="s",
+        teams_agent_tenant_id="t", health_host="0.0.0.0",
+        teams_agent_digest_at="09:00", teams_agent_digest_interval_hours=6,
+    )
+    assert "Digest has both a fixed time and an interval" in _titles(found, doctor.WARN)
+
+
+def test_digest_time_set_with_the_bot_off_is_flagged():
+    """The gate used to read the interval only, so a fixed time scheduled against a
+    disabled bot would have passed silently."""
+    found = _diagnose(teams_agent_digest_at="09:00", teams_agent_enabled=False)
+    assert "Digest scheduled with the bot off" in _titles(found, doctor.WARN)
+
+
 def test_exposed_dashboard_without_password_is_an_error():
     found = _diagnose(health_host="0.0.0.0", dashboard_auth_token="",
                       dashboard_auth_password_hash="")

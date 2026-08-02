@@ -107,6 +107,7 @@ pr_reviewer_target_branches: []      # e.g. ["dxfac/development", "main"]
 teams_agent_enabled: false
 teams_agent_nlu_enabled: true         # free-text read-only queries when enabled above
 teams_agent_digest_interval_hours: 0  # proactive activity digest (stats, PRs, standup); 0 = off
+teams_agent_digest_at: ""             # or a fixed local time, e.g. "09:00" — wins over the interval
 
 # ── Dependency-aware scheduling (P1) ──
 # Order work by the ADO link graph instead of dispatching every pending item at

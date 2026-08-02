@@ -30,7 +30,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, unquote
 
-from ai_autopilot.config import Settings
+from ai_autopilot.config import Settings, parse_hhmm
 from ai_autopilot.container import Container
 from ai_autopilot.data.entities import PipelineState
 from ai_autopilot.logging_config import get_logger
@@ -321,9 +321,9 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
     """Build ``(agent_application, adapter, digest_task)`` for ``/api/messages``, or
     ``None`` if the Teams bot isn't configured/installed — the caller then skips the
     route entirely, leaving the rest of the app unaffected. ``digest_task`` is the
-    background asyncio task for the proactive daily digest, or ``None`` if
-    ``teams_agent_digest_interval_hours`` is 0 (off) — the caller cancels it on
-    shutdown alongside every other background service."""
+    background asyncio task for the proactive daily digest, or ``None`` if neither
+    ``teams_agent_digest_at`` nor ``teams_agent_digest_interval_hours`` schedules one
+    — the caller cancels it on shutdown alongside every other background service."""
     if not (
         config.teams_agent_enabled
         and config.teams_agent_app_id
@@ -411,7 +411,7 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
             _log.warning("storing conversation for digest failed", error=str(exc))
 
     digest_task = None
-    if config.teams_agent_digest_interval_hours > 0:
+    if config.teams_agent_digest_interval_hours > 0 or config.teams_agent_digest_at.strip():
         digest_task = asyncio.create_task(
             _digest_loop(config, container, app, adapter, reviewer_tracker,
                          conversation_storage, MessageFactory),
@@ -422,21 +422,62 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
     return app, adapter, digest_task
 
 
+def seconds_until(hhmm: str, now: datetime) -> float | None:
+    """Seconds from ``now`` to the next local occurrence of ``hhmm``, or None if it isn't
+    a time of day.
+
+    Always strictly positive: at exactly the scheduled second the digest for that slot has
+    just been sent, so the same time TODAY only counts when it is still ahead — otherwise
+    the loop would fire twice in a row on a zero-length sleep.
+    """
+    parsed = parse_hhmm(hhmm)
+    if parsed is None:
+        return None
+    hour, minute = parsed
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
 async def _digest_loop(
     config: Settings, container: Container, app, adapter,
     reviewer_tracker: ReviewerTrackerService, storage: _DbConversationStorage,
     message_factory,
 ) -> None:
     interval = config.teams_agent_digest_interval_hours
+    at = config.teams_agent_digest_at.strip()
+    # A fixed time wins over the interval — see teams_agent_digest_at in config. The
+    # interval stays the fallback so an install that never set a time is unchanged.
+    previous: datetime | None = None
     while True:
         try:
-            await asyncio.sleep(interval * 3600)
-            # The stats window MUST equal the send interval — not a fixed 24h —
-            # otherwise a longer interval leaves a silent gap between digests, and a
-            # shorter one double-counts the overlap. Single source of truth: interval.
+            if at:
+                delay = seconds_until(at, datetime.now())  # noqa: DTZ005 — host wall-clock
+                if delay is None:
+                    # A constant that doesn't parse cannot start parsing on the next
+                    # cycle, so retrying would only spin. doctor names the bad value.
+                    _log.error("Teams digest disabled — digest_at is not HH:MM", value=at)
+                    return
+                await asyncio.sleep(delay)
+                fired = datetime.now()  # noqa: DTZ005 — same clock the sleep was measured on
+                # Same contract as the interval branch below: the window is the REAL gap,
+                # never a nominal 24h. A restart, an overrunning cycle or a DST shift all
+                # move it, and a fixed figure would then either skip activity or count it
+                # twice. The first fire of a process has no previous one to measure from,
+                # so it falls back to the schedule's own period.
+                window = 24 if previous is None else max(
+                    1, round((fired - previous).total_seconds() / 3600))
+                previous = fired
+            else:
+                await asyncio.sleep(interval * 3600)
+                # The stats window MUST equal the send interval — not a fixed 24h —
+                # otherwise a longer interval leaves a silent gap between digests, and a
+                # shorter one double-counts the overlap. Single source of truth: interval.
+                window = interval
             await _send_digest(
                 container, app, adapter, reviewer_tracker, storage, message_factory,
-                window_hours=interval,
+                window_hours=window,
             )
         except asyncio.CancelledError:
             raise

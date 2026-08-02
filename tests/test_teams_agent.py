@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from datetime import datetime
 from types import SimpleNamespace
 
 import ai_autopilot.execution.claude_client as claude_client
@@ -1208,3 +1209,92 @@ async def test_advisory_run_denies_mutators_without_a_checkout(monkeypatch, fake
     assert result.success
     for tool in ("Write", "Edit", "NotebookEdit"):
         assert tool in rec.last.disallowed_tools, tool
+
+
+# ── Digest schedule: a fixed local time, not an interval that drifts on restart ──
+
+
+def test_seconds_until_takes_the_next_occurrence():
+    now = datetime(2026, 8, 2, 8, 0, 0)
+    assert teams_agent.seconds_until("09:00", now) == 3600
+    assert teams_agent.seconds_until("07:30", now) == 23.5 * 3600   # gone → tomorrow
+    # Exactly now must be tomorrow too: a zero sleep would re-send the digest that has
+    # just gone out, and then again, for as long as the second lasts.
+    assert teams_agent.seconds_until("08:00", now) == 24 * 3600
+
+
+def test_seconds_until_rejects_anything_that_is_not_a_time_of_day():
+    now = datetime(2026, 8, 2, 8, 0, 0)
+    for bad in ("9am", "24:00", "09.00", "09:60", "-1:00", "09", "09:00:00", "", "   "):
+        assert teams_agent.seconds_until(bad, now) is None, bad
+
+
+async def test_digest_at_wins_over_the_interval(monkeypatch):
+    """Both configured is a real state (the interval predates the fixed time), so which
+    one runs has to be pinned rather than left to whichever branch is written first."""
+    slept: list[float] = []
+    windows: list[int] = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+        if len(slept) >= 2:      # let one full cycle through, then stop the loop
+            raise asyncio.CancelledError
+
+    async def fake_send(*_args, window_hours, **_kw):
+        windows.append(window_hours)
+
+    monkeypatch.setattr(teams_agent.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(teams_agent, "_send_digest", fake_send)
+    cfg = Settings(teams_agent_digest_at="09:00", teams_agent_digest_interval_hours=6)
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await teams_agent._digest_loop(cfg, None, None, None, None, None, None)
+
+    assert 6 * 3600 not in slept                      # the interval is not what it waited
+    assert all(0 < s <= 24 * 3600 for s in slept)
+    # First fire of a process has no previous one to measure the gap from.
+    assert windows == [24]
+
+
+async def test_digest_loop_stops_on_a_time_it_cannot_parse(monkeypatch):
+    """It must RETURN, not spin: the value is a constant, so a retry would re-read the
+    same bad string every cycle at full speed. doctor is what tells you it's wrong."""
+    sent: list[int] = []
+
+    async def fake_sleep(_seconds):
+        raise AssertionError("must not sleep on an unusable schedule")
+
+    async def fake_send(*_args, **_kw):
+        sent.append(1)
+
+    monkeypatch.setattr(teams_agent.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(teams_agent, "_send_digest", fake_send)
+
+    await teams_agent._digest_loop(
+        Settings(teams_agent_digest_at="9am"), None, None, None, None, None, None)
+    assert sent == []
+
+
+async def test_digest_without_a_fixed_time_still_uses_the_interval(monkeypatch):
+    """The fallback an existing install is on — unchanged, including window == interval."""
+    slept: list[float] = []
+    windows: list[int] = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+        if len(slept) >= 2:
+            raise asyncio.CancelledError
+
+    async def fake_send(*_args, window_hours, **_kw):
+        windows.append(window_hours)
+
+    monkeypatch.setattr(teams_agent.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(teams_agent, "_send_digest", fake_send)
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await teams_agent._digest_loop(
+            Settings(teams_agent_digest_interval_hours=6),
+            None, None, None, None, None, None)
+
+    assert slept == [6 * 3600, 6 * 3600]
+    assert windows == [6]

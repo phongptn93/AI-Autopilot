@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ai_autopilot import flows as flows_mod
-from ai_autopilot.config import Settings, describe_users, is_ambiguous_user
+from ai_autopilot.config import Settings, describe_users, is_ambiguous_user, parse_hhmm
 
 ERROR, WARN, OK = "error", "warn", "ok"
 ERROR_ICON, WARN_ICON, OK_ICON = "❌", "⚠️ ", "✅"
@@ -236,11 +236,43 @@ def check_notifications(config: Settings) -> list[Finding]:
     return out
 
 
+def _check_digest_schedule(config: Settings) -> list[Finding]:
+    """Checked BEFORE the bot-enabled gate, because "scheduled against a bot that is off"
+    is one of the things worth reporting — and it was unreachable while it lived after the
+    early return in check_teams_bot: the one config it describes is the one config that
+    returned before reaching it.
+    """
+    out: list[Finding] = []
+    digest_at = config.teams_agent_digest_at.strip()
+    if digest_at and parse_hhmm(digest_at) is None:
+        out.append(Finding(
+            ERROR, "Digest time is not a time of day",
+            f"teams_agent_digest_at={digest_at!r}",
+            'Use 24-hour "HH:MM", e.g. "09:00". The digest loop refuses to run on a '
+            "value it can't parse rather than guess an hour nobody chose.",
+        ))
+    elif digest_at and config.teams_agent_digest_interval_hours > 0:
+        out.append(Finding(
+            WARN, "Digest has both a fixed time and an interval",
+            f"digest_at={digest_at} · interval={config.teams_agent_digest_interval_hours}h",
+            "The fixed time wins and the interval is ignored. Clear the interval so the "
+            "config says what actually happens.",
+        ))
+    if (digest_at or config.teams_agent_digest_interval_hours > 0) \
+            and not config.teams_agent_enabled:
+        out.append(Finding(
+            WARN, "Digest scheduled with the bot off", "",
+            "The digest posts through the bot; enable it, or clear both the fixed time "
+            "and the interval.",
+        ))
+    return out
+
+
 def check_teams_bot(config: Settings) -> list[Finding]:
     """The trap that cost the most time: the bot switched on but unable to work."""
+    out: list[Finding] = _check_digest_schedule(config)
     if not config.teams_agent_enabled:
-        return []
-    out: list[Finding] = []
+        return out
     missing = [
         name for name, value in (
             ("teams_agent_app_id", config.teams_agent_app_id),
@@ -262,11 +294,6 @@ def check_teams_bot(config: Settings) -> list[Finding]:
             f"health_host={config.health_host} is loopback only.",
             "Teams calls the messaging endpoint from the internet. Expose the app over "
             "HTTPS and point the Azure Bot's endpoint at https://<host>/api/messages.",
-        ))
-    if config.teams_agent_digest_interval_hours > 0 and not config.teams_agent_enabled:
-        out.append(Finding(
-            WARN, "Digest scheduled with the bot off", "",
-            "The digest posts through the bot; enable it or set the interval to 0.",
         ))
     return out or [Finding(OK, "Teams bot configuration complete")]
 

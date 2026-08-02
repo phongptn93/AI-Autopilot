@@ -272,6 +272,23 @@ def is_ambiguous_user(claimed: str) -> bool:
     return bool(c) and "@" not in c and len(c.split()) == 1
 
 
+def parse_hhmm(value: str | None) -> tuple[int, int] | None:
+    """``"09:00"`` → ``(9, 0)``; ``None`` for anything that isn't a real time of day.
+
+    A schedule is only worth having if a typo is visible: "9am", "24:00" and "09.00" all
+    parse as *some* number under a looser rule and would silently move the digest to an
+    hour nobody chose. Returning None instead lets doctor name the bad value and the
+    loop refuse to run on it.
+    """
+    parts = (value or "").strip().split(":")
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        return None
+    hour, minute = int(parts[0]), int(parts[1])
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return hour, minute
+
+
 def describe_users(claimed: list[str] | tuple[str, ...], limit: int = 4) -> str:
     """The allowed-commander roster for a refusal message, bounded.
 
@@ -804,6 +821,12 @@ class Settings(BaseSettings):
     # have been @mentioned or added at least once so its conversation gets stored
     # (survives restarts — the reference is persisted, not kept only in memory).
     teams_agent_digest_interval_hours: int = 0
+    # Fixed local wall-clock time to post it instead, "HH:MM" (e.g. "09:00"). Wins over
+    # the interval when set, because the interval counts from process START: a restart
+    # at 14:00 moves a 24h digest to 14:00 for good, so the one message the team is
+    # meant to read every morning arrives at a different hour after every deploy.
+    # Local time on the host, like the planned runs in planning_analyzer.
+    teams_agent_digest_at: str = ""
 
     # ── Comment reaction loop (steer the autopilot by just commenting) ──
     # When a NEW human comment appears on an autopilot-owned item (one that still

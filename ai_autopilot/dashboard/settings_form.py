@@ -383,6 +383,11 @@ FIELDS: tuple[Field, ...] = (
           "per-person work item standup. 0 = off. Requires the bot to have been "
           "messaged/added at least once so its conversation is stored (persists "
           "across restarts)."),
+    Field("teams_agent_digest_at", "↳ Daily digest at (HH:MM)", "text",
+          "💬 Teams bot (2-way chat)",
+          "Post it at a fixed local time instead, e.g. 09:00. Wins over the interval "
+          "above, which counts from process start — so a restart at 14:00 moves a 24h "
+          "digest to 14:00 permanently. Blank = use the interval."),
     Field("teams_agent_app_id", "↳ Agent (App) ID", "text", "💬 Teams bot (2-way chat)",
           "Azure Bot's Application (client) ID. Also requires `pip install .[teams-bot]`."),
     Field("teams_agent_tenant_id", "↳ Tenant ID", "text", "💬 Teams bot (2-way chat)",

@@ -9,6 +9,8 @@
         :root {
             --bg: #0a0b0f; --bg-elev: #111319; --bg-card: #14161e; --bg-sidebar: #0d0e14;
             --bg-input: #0c0d12; --bg-hover: #1b1e28;
+            /* --bg at 90%, for the sticky bars that blur the content scrolling under them. */
+            --bg-sticky: rgba(10, 11, 15, .9);
             --border: #23262f; --border-soft: #1b1d25;
             --text: #e6e7eb; --text-muted: #8a8d99; --text-dim: #565963;
             --accent: #6366f1; --accent-hover: #818cf8; --accent-bg: rgba(99,102,241,.13);
@@ -23,7 +25,11 @@
             --mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
             --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+        /* The palette is dark and has no light counterpart, so tell the browser. Without it a
+           light-mode OS renders every native widget it still owns — scrollbars, the datepicker
+           and select popups, autofilled fields — in its light theme, on a dark page. */
+        html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+            color-scheme: dark; }
         body { font-family: var(--sans); background: var(--bg); color: var(--text);
             line-height: 1.55; min-height: 100vh; font-size: 14px;
             background-image: radial-gradient(1200px 600px at 80% -10%, rgba(99,102,241,.06), transparent 60%); }
@@ -162,13 +168,17 @@
         /* ── Sticky save bar: one definition, like the controls above ──
            Settings and the State flow page each carried their own copy. They had already
            drifted — only one of them dimmed for a light colour scheme — which is exactly how
-           two pages that should look identical stop looking identical. */
+           two pages that should look identical stop looking identical.
+
+           That light-scheme rule is gone rather than hoisted: the palette above is the only
+           one there is, so on a light OS it turned this bar white against a page that stayed
+           dark. A dark-only app has to say so (color-scheme below) instead of half-answering
+           a preference it cannot honour. */
         .savebar { position: sticky; bottom: 0; z-index: 20; display: flex; align-items: center;
-            justify-content: flex-end; gap: 12px; background: rgba(10, 11, 15, .9);
+            justify-content: flex-end; gap: 12px; background: var(--bg-sticky);
             backdrop-filter: blur(8px); border-top: 1px solid var(--border-soft);
             padding: 14px 4px; margin: 8px -4px 0; }
         .savebar .hint { color: var(--text-dim); font-size: 12px; margin-right: auto; }
-        @media (prefers-color-scheme: light) { .savebar { background: rgba(255, 255, 255, .92); } }
         .restart-badge { display: inline-block; background: var(--amber-bg); color: var(--amber);
             font-size: 10px; padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: middle; font-weight: 700; }
 

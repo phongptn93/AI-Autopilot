@@ -643,8 +643,8 @@ def create_dashboard_router() -> APIRouter:
         return _ctx(request, "planning", **base)
 
     async def _planning_load(c: Container, assignee: str, state: str, wtype: str) -> list:
-        if not assignee:
-            return []
+        """Load the work items to plan. A BLANK ``assignee`` is a real choice — the whole
+        team's board — not a reason to show nothing (comma-separate names for a subset)."""
         states = None if state in ("", "all") else [state]
         types = None if wtype in ("", "all") else [wtype]
         try:
@@ -656,15 +656,20 @@ def create_dashboard_router() -> APIRouter:
 
     _FILTER_COOKIE = "planning_filter"
 
-    def _restore_filter(request: Request, assignee: str, state: str, wtype: str
-                        ) -> tuple[str, str, str]:
-        """When the request carries no explicit filter, restore the last one from the
-        cookie so the Planning view survives across sessions."""
+    def _restore_filter(request: Request, assignee: str, state: str, wtype: str,
+                        default_assignee: str = "") -> tuple[str, str, str]:
+        """Resolve the active filter: explicit query params win, then the cookie from the
+        last visit, then this machine's own assignee as the opening default.
+
+        An EMPTY assignee means "everyone", which is a choice a user can make — so it has
+        to survive the cookie round-trip (``keep_blank_values``) and must not be silently
+        replaced by the default, or clearing the box would snap back to one person.
+        """
         if any(k in request.query_params for k in ("assignee", "state", "type")):
             return assignee, state, wtype
-        parsed = parse_qs(request.cookies.get(_FILTER_COOKIE, ""))
+        parsed = parse_qs(request.cookies.get(_FILTER_COOKIE, ""), keep_blank_values=True)
         if not parsed:
-            return assignee, state, wtype
+            return default_assignee or assignee, state, wtype
         return (
             (parsed.get("assignee") or [assignee])[0],
             (parsed.get("state") or [state])[0],
@@ -677,18 +682,19 @@ def create_dashboard_router() -> APIRouter:
         started: int = 0, scheduled: int = 0,
     ):
         c: Container = request.app.state.container
-        assignee, state, type = _restore_filter(request, assignee, state, type)
-        who = assignee or c.config.auto_transition_assignee
-        loaded = await _planning_load(c, who, state, type)
+        assignee, state, type = _restore_filter(
+            request, assignee, state, type, c.config.auto_transition_assignee
+        )
+        loaded = await _planning_load(c, assignee, state, type)
         ctx = await _planning_ctx(
-            request, loaded=loaded, assignee=who, state_filter=state, type_filter=type,
+            request, loaded=loaded, assignee=assignee, state_filter=state, type_filter=type,
             started=started, scheduled_n=scheduled,
         )
         resp = _TEMPLATES.TemplateResponse(request, "planning.html", ctx)
         # Remember the active filter for next time (30 days).
         resp.set_cookie(
             _FILTER_COOKIE,
-            urlencode({"assignee": who, "state": state, "type": type}),
+            urlencode({"assignee": assignee, "state": state, "type": type}),
             max_age=60 * 60 * 24 * 30, samesite="lax", httponly=True,
         )
         return resp
@@ -720,7 +726,9 @@ def create_dashboard_router() -> APIRouter:
         c: Container = request.app.state.container
         form = await request.form()
         ids = [int(x) for x in form.getlist("ids") if str(x).strip().isdigit()]
-        assignee = str(form.get("assignee", "")) or c.config.auto_transition_assignee
+        # Blank = the whole team; do NOT fall back to this machine's assignee or the
+        # analysis would silently re-scope to one person after every Analyze click.
+        assignee = str(form.get("assignee", ""))
         state = str(form.get("state", "all"))
         wtype = str(form.get("type", "all"))
         analysis = await planning_analyzer.analyze(c, ids) if ids else None

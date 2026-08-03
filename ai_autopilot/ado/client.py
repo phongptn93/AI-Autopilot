@@ -203,25 +203,26 @@ class AdoClient:
         self, assignee: str, states: list[str] | None = None,
         types: list[str] | None = None, top: int = 200,
     ) -> list[WorkItemInfo]:
-        """Work items assigned to ``assignee`` — email/unique name, or several separated
-        by comma/semicolon (a team) — any tag, for the Planning workbench to pick from.
-        Optionally filtered to ``states`` / ``types``."""
+        """Work items for the Planning workbench — any tag, optionally filtered to
+        ``states`` / ``types``.
+
+        ``assignee`` is an email/unique name, or several separated by comma/semicolon
+        (a team). **Blank means every assignee** (including unassigned items): planning
+        a sprint is a team-wide act, so forcing one name hid everyone else's work and
+        made cross-person conflicts invisible — exactly what the conflict analyzer is
+        for. Client-side capped at ``top`` (WIQL has no LIMIT), logged when it truncates.
+        """
         people = [
             p.replace("'", "''").strip()
             for p in re.split(r"[,;]", assignee or "")
             if p.strip()
         ]
-        if not people:
-            return []
+        clauses = [f"[System.TeamProject] = '{_wiql_lit(self._config.ado_project)}'"]
         if len(people) == 1:
-            who_clause = f"[System.AssignedTo] = '{people[0]}'"
-        else:
+            clauses.append(f"[System.AssignedTo] = '{people[0]}'")
+        elif people:
             who_list = ", ".join(f"'{p}'" for p in people)
-            who_clause = f"[System.AssignedTo] IN ({who_list})"
-        clauses = [
-            who_clause,
-            f"[System.TeamProject] = '{_wiql_lit(self._config.ado_project)}'",
-        ]
+            clauses.append(f"[System.AssignedTo] IN ({who_list})")
         if states:
             state_list = ", ".join(f"'{_wiql_lit(s)}'" for s in states)
             clauses.append(f"[System.State] IN ({state_list})")
@@ -244,8 +245,13 @@ class AdoClient:
         if resp.status_code >= 400 or not text.startswith("{"):
             self._log.warning("assignee WIQL failed", status=resp.status_code)
             return []
-        ids = [r["id"] for r in (resp.json().get("workItems") or [])][:top]
-        return await self.get_work_items_by_ids(ids)
+        all_ids = [r["id"] for r in (resp.json().get("workItems") or [])]
+        if len(all_ids) > top:
+            self._log.info(
+                "planning load truncated", matched=len(all_ids), returned=top,
+                assignee=assignee or "(everyone)",
+            )
+        return await self.get_work_items_by_ids(all_ids[:top])
 
     async def get_all_tagged_work_items(self) -> list[WorkItemInfo]:
         """Query every work item carrying the trigger tag, in ANY state.

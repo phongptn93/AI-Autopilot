@@ -39,7 +39,7 @@
 
 <div class="page-header">
   <h2>🧭 Planning workbench</h2>
-  <p>Load your assigned work, let AI group &amp; check conflicts, then start now or schedule a run.</p>
+  <p>Load work — yours, a few colleagues', or the whole team — let AI group &amp; check conflicts, then start now or schedule a run.</p>
 </div>
 
 {% if started %}<div class="flash flash-ok">▶️ Started {{ started }} item(s) — now in the pipeline.</div>{% endif %}
@@ -51,9 +51,9 @@
   <form method="get" action="/dashboard/planning">
     <div class="pf-toolbar">
       <div class="pf-field" style="flex:1; min-width:240px">
-        <span>Assignee</span>
+        <span>Assignee <span class="dim" style="font-weight:400">— để trống = tất cả mọi người</span></span>
         <input class="pf-input" name="assignee" value="{{ assignee }}"
-               placeholder="email / name — comma-separate for a team"/>
+               placeholder="để trống = cả team · nhiều người: a@x.com, b@x.com"/>
       </div>
       <div class="pf-field" style="min-width:150px">
         <span>State</span>
@@ -91,7 +91,7 @@
         <thead><tr>
           <th style="width:40px"><input class="cell-chk" type="checkbox"
             onclick="document.querySelectorAll('.wbchk').forEach(c=>c.checked=this.checked);_sel()"></th>
-          <th>Item</th><th style="width:120px">Type</th><th style="width:150px">State</th><th style="width:120px">In pipeline</th>
+          <th>Item</th><th style="width:160px">Assignee</th><th style="width:120px">Type</th><th style="width:150px">State</th><th style="width:120px">In pipeline</th>
         </tr></thead>
         <tbody>
           {% for it in loaded %}
@@ -101,6 +101,7 @@
               <span class="id-col">#{{ it.id }}</span>&nbsp;
               {% if ado_item_base %}<a class="rowlink" href="{{ ado_item_base }}/{{ it.id }}" target="_blank">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %}
             </td>
+            <td class="muted">{{ it.assigned_to or '—' }}</td>
             <td><span class="chip">{{ it.work_item_type }}</span></td>
             <td class="muted">{{ it.state }}</td>
             <td>
@@ -124,8 +125,8 @@
     </div>
     {% else %}
     <div class="empty-state">
-      {% if assignee %}No work items for <b>{{ assignee }}</b>{% if state_filter!='all' %} · state “{{ state_filter }}”{% endif %}{% if type_filter!='all' %} · type “{{ type_filter }}”{% endif %}.
-      {% else %}Enter an assignee and press <b>Load</b> to list work items.{% endif %}
+      No work items for {% if assignee %}<b>{{ assignee }}</b>{% else %}<b>toàn bộ team</b>{% endif %}{% if state_filter!='all' %} · state “{{ state_filter }}”{% endif %}{% if type_filter!='all' %} · type “{{ type_filter }}”{% endif %}.
+      {% if assignee %}<div class="dim" style="margin-top:6px">Xoá trống ô Assignee rồi bấm <b>Load</b> để xem việc của mọi người.</div>{% endif %}
     </div>
     {% endif %}
   </div>

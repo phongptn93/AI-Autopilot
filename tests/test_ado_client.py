@@ -88,11 +88,11 @@ async def test_multi_assignee_uses_in_clause():
     assert "[System.AssignedTo] IN ('a@x.com', 'b@x.com', 'c@x.com')" in q
 
 
-async def test_blank_assignee_returns_empty(tmp_path):
-    c = _client(ado_project="Proj")
-    c._http = _CaptureHttp()
-    assert await c.get_work_items_by_assignee("  , ; ") == []
-    assert c._http.last_query == ""          # never queried
+async def test_blank_assignee_queries_everyone():
+    """Blank/whitespace = the whole team, not "show nothing": Planning is a team view."""
+    q = await _assignee_query("  , ; ")
+    assert "AssignedTo" not in q             # no person filter at all
+    assert "[System.TeamProject] = 'Proj'" in q
 
 
 # ── Batched work-item fetch ───────────────────────────────────────────────────

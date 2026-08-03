@@ -56,6 +56,15 @@
     <div class="stat-card-value">{{ '{:,}'.format(report.total_tokens) }}</div>
   </div>
   <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Lessons injected</span><div class="stat-card-icon">🧠</div></div>
+    <div class="stat-card-value">{{ report.lessons_injected }}</div>
+    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
+      {% if report.runs_with_lessons %}in {{ report.runs_with_lessons }} run(s) ·
+        <a class="table-link" href="/dashboard/learning">what it learned →</a>
+      {% else %}<a class="table-link" href="/dashboard/learning">learning loop off / empty</a>{% endif %}
+    </div>
+  </div>
+  <div class="stat-card">
     <div class="stat-card-header"><span class="stat-card-label">Avg duration</span><div class="stat-card-icon">⏱️</div></div>
     <div class="stat-card-value">{{ fmt_duration(report.avg_duration_seconds) }}</div>
   </div>

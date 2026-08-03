@@ -33,6 +33,10 @@ class AnalyticsReport:
     with_pr: int = 0
     distinct_items: int = 0
     total_tokens: int = 0
+    # Learning loop: how many past lessons were fed into briefs over the window, and
+    # how many runs carried at least one. Zero everywhere = the loop is off or empty.
+    lessons_injected: int = 0
+    runs_with_lessons: int = 0
     avg_duration_seconds: float = 0.0
     by_category: list[CategoryStat] = field(default_factory=list)
     per_day: list[tuple[str, int]] = field(default_factory=list)  # (YYYY-MM-DD, runs)
@@ -76,6 +80,9 @@ def compute_analytics(
         rep.total_runs += 1
         items.add(r.work_item_id)
         rep.total_tokens += r.cost_tokens or 0
+        if r.lessons_injected:
+            rep.lessons_injected += r.lessons_injected
+            rep.runs_with_lessons += 1
         if r.status == ExecutionStatus.SUCCESS:
             rep.success += 1
         elif r.status == ExecutionStatus.FAILED:

@@ -196,7 +196,11 @@ FIELDS: tuple[Field, ...] = (
     Field("auto_review_enabled", "Auto security review", "bool", "🧪 Quality gates"),
     Field("learning_loop_enabled", "🧠 Learning loop", "bool", "🧪 Quality gates",
           "Remember what auto-review flagged per repo and inject recent lessons into the "
-          "next run's brief, so the agent stops repeating them. Off = brief unchanged."),
+          "next run's brief, so the agent stops repeating them. Off = brief unchanged. "
+          "See what it has learned on the Learning page."),
+    Field("lessons_max_injected", "↳ Lessons injected / run", "int", "🧪 Quality gates",
+          "How many of the most recent lessons go into a brief. Default 8. "
+          "0 = keep recording but stop injecting."),
     Field("test_gate_enabled", "🧪 Auto-test-gate", "bool", "🧪 Quality gates",
           "Run the repo's test suite in the worktree before opening a PR; a red run blocks "
           "the PR and lowers the run score. Off = no test run."),

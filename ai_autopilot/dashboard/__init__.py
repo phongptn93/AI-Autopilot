@@ -970,6 +970,77 @@ def create_dashboard_router() -> APIRouter:
             _ctx(request, "analytics", report=report, days=days, tag=tag),
         )
 
+    @router.get("/learning", response_class=HTMLResponse)
+    async def learning_page(request: Request, days: int = 30):
+        """The retrospective learning loop, made visible: what the autopilot remembers
+        per repo, which of it feeds the next brief, and how often it is being used.
+
+        Without this page the loop is invisible — lessons live in files nobody opens, so
+        a wrong lesson keeps poisoning every future brief with no way to notice.
+        """
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        cfg = c.config
+        workspace = cfg.workspace_directory
+        days = max(1, min(days, 180))
+        repos = lessons_mod.list_repos(workspace)
+        groups = [(repo, lessons_mod.entries(workspace, repo)) for repo in repos]
+        limit = max(0, cfg.lessons_max_injected)
+        # Per repo: how many of ITS newest lessons a brief on that repo carries.
+        injected_from = {repo: min(len(items), limit) for repo, items in groups}
+        series = lessons_mod.per_day(workspace)[-days:]
+        today = datetime.now().date().isoformat()
+        try:
+            dfrom = (datetime.now() - timedelta(days=days - 1)).date().isoformat()
+            records, _ = await c.execution_repo.search(dfrom=dfrom, limit=5000)
+        except Exception:  # noqa: BLE001 — the page must render without history
+            records = []
+        return _TEMPLATES.TemplateResponse(
+            request, "learning.html",
+            _ctx(
+                request, "learning",
+                enabled=cfg.learning_loop_enabled, workspace=workspace,
+                repos=repos, groups=groups, injected_from=injected_from,
+                total=sum(len(items) for _, items in groups),
+                max_injected=limit, series=series,
+                peak=max((n for _, n in series), default=0),
+                new_today=sum(n for day, n in series if day == today),
+                days=days,
+                injected_total=sum(r.lessons_injected or 0 for r in records),
+                injected_runs=sum(1 for r in records if r.lessons_injected),
+            ),
+        )
+
+    @router.post("/learning/delete")
+    async def learning_delete(request: Request):
+        """Prune ONE lesson. A wrong lesson is worse than none — it is re-taught every run."""
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        form = await request.form()
+        repo, text = str(form.get("repo") or ""), str(form.get("text") or "")
+        if lessons_mod.delete(c.config.workspace_directory, repo, text):
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="lesson.deleted",
+                target=f"{repo}: {text}"[:300],
+            )
+        return RedirectResponse("/dashboard/learning", status_code=303)
+
+    @router.post("/learning/clear")
+    async def learning_clear(request: Request):
+        """Forget everything learned about one repo (e.g. after a rewrite)."""
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        form = await request.form()
+        repo = str(form.get("repo") or "")
+        if lessons_mod.clear(c.config.workspace_directory, repo):
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="lesson.cleared", target=repo[:300],
+            )
+        return RedirectResponse("/dashboard/learning", status_code=303)
+
     @router.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request):
         c: Container = request.app.state.container

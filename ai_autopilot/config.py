@@ -925,6 +925,10 @@ class Settings(BaseSettings):
     # run's brief, so the agent stops repeating flagged mistakes. Opt-in — off = the
     # brief is unchanged and nothing is written.
     learning_loop_enabled: bool = False
+    # How many of the most recent lessons are injected into a brief. Too few and the
+    # loop forgets; too many and the brief drowns in old findings. 0 = record only
+    # (keep learning, stop injecting).
+    lessons_max_injected: int = 8
 
     # ── Auto-test-gate ──
     # Run the target repo's test suite in the worktree after the agent edits but

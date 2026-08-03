@@ -624,6 +624,7 @@
       <tr><td>Capture</td><td>Sau auto-review, findings được chuẩn hóa thành bài học ngắn, gắn với repo.</td></tr>
       <tr><td>Inject</td><td><code>lessons_max_injected</code> bài gần nhất được thêm vào brief trước khi agent chạy.</td></tr>
       <tr><td>Scope</td><td>Theo repo, không toàn cục — convention của BE khác FE, trộn vào nhau là nhiễu.</td></tr>
+      <tr><td>Surface</td><td>Trang <code>/dashboard/learning</code>: xem bài học theo repo, biết cái nào đang được nhồi, xoá bài sai. History gắn badge <code>🧠 N</code> cho run đã được cảnh báo (cột <code>executions.lessons_injected</code>).</td></tr>
     </tbody>
   </table>
   <div class="info">Đây là hệ con duy nhất mà giá trị <strong>cộng dồn theo thời gian</strong>: mọi thứ khác giữ chất lượng ổn định, cái này làm nó tăng dần — nếu findings thực sự được sinh ra, tức là auto-review phải bật.</div>

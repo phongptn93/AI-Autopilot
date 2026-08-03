@@ -152,7 +152,9 @@ class ClaudeExecutor:
         """Implement a work item on a fresh branch and open a PR."""
         repo, base_branch = self._resolve_repo(item)
         prompt = self._build_prompt(item, skill_command, repo)
-        return await self._run_in_workspace(
+        workspace = self._config.workspace_directory
+        injected = self._lessons_injected([_repo_name(repo, workspace)] if workspace else [])
+        result = await self._run_in_workspace(
             item_id=item.id,
             repo=repo,
             branch=_branch_name(item),
@@ -162,6 +164,21 @@ class ClaudeExecutor:
             draft_pr=draft_pr,
             existing_branch=False,
             create_pr=True,
+        )
+        result.lessons_injected = injected
+        return result
+
+    def _lessons_injected(self, repos: list[str]) -> int:
+        """How many past lessons the brief just carried.
+
+        Counts the SAME list the brief was built from, so History's 🧠 badge can never
+        claim the agent was warned about something it never saw.
+        """
+        workspace = self._config.workspace_directory
+        if not self._config.learning_loop_enabled or not workspace:
+            return 0
+        return len(
+            lessons.recent(workspace, repos, limit=self._config.lessons_max_injected)
         )
 
     def _build_prompt(self, item: WorkItemInfo, skill_command: str, repo: str) -> str:
@@ -191,7 +208,10 @@ class ClaudeExecutor:
             f"You may use the Azure DevOps MCP to fetch more detail on #{item.id} if needed."
         )
         if self._config.learning_loop_enabled:
-            past = lessons.lessons_brief(self._config.workspace_directory, [repo_name])
+            past = lessons.lessons_brief(
+                self._config.workspace_directory, [repo_name],
+                limit=self._config.lessons_max_injected,
+            )
             if past:
                 parts.append(past)
         parts.append(f"\nNow run this skill: {skill_command}")
@@ -213,6 +233,7 @@ class ClaudeExecutor:
         started = time.monotonic()
 
         repos = self._allowed_repos(workspace)
+        injected = self._lessons_injected(repos)
         # Isolate this task in its own worktree scratch so it never touches the
         # user's main checkout; None → run in the shared workspace (disabled / no repos).
         scratch = await self._acquire_agent_scratch(item.id, repos)
@@ -228,6 +249,10 @@ class ClaudeExecutor:
                 workspace, item.id, f"🚀 agent started{isolated} — repos: {', '.join(repos) or '-'}"
             )
             brief = self._build_brief(item, repos, autonomy=autonomy, draft_pr=draft_pr)
+            if injected:
+                activity.append(
+                    workspace, item.id, f"🧠 {injected} lesson(s) from past runs injected"
+                )
             self._log.info("running agent", id=item.id, cwd=run_dir, repos=repos, isolated=bool(scratch))
             claude_run = await self._run_claude(
                 brief, run_dir, on_event=lambda line: activity.append(workspace, item.id, line)
@@ -246,6 +271,7 @@ class ClaudeExecutor:
         finally:
             await self.release_scratch(scratch)
         result.duration_seconds = time.monotonic() - started
+        result.lessons_injected = injected
         return result
 
     async def review_pr(self, repo_name: str, pr_id: int, pr_url: str = "") -> str:
@@ -702,7 +728,10 @@ class ClaudeExecutor:
                 f"they conflict:\n\n{item.pending_comment}"
             )
         if self._config.learning_loop_enabled:
-            past = lessons.lessons_brief(self._config.workspace_directory, repos)
+            past = lessons.lessons_brief(
+                self._config.workspace_directory, repos,
+                limit=self._config.lessons_max_injected,
+            )
             if past:
                 lines.append(past)
         lines += [

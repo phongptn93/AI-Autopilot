@@ -820,8 +820,8 @@ push</b>. Hiểu sai theo hướng advisory thì chỉ tốn một comment.</p>
 <tr><td><code>auto_test_enabled</code></td><td class="def">false</td><td>Chạy test suite của repo trong worktree; <b>test đỏ → không mở PR</b>. Tự nhận pytest / dotnet / npm.</td></tr>
 <tr><td><code>auto_test_command</code></td><td class="def">""</td><td>Ghi đè lệnh test khi tự nhận sai.</td></tr>
 <tr><td><code>auto_security_review</code></td><td class="def">false</td><td>Rà soát diff theo severity; <b>critical → chặn PR</b>. Tín hiệu đi vào điểm run.</td></tr>
-<tr><td><code>lessons_enabled</code></td><td class="def">false</td><td>Learning loop: ghi nhớ điều auto-review nhắc <b>theo từng repo</b> rồi nhồi các bài học gần nhất vào brief của run sau.</td></tr>
-<tr><td><code>lessons_max_injected</code></td><td class="def">5</td><td>Nhồi tối đa bao nhiêu bài học mỗi run.</td></tr>
+<tr><td><code>learning_loop_enabled</code></td><td class="def">false</td><td>Learning loop: ghi nhớ điều auto-review nhắc <b>theo từng repo</b> rồi nhồi các bài học gần nhất vào brief của run sau. Xem/xoá bài học ở trang <b>🧠 Learning</b> của dashboard.</td></tr>
+<tr><td><code>lessons_max_injected</code></td><td class="def">8</td><td>Nhồi tối đa bao nhiêu bài học mỗi run (0 = vẫn ghi nhưng không nhồi).</td></tr>
 </table>
 <div class="callout c-info">Đây là nhóm nên bật <b>đầu tiên</b> khi thử autopilot: nó giảm PR rác
 mà không đổi cách bạn làm việc.</div>

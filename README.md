@@ -26,7 +26,8 @@ Polls your ADO board, understands each tagged work item, and drives **Claude Cod
 | 🔀 **Dependency‑aware scheduling** | Orders work by the ADO link graph (0 tokens) and avoids running conflicting items concurrently — with an AI conflict feed‑back loop. |
 | 🔁 **Closed‑loop SDLC (v2)** | Optional multi‑stage engine (analyze → design → implement → test → review → PR) with per‑stage gating and multi‑machine handoff. |
 | 🛡️ **Safe by design** | Isolated git worktrees, auto security review, objective run scoring, and a single tag/state policy table. |
-| 📊 **Live dashboard** | Overview · Board · Planning · Reviews · Queue · Analytics · Audit · History · Settings · Config — full‑width, filterable, drag‑and‑drop, password‑lockable. |
+| 📊 **Live dashboard** | Overview · Board · Planning · Reviews · Queue · Analytics · Learning · Audit · History · Settings · Config — full‑width, filterable, drag‑and‑drop, password‑lockable. |
+| 🧠 **Retrospective learning** | What auto‑review flags is remembered **per repo** and injected into the next brief, so the agent stops re‑earning the same findings. The **Learning** page shows every lesson, which ones feed the next run, and lets you prune a wrong one — History badges each run it warned (`🧠 N`). |
 | 🩺 **`ai-autopilot doctor`** | Audits whether the configuration is *coherent* — the gap `/health` cannot see. Every check came from a failure diagnosed by hand: a Teams bot switched on with no app id (silently absent, not broken), a messaging endpoint on loopback, concurrency without worktrees, a setting whose companion switch is off. Config‑only: no network, no writes, safe in CI. |
 | 🔌 **Extensible** | Python plugins (pre/post/skill hooks), scheduled loops, multi‑tenant, and Teams/Zalo/Email notifications. |
 | 👀 **PR reviewer tracking** | Watches every active PR's reviewer list (any author) — auto‑reviews + votes when the bot is added as reviewer, reminds overdue human reviewers, and answers role commands (`/spec /qc /security /impact ...`) routed to specialist subagents. |
@@ -87,7 +88,7 @@ The service listens on **`:5080`** by default:
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/dashboard` | Overview · Board · Planning · History · Settings · Config · Capabilities |
+| `/dashboard` | Overview · Board · Planning · History · Learning · Settings · Config · Capabilities |
 | `/health` | Readiness checks (ado / claude / disk) as JSON |
 | `/metrics` | Prometheus metrics |
 | `/api/webhook/ado` | ADO Service Hook → instant pickup (work items **and** PR comments) |

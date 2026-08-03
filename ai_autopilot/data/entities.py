@@ -278,3 +278,6 @@ class ExecutionRecord(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     cost_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # Lessons the learning loop injected into this run's brief. NULL on rows written
+    # before the column existed → rendered as "no badge", never as a zero claim.
+    lessons_injected: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)

@@ -104,6 +104,7 @@ class ExecutionRepository:
                 result.duration_seconds = record.duration_seconds
             if result.cost_tokens:
                 record.cost_tokens = result.cost_tokens
+            record.lessons_injected = result.lessons_injected
             await session.commit()
 
     async def mark_retrying(self, record_id: int, retry_count: int) -> None:

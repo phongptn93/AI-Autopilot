@@ -28,6 +28,9 @@ class ExecutionResult:
     # Auto-test-gate outcome: True/False when the suite ran, None when skipped
     # (gate off / no runner). Feeds pr_scorer's ci signal.
     tests_passed: bool | None = None
+    # How many past lessons the learning loop injected into this run's brief
+    # (0 = loop off / nothing learned yet). Surfaced as History's 🧠 badge.
+    lessons_injected: int = 0
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod

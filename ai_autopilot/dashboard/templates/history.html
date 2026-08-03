@@ -14,6 +14,11 @@
     font-size:13px; font-weight:600; text-decoration:none; }
   .pgbtn:hover { border-color:var(--accent,#6366f1); background:var(--accent-bg,rgba(99,102,241,.13)); }
   .pgbtn.disabled { opacity:.35; pointer-events:none; }
+  /* Learning loop: this run was warned with N past lessons. */
+  .lesson-badge { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px;
+    font-size:11px; font-weight:700; white-space:nowrap; cursor:help;
+    border:1px solid var(--accent,#6366f1); color:var(--accent-hover,#818cf8);
+    background:var(--accent-bg,rgba(99,102,241,.13)); }
 </style>
 
 <div class="page-header">
@@ -59,7 +64,9 @@
                 {% set label, css = category_badge(e.category) %}
                 <tr>
                     <td class="id-col">#{{ e.work_item_id }}</td>
-                    <td class="title-col">{{ e.title }}</td>
+                    <td class="title-col">{{ e.title }}
+                        {% if e.lessons_injected %}<span class="lesson-badge"
+                            title="{{ e.lessons_injected }} bài học từ run trước đã được nhồi vào brief của run này">🧠 {{ e.lessons_injected }}</span>{% endif %}</td>
                     <td><span class="cat-badge {{ css }}">{{ label }}</span></td>
                     <td class="mono">{{ e.skill_used or '—' }}</td>
                     <td><span class="badge {{ status_class(e.status.value) }}"><span class="badge-dot"></span>{{ e.status.value }}</span></td>

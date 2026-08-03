@@ -77,6 +77,11 @@ feedback_loop_enabled: false
 max_revisions: 3
 auto_review_enabled: true
 block_on_severity: "Critical,High"
+# Retrospective learning loop: remember what auto-review flagged, per repo, in
+# <workspace>/.autopilot/lessons/<repo>.md and inject the most recent lessons into the
+# next run's brief. Read/prune them on the dashboard's Learning page.
+learning_loop_enabled: false
+lessons_max_injected: 8               # 0 = keep recording, stop injecting
 # Resume the Claude Agent session per (repo, branch) across revise rounds — follow-ups
 # keep prior context (cheaper, more consistent). Falls back to a fresh session if resume
 # fails (e.g. not on this host). Off by default.

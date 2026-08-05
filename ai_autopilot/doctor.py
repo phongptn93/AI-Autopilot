@@ -517,8 +517,15 @@ def check_assignee_scoping(config: Settings) -> list[Finding]:
             "otherwise match nobody.",
             "Use the full email (e.g. phong.pham@nois.vn), or the full display name.",
         ))
-    roster = config.effective_command_users
-    if roster:
+    # What the COMMAND gate actually enforces — not the ownership roster. With
+    # commands_from_anyone on they differ, and printing the roster there would describe a
+    # restriction that is no longer applied.
+    roster = config.command_allowlist
+    if config.commands_from_anyone:
+        out.append(Finding(
+            OK, "Commands accepted from anyone (commands_from_anyone: true)"
+        ))
+    elif roster:
         out.append(Finding(
             OK, f"Commands accepted from: {describe_users(roster, limit=6)}"
         ))

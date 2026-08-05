@@ -120,6 +120,26 @@ def test_extras_alone_are_enough_when_there_is_no_owner():
     assert matches_any_user("other@nois.vn", "Other", cfg.effective_command_users) is False
 
 
+def test_commands_from_anyone_opens_the_gate_without_touching_ownership():
+    """The owner is what decides which ITEMS this machine picks up, so it is always set —
+    which meant the roster was never empty and every colleague's "/ai …" was refused.
+    The flag opens the command gate alone; ownership must stay scoped to the owner."""
+    cfg = Settings(
+        assignee_trigger_user="dxfactory@nois.vn", commands_from_anyone=True
+    )
+    assert cfg.command_allowlist == []                       # gate: unrestricted
+    assert matches_any_user("anyone@x.vn", "Anyone", cfg.command_allowlist) is True
+    # Ownership is unchanged — the shared assignee-trigger tag still claims only our items.
+    assert cfg.effective_command_users == ["dxfactory@nois.vn"]
+    assert matches_any_user("anyone@x.vn", "Anyone", cfg.effective_command_users) is False
+
+
+def test_the_gate_falls_back_to_the_roster_when_the_flag_is_off():
+    cfg = Settings(assignee_trigger_user="dxfactory@nois.vn", command_users=["que.phan@nois.vn"])
+    assert cfg.commands_from_anyone is False                 # default: unchanged behaviour
+    assert cfg.command_allowlist == cfg.effective_command_users
+
+
 def test_an_ambiguous_entry_in_the_roster_still_matches_nobody():
     """The strict rule for a lone word applies per entry, so one bad entry cannot widen
     the roster to a colleague who merely shares a first name."""

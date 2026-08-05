@@ -1102,6 +1102,8 @@ Giá trị lạ được <b>log rồi bỏ qua</b>, không làm sập autopilot.
 <tr><td><code>daily_budget_tokens</code> / <code>cost_alert_enabled</code></td><td class="def">0 / false</td><td>Ngân sách token/ngày + cảnh báo. 0 = không giới hạn.</td></tr>
 <tr><td><code>allowed_users</code> / <code>approver_users</code></td><td class="def">[] / []</td><td>RBAC: chỉ xử lý item của user cho phép; ai được duyệt.</td></tr>
 <tr><td><code>allowed_skills</code></td><td class="def">[]</td><td>Giới hạn skill được chạy (trống = tất cả).</td></tr>
+<tr><td><code>command_users</code> / <code>commands_from_anyone</code></td><td class="def">[] / false</td><td>Ai được ra lệnh <code>/ai</code>, <code>@mention</code>: mặc định chỉ owner. Liệt kê thêm người, hoặc bật cờ cho <b>tất cả</b>. Không đổi việc máy nhận work item của ai.</td></tr>
+<tr><td><code>pr_add_assignee_as_reviewer</code> / <code>pr_extra_reviewer_ids</code> / <code>pr_reviewers_required</code></td><td class="def">false / [] / false</td><td>Gán reviewer cho PR autopilot tạo: người được assign work item (+ id bổ sung). <code>required</code> = chặn hoàn tất PR đến khi họ vote.</td></tr>
 <tr><td><code>tenants</code></td><td class="def">[]</td><td>Multi-tenant: nhiều org/project trên cùng instance.</td></tr>
 <tr><td><code>scheduled_loops</code></td><td class="def">[]</td><td>Vòng lặp định kỳ (sweeper/changelog) mở PR theo cron/interval.</td></tr>
 <tr><td><code>teams_webhook_url</code> / <code>zalo_*</code> / <code>smtp_*</code> 🔒</td><td class="def">""</td><td>Kênh thông báo (Teams/Zalo/Email). Để ENV.</td></tr>

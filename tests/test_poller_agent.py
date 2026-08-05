@@ -20,6 +20,7 @@ class _FakeAdo:
         self.removed: list[tuple[int, str]] = []
         self.tagged_items: list = []
         self.comments_by_item: dict[int, list[dict]] = {}
+        self.reviewers: list[tuple[str, int, str, bool]] = []
 
     async def add_tag(self, work_item_id, tag):
         self.tags.append((work_item_id, tag))
@@ -41,6 +42,10 @@ class _FakeAdo:
 
     async def get_work_item_comments(self, work_item_id):
         return self.comments_by_item.get(work_item_id, [])
+
+    async def add_pull_request_reviewer(self, repo_id, pr_id, reviewer_id, *, required=False):
+        self.reviewers.append((repo_id, pr_id, reviewer_id, required))
+        return True
 
 
 class _FakeExec:
@@ -268,6 +273,83 @@ async def test_unattended_completed_marks_processed():
     await p._handle_agent_result(_item(), res)
     assert (7, c.config.processed_tag) in c.ado.tags  # Done outcome tags processed_tag
     assert c.notifier.completed == [True]
+
+
+# ── Reviewers on the PR the autopilot opens ──────────────────────────────────
+
+_PR_URL = "https://dev.azure.com/nois/DxFactory/_git/Backend-Fresh/pullrequest/2470"
+
+
+def _assigned_item() -> WorkItemInfo:
+    return WorkItemInfo(
+        id=7, title="t", work_item_type="Task",
+        assigned_to="Que Phan", assigned_to_email="que.phan@nois.vn",
+        assigned_to_id="11111111-2222-3333-4444-555555555555",
+    )
+
+
+async def test_assignee_is_added_as_reviewer_on_a_draft_pr():
+    """A draft PR is exactly when someone has to be told to look — so the reviewer is
+    added there too, not only on unattended PRs."""
+    p, c = _poller(autonomy="assisted", pr_add_assignee_as_reviewer=True)
+    res = ExecutionResult.ok(7, "agent", "done")
+    res.pr_url = _PR_URL
+    await p._handle_agent_result(_assigned_item(), res)
+    # Repo NAME from the url is a valid repositoryId for the git REST endpoints.
+    assert c.ado.reviewers == [
+        ("Backend-Fresh", 2470, "11111111-2222-3333-4444-555555555555", False)
+    ]
+
+
+async def test_extra_reviewers_are_added_and_never_duplicated():
+    p, c = _poller(
+        pr_add_assignee_as_reviewer=True,
+        pr_extra_reviewer_ids=["11111111-2222-3333-4444-555555555555", "  ", "aaaa-bbbb"],
+        pr_reviewers_required=True,
+    )
+    res = ExecutionResult.ok(7, "agent", "done")
+    res.pr_url = _PR_URL
+    await p._handle_agent_result(_assigned_item(), res)
+    assert [r[2] for r in c.ado.reviewers] == [
+        "11111111-2222-3333-4444-555555555555", "aaaa-bbbb"   # assignee listed twice → once
+    ]
+    assert all(r[3] is True for r in c.ado.reviewers)          # required
+
+
+async def test_every_pr_of_a_multi_repo_run_gets_the_reviewer():
+    p, c = _poller(pr_add_assignee_as_reviewer=True)
+    res = ExecutionResult.ok(7, "agent", "done")
+    res.pr_url = _PR_URL
+    res.pr_urls = [
+        _PR_URL,                                                          # same one → once
+        "https://dev.azure.com/nois/DxFactory/_git/Micro-Frontend/pullrequest/2471",
+    ]
+    await p._handle_agent_result(_assigned_item(), res)
+    assert [(r[0], r[1]) for r in c.ado.reviewers] == [
+        ("Backend-Fresh", 2470), ("Micro-Frontend", 2471)
+    ]
+
+
+async def test_no_reviewer_added_when_the_feature_is_off_or_nobody_is_assigned():
+    p, c = _poller()                                   # default: feature off
+    res = ExecutionResult.ok(7, "agent", "done")
+    res.pr_url = _PR_URL
+    await p._handle_agent_result(_assigned_item(), res)
+    assert c.ado.reviewers == []
+
+    p, c = _poller(pr_add_assignee_as_reviewer=True)   # on, but the item has no assignee
+    await p._handle_agent_result(_item(), res)
+    assert c.ado.reviewers == []
+
+
+async def test_an_unparseable_pr_url_is_survived_not_raised():
+    """The PR is already open; a url we can't address must not fail the run."""
+    p, c = _poller(pr_add_assignee_as_reviewer=True)
+    res = ExecutionResult.ok(7, "agent", "done")
+    res.pr_url = "https://example.invalid/whatever"
+    await p._handle_agent_result(_assigned_item(), res)
+    assert c.ado.reviewers == []
+    assert (7, c.config.review_tag) in c.ado.tags      # the run still completed normally
 
 
 async def test_report_mode_marks_processed_without_pr():
@@ -717,6 +799,30 @@ async def test_a_listed_teammate_can_command_this_machine():
     p._process = _fake_process
     await p._reconcile_human_replies()
     assert item.pending_comment == "/ai sửa null check"
+
+
+async def test_commands_from_anyone_accepts_a_stranger_but_not_their_work_items():
+    p, c = _poller(commands_from_anyone=True)
+    c.config.trigger_tag = "autopilot"
+    c.config.assignee_trigger_tag = "ai-autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot"])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(6, "/ai sửa null check", is_bot=False, email="stranger@elsewhere.vn"),
+    ]}
+
+    async def _fake_process(it):
+        pass
+
+    p._process = _fake_process
+    await p._reconcile_human_replies()
+    assert item.pending_comment == "/ai sửa null check"
+    # Ownership untouched: an item carrying only the SHARED tag, assigned to someone
+    # else, is still not ours to run.
+    others = _tagged(8, "Active", ["ai-autopilot"])
+    others.assigned_to_email = "stranger@elsewhere.vn"
+    assert p._owns_item(others) is False
 
 
 async def test_someone_not_on_the_roster_is_still_ignored():

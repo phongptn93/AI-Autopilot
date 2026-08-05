@@ -474,6 +474,13 @@ class Settings(BaseSettings):
     # (see matches_user). Read via ``effective_command_users``, never on its own.
     # Empty owner AND empty list = anyone may command (single-machine default).
     command_users: list[str] = Field(default_factory=list)
+    # Open the /command gate to EVERYONE, without having to enumerate the team. The owner
+    # is normally always set (it decides whose work items this machine picks up), so the
+    # roster is never empty in practice and a colleague's "/ai …" is refused with
+    # "Trên máy này tôi chỉ nhận lệnh từ …". Clearing the owner to fix that would also
+    # widen which ITEMS get processed — the wrong knob. This flag scopes only the command
+    # gate (work-item /commands, PR /commands, @mentions); ownership is untouched.
+    commands_from_anyone: bool = False
     processed_tag: str = "autopilot-done"
     review_tag: str = "autopilot-review"
     # Applied when the agent escalates (needs_human); these items are held — the
@@ -702,6 +709,20 @@ class Settings(BaseSettings):
     # Only resume a stored session this fresh; older → start clean (stale context hurts
     # more than it helps once the branch has moved on).
     claude_session_ttl_hours: int = 24
+
+    # ── Reviewers on the PRs the autopilot opens ──
+    # Add the work item's ASSIGNEE as a reviewer on the PR opened for it. The person who
+    # owns the ticket is the one who should look at the code, and nobody reviews a PR they
+    # were never told about — ADO notifies on being added. Best-effort: a failure here is
+    # logged, never fails the run (the PR is already open). Off = ADO's own default
+    # reviewer policy applies, unchanged.
+    pr_add_assignee_as_reviewer: bool = False
+    # Extra reviewers added to every PR, as ADO identity GUIDs (the reviewers endpoint is
+    # keyed on identity id, not email — read one off an existing reviewer in the PR API).
+    pr_extra_reviewer_ids: list[str] = Field(default_factory=list)
+    # Mark added reviewers REQUIRED — ADO then blocks completing the PR until they vote.
+    # Off = optional reviewer (notified, not blocking), which is the safer default.
+    pr_reviewers_required: bool = False
 
     # ── PR reviewer tracking (all active PRs in the configured repos) ──
     # Watch every active PR's reviewer list: detect newly-added reviewers, track their
@@ -1156,6 +1177,17 @@ class Settings(BaseSettings):
             if u and u not in out:
                 out.append(u)
         return out
+
+    @property
+    def command_allowlist(self) -> list[str]:
+        """Who may issue /commands and @mentions — the roster, or ``[]`` (= anyone) when
+        ``commands_from_anyone`` is on.
+
+        Deliberately separate from ``effective_command_users``: that property also decides
+        which ITEMS this machine owns (shared assignee-trigger tag), so opening the command
+        gate through it would make the machine start picking up colleagues' work items too.
+        Command gates read THIS; ownership keeps reading the roster."""
+        return [] if self.commands_from_anyone else self.effective_command_users
 
     @property
     def command_catalog(self) -> list[tuple[str, bool, str]]:

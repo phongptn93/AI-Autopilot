@@ -647,7 +647,7 @@ class ReviewerTrackerService:
         )
         if not commands:
             return
-        claimed = cfg.effective_command_users
+        claimed = cfg.command_allowlist
         handled = await cmd_repo.handled_comments(pr_id)
         branch = pr.get("sourceRefName", "").removeprefix("refs/heads/")
         item = await self._pr_work_item(pr)

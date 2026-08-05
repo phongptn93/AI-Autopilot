@@ -125,6 +125,22 @@ async def test_unauthorized_commenter_gets_refusal_not_silence():
     assert len(ado.replies) == 1
 
 
+async def test_commands_from_anyone_runs_a_strangers_command():
+    """Opting in means no refusal for anybody — the owner stays configured (it still
+    decides which items get picked up), so the gate must read the flag, not the roster."""
+    ado = _FakeAdo([_thread(10, 1, "/ai fix issue 1", email="mallory@other.vn")])
+    feedback = _FakeFeedback()
+    svc = _service(
+        ado, feedback, assignee_trigger_user="phong@nois.vn", commands_from_anyone=True
+    )
+
+    await svc._inspect_pr("repo-1", "repo-a", _PR)
+    await asyncio.gather(*svc._tasks)
+
+    assert feedback.calls == ["/ai fix issue 1"]
+    assert not any("chỉ nhận lệnh" in r for r in ado.replies)
+
+
 async def test_authorized_command_runs_and_resolves():
     ado = _FakeAdo([_thread(10, 1, "/ai rename field")])
     feedback = _FakeFeedback()

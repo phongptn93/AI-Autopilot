@@ -677,6 +677,36 @@ class AdoClient:
             return []
         return resp.json().get("value") or []
 
+    async def add_pull_request_reviewer(
+        self, repo_id: str, pr_id: int, reviewer_id: str, *, required: bool = False
+    ) -> bool:
+        """Add an identity as a reviewer on a PR (idempotent — a re-PUT is a no-op).
+
+        ``reviewer_id`` is the ADO identity GUID (``System.AssignedTo``'s ``id``), not an
+        email. ``required`` marks them a *required* reviewer, which blocks completion until
+        they vote. Same endpoint as :meth:`cast_pull_request_vote` but with ``vote: 0`` —
+        added, not voting — so the human's own verdict is never pre-empted.
+        """
+        url = self._git_url(
+            f"git/repositories/{repo_id}/pullRequests/{pr_id}/reviewers/{reviewer_id}?{_API}"
+        )
+        try:
+            resp = await self._http.put(
+                url, json={"vote": 0, "isRequired": required}, headers=await self._headers()
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("add_pr_reviewer error", pr=pr_id, error=str(exc))
+            return False
+        if resp.status_code >= 400:
+            # Most common cause is ADO refusing the PR's own author as a reviewer — a
+            # warning, never fatal: the PR exists and the run must not be failed for it.
+            self._log.warning(
+                "add_pr_reviewer failed", pr=pr_id, reviewer=reviewer_id,
+                status=resp.status_code, body=resp.text[:200],
+            )
+            return False
+        return True
+
     async def cast_pull_request_vote(
         self, repo_id: str, pr_id: int, reviewer_id: str, vote: int
     ) -> bool:
@@ -870,6 +900,7 @@ class AdoClient:
             state=str(f.get("System.State", "")),
             assigned_to=_identity(f.get("System.AssignedTo")),
             assigned_to_email=_identity_email(f.get("System.AssignedTo")),
+            assigned_to_id=_identity_id(f.get("System.AssignedTo")),
             description=f.get("System.Description"),
             acceptance_criteria=f.get("Microsoft.VSTS.Common.AcceptanceCriteria"),
             parent_id=_as_int(f.get("System.Parent")),
@@ -905,6 +936,14 @@ def _identity(value: Any) -> str | None:
 def _identity_email(value: Any) -> str | None:
     if isinstance(value, dict):
         return value.get("uniqueName") or value.get("mailAddress")
+    return None
+
+
+def _identity_id(value: Any) -> str | None:
+    """The identity GUID — the only form the PR *reviewers* endpoint accepts."""
+    if isinstance(value, dict):
+        ident = value.get("id")
+        return str(ident) if ident else None
     return None
 
 

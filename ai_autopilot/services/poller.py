@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from datetime import UTC, datetime, timedelta
+from urllib.parse import unquote
 
 from ai_autopilot import metrics
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
@@ -24,6 +26,21 @@ from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.routing import plan_schedule, sort_by_priority
 from ai_autopilot.services.planning_analyzer import run_due_plans
+
+
+# An ADO pull-request URL, e.g.
+# https://dev.azure.com/org/Project/_git/Micro-Frontend/pullrequest/2470
+# The repo NAME is captured on purpose: the git REST endpoints accept a name wherever
+# they accept a repository id, so no extra lookup is needed to reach the PR.
+_PR_URL_RE = re.compile(r"/_git/([^/\s?#]+)/pullrequest/(\d+)", re.IGNORECASE)
+
+
+def parse_pr_url(url: str | None) -> tuple[str, int] | None:
+    """``(repo, pr_id)`` from a PR url, or ``None`` if it isn't one."""
+    m = _PR_URL_RE.search(url or "")
+    if not m:
+        return None
+    return unquote(m.group(1)), int(m.group(2))
 
 
 def _scheduler_snapshot(items: list[WorkItemInfo], plan: object, at: datetime) -> dict:
@@ -447,9 +464,19 @@ class AdoPollerService:
             asyncio.create_task(self._process(item))
 
     def _is_my_user(self, email: str | None, name: str | None) -> bool:
-        """True if the identity may command THIS machine — its owner, or anyone listed in
-        ``command_users``. Blank owner and empty list = anyone."""
+        """True if the identity is one THIS machine acts for — its owner, or anyone listed
+        in ``command_users``. Blank owner and empty list = anyone.
+
+        Ownership only (which items this stream picks up). For "may this person command
+        me", call :meth:`_may_command` — that one honours ``commands_from_anyone``."""
         return matches_any_user(email, name, self._config.effective_command_users)
+
+    def _may_command(self, email: str | None, name: str | None) -> bool:
+        """True if the identity may issue /commands and @mentions to this machine.
+
+        Same roster as :meth:`_is_my_user` unless ``commands_from_anyone`` is on, in which
+        case everyone may command while ownership stays scoped to the roster."""
+        return matches_any_user(email, name, self._config.command_allowlist)
 
     def _owns_item(self, item: WorkItemInfo) -> bool:
         """True if this machine's stream owns the item — mirrors the main poll's candidate
@@ -519,7 +546,7 @@ class AdoPollerService:
                 if (
                     cm["id"] <= baseline
                     or cm.get("is_bot")
-                    or not self._is_my_user(cm.get("created_by_email"), cm.get("created_by"))
+                    or not self._may_command(cm.get("created_by_email"), cm.get("created_by"))
                 ):
                     continue
                 instr = match_command(cm["text"], cfg.comment_commands)
@@ -838,6 +865,42 @@ class AdoPollerService:
             inp, auto_min=cfg.pr_score_auto_min, review_min=cfg.pr_score_review_min
         )
 
+    async def _add_reviewers(self, item: WorkItemInfo, result: ExecutionResult) -> None:
+        """Put the work item's assignee (and any configured extras) on the PR as reviewers.
+
+        Runs for BOTH draft and normal PRs: a draft is exactly the case where someone has
+        to be told to look. Every PR of the run is covered, not just the first — a
+        multi-repo item opens one per repo and the reviewer is needed on each. Entirely
+        best-effort: the PRs are already open, so a failed reviewer add is logged and
+        swallowed rather than turning a good run into a failure.
+        """
+        cfg = self._config
+        ids: list[str] = []
+        if cfg.pr_add_assignee_as_reviewer and item.assigned_to_id:
+            ids.append(item.assigned_to_id)
+        ids += [i.strip() for i in (cfg.pr_extra_reviewer_ids or []) if (i or "").strip()]
+        if not ids or cfg.dry_run:
+            if ids and cfg.dry_run:
+                self._log.info("[DRY-RUN] would add PR reviewers", id=item.id, count=len(ids))
+            return
+        urls = list(dict.fromkeys([u for u in [result.pr_url, *result.pr_urls] if u]))
+        for url in urls:
+            target = parse_pr_url(url)
+            if target is None:
+                # The agent reported a PR we can't address (unexpected url shape) — say so
+                # rather than silently doing nothing, since the operator opted into this.
+                self._log.warning("add reviewers: unrecognised PR url", id=item.id, url=url)
+                continue
+            repo, pr_id = target
+            for reviewer_id in dict.fromkeys(ids):
+                ok = await self._c.ado.add_pull_request_reviewer(
+                    repo, pr_id, reviewer_id, required=cfg.pr_reviewers_required
+                )
+                self._log.info(
+                    "PR reviewer added" if ok else "PR reviewer add failed",
+                    id=item.id, pr=pr_id, reviewer=reviewer_id,
+                )
+
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config
         if result.needs_human:
@@ -873,6 +936,8 @@ class AdoPollerService:
                 self._log.info("run below review threshold — escalated", id=item.id, score=score.score)
                 return
             badge = score_badge_html(score) if score else ""
+            if result.pr_url or result.pr_urls:
+                await self._add_reviewers(item, result)
             if result.pr_url and cfg.pr_is_draft:
                 await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
                 await self._apply_outcome(item, "review")
@@ -985,6 +1050,8 @@ class AdoPollerService:
         c, cfg = self._c, self._config
         if result.success:
             c.retry_policy.record_success(item.id)
+            if result.pr_url or result.pr_urls:
+                await self._add_reviewers(item, result)
             if cfg.pr_is_draft and result.pr_url:
                 await self._apply_outcome(item, "review")
                 await c.ado.add_comment(

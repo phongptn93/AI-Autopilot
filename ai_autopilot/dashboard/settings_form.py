@@ -62,6 +62,10 @@ FIELDS: tuple[Field, ...] = (
           "being refused. Does NOT change whose work items get picked up. Owner blank AND "
           "this list empty = anyone may command. Use a full email; a lone first name matches "
           "nobody (see doctor)."),
+    Field("commands_from_anyone", "↳ let ANYONE command", "bool", "Tags & Trigger",
+          "Accept /commands and @mentions from every account, without listing them above. "
+          "Only opens the command gate — which work items this machine picks up is still "
+          "scoped to the owner. Turn off to go back to the roster."),
     Field("trigger_states", "Trigger states", "stateset", "Tags & Trigger",
           "ADO states eligible for processing — tick from your board, or add custom ones below."),
     Field("reprocess_on_reopen", "Reprocess when reopened", "bool", "Tags & Trigger",
@@ -221,6 +225,18 @@ FIELDS: tuple[Field, ...] = (
           "address them. Restart required to take effect."),
     Field("max_revisions", "↳ Max PR revisions / item", "int", "🔁 PR review & feedback",
           "Cap auto-revisions per work item so a review back-and-forth can't run away. Default 3."),
+    Field("pr_add_assignee_as_reviewer", "🧑‍⚖️ Add assignee as PR reviewer", "bool",
+          "🔁 PR review & feedback",
+          "When the autopilot opens a PR for a work item, add that item's ASSIGNEE as a "
+          "reviewer (ADO notifies them). Best-effort — never fails the run."),
+    Field("pr_extra_reviewer_ids", "↳ Extra reviewers (identity IDs)", "list",
+          "🔁 PR review & feedback",
+          "Added to every PR on top of the assignee. ADO identity GUIDs, one per line — the "
+          "reviewers API is keyed on the id, not the email."),
+    Field("pr_reviewers_required", "↳ Mark them required", "bool",
+          "🔁 PR review & feedback",
+          "Required reviewers block completing the PR until they vote. Off = optional "
+          "(notified only)."),
     Field("pr_reviewer_tracking_enabled", "👀 Track PR reviewers", "bool",
           "🔁 PR review & feedback",
           "Watch reviewer lists on ALL active PRs: dashboard status, auto-review when the bot "

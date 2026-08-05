@@ -32,6 +32,9 @@ class WorkItemInfo:
     state: str = ""
     assigned_to: str | None = None          # display name
     assigned_to_email: str | None = None    # uniqueName / email
+    # ADO identity GUID of the assignee. Needed to add them as a PR reviewer: the
+    # reviewers endpoint is keyed on the identity id, and an email is not one.
+    assigned_to_id: str | None = None
     description: str | None = None
     acceptance_criteria: str | None = None
     parent_id: int | None = None

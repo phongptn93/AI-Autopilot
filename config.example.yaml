@@ -22,6 +22,17 @@ poll_interval_seconds: 30
 # otherwise tagged items are never picked up. Check your board column names.
 trigger_states: ["New", "To Do", "Proposed", "Active"]
 
+# ── Who may issue /commands and @mentions ──
+# By default only the machine's OWNER (assignee_trigger_user, falling back to
+# auto_transition_assignee) may reply "/ai …" — a colleague gets
+# "🔒 Trên máy này tôi chỉ nhận lệnh từ: …". Two ways to widen it:
+#   command_users        – name the extra accounts (email or full display name)
+#   commands_from_anyone – open it to EVERYONE, no list to maintain
+# Both scope ONLY the command gate; which work items this machine picks up stays
+# scoped to the owner either way.
+command_users: []
+commands_from_anyone: false
+
 # ── Repository / execution ──
 repo_working_directory: "/path/to/your/git/repo"
 base_branch: "development"
@@ -77,6 +88,13 @@ feedback_loop_enabled: false
 max_revisions: 3
 auto_review_enabled: true
 block_on_severity: "Critical,High"
+# Reviewers on the PRs the autopilot opens. The assignee of the work item is the
+# person who should look at the code — ADO notifies them once they're added.
+# pr_extra_reviewer_ids takes ADO identity GUIDs (not emails): the reviewers API is
+# keyed on the identity id. Required reviewers block completing the PR until they vote.
+pr_add_assignee_as_reviewer: false
+pr_extra_reviewer_ids: []
+pr_reviewers_required: false
 # Retrospective learning loop: remember what auto-review flagged, per repo, in
 # <workspace>/.autopilot/lessons/<repo>.md and inject the most recent lessons into the
 # next run's brief. Read/prune them on the dashboard's Learning page.

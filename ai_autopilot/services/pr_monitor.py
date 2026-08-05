@@ -348,7 +348,7 @@ class PrMonitorService:
         if not commands:
             return
 
-        claimed = cfg.effective_command_users
+        claimed = cfg.command_allowlist
         handled = await self._get_handled(pr_id)
         branch = source_ref.removeprefix("refs/heads/")
         to_run: list[tuple[dict, int]] = []

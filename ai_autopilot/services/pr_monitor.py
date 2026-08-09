@@ -13,6 +13,7 @@ import time
 
 from ai_autopilot.config import describe_users, match_command, matches_any_user
 from ai_autopilot.container import Container
+from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.outcomes import apply_outcome
@@ -146,10 +147,20 @@ class PrMonitorService:
         return self._revision_counts[work_item_id]
 
     async def _set_revisions(self, work_item_id: int, count: int) -> None:
+        previous = self._revision_counts.get(work_item_id, 0)
         self._revision_counts[work_item_id] = count
         if self._repo is not None:
             with contextlib.suppress(Exception):
                 await self._repo.set_revision_count(work_item_id, count)
+        # `revisions` is a BUDGET: `_release_closed_budgets` zeroes it the moment the PR
+        # closes, i.e. exactly when "this item needed N rounds of rework" finally means
+        # something. Append the increment to the durable log before that happens.
+        quality = getattr(self._c, "quality_repo", None)
+        if quality is not None and count > previous:
+            await quality.record(
+                work_item_id=work_item_id, kind=QualityKind.PR_REVISION, value=count,
+                actor="human", detail=f"/ai revise round {count}",
+            )
 
     def _branch_lock(self, repo_id: str, branch: str) -> asyncio.Lock:
         """Get-or-create the lock serialising command handling for one PR branch.

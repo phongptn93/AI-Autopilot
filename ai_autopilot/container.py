@@ -22,6 +22,7 @@ from ai_autopilot.data import (
     PlannedRunRepository,
     PrCommandRepository,
     PrReviewerRepository,
+    QualityRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
     StateRepository,
@@ -35,6 +36,7 @@ from ai_autopilot.execution import (
     SdlcLoopEngine,
 )
 from ai_autopilot.execution.sdlc_plan import handoff_collides
+from ai_autopilot.learning import QualityLog
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.multitenant import TenantManager
 from ai_autopilot.notifications import (
@@ -74,6 +76,13 @@ class Container:
         self.pr_reviewer_repo = PrReviewerRepository(self.database)
         self.claude_session_repo = ClaudeSessionRepository(self.database)
         self.audit_repo = AuditRepository(self.database)
+        # The append-only table, wrapped by the funnel that also feeds the learning
+        # loop — every call site records through the funnel, never the bare repo.
+        self.quality_events = QualityRepository(self.database)
+        self.quality_repo = QualityLog(
+            self.quality_events, config,
+            repos_provider=lambda: self.executor._allowed_repos(config.workspace_directory),
+        )
 
         # ADO.
         self.auth = AdoAuthService(config)
@@ -99,7 +108,8 @@ class Container:
 
         # Closed-loop SDLC engine (opt-in via sdlc_loop_enabled).
         self.sdlc_engine = SdlcLoopEngine(
-            self.executor, self.reviewer, self.ado, self.router, config, self.sdlc_state_repo
+            self.executor, self.reviewer, self.ado, self.router, config, self.sdlc_state_repo,
+            self.quality_repo,
         )
         self.schedule = ScheduleGuard(config)
         self.rbac = RbacPolicy(config)

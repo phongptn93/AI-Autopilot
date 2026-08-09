@@ -46,6 +46,7 @@ def test_metrics_endpoint(client: TestClient):
         "/dashboard/settings",
         "/dashboard/analytics",
         "/dashboard/learning",
+        "/dashboard/quality",
         "/dashboard/queue",
         "/dashboard/audit",
     ],

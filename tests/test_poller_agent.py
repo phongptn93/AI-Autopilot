@@ -73,12 +73,16 @@ class _FakeExec:
 class _FakeExecRepo:
     def __init__(self):
         self.completed: list[tuple[int, bool]] = []
+        self.retries: list[tuple[int, int]] = []
 
     async def start_execution(self, item, skill, trigger_tag=None):
         return 99
 
     async def complete_execution(self, record_id, result):
         self.completed.append((record_id, result.success))
+
+    async def mark_retrying(self, work_item_id, retry_count):
+        self.retries.append((work_item_id, retry_count))
 
 
 class _FakeCost:
@@ -117,6 +121,19 @@ class _FakeRetry:
         return None
 
 
+class _FakeQuality:
+    """Captures the append-only quality events the poller records."""
+
+    def __init__(self):
+        self.events: list[dict] = []
+
+    async def record(self, **kw):
+        self.events.append(kw)
+
+    def kinds(self) -> list[str]:
+        return [e["kind"] for e in self.events]
+
+
 class _FakeState:
     def __init__(self):
         self.calls: list[tuple[int, object]] = []
@@ -148,6 +165,7 @@ def _poller(
         retry_policy=_FakeRetry(exhausted), state_repo=_FakeState(),
         sdlc_state_repo=_FakeSdlcState(), mention_identity=mention_identity,
         executor=_FakeExec(), execution_repo=_FakeExecRepo(), cost_tracker=_FakeCost(),
+        quality_repo=_FakeQuality(),
     )
     return AdoPollerService(c), c
 

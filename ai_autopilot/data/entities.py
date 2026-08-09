@@ -248,6 +248,55 @@ class AuditEvent(Base):
     detail: Mapped[str] = mapped_column(String(2000), default="")
 
 
+class QualityKind:
+    """``QualityEvent.kind`` values. Plain strings, not an ``Enum`` column: this is an
+    append-only analytics log that will outlive today's vocabulary, and a new kind must
+    never invalidate rows already written."""
+
+    EXECUTION_RETRY = "execution_retry"   # value = attempt number
+    PR_REVISION = "pr_revision"           # value = /ai revise round on the PR
+    SDLC_ITERATION = "sdlc_iteration"     # value = SDLC revise round; stage = stage name
+    REVIEW_VOTE = "review_vote"           # value = ADO vote -10..10; actor = reviewer
+    REVIEW_FINDING = "review_finding"     # value = finding count; detail = the findings
+    TEST_FAILED = "test_failed"           # detail = test summary
+    REOPENED = "reopened"                 # a human dragged the item back to a trigger state
+
+    #: Kinds that mean "this item had to be redone" — the rework tally.
+    REWORK = (EXECUTION_RETRY, PR_REVISION, SDLC_ITERATION, REOPENED)
+
+
+class QualityEvent(Base):
+    """One durable data point about how much rework a work item needed.
+
+    Append-only and never reset. Every counter this draws from is a *budget* built to
+    stop runaway loops, not to measure: ``pr_command_states.revisions`` is zeroed when
+    the PR closes, ``sdlc_loop_states`` rows are deleted on success, ``PrReviewerState``
+    keeps only the CURRENT vote, and ``RetryPolicy`` lives in a dict that a restart
+    empties. Each is cleared at precisely the moment the number finally means something
+    — so the answer to "how many times did #123 get sent back" was unrecoverable.
+    Events are written at those same moments, before the clearing, and kept forever.
+
+    A new table rather than columns on ``executions``: ``create_all`` adds missing
+    tables to an existing database but will not ALTER one, so this upgrades in place.
+    """
+
+    __tablename__ = "quality_events"
+    __table_args__ = (
+        Index("ix_quality_events_at", "at"),
+        Index("ix_quality_events_work_item_id", "work_item_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime)
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0)
+    kind: Mapped[str] = mapped_column(String(64), default="")     # see QualityKind
+    stage: Mapped[str] = mapped_column(String(64), default="")    # SDLC stage, when known
+    value: Mapped[int] = mapped_column(Integer, default=0)        # meaning depends on kind
+    actor: Mapped[str] = mapped_column(String(200), default="")   # reviewer / "autopilot"
+    pr_id: Mapped[int] = mapped_column(Integer, default=0)        # 0 when not PR-scoped
+    detail: Mapped[str] = mapped_column(String(2000), default="")
+
+
 class ExecutionRecord(Base):
     __tablename__ = "executions"
     __table_args__ = (

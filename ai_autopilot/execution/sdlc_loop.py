@@ -11,6 +11,7 @@ item up. All the deciding lives in ``sdlc_plan``; this module only does the I/O.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from pathlib import Path
@@ -31,6 +32,7 @@ from ai_autopilot.execution.sdlc_plan import (
     stage_score_input,
 )
 from ai_autopilot import activity
+from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
@@ -43,7 +45,8 @@ class SdlcLoopEngine:
     scratch/git/Claude I/O and ``AutoReviewer`` for the review gate."""
 
     def __init__(
-        self, executor: ClaudeExecutor, reviewer, ado, router, config: Settings, repo
+        self, executor: ClaudeExecutor, reviewer, ado, router, config: Settings, repo,
+        quality=None,
     ) -> None:
         self._exec = executor
         self._reviewer = reviewer
@@ -52,7 +55,17 @@ class SdlcLoopEngine:
         self._router = router
         self._config = config
         self._repo = repo
+        # Append-only quality log. Optional so the engine stays constructible without a
+        # database (tests, dry runs); every write is guarded.
+        self._quality = quality
         self._log = get_logger("execution.sdlc_loop")
+
+    async def _record_quality(self, item_id: int, kind: str, **kw) -> None:
+        """Append one quality event, if a log is wired. Never raises into the loop."""
+        if self._quality is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._quality.record(work_item_id=item_id, kind=kind, **kw)
 
     async def run(self, item: WorkItemInfo) -> ExecutionResult:  # noqa: C901 - a bounded state loop
         cfg = self._config
@@ -137,6 +150,13 @@ class SdlcLoopEngine:
                     self._log.info(
                         "sdlc revise", id=item.id, stage=stage.name, iteration=iterations
                     )
+                    # The loop's own row is DELETED on success (`_repo.clear` below), so
+                    # a completed item leaves no record of how many rounds it took.
+                    await self._record_quality(
+                        item.id, QualityKind.SDLC_ITERATION, value=iterations,
+                        stage=stage.name, actor="autopilot",
+                        detail=f"score {score.score} below bar at stage '{stage.name}'",
+                    )
                 else:  # ESCALATE — shared budget spent
                     return await self._escalate(
                         item, profile, stage_index, iterations, branch, signals,
@@ -195,10 +215,22 @@ class SdlcLoopEngine:
             activity.append(ws, item.id, "🔍 auto-review " + ("passed" if review.passed else "found issues"))
             # Same gate stage runs the test suite; its result feeds signals.ci_passed
             # (sdlc_plan hard-fails on ci_passed is False).
+            if review.critical_issues or review.warnings:
+                findings = review.critical_issues + review.warnings
+                await self._record_quality(
+                    item.id, QualityKind.REVIEW_FINDING, value=len(findings),
+                    stage=stage.name, actor="auto-review",
+                    detail=" | ".join(findings[:10]),
+                )
             tests = await self._test_gate.run(primary)
             self._pending_tests = tests  # consumed in _absorb
             if tests.ran:
                 activity.append(ws, item.id, "🧪 tests " + ("passed" if tests.passed else "FAILED"))
+                if not tests.passed:
+                    await self._record_quality(
+                        item.id, QualityKind.TEST_FAILED, stage=stage.name,
+                        actor="test-gate", detail=tests.summary,
+                    )
             return review.raw_output, False, 0
 
         # For the pr stage, make sure the branch is on origin before /pr-create.

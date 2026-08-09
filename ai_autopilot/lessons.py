@@ -20,6 +20,11 @@ from datetime import datetime
 from pathlib import Path
 
 _LESSONS_SUBDIR = Path(".autopilot") / "lessons"
+#: Bucket for lessons that belong to the workspace rather than one repo — a PR
+#: rejection or a reopen is attached to a work item, which may span several repos or
+#: none that we can name at that point. Always read alongside the named repos so an
+#: unattributable signal still teaches.
+SHARED_BUCKET = "_workspace"
 _MAX_LESSONS = 50  # keep the file bounded — oldest lines drop off
 _SAFE_REPO = re.compile(r"[^A-Za-z0-9._-]+")
 _LINE = re.compile(r"^\s*-\s*\[(?P<date>[^\]]*)\]\s*(?P<text>.*)$")
@@ -98,7 +103,7 @@ def recent(workspace: str, repos: list[str], *, limit: int = 8) -> list[str]:
         return []
     seen: set[str] = set()
     out: list[str] = []
-    for repo in repos:
+    for repo in [*repos, SHARED_BUCKET]:
         for lesson in read_lessons(workspace, repo, limit=limit):
             if lesson not in seen:
                 seen.add(lesson)

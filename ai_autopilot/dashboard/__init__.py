@@ -21,7 +21,7 @@ from ai_autopilot.board import board_columns, build_board, latest_records, parse
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
-from ai_autopilot.data.entities import PipelineState
+from ai_autopilot.data.entities import PipelineState, QualityKind
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services import planning_analyzer
 from ai_autopilot.services.pr_feedback import parse_work_item_id
@@ -950,6 +950,26 @@ def create_dashboard_router() -> APIRouter:
         return _TEMPLATES.TemplateResponse(
             request, "audit.html",
             _ctx(request, "audit", events=events, action=action, actions=actions),
+        )
+
+    @router.get("/quality", response_class=HTMLResponse)
+    async def quality_page(request: Request, days: int = 30, kind: str = ""):
+        """Rework & review quality: how often each item had to be redone, and what
+        humans voted — read from the append-only log that outlives every budget."""
+        c: Container = request.app.state.container
+        days = max(1, min(days, 365))
+        since = datetime.now() - timedelta(days=days)
+        rows = await c.quality_events.rework_rows(since=since)
+        totals = await c.quality_events.kind_totals(since=since)
+        events = await c.quality_events.recent(limit=200, kind=kind, since=since)
+        titles = {s.work_item_id: s.title for s in await c.state_repo.all()}
+        return _TEMPLATES.TemplateResponse(
+            request, "quality.html",
+            _ctx(
+                request, "quality", rows=rows, totals=totals, events=events,
+                titles=titles, days=days, kind=kind,
+                kinds=sorted(totals), rework_kinds=set(QualityKind.REWORK),
+            ),
         )
 
     @router.get("/analytics", response_class=HTMLResponse)

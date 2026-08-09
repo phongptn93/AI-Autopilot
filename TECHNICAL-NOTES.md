@@ -115,6 +115,17 @@ checkout and concurrent tasks never collide (`_acquire_agent_scratch`):
 - **Teardown** (`release_scratch`): `git worktree remove --force` each repo, `worktree
   prune`, then remove the dir — best-effort, never raises. (A dir pinned by a still-open
   interactive console remains as an empty shell until that console closes.)
+- **Stale branch claims** (`_free_branch_for_checkout`, run before every `checkout -B` /
+  `worktree add -B`): a scratch that outlived its run — an interactive session never
+  finalised, a killed task — keeps its branch checked out, and git then refuses every
+  later run on that item with *"'<branch>' is already used by worktree at …"*. Prune
+  first (a dangling registration alone is the common case), then evict — but **only**
+  worktrees under `_scratch_base` that hold nothing uncommitted. A human's worktree, or
+  one with live edits, raises a message saying what to do instead: losing someone's work
+  to unblock a robot is the worse failure. `prepare_stage_branch` passes its own worktree
+  as `exclude` (on a resumed SDLC loop it legitimately already holds the branch) and logs
+  an error if the checkout still didn't take — otherwise stages commit onto a detached
+  HEAD and the `pr` stage silently finds nothing to push.
 
 ---
 
@@ -177,6 +188,42 @@ Without this, merge/deploy detection silently queries the wrong project and neve
 - **Known gap**: the live interactive-session map (`_live`) is in-memory. It is now
   backstopped by the `autopilot-live` tag + deterministic scratch + orphan-finalise, but
   the DB is not yet the single source of truth for in-flight work.
+
+### Quality log — measuring rework, and learning from it (`quality_events`, `learning.py`)
+
+Every "this had to be redone" counter in the system is a **budget** built to stop a
+runaway loop, not a record: `pr_command_states.revisions` is zeroed when the PR closes,
+`sdlc_loop_states` rows are deleted on success, `PrReviewerState` keeps only the
+*current* vote, and `RetryPolicy` lives in a dict a restart empties. Each is cleared
+precisely when the number finally means something — so "how many times did #123 get
+sent back" was unanswerable.
+
+`QualityEvent` is the append-only answer: one row per signal, never reset, written at
+those same moments *before* the clearing. Kinds: `execution_retry`, `pr_revision`,
+`sdlc_iteration`, `review_vote` (ADO −10..10, per reviewer), `review_finding`,
+`test_failed`, `reopened`. Surfaced on **Dashboard → 🔁 Quality** (per-item tallies +
+raw event log); `rework_rows()` is the per-item roll-up, `kind_totals()` the tiles.
+
+**One funnel, two outcomes.** Call sites never touch the repository directly — they go
+through `learning.QualityLog.record()`, which writes the event **and**, when the signal
+carries a teachable reason, a lesson for the next brief. This is deliberate: the
+learning loop was previously inert because every execution path *read* lessons
+(`_lessons_injected`, `_build_brief`) while only the replaced legacy path
+(`_run_in_workspace`) ever *wrote* one — `run_agent`, `dispatch_interactive` and the
+SDLC loop all drew from a well nothing filled, so `.autopilot/lessons/` never even
+existed. Recording and learning being the same call makes that gap unrepresentable.
+
+- Teaches: `review_finding` (the findings), `test_failed` (the summary), `review_vote`
+  when blocking (≤ −5), `reopened`. Does **not** teach: `execution_retry` (an infra
+  flake implies no rule), `pr_revision` (the review comment is the lesson).
+- Lessons from a work-item-level signal go to `lessons.SHARED_BUCKET` (`_workspace`),
+  which `lessons.recent()` always reads alongside the named repos — a PR rejection
+  belongs to no single repo, and filing it under one would hide it from every other
+  brief.
+- `learning_loop_enabled` with an empty `workspace_directory` now **logs a warning**
+  instead of silently dropping the lesson: `lessons.recent` reads nothing back without
+  a workspace, and the silent version is exactly what made the loop look enabled while
+  doing nothing.
 
 ---
 

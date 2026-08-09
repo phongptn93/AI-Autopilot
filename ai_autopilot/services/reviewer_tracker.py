@@ -24,6 +24,7 @@ from urllib.parse import quote
 from ai_autopilot import metrics
 from ai_autopilot.config import describe_users, matches_any_user
 from ai_autopilot.container import Container
+from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import TaskCategory, WorkItemInfo
@@ -466,6 +467,26 @@ class ReviewerTrackerService:
         except Exception as exc:  # noqa: BLE001
             self._log.warning("closed-PR cleanup failed", error=str(exc))
 
+    async def _record_vote(
+        self, pr: dict, pr_id: int, reviewer: dict, vote: int, is_bot: bool
+    ) -> None:
+        """Append a durable record of one reviewer's vote change (best-effort).
+
+        Skipped when the PR's branch carries no work-item id: the quality log is keyed
+        by work item, and an unattributable vote would only add noise.
+        """
+        quality = getattr(self._c, "quality_repo", None)
+        if quality is None:
+            return
+        wid = parse_work_item_id(pr.get("sourceRefName", ""))
+        if not wid:
+            return
+        await quality.record(
+            work_item_id=wid, kind=QualityKind.REVIEW_VOTE, value=vote, pr_id=pr_id,
+            actor=(reviewer.get("displayName") or "")[:200] + (" (bot)" if is_bot else ""),
+            detail=VOTE_LABELS.get(vote, str(vote)),
+        )
+
     async def _track_pr(self, repo_id: str, repo_name: str, pr: dict, bot: dict) -> None:
         pr_id = pr.get("pullRequestId")
         if pr_id is None or self._repo is None:
@@ -499,6 +520,11 @@ class ReviewerTrackerService:
                     "reviewer vote changed", pr=pr_id, reviewer=r.get("displayName"),
                     vote=VOTE_LABELS.get(vote, vote),
                 )
+                # `upsert` below OVERWRITES prev.vote, and the whole row is dropped when
+                # the PR closes — so a rejection that was later resolved left no trace.
+                # The transition is the signal worth keeping: it is a human saying the
+                # work was not good enough.
+                await self._record_vote(pr, pr_id, r, vote, is_bot)
             snap = await self._repo.upsert(
                 pr_id, rid, repo_id=repo_id,
                 display_name=r.get("displayName") or "",

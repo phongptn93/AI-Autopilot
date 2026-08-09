@@ -17,7 +17,7 @@ from urllib.parse import unquote
 from ai_autopilot import metrics
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
 from ai_autopilot.container import Container
-from ai_autopilot.data import PipelineState
+from ai_autopilot.data import PipelineState, QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.execution.pr_scorer import RunScore, ScoreInput, score_badge_html, score_run
 from ai_autopilot.execution.sdlc_plan import handoff_state, resolve_profile_name
@@ -406,6 +406,13 @@ class AdoPollerService:
             for tag in held:
                 await c.ado.remove_tag(item.id, tag)
             await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
+            # Record BEFORE clearing: record_success wipes the in-memory attempt count,
+            # and a reopen is the strongest rework signal there is — a human looked at
+            # the result and sent it back.
+            await c.quality_repo.record(
+                work_item_id=item.id, kind=QualityKind.REOPENED,
+                actor="human", detail=f"reopened from state {item.state!r}; cleared {held}",
+            )
             c.retry_policy.record_success(item.id)  # fresh retries on reopen
             self._processed.pop(item.id, None)
             await c.ado.add_comment(
@@ -901,6 +908,27 @@ class AdoPollerService:
                     id=item.id, pr=pr_id, reviewer=reviewer_id,
                 )
 
+    async def _record_failed_attempt(self, item: WorkItemInfo, result: ExecutionResult) -> int:
+        """Register one failed attempt everywhere it needs to land, and return its number.
+
+        ``RetryPolicy`` alone is an in-memory dict that a restart empties and
+        ``record_success`` deletes outright, so the attempt count used to vanish exactly
+        when it became interesting. This also writes the durable copies: the execution
+        row's ``retry_count`` (the History page's "Retries" column), the Prometheus
+        counter, and an append-only quality event.
+        """
+        c = self._c
+        c.retry_policy.record_failure(item.id, result.error or "Unknown error")
+        state = c.retry_policy.get_state(item.id)
+        attempt = state.retry_count if state else 1
+        metrics.RETRY_TOTAL.inc()
+        await c.execution_repo.mark_retrying(item.id, attempt)
+        await c.quality_repo.record(
+            work_item_id=item.id, kind=QualityKind.EXECUTION_RETRY, value=attempt,
+            actor="autopilot", detail=(result.error or "Unknown error"),
+        )
+        return attempt
+
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config
         if result.needs_human:
@@ -961,14 +989,12 @@ class AdoPollerService:
                 await c.notifier.notify_completed(item, result)
             return
 
-        c.retry_policy.record_failure(item.id, result.error or "Unknown error")
+        count = await self._record_failed_attempt(item, result)
         await c.state_repo.set(item.id, PipelineState.FAILED, detail=result.error or "")
         exhausted = c.retry_policy.is_exhausted(item.id)
         await c.notifier.notify_completed(item, result)
         if exhausted:
             await self._apply_outcome(item, "failed")
-            state = c.retry_policy.get_state(item.id)
-            count = state.retry_count if state else cfg.max_retries
             self._log.error("gave up after retries", id=item.id, count=count)
             await c.ado.add_comment(
                 item.id,
@@ -1064,13 +1090,11 @@ class AdoPollerService:
                 await self._apply_outcome(item, "done" if result.pr_url else "report")
                 await c.notifier.notify_completed(item, result)
         else:
-            c.retry_policy.record_failure(item.id, result.error or "Unknown error")
+            count = await self._record_failed_attempt(item, result)
             exhausted = c.retry_policy.is_exhausted(item.id)
             await c.notifier.notify_completed(item, result)
             if exhausted:
                 await self._apply_outcome(item, "failed")
-                state = c.retry_policy.get_state(item.id)
-                count = state.retry_count if state else cfg.max_retries
                 self._log.error("gave up after retries", id=item.id, count=count)
                 await c.ado.add_comment(
                     item.id,

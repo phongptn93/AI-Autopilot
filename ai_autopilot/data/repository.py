@@ -23,6 +23,8 @@ from ai_autopilot.data.entities import (
     PrCommandState,
     PrReviewBudget,
     PrReviewerState,
+    QualityEvent,
+    QualityKind,
     SchedulerDecision,
     SdlcLoopState,
     WorkItemState,
@@ -107,12 +109,26 @@ class ExecutionRepository:
             record.lessons_injected = result.lessons_injected
             await session.commit()
 
-    async def mark_retrying(self, record_id: int, retry_count: int) -> None:
+    async def mark_retrying(self, work_item_id: int, retry_count: int) -> None:
+        """Stamp the attempt number on the item's most recent run.
+
+        Keyed by work item rather than record id: every caller reaches this right after
+        ``complete_execution`` on the run that just failed, so the newest row for the
+        item *is* that run — and the failure handlers would otherwise have to thread a
+        record id through six call sites to say so. Status is left as the handler set
+        it (FAILED); only the counter is written, which is what the History page's
+        "Retries" column reads. That column was structurally always 0 before this had
+        a caller.
+        """
         async with self._db.session() as session:
-            record = await session.get(ExecutionRecord, record_id)
+            record = (await session.execute(
+                select(ExecutionRecord)
+                .where(ExecutionRecord.work_item_id == work_item_id)
+                .order_by(ExecutionRecord.started_at.desc())
+                .limit(1)
+            )).scalars().first()
             if record is None:
                 return
-            record.status = ExecutionStatus.RETRYING
             record.retry_count = retry_count
             await session.commit()
 
@@ -531,6 +547,114 @@ class AuditRepository:
             if action:
                 q = q.where(AuditEvent.action.startswith(action))
             return list((await session.execute(q)).scalars().all())
+
+
+@dataclass
+class ReworkRow:
+    """One work item's durable quality tally, for the Quality page."""
+
+    work_item_id: int = 0
+    retries: int = 0
+    pr_revisions: int = 0
+    sdlc_iterations: int = 0
+    reopens: int = 0
+    findings: int = 0        # auto-review findings recorded
+    test_failures: int = 0
+    rejections: int = 0      # human votes < 0 (rejected / waiting for author)
+    approvals: int = 0       # human votes > 0
+    worst_vote: int = 0      # lowest vote ever seen (-10 = rejected)
+    last_at: datetime | None = None
+
+    @property
+    def rework(self) -> int:
+        """Times this item had to be redone — the headline number."""
+        return self.retries + self.pr_revisions + self.sdlc_iterations + self.reopens
+
+
+class QualityRepository:
+    """Append-only log of rework / review-quality events (:class:`QualityEvent`).
+
+    ``record`` never raises into the caller: a broken analytics write must not break
+    the run it is measuring — same contract as :class:`AuditRepository`."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def record(
+        self, *, work_item_id: int, kind: str, value: int = 0, stage: str = "",
+        actor: str = "", pr_id: int = 0, detail: str = "",
+    ) -> None:
+        try:
+            async with self._db.session() as session:
+                session.add(QualityEvent(
+                    at=datetime.now(UTC).replace(tzinfo=None),
+                    work_item_id=int(work_item_id or 0), kind=(kind or "")[:64],
+                    stage=(stage or "")[:64], value=int(value or 0),
+                    actor=(actor or "")[:200], pr_id=int(pr_id or 0),
+                    detail=(detail or "")[:2000],
+                ))
+                await session.commit()
+        except Exception:  # noqa: BLE001 — measurement must never break the measured run
+            get_logger("data.quality").warning("quality write failed", kind=kind)
+
+    async def recent(
+        self, limit: int = 200, kind: str = "", work_item_id: int = 0, since: datetime | None = None
+    ) -> list[QualityEvent]:
+        """Newest-first events, optionally filtered."""
+        async with self._db.session() as session:
+            q = select(QualityEvent).order_by(QualityEvent.at.desc()).limit(max(1, limit))
+            if kind:
+                q = q.where(QualityEvent.kind == kind)
+            if work_item_id:
+                q = q.where(QualityEvent.work_item_id == work_item_id)
+            if since is not None:
+                q = q.where(QualityEvent.at >= since)
+            return list((await session.execute(q)).scalars().all())
+
+    async def rework_rows(self, since: datetime | None = None) -> list[ReworkRow]:
+        """Per-item tallies, worst rework first.
+
+        Aggregated in Python rather than SQL: the row count is one per event and the
+        window is a handful of days, so the join-free read stays simple and the
+        conditional-sum SQL (which differs across backends) is avoided.
+        """
+        async with self._db.session() as session:
+            q = select(QualityEvent)
+            if since is not None:
+                q = q.where(QualityEvent.at >= since)
+            events = list((await session.execute(q)).scalars().all())
+        rows: dict[int, ReworkRow] = {}
+        for e in events:
+            row = rows.setdefault(e.work_item_id, ReworkRow(work_item_id=e.work_item_id))
+            if e.kind == QualityKind.EXECUTION_RETRY:
+                row.retries += 1
+            elif e.kind == QualityKind.PR_REVISION:
+                row.pr_revisions += 1
+            elif e.kind == QualityKind.SDLC_ITERATION:
+                row.sdlc_iterations += 1
+            elif e.kind == QualityKind.REOPENED:
+                row.reopens += 1
+            elif e.kind == QualityKind.REVIEW_FINDING:
+                row.findings += max(1, e.value)
+            elif e.kind == QualityKind.TEST_FAILED:
+                row.test_failures += 1
+            elif e.kind == QualityKind.REVIEW_VOTE:
+                if e.value < 0:
+                    row.rejections += 1
+                elif e.value > 0:
+                    row.approvals += 1
+                row.worst_vote = min(row.worst_vote, e.value)
+            if row.last_at is None or e.at > row.last_at:
+                row.last_at = e.at
+        return sorted(rows.values(), key=lambda r: (-r.rework, -r.rejections, r.work_item_id))
+
+    async def kind_totals(self, since: datetime | None = None) -> dict[str, int]:
+        """``{kind: count}`` over the window — the page's headline tiles."""
+        async with self._db.session() as session:
+            q = select(QualityEvent.kind, func.count()).group_by(QualityEvent.kind)
+            if since is not None:
+                q = q.where(QualityEvent.at >= since)
+            return {k: n for k, n in (await session.execute(q)).all()}
 
 
 class AiConflictRepository:

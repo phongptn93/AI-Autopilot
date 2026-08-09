@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .q-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
+  .q-tile { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px; padding:14px 16px; }
+  .q-tile .n { font-size:26px; font-weight:600; line-height:1.1; }
+  .q-tile .l { color:var(--text-dim); font-size:12px; margin-top:4px; }
+  .q-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .q-table th, .q-table td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border,#23232b); vertical-align:top; }
+  .q-table td.n, .q-table th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .q-title { max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .q-detail { color:var(--text-dim); max-width:460px; }
+  .q-kind { font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:nowrap; }
+  .q-zero { color:var(--text-dim); }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid; }
+  .pill-bad  { color:#f87171; border-color:#7f1d1d; background:#7f1d1d22; }
+  .pill-warn { color:#fbbf24; border-color:#78350f; background:#78350f22; }
+  .pill-ok   { color:#34d399; border-color:#065f46; background:#065f4622; }
+  .q-sub { color:var(--text-dim); font-size:12px; margin-top:2px; }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+  <div>
+    <h2>🔁 Rework &amp; review quality</h2>
+    <p>How often each work item had to be redone, and what humans voted. Append-only —
+       unlike the budgets it is built from, nothing here is ever reset when an item finishes.</p>
+  </div>
+  <form method="get" action="/dashboard/quality" style="display:flex;gap:6px;align-items:center">
+    <select name="days" class="btn-ghost" style="padding:6px 10px">
+      {% for d in [7, 30, 90, 365] %}
+        <option value="{{ d }}" {{ 'selected' if days == d else '' }}>Last {{ d }} days</option>
+      {% endfor %}
+    </select>
+    <select name="kind" class="btn-ghost" style="padding:6px 10px">
+      <option value="">All events</option>
+      {% for k in kinds %}
+        <option value="{{ k }}" {{ 'selected' if kind == k else '' }}>{{ k }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn-ghost">Apply</button>
+  </form>
+</div>
+
+{% set total_rework = rows | sum(attribute='rework') %}
+{% set total_reject = rows | sum(attribute='rejections') %}
+<div class="q-tiles">
+  <div class="q-tile">
+    <div class="n">{{ total_rework }}</div>
+    <div class="l">Rework events — retries, revise rounds, reopens</div>
+  </div>
+  <div class="q-tile">
+    <div class="n">{{ rows | length }}</div>
+    <div class="l">Work items with any signal</div>
+  </div>
+  <div class="q-tile">
+    <div class="n">{{ '%.2f' | format(total_rework / rows | length) if rows else '0.00' }}</div>
+    <div class="l">Rework per item — the number to drive down</div>
+  </div>
+  <div class="q-tile">
+    <div class="n">{{ total_reject }}</div>
+    <div class="l">Human votes that blocked a PR</div>
+  </div>
+  <div class="q-tile">
+    <div class="n">{{ totals.get('test_failed', 0) }}</div>
+    <div class="l">Test-gate failures</div>
+  </div>
+</div>
+
+<h3 style="margin:22px 0 10px">Per work item</h3>
+{% if rows %}
+<div class="card" style="padding:4px 8px">
+  <table class="q-table">
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th class="n">Rework</th>
+        <th class="n">Retries</th>
+        <th class="n">/ai rounds</th>
+        <th class="n">SDLC iters</th>
+        <th class="n">Reopens</th>
+        <th class="n">Findings</th>
+        <th class="n">Tests failed</th>
+        <th>Human vote</th>
+        <th>Last signal</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>
+            <a href="/dashboard/activity/{{ r.work_item_id }}">#{{ r.work_item_id }}</a>
+            <div class="q-title q-sub">{{ titles.get(r.work_item_id, '') }}</div>
+          </td>
+          <td class="n">
+            {% if r.rework >= 3 %}<span class="pill pill-bad">{{ r.rework }}</span>
+            {% elif r.rework >= 1 %}<span class="pill pill-warn">{{ r.rework }}</span>
+            {% else %}<span class="q-zero">0</span>{% endif %}
+          </td>
+          <td class="n">{{ r.retries or '' }}</td>
+          <td class="n">{{ r.pr_revisions or '' }}</td>
+          <td class="n">{{ r.sdlc_iterations or '' }}</td>
+          <td class="n">{{ r.reopens or '' }}</td>
+          <td class="n">{{ r.findings or '' }}</td>
+          <td class="n">{{ r.test_failures or '' }}</td>
+          <td>
+            {% if r.worst_vote < 0 %}<span class="pill pill-bad">blocked ({{ r.worst_vote }})</span>
+            {% elif r.approvals %}<span class="pill pill-ok">approved</span>
+            {% else %}<span class="q-zero">—</span>{% endif %}
+          </td>
+          <td style="white-space:nowrap;color:var(--text-dim)">
+            {{ r.last_at.strftime('%Y-%m-%d %H:%M') if r.last_at else '' }}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">
+  No quality signal recorded in the last {{ days }} days. Events start accruing on the next
+  retry, <code>/ai</code> revise round, reviewer vote, test failure, or reopen.
+</div></div>
+{% endif %}
+
+<h3 style="margin:26px 0 10px">Event log{% if kind %} — <code>{{ kind }}</code>{% endif %}</h3>
+{% if events %}
+<div class="card" style="padding:4px 8px">
+  <table class="q-table">
+    <thead><tr><th>When (UTC)</th><th>Item</th><th>Kind</th><th class="n">Value</th><th>Stage</th><th>Actor</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for e in events %}
+        <tr>
+          <td style="white-space:nowrap;color:var(--text-dim)">{{ e.at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          <td><a href="/dashboard/activity/{{ e.work_item_id }}">#{{ e.work_item_id }}</a></td>
+          <td class="q-kind">
+            {% if e.kind in rework_kinds %}<span class="pill pill-warn">{{ e.kind }}</span>
+            {% else %}{{ e.kind }}{% endif %}
+          </td>
+          <td class="n">{{ e.value if e.value else '' }}</td>
+          <td>{{ e.stage }}</td>
+          <td>{{ e.actor }}</td>
+          <td class="q-detail">{{ e.detail }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">No events{% if kind %} of kind <code>{{ kind }}</code>{% endif %} in this window.</div></div>
+{% endif %}
+{% endblock %}

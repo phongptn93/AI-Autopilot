@@ -470,11 +470,30 @@ class ClaudeExecutor:
         ``_acquire_agent_scratch`` adds worktrees ``--detach`` at their base ref; the
         SDLC loop needs ONE stable branch to accumulate every stage's commits and to
         push from the ``pr`` stage. Best-effort per repo (a repo that can't branch is
-        skipped, not fatal)."""
+        skipped, not fatal). A stale worktree still holding the branch is evicted
+        first: otherwise this checkout silently fails and every stage commits onto a
+        detached HEAD, so the ``pr`` stage finds nothing to push."""
+        workspace = self._config.workspace_directory
         for repo in repos:
             worktree = Path(scratch) / repo
-            if worktree.is_dir():
-                await self._git(["checkout", "-B", branch], str(worktree), check=False)
+            if not worktree.is_dir():
+                continue
+            if workspace:
+                try:
+                    await self._free_branch_for_checkout(
+                        str(Path(workspace) / repo), branch, 0, exclude=str(worktree)
+                    )
+                except GitError as exc:  # someone else's / dirty worktree — log, try anyway
+                    self._log.warning("stage branch blocked by a worktree", error=str(exc))
+            await self._git(["checkout", "-B", branch], str(worktree), check=False)
+            current = (
+                await self._git(["branch", "--show-current"], str(worktree), check=False)
+            ).strip()
+            if current != branch:
+                self._log.error(
+                    "stage branch not checked out — commits would be lost on a detached HEAD",
+                    repo=repo, branch=branch, current=current or "(detached)",
+                )
 
     async def stage_commit(
         self, scratch: str, repos: list[str], message: str
@@ -1079,6 +1098,9 @@ class ClaudeExecutor:
                 )
             await self._git(["reset", "--hard"], repo, check=False)
             await self._git(["clean", "-fd"], repo, check=False)
+            # A leftover scratch worktree may still hold this branch — `checkout -B`
+            # would then fail outright ("already used by worktree at …").
+            await self._free_branch_for_checkout(repo, branch, item_id)
             await self._git(["checkout", "-B", branch, from_ref], repo)
             return _Workspace(
                 repo, repo, branch, base_branch,
@@ -1097,6 +1119,8 @@ class ClaudeExecutor:
             # A cached revise worktree may still hold this branch checked out — a fresh
             # `worktree add -B` would then fail ("already checked out"). Evict it first.
             await self._evict_revise_worktree(repo, branch, item_id, base_dir)
+            # …and so may a scratch worktree from an unfinished run on this item.
+            await self._free_branch_for_checkout(repo, branch, item_id)
             # Name the worktree dir by a short GUID (not the branch) to keep the
             # path short — long branch names otherwise blow past Windows MAX_PATH.
             # The real branch is still created via ``-B branch`` below.
@@ -1106,8 +1130,75 @@ class ClaudeExecutor:
             return _Workspace(repo, path, branch, base_branch, is_worktree=True)
 
         self._log.info("creating branch in-place", id=item_id, branch=branch, repo=repo)
+        await self._free_branch_for_checkout(repo, branch, item_id)
         await self._git(["checkout", "-B", branch, from_ref], repo)
         return _Workspace(repo, repo, branch, base_branch, is_worktree=False)
+
+    async def _worktree_holding_branch(
+        self, repo: str, branch: str, exclude: str | None = None
+    ) -> str | None:
+        """Path of a *linked* worktree that currently has ``branch`` checked out.
+
+        Git refuses ``checkout -B <branch>`` / ``worktree add -B <branch>`` while any
+        other worktree holds it ("fatal: '<branch>' is already used by worktree at
+        …"). Registrations also outlive their directory, so prune first — that alone
+        clears the common case. Two holders are never reported: the repo's own
+        checkout (``-B`` there is a plain branch reset, which git allows) and
+        ``exclude`` — the worktree the caller is *about* to check out in, which on a
+        resumed run already holds the branch from the previous round.
+        """
+        async with self._repo_lock(repo):
+            await self._git(["worktree", "prune"], repo, check=False)
+            listing = await self._git(["worktree", "list", "--porcelain"], repo, check=False)
+        allowed = {Path(repo)} | ({Path(exclude)} if exclude else set())
+        path: str | None = None
+        for line in listing.splitlines():
+            if line.startswith("worktree "):
+                path = line[len("worktree "):].strip()
+            elif path and line.strip() == f"branch refs/heads/{branch}":
+                return None if Path(path) in allowed else path
+        return None
+
+    async def _free_branch_for_checkout(
+        self, repo: str, branch: str, item_id: int, exclude: str | None = None
+    ) -> None:
+        """Clear a *stale* worktree claim on ``branch`` so the branch can be checked out.
+
+        A scratch worktree that outlived its run — an interactive session that never
+        finalised, a crashed or killed task — keeps its branch checked out forever,
+        and every later run on that item then dies on git's "already used by worktree"
+        instead of doing any work.
+
+        Only worktrees the autopilot owns (under ``_scratch_base``) and holding
+        nothing uncommitted are evicted. A human's worktree, or one with live work in
+        it, is left alone and reported with a message that says what to do — losing
+        someone's edits to unblock a robot is the worse failure.
+        """
+        held = await self._worktree_holding_branch(repo, branch, exclude)
+        if held is None:
+            return
+        scratch_base, held_path = Path(self._scratch_base()), Path(held)
+        if scratch_base != held_path and scratch_base not in held_path.parents:
+            raise GitError(
+                f"branch {branch!r} is checked out in a worktree AI-Autopilot does not "
+                f"own: {held}. Finish or drop it (`git worktree remove {held}`), then retry."
+            )
+        dirty = (await self._git(["status", "--porcelain"], held, check=False)).strip()
+        if dirty:
+            raise GitError(
+                f"branch {branch!r} is checked out in scratch worktree {held}, which has "
+                f"{len(dirty.splitlines())} uncommitted change(s). Commit or discard them "
+                f"(`git worktree remove --force {held}` drops them), then retry."
+            )
+        self._log.warning(
+            "evicting stale worktree that held the branch",
+            id=item_id, branch=branch, path=held, repo=repo,
+        )
+        async with self._repo_lock(repo):
+            await self._git(["worktree", "remove", "--force", held], repo, check=False)
+            if held_path.exists():
+                await _force_rmtree(held_path)
+            await self._git(["worktree", "prune"], repo, check=False)
 
     def _revise_worktree_path(self, base_dir: str, item_id: int, repo: str, branch: str) -> str:
         """Deterministic cache path for one (item, branch) revise worktree — a follow-up
@@ -1139,6 +1230,8 @@ class ClaudeExecutor:
                 self._log.warning("cached worktree unusable — recreating", id=item_id, path=path)
                 await self._evict_revise_worktree(repo, branch, item_id, base_dir)
         self._log.info("creating revise worktree", id=item_id, branch=branch, path=path)
+        # Outside the lock: the helper takes it itself and asyncio locks aren't reentrant.
+        await self._free_branch_for_checkout(repo, branch, item_id)
         async with self._repo_lock(repo):
             await self._git(["worktree", "prune"], repo, check=False)  # heal stale registrations
             await self._git(["worktree", "add", "-B", branch, path, from_ref], repo)

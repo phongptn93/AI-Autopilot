@@ -14,7 +14,7 @@ import pytest
 
 from ai_autopilot.config import Settings
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
-from ai_autopilot.execution.claude_executor import ClaudeExecutor
+from ai_autopilot.execution.claude_executor import ClaudeExecutor, GitError
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 
@@ -51,6 +51,12 @@ def _executor(**overrides) -> ClaudeExecutor:
 def _rev(cwd: Path) -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _branch(cwd: Path) -> str:
+    return subprocess.run(
+        ["git", "branch", "--show-current"], cwd=cwd, capture_output=True, text=True
     ).stdout.strip()
 
 
@@ -132,6 +138,71 @@ async def test_workspace_mode_runs_from_workspace(repo: Path, tmp_path: Path):
         assert ws.is_worktree is False           # not a separate worktree
         assert ws.path == str(repo)              # git operates in the repo
         assert ws.claude_cwd == str(workspace)   # Claude runs from the workspace
+    finally:
+        await ex._release_workspace(ws)
+
+
+async def test_workspace_mode_evicts_stale_scratch_holding_branch(repo: Path, tmp_path: Path):
+    # An interactive scratch that never finalised keeps its branch checked out, so
+    # the next run's in-place `checkout -B` died on "already used by worktree at …".
+    workspace = repo.parent
+    scratch_base = workspace / ".aiwt"
+    ex = _executor(use_worktrees=True, workspace_directory=str(workspace))
+    branch = "feature/7812-cols"
+
+    stale = scratch_base / "agent-7812" / repo.name
+    stale.parent.mkdir(parents=True)
+    _git(repo, "worktree", "add", "-b", branch, str(stale), "origin/development")
+    assert stale.is_dir()
+
+    ws = await ex._acquire_workspace(str(repo), branch, "development", 7812)
+    try:
+        assert _branch(repo) == branch      # the run got its branch
+        assert not stale.exists()           # stale claim evicted
+    finally:
+        await ex._release_workspace(ws)
+
+
+async def test_stale_worktree_with_uncommitted_work_is_not_destroyed(repo: Path):
+    # Unblocking the robot must never cost someone their edits: report, don't delete.
+    workspace = repo.parent
+    ex = _executor(use_worktrees=True, workspace_directory=str(workspace))
+    branch = "feature/7813-wip"
+
+    live = workspace / ".aiwt" / "agent-7813" / repo.name
+    live.parent.mkdir(parents=True)
+    _git(repo, "worktree", "add", "-b", branch, str(live), "origin/development")
+    (live / "wip.txt").write_text("unsaved work\n")
+
+    with pytest.raises(GitError, match="uncommitted"):
+        await ex._acquire_workspace(str(repo), branch, "development", 7813)
+    assert (live / "wip.txt").read_text() == "unsaved work\n"   # untouched
+
+
+async def test_foreign_worktree_holding_branch_is_reported_not_removed(repo: Path, tmp_path: Path):
+    # A human's worktree lives outside the scratch base — never ours to delete.
+    ex = _executor(use_worktrees=True, workspace_directory=str(repo.parent))
+    branch = "feature/7814-mine"
+    mine = tmp_path / "my-own-worktree"
+    _git(repo, "worktree", "add", "-b", branch, str(mine), "origin/development")
+
+    with pytest.raises(GitError, match="does not own"):
+        await ex._acquire_workspace(str(repo), branch, "development", 7814)
+    assert mine.is_dir()
+
+
+async def test_stale_registration_alone_does_not_block(repo: Path, tmp_path: Path):
+    # Directory deleted by hand, registration left behind — prune clears it silently.
+    ex = _executor(use_worktrees=True, workspace_directory=str(repo.parent))
+    branch = "feature/7815-ghost"
+    ghost = repo.parent / ".aiwt" / "agent-7815" / repo.name
+    ghost.parent.mkdir(parents=True)
+    _git(repo, "worktree", "add", "-b", branch, str(ghost), "origin/development")
+    shutil.rmtree(ghost)
+
+    ws = await ex._acquire_workspace(str(repo), branch, "development", 7815)
+    try:
+        assert _branch(repo) == branch
     finally:
         await ex._release_workspace(ws)
 

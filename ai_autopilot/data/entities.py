@@ -141,13 +141,27 @@ class PrCommandState(Base):
 
 
 class HandledPrComment(Base):
-    """PR comment ids the babysitter already dispatched — the restart-proof twin of
-    its in-memory set, closing the gap where a command was dispatched but the
-    bot-signed reply (the other durable mark) never got posted."""
+    """PR comments the babysitter already dispatched — the restart-proof twin of its
+    in-memory set, closing the gap where a command was dispatched but the bot-signed
+    reply (the other durable mark) never got posted.
 
-    __tablename__ = "handled_pr_comments"
+    Keyed by THREAD as well as comment, because an ADO comment id is an ordinal within
+    its thread, not a PR-wide id: every thread starts again at 1. Keying on
+    ``(pr_id, comment_id)`` therefore made the first comment of every new thread collide
+    with the first comment of the oldest one — a PR that had once handled comments
+    1/4/7/9 silently swallowed the next four threads whose command landed at those
+    ordinals. Silently: no reply, no log, indistinguishable from the bot being down.
+
+    A new table rather than a third key column on the old one — ``create_all`` adds
+    missing tables but never alters existing ones, so a renamed table is the migration.
+    Losing the old rows is harmless and in fact desirable: a command the bot really did
+    answer is still marked by its bot-signed reply (see ``command_threads``), so only the
+    wrongly-swallowed ones come back."""
+
+    __tablename__ = "handled_pr_thread_comments"
 
     pr_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    thread_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     comment_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime)
 

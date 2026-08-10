@@ -195,8 +195,17 @@ _BOT_GUID = "11111111-2222-3333-4444-555555555555"
 
 
 def _mention(guid: str = _BOT_GUID, name: str = "Phong Pham") -> str:
-    """An @mention exactly as Azure DevOps stores it in comment HTML."""
+    """An @mention as the ADO web UI RENDERS it (an anchor carrying the GUID)."""
     return f'<a href="#" data-vss-mention="version:2.0,{guid}">@{name}</a>'
+
+
+def _mention_raw(guid: str = _BOT_GUID) -> str:
+    """An @mention as the REST API actually RETURNS it — the storage form.
+
+    This is what a real comment looks like on the wire; the rendered anchor above only
+    ever exists in the browser. Every mention test used to build the anchor, so the
+    parser passed CI while dropping every real mention in production."""
+    return f"@<{guid.upper()}>"
 
 
 def _bot() -> BotIdentity:
@@ -250,6 +259,43 @@ def test_slash_commands_still_report_no_mention():
     threads = [_mention_thread(10, 1, "/ai đổi field")]
     got = command_threads(threads, ["/ai"], bot=_bot())
     assert got[0]["via_mention"] is False and got[0]["instruction"] == "/ai đổi field"
+
+
+# ── The storage form: what the REST API really returns ────────────────────────
+
+def test_storage_form_mention_is_detected():
+    """Verbatim from PR 2941, where this went unanswered: the API returns ``@<GUID>``,
+    not the anchor, so matching only the anchor dropped the comment in silence."""
+    threads = [_mention_thread(11676, 2, _mention_raw() + " hãy sửa lại như comment")]
+    got = command_threads(threads, ["/ai", "/review"], bot=_bot())
+    assert [t["thread_id"] for t in got] == [11676]
+    assert got[0]["instruction"] == "hãy sửa lại như comment"
+    assert got[0]["via_mention"] is True
+
+
+def test_storage_form_mention_of_someone_else_is_ignored():
+    other = _mention_raw("99999999-2222-3333-4444-555555555555")
+    assert command_threads(
+        [_mention_thread(10, 1, other + " xem hộ cái này")], ["/ai"], bot=_bot()
+    ) == []
+
+
+def test_storage_form_mention_with_explicit_command_is_not_inferred():
+    threads = [_mention_thread(10, 1, _mention_raw() + " /security rà đoạn này")]
+    got = command_threads(threads, ["/ai", "/security"], bot=_bot())
+    assert got[0]["instruction"] == "/security rà đoạn này"
+    assert got[0]["via_mention"] is False
+
+
+def test_slash_command_after_mentioning_a_colleague_still_matches():
+    """Stripping ``@<GUID>`` as a mention, not as an HTML tag, is what keeps the ``/ai``
+    leading: tag-stripping alone left a bare ``@`` in front and the command stopped
+    matching."""
+    other = _mention_raw("99999999-2222-3333-4444-555555555555")
+    got = command_threads(
+        [_mention_thread(10, 1, f"{other} /ai đổi field")], ["/ai"], bot=_bot()
+    )
+    assert got[0]["instruction"] == "/ai đổi field" and got[0]["via_mention"] is False
 
 
 # ── Review budgets: the counters that bound cost ───────────────────────────────

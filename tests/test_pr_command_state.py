@@ -26,11 +26,23 @@ async def test_pr_command_repo_roundtrip(db: Database):
     assert await repo.revision_count(42) == 3
 
     assert await repo.handled_comments(7) == set()
-    await repo.mark_handled(7, 100)
-    await repo.mark_handled(7, 101)
-    await repo.mark_handled(7, 100)                    # idempotent
-    assert await repo.handled_comments(7) == {100, 101}
-    assert await repo.handled_comments(8) == set()     # per-PR isolation
+    await repo.mark_handled(7, 30, 100)
+    await repo.mark_handled(7, 30, 101)
+    await repo.mark_handled(7, 30, 100)                     # idempotent
+    assert await repo.handled_comments(7) == {(30, 100), (30, 101)}
+    assert await repo.handled_comments(8) == set()          # per-PR isolation
+
+
+async def test_handled_comments_are_scoped_to_their_thread(db: Database):
+    """ADO numbers comments per THREAD — every thread starts again at 1. Keyed by comment
+    id alone, the first comment of a new thread inherited the first comment of an older
+    one's "already handled" mark, and its command was dropped without a reply or a log."""
+    repo = PrCommandRepository(db)
+    await repo.mark_handled(2941, 11421, 1)                 # an old thread's /ai
+
+    handled = await repo.handled_comments(2941)
+    assert (11421, 1) in handled
+    assert (11637, 1) not in handled                        # a NEW thread's first comment
 
 
 async def test_efficiency_stats_aggregate(db: Database):

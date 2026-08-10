@@ -678,22 +678,22 @@ class ReviewerTrackerService:
         branch = pr.get("sourceRefName", "").removeprefix("refs/heads/")
         item = await self._pr_work_item(pr)
         for cmd in commands:
-            cid = cmd["comment_id"]
-            if cid in handled:
+            cid, ctid = cmd["comment_id"], cmd["thread_id"]
+            if (ctid, cid) in handled:
                 continue
             if cfg.dry_run:
                 # Dry-run: acknowledge in the log, mark handled so we don't re-log, no ADO write.
                 self._log.info("[DRY-RUN] would handle PR command", pr=pr_id, cmd=cmd["instruction"][:60])
-                await cmd_repo.mark_handled(pr_id, cid)
+                await cmd_repo.mark_handled(pr_id, ctid, cid)
                 continue
             if not matches_any_user(cmd["author_email"], cmd["author_name"], claimed):
-                await cmd_repo.mark_handled(pr_id, cid)
-                self._spawn(self._reply(repo_id, pr_id, cmd["thread_id"],
+                await cmd_repo.mark_handled(pr_id, ctid, cid)
+                self._spawn(self._reply(repo_id, pr_id, ctid,
                     f"<div>🔒 Trên máy này tôi chỉ nhận lệnh từ: "
                     f"<b>{describe_users(claimed)}</b> — nhờ đúng người reply để tôi "
                     "tiếp nhận.</div>"))
                 continue
-            await cmd_repo.mark_handled(pr_id, cid)
+            await cmd_repo.mark_handled(pr_id, ctid, cid)
             # A bare @mention gets its command inferred here (advisory by default) and
             # written into the instruction, so the metric and _guidance see a real command.
             advisory = await resolve_command(cfg, cmd)

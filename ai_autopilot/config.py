@@ -155,24 +155,53 @@ class BotIdentity:
     claimed: str = ""
 
 
-# Azure DevOps stores an @mention inside comment HTML as an anchor carrying the mentioned
-# identity's GUID, e.g.
-#   <a href="#" data-vss-mention="version:2.0,11111111-2222-3333-4444-555555555555">@Phong Pham</a>
-# The attribute is captured whole and the GUID picked out separately — the "version:" part
-# has changed shape before, and a mention with no GUID must still be matchable by name.
+# Azure DevOps has TWO representations of an @mention, and a comment can only be matched
+# against the one it actually arrives in:
+#
+#   storage form  @<11111111-2222-3333-4444-555555555555>
+#   rendered form <a href="#" data-vss-mention="version:2.0,1111…">@Phong Pham</a>
+#
+# The REST API returns comments in the STORAGE form — the rendered anchor is what the web
+# UI paints. Matching only the anchor is why a real "@AI Autopilot fix this" on a pull
+# request was dropped in silence: no command, no log, no reply. Both forms are matched, and
+# the attribute of the rendered one is captured whole with the GUID picked out separately —
+# the "version:" part has changed shape before, and a mention carrying no GUID must still be
+# matchable by name.
 _MENTION_RE = re.compile(
     r"<(?P<tag>a|span)\b[^>]*\bdata-vss-mention\s*=\s*\"(?P<attr>[^\"]*)\"[^>]*>"
     r"(?P<label>.*?)</(?P=tag)>",
     re.IGNORECASE | re.DOTALL,
 )
-_GUID_RE = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE
-)
+_GUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+_GUID_RE = re.compile(_GUID, re.IGNORECASE)
+# Storage form. The label is the GUID itself — there is no display name to fall back on,
+# which is fine: a GUID identifies the bot better than any name could.
+_MENTION_STORAGE_RE = re.compile(rf"@&lt;({_GUID})&gt;|@<({_GUID})>", re.IGNORECASE)
+
+
+def _mentions(text: str) -> list[tuple[int, int, str, str]]:
+    """Every @mention in ``text`` as ``(start, end, guid, label)``, in document order.
+
+    Covers both ADO representations (see above). ``guid`` is "" when the rendered form
+    carries no GUID; ``label`` is "" for the storage form, which has no display name."""
+    found: list[tuple[int, int, str, str]] = []
+    for m in _MENTION_RE.finditer(text):
+        guid = _GUID_RE.search(m.group("attr") or "")
+        label = _plain(m.group("label") or "").lstrip("@").strip()
+        found.append((m.start(), m.end(), guid.group(0) if guid else "", label))
+    for m in _MENTION_STORAGE_RE.finditer(text):
+        found.append((m.start(), m.end(), m.group(1) or m.group(2) or "", ""))
+    return sorted(found)
 
 
 def _plain(text: str) -> str:
-    """Comment HTML → plain text (ADO stores comments as HTML)."""
-    return html.unescape(_HTML_TAG_RE.sub(" ", text or "")).strip()
+    """Comment HTML → plain text (ADO stores comments as HTML).
+
+    Storage-form mentions go first: ``@<GUID>`` is not an HTML tag, so tag-stripping alone
+    would leave a bare ``@`` — and a leading one shifts the text enough that ``/ai …`` after
+    a mention of a colleague no longer starts with the command."""
+    text = _MENTION_STORAGE_RE.sub(" ", text or "")
+    return html.unescape(_HTML_TAG_RE.sub(" ", text)).strip()
 
 
 def find_bot_mention(text: str | None, bot: BotIdentity | None) -> str | None:
@@ -189,12 +218,10 @@ def find_bot_mention(text: str | None, bot: BotIdentity | None) -> str | None:
     compare do we fall back to the display name."""
     if not text or bot is None:
         return None
-    for m in _MENTION_RE.finditer(text):
-        guid_match = _GUID_RE.search(m.group("attr") or "")
-        label = _plain(m.group("label") or "").lstrip("@").strip()
-        if guid_match and bot.identity_id:
+    for start, end, guid, label in _mentions(text):
+        if guid and bot.identity_id:
             # Definitive either way — never second-guess a GUID with a name.
-            if guid_match.group(0).lower() != bot.identity_id.lower():
+            if guid.lower() != bot.identity_id.lower():
                 continue
         elif not (
             (bot.display_name and matches_user(None, label, bot.display_name))
@@ -202,7 +229,7 @@ def find_bot_mention(text: str | None, bot: BotIdentity | None) -> str | None:
         ):
             continue
         # Drop just this mention, keep the rest of what they wrote as the instruction.
-        return _plain(text[: m.start()] + " " + text[m.end():])
+        return _plain(text[:start] + " " + text[end:])
     return None
 
 

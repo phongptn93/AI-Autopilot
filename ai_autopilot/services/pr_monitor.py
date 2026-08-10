@@ -32,7 +32,9 @@ class PrMonitorService:
         # In-memory caches over PrCommandRepository (survives restarts). Loaded lazily
         # per PR / per item; every mutation is written through to the DB best-effort.
         self._revision_counts: dict[int, int] = {}
-        self._handled: dict[int, set[int]] = {}  # pr_id → comment ids already handled
+        # pr_id → (thread_id, comment_id) pairs already handled. Thread-scoped because an
+        # ADO comment id only counts within its thread (see ``HandledPrComment``).
+        self._handled: dict[int, set[tuple[int, int]]] = {}
         self._task: asyncio.Task | None = None
         # Command handling runs as bounded background tasks so a slow revise never blocks the
         # scan loop (other PRs keep getting picked up). Same-repo revises are still serialised
@@ -122,20 +124,20 @@ class PrMonitorService:
     def _repo(self):
         return getattr(self._c, "pr_command_repo", None)
 
-    async def _get_handled(self, pr_id: int) -> set[int]:
+    async def _get_handled(self, pr_id: int) -> set[tuple[int, int]]:
         if pr_id not in self._handled:
-            loaded: set[int] = set()
+            loaded: set[tuple[int, int]] = set()
             if self._repo is not None:
                 with contextlib.suppress(Exception):
                     loaded = await self._repo.handled_comments(pr_id)
             self._handled[pr_id] = loaded
         return self._handled[pr_id]
 
-    async def _mark_handled(self, pr_id: int, comment_id: int) -> None:
-        self._handled.setdefault(pr_id, set()).add(comment_id)
+    async def _mark_handled(self, pr_id: int, thread_id: int, comment_id: int) -> None:
+        self._handled.setdefault(pr_id, set()).add((thread_id, comment_id))
         if self._repo is not None:
             with contextlib.suppress(Exception):
-                await self._repo.mark_handled(pr_id, comment_id)
+                await self._repo.mark_handled(pr_id, thread_id, comment_id)
 
     async def _get_revisions(self, work_item_id: int) -> int:
         if work_item_id not in self._revision_counts:
@@ -364,19 +366,19 @@ class PrMonitorService:
         branch = source_ref.removeprefix("refs/heads/")
         to_run: list[tuple[dict, int]] = []
         for cmd in commands:
-            cid = cmd["comment_id"]
-            if cid in handled:
+            cid, ctid = cmd["comment_id"], cmd["thread_id"]
+            if (ctid, cid) in handled:
                 continue
             if not matches_any_user(cmd["author_email"], cmd["author_name"], claimed):
                 # Someone else's command: don't run it, but don't ghost them either —
                 # say who drives this autopilot. The signed reply doubles as the durable
                 # handled mark (command_threads skips bot-answered commands), so one
                 # refusal per command, even across restarts.
-                await self._mark_handled(pr_id, cid)
-                self._spawn(self._reply_unauthorized(repo_id, pr_id, cmd["thread_id"], claimed))
+                await self._mark_handled(pr_id, ctid, cid)
+                self._spawn(self._reply_unauthorized(repo_id, pr_id, ctid, claimed))
                 continue
             # Mark before dispatch → no double-run across concurrent scans or restarts.
-            await self._mark_handled(pr_id, cid)
+            await self._mark_handled(pr_id, ctid, cid)
             # The revision cap guards against runaway CODE churn — advisory commands
             # (/review) change nothing, so they neither consume nor hit the budget:
             # you can ask for another review even after the item is revision-capped.

@@ -803,18 +803,25 @@ class PrCommandRepository:
                 await session.delete(row)
                 await session.commit()
 
-    async def handled_comments(self, pr_id: int) -> set[int]:
+    async def handled_comments(self, pr_id: int) -> set[tuple[int, int]]:
+        """``(thread_id, comment_id)`` pairs already dispatched on this PR.
+
+        Pairs, not bare comment ids: ADO numbers comments per THREAD, so a bare id is
+        ambiguous across a PR (see ``HandledPrComment``)."""
         async with self._db.session() as session:
             rows = await session.execute(
-                select(HandledPrComment.comment_id).where(HandledPrComment.pr_id == pr_id)
+                select(HandledPrComment.thread_id, HandledPrComment.comment_id).where(
+                    HandledPrComment.pr_id == pr_id
+                )
             )
-            return set(rows.scalars().all())
+            return {(t, c) for t, c in rows.all()}
 
-    async def mark_handled(self, pr_id: int, comment_id: int) -> None:
+    async def mark_handled(self, pr_id: int, thread_id: int, comment_id: int) -> None:
         async with self._db.session() as session:
-            if await session.get(HandledPrComment, (pr_id, comment_id)) is None:
+            if await session.get(HandledPrComment, (pr_id, thread_id, comment_id)) is None:
                 session.add(HandledPrComment(
-                    pr_id=pr_id, comment_id=comment_id, created_at=datetime.now(UTC)
+                    pr_id=pr_id, thread_id=thread_id, comment_id=comment_id,
+                    created_at=datetime.now(UTC),
                 ))
                 await session.commit()
 

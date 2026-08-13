@@ -704,6 +704,22 @@ class Settings(BaseSettings):
     # history / trend view). 0 = keep only the latest.
     scheduler_history_limit: int = 20
 
+    # ── Batched runs: linked items share ONE run, then split into one PR each ──
+    # The scheduler's default answer to "these items touch the same area" is to
+    # serialise them into separate waves — correct, but each wave re-reads the same
+    # code from scratch and the second run can still land on top of the first.
+    # Batching inverts that for a *linked cluster*: one agent run holds all of them
+    # in context and produces one branch + one PR PER WORK ITEM, so review and
+    # merge stay per-item. Off by default — it changes how work is dispatched.
+    batch_related_enabled: bool = False
+    # Hard cap on cluster size. A batch is one Claude context and one failure
+    # domain, so keep it small; anything larger is dispatched item-by-item.
+    batch_max_items: int = 3
+    # Stack the PRs (item 2 branches off item 1, and targets it) instead of cutting
+    # every branch from the base. Stacked = no conflicts when the items touch the
+    # same files, at the cost of a merge ORDER. Independent = merge in any order.
+    batch_stacked_prs: bool = True
+
     # ── Feedback loop / PR babysitter ──
     feedback_loop_enabled: bool = False
     max_revisions: int = 3

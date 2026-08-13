@@ -35,7 +35,12 @@ from ai_autopilot.config import (
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
 from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.execution.claude_client import ClaudeRun, run_claude
-from ai_autopilot.execution.result_contract import clear_result, read_result
+from ai_autopilot.execution.result_contract import (
+    batch_key,
+    clear_result,
+    find_result,
+    parse_result_text,
+)
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.workspace import discover_repos, parse_repo_descriptions
@@ -232,6 +237,17 @@ class ClaudeExecutor:
         workspace = self._config.workspace_directory
         started = time.monotonic()
 
+        # Preflight. Without a workspace there is no repo to edit and no `.claude`
+        # to load (setting_sources stays off), so the run cannot succeed — and it
+        # fails LATE and confusingly, as "agent produced no result file" after a
+        # full timeout. Say what is actually wrong, before spending a run on it.
+        misconfig = self._preflight(autonomy)
+        if misconfig:
+            self._log.error("agent preflight failed", id=item.id, error=misconfig)
+            result = ExecutionResult.fail(item.id, "agent", misconfig)
+            result.duration_seconds = time.monotonic() - started
+            return result
+
         repos = self._allowed_repos(workspace)
         injected = self._lessons_injected(repos)
         # Isolate this task in its own worktree scratch so it never touches the
@@ -258,7 +274,18 @@ class ClaudeExecutor:
                 brief, run_dir, on_event=lambda line: activity.append(workspace, item.id, line)
             )
             activity.append(workspace, item.id, "✅ agent run finished")
-            result = self._result_from_agent(item, read_result(run_dir, item.id), autonomy)
+            agent = find_result(run_dir, item.id)
+            if agent is None:
+                # The work may well be done (branch pushed, PR open) and only the
+                # bookkeeping missed — recover the envelope from the run's output
+                # rather than discarding the whole run.
+                agent = parse_result_text(claude_run.text)
+                if agent is not None:
+                    self._log.warning("recovered result from agent output", id=item.id)
+                    activity.append(
+                        workspace, item.id, "⚠️ result file missing — recovered from agent output"
+                    )
+            result = self._result_from_agent(item, agent, autonomy, run_text=claude_run.text)
             result.cost_tokens = claude_run.total_tokens
             result.cost_usd = claude_run.cost_usd
         except TimeoutError:
@@ -273,6 +300,261 @@ class ClaudeExecutor:
         result.duration_seconds = time.monotonic() - started
         result.lessons_injected = injected
         return result
+
+    async def run_agent_batch(
+        self, items: list[WorkItemInfo], *, autonomy: str, draft_pr: bool
+    ) -> dict[int, ExecutionResult]:
+        """Handle a cluster of linked work items in ONE agent run, one PR each.
+
+        The scheduler's alternative is to serialise the cluster into separate
+        waves: each run then re-reads the same code from scratch, and the second
+        run lands on a base that no longer matches what it read. Here a single
+        run holds all of them in context and produces one branch + one PR **per
+        work item**, so the review and merge units stay per-item — which is what
+        the board, the retry budget and the ADO states are keyed on.
+
+        Returns ``{work_item_id: ExecutionResult}`` — one per input item, always,
+        so the caller's per-item bookkeeping is unchanged. ``items`` is taken in
+        the order the PRs should stack (predecessors first).
+        """
+        workspace = self._config.workspace_directory
+        started = time.monotonic()
+        lead = items[0]
+        ids = [i.id for i in items]
+
+        misconfig = self._preflight(autonomy)
+        if misconfig:
+            self._log.error("batch preflight failed", ids=ids, error=misconfig)
+            return self._batch_fail(items, misconfig, started)
+
+        repos = self._allowed_repos(workspace)
+        injected = self._lessons_injected(repos)
+        scratch = await self._acquire_agent_scratch(lead.id, repos)
+        run_dir = scratch or workspace
+        pretrust_claude_dir(run_dir)
+        key = batch_key(lead.id)
+        # The dashboard's activity feed is per item, and a batch is one run — mirror
+        # every line onto ALL members so none of them looks stalled while it runs.
+        def _feed(line: str) -> None:
+            for iid in ids:
+                activity.append(workspace, iid, line)
+
+        try:
+            clear_result(run_dir, key)
+            for iid in ids:
+                activity.clear(workspace, iid)
+            isolated = " (isolated worktree)" if scratch else ""
+            _feed(
+                f"🧺 batch started{isolated} — {len(items)} linked items: "
+                + ", ".join(f"#{i}" for i in ids)
+            )
+            brief = self._build_batch_brief(items, repos, autonomy=autonomy, draft_pr=draft_pr)
+            if injected:
+                _feed(f"🧠 {injected} lesson(s) from past runs injected")
+            self._log.info(
+                "running agent batch", ids=ids, cwd=run_dir, repos=repos, isolated=bool(scratch)
+            )
+            claude_run = await self._run_claude(brief, run_dir, on_event=_feed)
+            _feed("✅ batch run finished")
+            agent = find_result(run_dir, key) or parse_result_text(claude_run.text)
+            results = self._results_from_batch(
+                items, agent, autonomy, run_text=claude_run.text
+            )
+            # One run, one bill — charge it to the lead so the totals stay honest
+            # instead of being multiplied by the number of items.
+            results[lead.id].cost_tokens = claude_run.total_tokens
+            results[lead.id].cost_usd = claude_run.cost_usd
+        except TimeoutError:
+            mins = self._config.task_timeout_minutes
+            self._log.error("agent batch timed out", ids=ids, minutes=mins)
+            return self._batch_fail(items, f"Timed out after {mins} minutes", started)
+        except Exception as exc:  # noqa: BLE001 — never leave the items stuck IN_PROGRESS
+            self._log.error("agent batch crashed", ids=ids, error=str(exc))
+            return self._batch_fail(items, str(exc), started)
+        finally:
+            await self.release_scratch(scratch)
+
+        elapsed = time.monotonic() - started
+        for res in results.values():
+            res.duration_seconds = elapsed
+            res.lessons_injected = injected
+        return results
+
+    def _batch_fail(
+        self, items: list[WorkItemInfo], error: str, started: float
+    ) -> dict[int, ExecutionResult]:
+        """Same failure on every member — the batch is one failure domain."""
+        elapsed = time.monotonic() - started
+        out: dict[int, ExecutionResult] = {}
+        for item in items:
+            res = ExecutionResult.fail(item.id, "agent-batch", error)
+            res.duration_seconds = elapsed
+            out[item.id] = res
+        return out
+
+    def _results_from_batch(
+        self, items: list[WorkItemInfo], agent, autonomy: str, run_text: str = ""
+    ) -> dict[int, ExecutionResult]:
+        """Split ONE agent result into a per-work-item result, by ``work_item_id``.
+
+        An item is only successful if a PR was attributed to *it* — a batch that
+        opened two of three PRs must not mark the third done just because the run
+        as a whole said "completed".
+        """
+        if agent is None:
+            last = _last_words(run_text)
+            path = f".autopilot/runs/{batch_key(items[0].id)}.json"
+            reason = f"Batch produced no result file ({path})"
+            if last:
+                reason += f" — agent's last words: {last}"
+            out = self._batch_fail(items, reason, time.monotonic())
+            for res in out.values():
+                res.output = run_text
+            return out
+
+        by_item: dict[int, list] = {i.id: [] for i in items}
+        unattributed = []
+        for art in agent.artifacts:
+            if art.work_item_id in by_item:
+                by_item[art.work_item_id].append(art)
+            else:
+                unattributed.append(art)
+        # A single-item batch needs no attribution to be unambiguous.
+        if len(items) == 1:
+            by_item[items[0].id].extend(unattributed)
+            unattributed = []
+        if unattributed:
+            self._log.warning(
+                "batch artifacts with no work_item_id",
+                ids=[i.id for i in items],
+                count=len(unattributed),
+            )
+
+        out: dict[int, ExecutionResult] = {}
+        for item in items:
+            arts = [a for a in by_item[item.id] if a.pr_url]
+            if agent.needs_human and not arts:
+                res = ExecutionResult.fail(
+                    item.id, "agent-batch", agent.reason or "needs human input"
+                )
+                res.needs_human = True
+                res.output = agent.summary
+            elif arts or (agent.is_completed and autonomy == "report"):
+                res = ExecutionResult.ok(item.id, "agent-batch", agent.summary)
+                res.pr_urls = [a.pr_url for a in arts]
+                res.pr_url = res.pr_urls[0] if res.pr_urls else None
+                res.branch_name = arts[0].branch if arts else None
+            else:
+                why = agent.reason or agent.summary or "no PR produced"
+                res = ExecutionResult.fail(
+                    item.id, "agent-batch", f"Batch opened no PR for #{item.id}: {why}"
+                )
+                res.output = agent.summary
+            out[item.id] = res
+        return out
+
+    def _build_batch_brief(
+        self, items: list[WorkItemInfo], repos: list[str], *, autonomy: str, draft_pr: bool
+    ) -> str:
+        """Brief for a batched run: N items, N branches, N PRs, one result file."""
+        lead = items[0]
+        key = batch_key(lead.id)
+        result_rel = f".autopilot/runs/{key}.json"
+        stacked = self._config.batch_stacked_prs
+        base = self._config.base_branch or "main"
+        draft = " Open every PR as a DRAFT." if draft_pr else ""
+
+        if stacked:
+            branching = (
+                f"- STACKED branches. Work the items IN THE ORDER LISTED. The first item's "
+                f"branch starts from `{base}` and its PR targets `{base}`. EACH later item "
+                "branches off the PREVIOUS item's branch and its PR TARGETS that previous "
+                "branch — never the base. This is what keeps items that touch the same files "
+                "from conflicting, and it means the PRs must be merged in the listed order."
+            )
+        else:
+            branching = (
+                f"- INDEPENDENT branches. Every item's branch starts from `{base}` and its PR "
+                f"targets `{base}`. Keep each item's diff to its own files so the PRs can be "
+                "merged in any order; if two items genuinely need the same edit, put it in the "
+                "FIRST item and say so in the second PR's description."
+            )
+
+        listing = []
+        for n, it in enumerate(items, 1):
+            listing.append(f"\n## {n}. Work item #{it.id}: {it.title}")
+            listing.append(f"Type: {it.work_item_type} | Category: {it.category}")
+            if it.description:
+                listing.append(f"Description:\n{it.description}")
+            if it.acceptance_criteria:
+                listing.append(f"Acceptance criteria:\n{it.acceptance_criteria}")
+            if it.pending_comment:
+                listing.append(
+                    "⚠️ Latest human guidance (highest priority for this item):\n"
+                    f"{it.pending_comment}"
+                )
+
+        descs = parse_repo_descriptions(self._config.repo_descriptions)
+        repo_list = "\n".join(
+            f"- ./{r}" + (f" — {descs[r.lower()]}" if r.lower() in descs else "") for r in repos
+        ) or "(none discovered)"
+
+        lines = [
+            "You are an autonomous engineer working in this workspace. These "
+            f"{len(items)} Azure DevOps work items are LINKED — they touch the same area, "
+            "which is why they are given to you together instead of one at a time.",
+            "",
+            "Read them as a set and decide the shared design ONCE. But deliver them "
+            "SEPARATELY: each work item gets its OWN branch and its OWN pull request, "
+            "because each is reviewed, merged and tracked on its own.",
+            "\n".join(listing),
+        ]
+        if self._config.learning_loop_enabled:
+            past = lessons.lessons_brief(
+                self._config.workspace_directory, repos,
+                limit=self._config.lessons_max_injected,
+            )
+            if past:
+                lines.append(past)
+        lines += [
+            "",
+            "# Repositories you may edit (subfolders of this workspace)",
+            repo_list,
+            "Do NOT edit anything outside these repos.",
+            "",
+            "# How to deliver",
+            "- ONE branch and ONE pull request PER WORK ITEM. Never put two work items in one "
+            "PR, and never open a PR that leaves an item half-done.",
+            branching,
+            "- Name each branch after its own item (e.g. `feature/be/<id>-<slug>`), and put the "
+            "item id in the PR title so a reviewer can tell them apart.",
+            "- Commit each item's work separately, even while they share this one worktree: "
+            "stage only that item's files before committing to its branch.",
+            "- If an item turns out to need NO change (already covered by another item in this "
+            "set), open no PR for it and say so in its `reason` — do not invent a change.",
+            f"-{draft}" if draft else "- Open normal (non-draft) PRs.",
+            "- Run a self-review (security-review / review-pr skill) before opening each PR.",
+            "- Work autonomously and DECISIVELY: do not ask clarifying questions. Choose the "
+            "most reasonable reading, note the assumption in the PR, keep going.",
+            f"- {BOT_COMMENT_INSTRUCTION}",
+            AGENT_CONDUCT_INSTRUCTION,
+            "",
+            "# Required output (the control plane reads ONLY this — you MUST write it)",
+            f"When finished, write ONE JSON file at `{result_rel}` (relative to this "
+            "workspace, NOT inside a repo — this file is the exception to the repo boundary "
+            "above, and must never be committed):",
+            '  {"status":"completed|failed|needs_human","summary":"<what you did overall>",',
+            '   "artifacts":[{"work_item_id":<id>,"repo":"<name>","branch":"<branch>",'
+            '"pr_url":"<url>"}],',
+            '   "needs_human":false,"reason":"<why, if failed/needs_human>"}',
+            "**`work_item_id` on every artifact is mandatory** — it is how each PR is reported "
+            f"back on its own work item. Cover all {len(items)} items ("
+            + ", ".join(f"#{i.id}" for i in items)
+            + "): an item with no artifact is treated as FAILED, so if you deliberately opened "
+            "no PR for one, say why in `reason`. Write this file even if the run failed or you "
+            "are blocked — without it the whole batch is lost.",
+        ]
+        return "\n".join(lines)
 
     async def review_pr(self, repo_name: str, pr_id: int, pr_url: str = "") -> str:
         """Run the real code-review SKILL on a PR, evaluating the diff against the
@@ -311,6 +593,31 @@ class ClaudeExecutor:
             return f"Không review được PR !{pr_id}: {exc}"
         finally:
             await self.release_scratch(scratch)
+
+    def _preflight(self, autonomy: str) -> str:
+        """Config that makes an agent run impossible. Returns "" when it can run.
+
+        Both cases below used to surface as "Agent produced no result file" —
+        after a full task timeout — because the run started anyway against an
+        empty cwd with no skills, no MCP and nothing it was allowed to edit.
+        """
+        workspace = self._config.workspace_directory
+        if not workspace:
+            return (
+                "workspace_directory is not configured — the agent has no repos to work in "
+                "and the workspace's .claude skills/MCP are not loaded. Set workspace_directory "
+                "to the folder that holds your repo checkouts."
+            )
+        if not Path(workspace).is_dir():
+            return f"workspace_directory does not exist: {workspace}"
+        # report mode only reads + comments, so it needs no writable repo.
+        if autonomy != "report" and not self._allowed_repos(workspace):
+            allow = self._config.allowed_repos
+            detail = (
+                f"allowed_repos={list(allow)} matched nothing" if allow else "no git repos found"
+            )
+            return f"no repository available in workspace_directory '{workspace}' ({detail})"
+        return ""
 
     def _allowed_repos(self, workspace: str) -> list[str]:
         """Repos the agent may edit: the configured whitelist, or all discovered."""
@@ -602,7 +909,7 @@ class ClaudeExecutor:
 
     def finalize_interactive(self, item: WorkItemInfo, run_dir: str) -> ExecutionResult | None:
         """Map a live session's result if it has finished; ``None`` while running."""
-        agent = read_result(run_dir, item.id)
+        agent = find_result(run_dir, item.id)
         if agent is None:
             return None
         return self._result_from_agent(item, agent, self._config.autonomy_level)
@@ -643,12 +950,22 @@ class ClaudeExecutor:
             async with self._repo_lock(src_repo):
                 await self._git(["worktree", "prune"], src_repo, check=False)
 
-    def _result_from_agent(self, item, agent, autonomy: str) -> ExecutionResult:
+    def _result_from_agent(
+        self, item, agent, autonomy: str, run_text: str = ""
+    ) -> ExecutionResult:
         if agent is None:
+            # "No result file" describes OUR bookkeeping, not what went wrong — and it
+            # is what the human sees on the work item. The agent almost always said
+            # why it stopped ("#123 chưa implement nên chưa có API để gọi"), so carry
+            # its closing words into the error and the full output into the record.
             self._log.warning("agent wrote no result file", id=item.id)
-            return ExecutionResult.fail(
-                item.id, "agent", "Agent produced no result file (.autopilot/runs/<id>.json)"
-            )
+            last = _last_words(run_text)
+            reason = "Agent produced no result file (.autopilot/runs/<id>.json)"
+            if last:
+                reason += f" — agent's last words: {last}"
+            result = ExecutionResult.fail(item.id, "agent", reason)
+            result.output = run_text
+            return result
         if agent.needs_human:
             self._log.info("agent escalated to human", id=item.id, reason=agent.reason)
             result = ExecutionResult.fail(item.id, "agent", agent.reason or "needs human input")
@@ -709,9 +1026,15 @@ class ClaudeExecutor:
                 "item, its acceptance criteria, the latest human comment, and the existing "
                 "code/conventions, note the assumption briefly in the commit/PR, and keep going.\n"
                 "- Report needs_human ONLY for a genuine HARD blocker you cannot resolve yourself: "
-                "missing credentials or repo access, or an irreversible destructive action that "
-                "needs sign-off. Ambiguity, naming/style choices, and minor gaps are NOT "
-                "blockers — decide and move on."
+                "missing credentials or repo access, an irreversible destructive action that "
+                "needs sign-off, or a DEPENDENCY THAT HAS NOT LANDED YET (the API / table / "
+                "component this item builds on does not exist in the repo, because the work item "
+                "that delivers it has not run). In that last case say WHICH work item you are "
+                "waiting on. Ambiguity, naming/style choices, and minor gaps are NOT blockers — "
+                "decide and move on.\n"
+                "- Being blocked is a RESULT, not a reason to stop silently: write the result "
+                "file with needs_human=true and the reason. Ending the run without that file "
+                "throws away everything you found out."
             )
 
         # Enforce the skill allowlist in the AI-native path too (the legacy router
@@ -780,6 +1103,10 @@ class ClaudeExecutor:
             "",
             "# Required output (the control plane reads ONLY this — you MUST write it)",
             f"When finished, write a JSON file at `{result_rel}` (relative to this workspace):",
+            "This one file is the EXCEPTION to 'do not edit anything outside these repos': it "
+            "belongs at the WORKSPACE ROOT, NOT inside a repo folder, and must never be "
+            "committed. Write it even if the task failed or you are blocked — a missing file "
+            "loses the whole run.",
             '  {"status":"completed|failed|needs_human","summary":"<what you did>",',
             '   "artifacts":[{"repo":"<name>","branch":"<branch>","pr_url":"<url>"}],',
             '   "needs_human":false,"reason":"<why, if failed/needs_human>"}',
@@ -1509,6 +1836,14 @@ def _extract_pr_url(output: str) -> str | None:
         if match:
             return match.group(0)
     return None
+
+
+def _last_words(text: str, limit: int = 400) -> str:
+    """The tail of the agent's output, flattened to one line for an error message."""
+    flat = " ".join((text or "").split())
+    if not flat:
+        return ""
+    return flat if len(flat) <= limit else "…" + flat[-limit:]
 
 
 def _sum_cost(*runs: ClaudeRun) -> float | None:

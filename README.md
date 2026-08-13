@@ -175,6 +175,7 @@ Most‑used keys:
 | `use_worktrees` | `true` | Isolated git worktree per task (required for `max_concurrent > 1`) |
 | `max_concurrent` | `1` | Concurrent executions |
 | `dependency_scheduling_enabled` | `true` | Order work by the ADO link graph (0 tokens) |
+| `batch_related_enabled` | `false` | Run a linked cluster as ONE agent run that opens **one PR per work item** (headless only) |
 | `pr_scoring_enabled` | `true` | Grade each run; weak runs are held for a human |
 | `sdlc_loop_enabled` | `false` | Opt into the closed‑loop SDLC engine (below) |
 | `claude_model` | *(CLI default)* | `sonnet` / `opus` / `fable` / `haiku` — pin explicitly instead of trusting the bundled CLI's own default |

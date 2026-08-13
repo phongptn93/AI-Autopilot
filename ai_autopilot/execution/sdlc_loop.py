@@ -19,7 +19,7 @@ from pathlib import Path
 from ai_autopilot.config import SdlcStage, Settings
 from ai_autopilot.execution.claude_executor import ClaudeExecutor, _branch_name
 from ai_autopilot.execution.pr_scorer import score_badge_html, score_run
-from ai_autopilot.execution.result_contract import clear_result, read_result
+from ai_autopilot.execution.result_contract import clear_result, find_result
 from ai_autopilot.execution.sdlc_plan import (
     ADVANCE,
     REVISE,
@@ -117,7 +117,7 @@ class SdlcLoopEngine:
                 total_tokens += tokens
 
                 self._absorb(signals, stage, run_text, is_error)
-                agent = read_result(run_dir, item.id)
+                agent = find_result(run_dir, item.id)
                 if agent is not None:
                     signals.needs_human = signals.needs_human or agent.needs_human
                     if agent.pr_url:

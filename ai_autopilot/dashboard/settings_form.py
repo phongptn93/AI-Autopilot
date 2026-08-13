@@ -299,6 +299,15 @@ FIELDS: tuple[Field, ...] = (
     Field("scheduler_history_limit", "History to keep", "int", "Dependency scheduling",
           "How many recent scheduling decisions (that held work back) to keep for the "
           "Planning history panel. 0 = keep only the live view."),
+    Field("batch_related_enabled", "Batch linked items", "bool", "Dependency scheduling",
+          "Run a linked cluster (Related / Predecessor chain) as ONE agent run that opens one "
+          "branch + one PR per work item, instead of serialising it into separate waves. "
+          "Headless agent mode only."),
+    Field("batch_max_items", "Max items / batch", "int", "Dependency scheduling",
+          "Largest cluster to batch. Bigger clusters are dispatched item-by-item. Default 3."),
+    Field("batch_stacked_prs", "Stack the batch PRs", "bool", "Dependency scheduling",
+          "Item 2 branches off item 1 and targets it (no conflicts, fixed merge order). "
+          "Off = every branch cut from the base branch (any merge order, may conflict)."),
     # ── Closed-loop SDLC (v2) ──
     Field("sdlc_loop_enabled", "Enable SDLC loop", "bool", "Closed-loop SDLC (v2)",
           "Drive items through profile-selected SDLC stages (gate + revise + escalate + handoff). "

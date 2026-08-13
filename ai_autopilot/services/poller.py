@@ -25,6 +25,7 @@ from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.routing import plan_schedule, sort_by_priority
+from ai_autopilot.routing.planning_groups import group_by_links
 from ai_autopilot.services.planning_analyzer import run_due_plans
 
 
@@ -103,6 +104,9 @@ class AdoPollerService:
         # Dependency scheduling: ids we've already told the human are deferred, so we
         # comment "waiting for #X" once per episode rather than every poll cycle.
         self._deferred_notified: set[int] = set()
+        # Batched runs: lead item id → the whole linked cluster it stands for this
+        # cycle. Populated by _schedule, consumed (and cleared) by _dispatch.
+        self._batch_of: dict[int, list[WorkItemInfo]] = {}
         # Comment-reaction loop: last human comment id handled per item (baseline), a
         # per-item round cap, comments to apply after an in-flight run finishes, and the
         # ids with a run currently in flight (so we defer rather than interrupt).
@@ -262,7 +266,7 @@ class AdoPollerService:
             "found new work items", count=len(new_items), dispatching=len(ready)
         )
 
-        await asyncio.gather(*(self._process(item) for item in ready))
+        await asyncio.gather(*(self._dispatch(item) for item in ready))
 
     async def _schedule(self, new_items: list[WorkItemInfo]) -> list[WorkItemInfo]:
         """Order the cycle's candidates by the ADO link graph (P1).
@@ -303,6 +307,12 @@ class AdoPollerService:
         for item in new_items:
             item.predecessor_ids = sorted(preds.get(item.id, set()))
             item.related_ids = sorted(related.get(item.id, set()))
+
+        # Batching (opt-in): collapse each linked cluster to a single LEAD, so the
+        # scheduler reasons about the cluster as one unit — its predecessors and
+        # conflicts are the union of its members', minus the edges inside it. The
+        # lead is later dispatched as one batched run that opens a PR per member.
+        new_items, preds, related = self._collapse_batches(new_items, preds, related)
 
         live_ids = set(self._live)
         active_ids = candidate_ids | live_ids
@@ -352,6 +362,87 @@ class AdoPollerService:
                 await c.ado.add_comment(item_id, f"<div>⏸️ <b>Autopilot hoãn:</b> {reason}.</div>")
 
         return plan.ready
+
+    def _batching_allowed(self) -> bool:
+        """Batching only applies to the headless agent path.
+
+        Interactive mode gives the human ONE steerable session per item, and the
+        SDLC loop drives one item through stages with its own per-item state — in
+        both, a shared run has nowhere to report to.
+        """
+        cfg = self._config
+        return bool(
+            cfg.batch_related_enabled
+            and cfg.batch_max_items > 1
+            and cfg.workspace_directory      # legacy path is per-item by construction
+            and cfg.execution_mode != "interactive"
+            and not cfg.sdlc_loop_enabled
+        )
+
+    def _collapse_batches(
+        self,
+        items: list[WorkItemInfo],
+        preds: dict[int, set[int]],
+        related: dict[int, set[int]],
+    ) -> tuple[list[WorkItemInfo], dict[int, set[int]], dict[int, set[int]]]:
+        """Replace each linked cluster with its lead; record the cluster in ``_batch_of``.
+
+        Returns the rewritten ``(items, predecessors, related)`` for ``plan_schedule``.
+        Clusters that are too big to batch are left completely untouched, so they
+        keep the existing one-item-per-wave behaviour.
+        """
+        self._batch_of = {}
+        if not self._batching_allowed():
+            return items, preds, related
+
+        groups = group_by_links(items, preds, related)
+        by_id = {i.id: i for i in items}
+        cap = self._config.batch_max_items
+        # Predecessor chains first: their ORDER is the stacking order. Related
+        # clusters have no inherent order, so priority decides.
+        clusters: list[list[int]] = []
+        taken: set[int] = set()
+        for chain in groups["serial"]:
+            if 1 < len(chain) <= cap and not (set(chain) & taken):
+                clusters.append(chain)
+                taken.update(chain)
+        for cluster in groups["conflicts"]:
+            if 1 < len(cluster) <= cap and not (set(cluster) & taken):
+                ordered = [i.id for i in sort_by_priority([by_id[x] for x in cluster])]
+                clusters.append(ordered)
+                taken.update(ordered)
+
+        if not clusters:
+            return items, preds, related
+
+        out_items: list[WorkItemInfo] = []
+        out_preds = {k: set(v) for k, v in preds.items()}
+        out_related = {k: set(v) for k, v in related.items()}
+        collapsed: set[int] = set()
+        for cluster in clusters:
+            members = [by_id[x] for x in cluster]
+            lead = members[0]
+            inside = set(cluster)
+            # The lead inherits every link the cluster has to the OUTSIDE world, so a
+            # batch still waits for an external predecessor and still conflicts with
+            # an external Related item.
+            out_preds[lead.id] = set().union(*(preds.get(x, set()) for x in cluster)) - inside
+            out_related[lead.id] = set().union(*(related.get(x, set()) for x in cluster)) - inside
+            self._batch_of[lead.id] = members
+            collapsed |= inside - {lead.id}
+            self._log.info(
+                "batching linked cluster", lead=lead.id, members=cluster, size=len(cluster)
+            )
+        out_items = [i for i in items if i.id not in collapsed]
+        return out_items, out_preds, out_related
+
+    async def _dispatch(self, item: WorkItemInfo) -> None:
+        """Run one ready unit: a batched cluster if this item leads one, else itself."""
+        members = self._batch_of.pop(item.id, None)
+        if members and len(members) > 1:
+            await self._process_batch(members)
+            return
+        await self._process(item)
 
     def _matched_tag(self, item: WorkItemInfo) -> str | None:
         """The first effective trigger tag this item carries (for dashboard filtering)."""
@@ -662,6 +753,85 @@ class AdoPollerService:
         follow = self._pending_comment.pop(item.id, None)
         if follow is not None and not cfg.dry_run:
             await self._dispatch_with_comment(item, follow)
+
+    async def _process_batch(self, items: list[WorkItemInfo]) -> None:
+        """Run a linked cluster as ONE agent run, then report PER ITEM.
+
+        The run is shared; everything the board sees is not. Each item keeps its own
+        execution record, state, tags, comment, retry budget and metrics — so a batch
+        where 2 of 3 PRs land leaves the third FAILED and retryable on its own, and a
+        human reading any one work item sees only its own outcome.
+        """
+        c, cfg = self._c, self._config
+        fresh = [i for i in items if i.id not in self._inflight]
+        if len(fresh) != len(items):
+            # Part of the cluster is already running (webhook / comment re-entry):
+            # don't take the whole cluster hostage — let this cycle skip it.
+            self._log.info(
+                "batch skipped — member already in flight", ids=[i.id for i in items]
+            )
+            return
+        ids = [i.id for i in items]
+        self._inflight.update(ids)
+        try:
+            async with self._gate:
+                now = datetime.now(UTC)
+                records: dict[int, int] = {}
+                try:
+                    for item in items:
+                        self._processed[item.id] = now
+                        classified = c.router.classify(item)
+                        await c.plugins.run_pre_processors(classified)
+                        if not c.rbac.is_user_allowed(item):
+                            self._log.warning(
+                                "rbac denied user — batch aborted", id=item.id, user=item.created_by
+                            )
+                            return
+                        await c.state_repo.set(
+                            item.id, PipelineState.IN_PROGRESS, title=item.title
+                        )
+                        await self._apply_outcome(item, "in_progress")
+                        await c.notifier.notify_started(item, "agent-batch")
+                        records[item.id] = await c.execution_repo.start_execution(
+                            item, "agent-batch", trigger_tag=self._matched_tag(item)
+                        )
+
+                    self._log.info("processing batch", ids=ids)
+                    results = await c.executor.run_agent_batch(
+                        items, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft
+                    )
+
+                    for item in items:
+                        result = results.get(item.id)
+                        if result is None:  # executor contract says never, be safe anyway
+                            result = ExecutionResult.fail(
+                                item.id, "agent-batch", "batch returned no result for this item"
+                            )
+                        await c.execution_repo.complete_execution(records[item.id], result)
+                        if result.cost_tokens:
+                            await c.cost_tracker.track(records[item.id], result.cost_tokens)
+                            metrics.record_cost(result.cost_tokens)
+                        await self._handle_agent_result(item, result)
+                        await c.plugins.run_post_processors(item, result)
+                        status = (
+                            "NEEDS_HUMAN" if result.needs_human
+                            else ("SUCCESS" if result.success else "FAILED")
+                        )
+                        metrics.record_task(status.lower(), str(item.category), "agent-batch")
+                        metrics.record_duration(str(item.category), result.duration_seconds)
+                        self._log.info("batch member finished", id=item.id, status=status)
+                except Exception as exc:  # noqa: BLE001 — one crash must not strand the cluster
+                    self._log.error("error processing batch", ids=ids, error=str(exc))
+                    for item in items:
+                        await c.notifier.notify_error(item, str(exc))
+        finally:
+            for iid in ids:
+                self._inflight.discard(iid)
+        # Comments that arrived mid-run are applied per item, one normal run each.
+        for item in items:
+            follow = self._pending_comment.pop(item.id, None)
+            if follow is not None and not cfg.dry_run:
+                await self._dispatch_with_comment(item, follow)
 
     async def _process_agent(self, item: WorkItemInfo, classified: WorkItemInfo) -> None:
         """Control plane around the agent: track, run, read structured result, react."""

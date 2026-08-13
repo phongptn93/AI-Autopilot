@@ -143,6 +143,19 @@ dependency_scheduling_enabled: true
 # tasks under one Requirement) as a Related soft-conflict even without an explicit
 # link. Off by default — enable if siblings often collide.
 sibling_conflict_scheduling: false
+# Batched runs (opt-in): instead of serialising a LINKED cluster into separate
+# waves, hand the whole cluster to ONE agent run that opens one branch + one pull
+# request PER WORK ITEM. The shared run reads the code once and keeps every item
+# in context; the board still sees one PR, one state and one retry budget per item.
+# Headless agent mode only (not interactive, not the SDLC loop).
+batch_related_enabled: false
+# Largest cluster to batch — a batch is one context and one failure domain. Bigger
+# clusters fall back to the normal item-by-item waves.
+batch_max_items: 3
+# true  = STACKED PRs: item 2 branches off item 1 and targets it. No conflicts when
+#         the items touch the same files, but they must be merged in that order.
+# false = every branch cut from base_branch: merge in any order, may conflict.
+batch_stacked_prs: true
 
 # ── Closed-loop SDLC engine (v2, Phase 1) — opt-in, PER-MACHINE ──
 # When enabled, items route through the SdlcLoopEngine: a PROFILE-selected ordered

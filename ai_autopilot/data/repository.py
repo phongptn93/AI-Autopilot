@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, false, func, select
 
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
@@ -55,6 +55,16 @@ class EfficiencyStats:
         return self.total_runs / self.distinct_items if self.distinct_items else 0.0
 
 
+def _project_cond(projects: list[str] | None):
+    """SQL predicate restricting executions to ``projects``, or ``None`` for no filter.
+
+    ``None`` and ``[]`` are not interchangeable: no workspace selected means every
+    project, while a workspace with no project assigned must match nothing."""
+    if projects is None:
+        return None
+    return ExecutionRecord.project.in_(projects) if projects else false()
+
+
 class ExecutionRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -66,6 +76,7 @@ class ExecutionRepository:
             record = ExecutionRecord(
                 work_item_id=item.id,
                 title=item.title,
+                project=item.project or "",
                 category=str(item.category),
                 skill_used=skill,
                 trigger_tag=trigger_tag,
@@ -167,13 +178,19 @@ class ExecutionRepository:
         dfrom: str | None = None,
         dto: str | None = None,
         trigger_tag: str | None = None,
+        projects: list[str] | None = None,
         offset: int = 0,
         limit: int = 25,
     ) -> tuple[list[ExecutionRecord], int]:
         """Filtered + paginated executions, newest-first, with the total match count.
 
         Filters: status, category, free-text ``q`` (work-item id or title), started
-        date range (``dfrom``/``dto`` as ``YYYY-MM-DD``), and trigger tag.
+        date range (``dfrom``/``dto`` as ``YYYY-MM-DD``), trigger tag, and ADO
+        project.
+
+        ``projects`` is applied in SQL rather than by the caller because this query
+        is PAGINATED: filtering the page afterwards would hand back three rows out
+        of twenty-five, with a total count that disagrees with them.
         """
         conds = []
         if status:
@@ -185,6 +202,9 @@ class ExecutionRepository:
             conds.append(ExecutionRecord.category == category)
         if trigger_tag:
             conds.append(ExecutionRecord.trigger_tag == trigger_tag)
+        project_cond = _project_cond(projects)
+        if project_cond is not None:
+            conds.append(project_cond)
         if q:
             s = q.strip()
             if s.isdigit():
@@ -213,12 +233,16 @@ class ExecutionRepository:
         return list(rows), int(total)
 
     async def get_recent(
-        self, count: int = 50, trigger_tag: str | None = None
+        self, count: int = 50, trigger_tag: str | None = None,
+        projects: list[str] | None = None,
     ) -> list[ExecutionRecord]:
         async with self._db.session() as session:
             query = select(ExecutionRecord)
             if trigger_tag:
                 query = query.where(ExecutionRecord.trigger_tag == trigger_tag)
+            project_cond = _project_cond(projects)
+            if project_cond is not None:
+                query = query.where(project_cond)
             rows = await session.execute(
                 query.order_by(ExecutionRecord.started_at.desc()).limit(count)
             )
@@ -251,14 +275,18 @@ class ExecutionRepository:
             return list(rows.scalars().all())
 
     async def get_stats(
-        self, since: datetime | None = None, trigger_tag: str | None = None
+        self, since: datetime | None = None, trigger_tag: str | None = None,
+        projects: list[str] | None = None,
     ) -> ExecutionStats:
+        project_cond = _project_cond(projects)
         async with self._db.session() as session:
             base = select(func.count()).select_from(ExecutionRecord)
             if since is not None:
                 base = base.where(ExecutionRecord.started_at >= since)
             if trigger_tag:
                 base = base.where(ExecutionRecord.trigger_tag == trigger_tag)
+            if project_cond is not None:
+                base = base.where(project_cond)
 
             total = (await session.execute(base)).scalar_one()
             success = (
@@ -277,6 +305,8 @@ class ExecutionRepository:
                 avg_query = avg_query.where(ExecutionRecord.started_at >= since)
             if trigger_tag:
                 avg_query = avg_query.where(ExecutionRecord.trigger_tag == trigger_tag)
+            if project_cond is not None:
+                avg_query = avg_query.where(project_cond)
             avg = (await session.execute(avg_query)).scalar() or 0.0
 
             return ExecutionStats(
@@ -296,11 +326,16 @@ class ExecutionRepository:
             )
             return {int(r[0]) for r in rows if r[0] is not None}
 
-    async def get_efficiency(self, trigger_tag: str | None = None) -> EfficiencyStats:
+    async def get_efficiency(
+        self, trigger_tag: str | None = None, projects: list[str] | None = None
+    ) -> EfficiencyStats:
         """Aggregate effort figures for the Overview's efficiency cards."""
         conds = []
         if trigger_tag:
             conds.append(ExecutionRecord.trigger_tag == trigger_tag)
+        project_cond = _project_cond(projects)
+        if project_cond is not None:
+            conds.append(project_cond)
         async with self._db.session() as session:
             row = (
                 await session.execute(
@@ -450,6 +485,22 @@ class StateHistoryRepository:
                 select(WorkItemStateHistory).where(WorkItemStateHistory.id.in_(newest))
             )
             return {r.work_item_id: r.state for r in rows.scalars().all()}
+
+    async def known_projects(self, ids: list[int] | None = None) -> dict[int, str]:
+        """``{work_item_id: project}`` from the recorded history.
+
+        The pipeline tables (``work_item_states``, ``execution_records``) key on an id
+        alone, so a page built from them cannot tell which workspace a row belongs to.
+        This answers that from data already on disk rather than re-fetching the items
+        from Azure DevOps just to read one field."""
+        async with self._db.session() as session:
+            stmt = select(
+                WorkItemStateHistory.work_item_id, WorkItemStateHistory.project
+            ).where(WorkItemStateHistory.project != "")
+            if ids:
+                stmt = stmt.where(WorkItemStateHistory.work_item_id.in_(ids))
+            rows = await session.execute(stmt.distinct())
+            return {wid: project for wid, project in rows.all()}
 
     async def changes_since(self, since: datetime | None = None) -> list[StateChange]:
         """Every recorded transition at/after ``since`` (all of them when ``None``),

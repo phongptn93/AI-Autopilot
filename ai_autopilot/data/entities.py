@@ -361,6 +361,10 @@ class ExecutionRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     work_item_id: Mapped[int] = mapped_column(Integer)
     title: Mapped[str] = mapped_column(String(500), default="")
+    # The item's ADO project, so History/Overview/Analytics can be scoped to a
+    # workspace. Blank on rows written before this column existed — those are shown
+    # only in the unscoped view rather than attributed to an arbitrary workspace.
+    project: Mapped[str] = mapped_column(String(200), default="")
     category: Mapped[str] = mapped_column(String(50), default="")
     # Which trigger tag matched this item (for dashboard filtering). NULL on rows
     # created before this column existed → only shown under the "All" filter.

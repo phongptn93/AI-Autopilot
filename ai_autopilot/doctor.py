@@ -117,6 +117,19 @@ def check_workspaces(config: Settings) -> list[Finding]:
     Silent when nothing extra is configured. A mis-typed line here is invisible at
     runtime — the work items simply run in the ROOT workspace and edit the wrong
     repos — so every failure mode is reported rather than defaulted away."""
+    # Reported by the workspace's display NAME, because that is what the operator sees
+    # on the page and in the selector — telling them "workspace 2" would send them
+    # hunting through YAML for a row this tool already identified.
+    from ai_autopilot import workspaces as workspaces_mod
+
+    named = {
+        tuple(sorted(p.lower() for p in view.projects)): view.name
+        for view in workspaces_mod.resolve(config)
+    }
+
+    def _name(ws) -> str:
+        return named.get(tuple(sorted(p.lower() for p in ws.ado_projects)), ws.label)
+
     workspaces = config.effective_workspaces
     if not workspaces:
         # A line that failed to parse leaves no workspace behind, so a non-empty map
@@ -125,8 +138,8 @@ def check_workspaces(config: Settings) -> list[Finding]:
             return [Finding(
                 ERROR, "No workspace route could be parsed",
                 f"{len(config.workspace_map)} line(s) in workspace_map, none usable.",
-                "Each line must read 'Project = C:\\path\\to\\workspace' (the '=' is what "
-                "separates the ADO project from its folder).",
+                "Rebuild them on /dashboard/workspaces — saving there replaces these "
+                "lines with structured entries and validates them as you go.",
             )]
         return []
     out: list[Finding] = []
@@ -135,32 +148,32 @@ def check_workspaces(config: Settings) -> list[Finding]:
         directory = (ws.workspace_directory or "").strip()
         if not directory:
             out.append(Finding(
-                ERROR, f"Workspace '{ws.label}' has no directory",
+                ERROR, f"Workspace '{_name(ws)}' has no directory",
                 f"projects: {', '.join(ws.ado_projects)}",
                 "Give it a folder, or drop the line — its work items currently run in the "
                 "root workspace, editing another project's repos.",
             ))
         elif not Path(directory).is_dir():
             out.append(Finding(
-                ERROR, f"Workspace '{ws.label}' directory does not exist", directory,
+                ERROR, f"Workspace '{_name(ws)}' directory does not exist", directory,
                 "Every run for these projects uses it as its working directory.",
             ))
         elif not (Path(directory) / ".claude").is_dir():
             out.append(Finding(
-                WARN, f"No .claude in workspace '{ws.label}'",
+                WARN, f"No .claude in workspace '{_name(ws)}'",
                 str(Path(directory) / ".claude"),
                 "Skills, rules and MCP servers live here; without it /skill commands are inert.",
             ))
         unknown = [p for p in ws.ado_projects if p.lower() not in known]
         if unknown:  # defensive — effective_ado_projects folds these in, so this is a bug net
             out.append(Finding(
-                WARN, f"Workspace '{ws.label}' names unpolled project(s)",
+                WARN, f"Workspace '{_name(ws)}' names unpolled project(s)",
                 ", ".join(unknown), "Add them under Azure DevOps Connection → More projects.",
             ))
     if not out:
         out.append(Finding(
             OK, f"{len(workspaces)} extra workspace(s) routed",
-            "; ".join(f"{w.label} → {w.workspace_directory}" for w in workspaces),
+            "; ".join(f"{_name(w)} → {w.workspace_directory}" for w in workspaces),
         ))
     return out
 
@@ -180,8 +193,8 @@ def check_projects(config: Settings) -> list[Finding]:
     if unrouted and config.effective_workspaces:
         findings.append(Finding(
             WARN, "Projects with no workspace of their own", ", ".join(unrouted),
-            "They run in the root workspace. That is fine when they share it — otherwise "
-            "give each one a line under 'Extra workspaces'.",
+            "They run in the default workspace. That is fine when they share it — "
+            "otherwise give each one its own entry on /dashboard/workspaces.",
         ))
     return findings
 

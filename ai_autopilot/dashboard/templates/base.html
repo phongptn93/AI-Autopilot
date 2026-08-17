@@ -189,12 +189,39 @@
         .chip.chip-accent { background: var(--accent-bg); color: var(--accent-hover); border-color: transparent; }
         .chip.chip-green { background: var(--green-bg); color: var(--green); border-color: transparent; }
         .chip.chip-amber { background: var(--amber-bg); color: var(--amber); border-color: transparent; }
+
+        /* ── Workspace scope picker (sidebar) ── */
+        .ws-picker { padding: 10px 14px 12px; border-bottom: 1px solid var(--border); }
+        .ws-picker label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+            color: var(--text-dim); margin-bottom: 5px; }
+        .ws-picker select { width: 100%; background: var(--bg); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12.5px;
+            font-family: inherit; cursor: pointer; }
+        .ws-picker select:hover { border-color: var(--accent); }
+        .ws-picker button { margin-top: 6px; width: 100%; }
     </style>
 </head>
 <body>
 <div class="layout">
     <aside class="sidebar">
         <div class="brand"><span class="brand-badge">🤖</span> AI Autopilot</div>
+        {% if show_workspace_picker %}
+        <!-- Scopes the VIEW only. The autopilot keeps polling and running every
+             workspace regardless of what is selected here. -->
+        <form method="post" action="/dashboard/workspace/select" class="ws-picker">
+            <input type="hidden" name="back" value="{{ request.url.path }}"/>
+            <label for="ws-picker">Đang xem</label>
+            <select id="ws-picker" name="workspace" onchange="this.form.submit()">
+                <option value="all" {% if current_workspace == 'all' %}selected{% endif %}>Tất cả workspace</option>
+                {% for ws in workspaces %}
+                <option value="{{ ws.id }}" {% if current_workspace == ws.id %}selected{% endif %}>
+                    {{ ws.label }}{% if not ws.enabled %} (tắt){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+            <noscript><button type="submit">Xem</button></noscript>
+        </form>
+        {% endif %}
         <div class="nav-section">Operate</div>
         <nav>
             <a class="nav-link {{ 'active' if active == 'overview' else '' }}" href="/dashboard"><span class="ico">📊</span> Overview</a>
@@ -211,6 +238,7 @@
         </nav>
         <div class="nav-section">Configure</div>
         <nav>
+            <a class="nav-link {{ 'active' if active == 'workspaces' else '' }}" href="/dashboard/workspaces"><span class="ico">🗂</span> Workspaces</a>
             <a class="nav-link {{ 'active' if active == 'config' else '' }}" href="/dashboard/config"><span class="ico">⚙️</span> Configuration</a>
             <a class="nav-link {{ 'active' if active == 'settings' else '' }}" href="/dashboard/settings"><span class="ico">🛠️</span> Settings</a>
             <a class="nav-link {{ 'active' if active == 'flow' else '' }}" href="/dashboard/flow"><span class="ico">🔀</span> State flow</a>

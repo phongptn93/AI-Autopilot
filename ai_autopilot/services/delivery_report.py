@@ -107,13 +107,21 @@ async def collect_prs(container, project_of: dict[int, str]) -> list[delivery.Pr
 
 
 async def gather(
-    container, *, days: int = 0, project: str = "all", now: datetime | None = None,
+    container, *, days: int = 0, projects: list[str] | None = None,
+    now: datetime | None = None,
 ) -> tuple[delivery.DeliveryReport, str | None]:
     """Build the delivery report. Returns ``(report, error)``.
+
+    ``projects`` restricts every figure to those ADO projects; ``None`` means all of
+    them. The two are NOT interchangeable — an empty list must yield an empty report
+    (a workspace with no project assigned), whereas ``None`` yields everything.
+    Widening the empty case to "all" would tell an operator their unconfigured
+    workspace is busy.
 
     ``error`` is set only when Azure DevOps itself could not be reached — the caller
     decides whether that is worth showing. Every other failure degrades one section.
     """
+    scope = None if projects is None else {p.strip().lower() for p in projects}
     config = container.config
     now = now or datetime.now(UTC)
     days = max(1, min(days or config.delivery_window_days, 180))
@@ -128,8 +136,8 @@ async def gather(
     except Exception as exc:  # noqa: BLE001
         error = str(exc)
 
-    if project != "all":
-        items = [i for i in items if (i.project or "").lower() == project.lower()]
+    if scope is not None:
+        items = [i for i in items if (i.project or "").lower() in scope]
     project_of = {i.id: i.project or "" for i in items}
 
     if error is None:
@@ -137,10 +145,10 @@ async def gather(
             prs = await collect_prs(container, project_of)
         except Exception as exc:  # noqa: BLE001
             _log.warning("delivery: PR collection failed", error=str(exc))
-    if project != "all":
+    if scope is not None:
         # A PR with no linked work item cannot be attributed to a project; keep it only
         # on the unfiltered view rather than assigning it to one arbitrarily.
-        prs = [p for p in prs if (p.project or "").lower() == project.lower()]
+        prs = [p for p in prs if (p.project or "").lower() in scope]
 
     changes: list = []
     history_since: datetime | None = None
@@ -152,8 +160,8 @@ async def gather(
             history_since = await history.first_seen()
         except Exception as exc:  # noqa: BLE001
             _log.warning("delivery: state history load failed", error=str(exc))
-    if project != "all":
-        changes = [c for c in changes if (c.project or "").lower() == project.lower()]
+    if scope is not None:
+        changes = [c for c in changes if (c.project or "").lower() in scope]
 
     ai_item_ids: set[int] = set()
     execution_repo = getattr(container, "execution_repo", None)
@@ -185,11 +193,11 @@ async def gather(
         except Exception:  # noqa: BLE001
             failed = []
 
-    if project != "all":
-        held = [h for h in held if project_of.get(h.work_item_id, "").lower() == project.lower()]
+    if scope is not None:
+        held = [h for h in held if project_of.get(h.work_item_id, "").lower() in scope]
         failed = [
             f for f in failed
-            if project_of.get(f.work_item_id, "").lower() == project.lower()
+            if project_of.get(f.work_item_id, "").lower() in scope
         ]
 
     report = delivery.compute_delivery(

@@ -16,7 +16,17 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from ai_autopilot import activity, delivery, flows as flows_mod, security
+from ai_autopilot import (
+    activity,
+    delivery,
+    security,
+)
+from ai_autopilot import (
+    flows as flows_mod,
+)
+from ai_autopilot import (
+    workspaces as workspaces_mod,
+)
 from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
@@ -58,6 +68,9 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                             "(không cần khởi động lại)."),
     "flow_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                             "vẫn được giữ."),
+    "ws_saved": ("green", "✅ Đã lưu workspace và áp dụng ngay (không cần khởi động lại)."),
+    "ws_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
+                          "vẫn được giữ."),
     "err_no_file": ("red", "⚠️ Chưa chọn tệp."),
     "err_invalid": ("red", "⚠️ Tệp không hợp lệ hoặc không phải YAML cấu hình."),
     "err_nothing": ("red", "⚠️ Tệp không chứa setting nào áp dụng được."),
@@ -114,6 +127,55 @@ def _flow_reject(errors: list[str], flows: list[dict]) -> RedirectResponse:
 def _take_flow_reject(request: Request) -> dict:
     """The pending rejection for this request (``{}`` if none). Consumes it."""
     return _FLOW_REJECTS.pop(request.cookies.get(_FLOW_ERROR_COOKIE) or "", {})
+
+
+# Same hand-off as the Flow editor, for the same reason: a rejected save must come back
+# with both the reasons and what the operator typed.
+_WS_ERROR_COOKIE = "autopilot_ws_errors"
+_WS_REJECTS: OrderedDict[str, dict] = OrderedDict()
+
+
+def _ws_reject(errors: list[str], views: list) -> RedirectResponse:
+    token = secrets.token_urlsafe(12)
+    _WS_REJECTS[token] = {"errors": errors, "views": views}
+    while len(_WS_REJECTS) > _FLOW_REJECTS_MAX:
+        _WS_REJECTS.popitem(last=False)
+    response = _flash("/dashboard/workspaces", "ws_invalid")
+    response.set_cookie(
+        _WS_ERROR_COOKIE, token, max_age=120, httponly=True, samesite="lax",
+        path="/dashboard",
+    )
+    return response
+
+
+def _take_ws_reject(request: Request) -> dict:
+    return _WS_REJECTS.pop(request.cookies.get(_WS_ERROR_COOKIE) or "", {})
+
+
+# Which workspace the dashboard is currently looking at. A cookie rather than a config
+# field on purpose: this is a VIEW filter, personal to the browser, and it must never
+# be mistaken for a switch that changes what the autopilot processes.
+_WS_COOKIE = "autopilot_workspace"
+
+
+def selected_workspace(request: Request) -> str:
+    """The workspace id this request is scoped to — ``"all"`` when unscoped.
+
+    A query parameter wins over the cookie so a link can carry the scope (and so the
+    selector itself works without JavaScript)."""
+    return (request.query_params.get("workspace")
+            or request.cookies.get(_WS_COOKIE)
+            or "all").strip()
+
+
+def scope_of(request: Request, config) -> tuple[str, list[str] | None]:
+    """``(workspace_id, projects_to_show)`` for this request.
+
+    ``projects_to_show`` is ``None`` for "everything" and a (possibly empty) list for a
+    specific workspace — the two are NOT interchangeable: an empty workspace must show
+    nothing, not everything."""
+    workspace_id = selected_workspace(request)
+    return workspace_id, workspaces_mod.scope_projects(config, workspace_id)
 
 _CATEGORY_LABELS = {
     "backendtask": ("BE", "cat-be"),
@@ -285,9 +347,20 @@ def create_dashboard_router() -> APIRouter:
 
     def _ctx(request: Request, active: str, **extra) -> dict:
         cfg = getattr(getattr(request.app.state, "container", None), "config", None)
+        # The workspace selector lives in the sidebar, so every page needs the list and
+        # the current choice. Resolved here rather than per-route so a page can never
+        # render the shell with a selector that disagrees with its own data.
+        all_workspaces = workspaces_mod.resolve(cfg) if cfg else []
+        current = selected_workspace(request)
+        if current != "all" and not any(w.id == current for w in all_workspaces):
+            current = "all"   # a renamed or deleted workspace must not strand the view
         return {
             "request": request,
             "active": active,
+            "workspaces": all_workspaces,
+            "current_workspace": current,
+            # Only worth showing a selector when there is something to choose between.
+            "show_workspace_picker": len(all_workspaces) > 1,
             # Drives the sidebar's logout button: with no password there is no session to
             # end, so offering "Đăng xuất" would be a control that does nothing.
             "dashboard_locked": bool(
@@ -389,9 +462,17 @@ def create_dashboard_router() -> APIRouter:
         c: Container = request.app.state.container
         selected_tag = request.query_params.get("tag") or "all"
         tag_filter = None if selected_tag == "all" else selected_tag
-        stats = await c.execution_repo.get_stats(trigger_tag=tag_filter)
-        recent = await c.execution_repo.get_recent(20, trigger_tag=tag_filter)
-        efficiency = await c.execution_repo.get_efficiency(trigger_tag=tag_filter)
+        # Scoped to the selected workspace. Runs recorded before the project column
+        # existed carry no project, so they show only in the unscoped view — better a
+        # visibly missing row than another workspace's run counted here.
+        _, in_scope = scope_of(request, c.config)
+        stats = await c.execution_repo.get_stats(trigger_tag=tag_filter, projects=in_scope)
+        recent = await c.execution_repo.get_recent(
+            20, trigger_tag=tag_filter, projects=in_scope
+        )
+        efficiency = await c.execution_repo.get_efficiency(
+            trigger_tag=tag_filter, projects=in_scope
+        )
         prs = await _pr_outcomes(c)
         tokens_per_merged = (
             efficiency.total_tokens // prs["merged"] if prs["merged"] else None
@@ -454,9 +535,15 @@ def create_dashboard_router() -> APIRouter:
             sel = selected_tag.lower()
             items = [i for i in items if any(t.lower() == sel for t in i.tags)]
 
-        # With several work-item projects on one board, "which project is this card
-        # from?" is the first question a reader has — so it is also a filter.
-        projects = c.config.effective_ado_projects
+        # The sidebar's workspace choice narrows the board first; the project dropdown
+        # then narrows within it. Two levels because a workspace can hold several
+        # projects — picking the workspace is "whose board is this", picking the
+        # project is "which stream inside it".
+        _, in_scope = scope_of(request, c.config)
+        if in_scope is not None:
+            allowed = {p.lower() for p in in_scope}
+            items = [i for i in items if (i.project or "").lower() in allowed]
+        projects = in_scope if in_scope is not None else c.config.effective_ado_projects
         selected_project = qp.get("project") or "all"
         if selected_project != "all":
             sel_proj = selected_project.lower()
@@ -691,17 +778,47 @@ def create_dashboard_router() -> APIRouter:
         )
         return _ctx(request, "planning", **base)
 
-    async def _planning_load(c: Container, assignee: str, state: str, wtype: str) -> list:
+    async def _scope_rows(request: Request, c: Container, rows: list) -> list:
+        """Narrow DB rows keyed only by ``work_item_id`` to the selected workspace.
+
+        The pipeline tables never recorded a project, so the mapping comes from the
+        state history. An item the history has never seen has an UNKNOWN project, and
+        unknown is excluded from a scoped view rather than shown everywhere: leaking
+        another workspace's item into this one is the error that misleads, while a
+        missing row is visible the moment the operator switches back to "all"."""
+        _, in_scope = scope_of(request, c.config)
+        if in_scope is None or not rows:
+            return rows
+        allowed = {p.lower() for p in in_scope}
+        try:
+            projects = await c.state_history.known_projects([r.work_item_id for r in rows])
+        except Exception as exc:  # noqa: BLE001 — never blank a page over a filter
+            _log.warning("workspace scoping unavailable", error=str(exc))
+            return rows
+        return [r for r in rows if projects.get(r.work_item_id, "").lower() in allowed]
+
+    async def _planning_load(
+        c: Container, assignee: str, state: str, wtype: str,
+        in_scope: list[str] | None = None,
+    ) -> list:
         """Load the work items to plan. A BLANK ``assignee`` is a real choice — the whole
-        team's board — not a reason to show nothing (comma-separate names for a subset)."""
+        team's board — not a reason to show nothing (comma-separate names for a subset).
+
+        ``in_scope`` is the selected workspace's projects (``None`` = every project).
+        Filtering happens here rather than in the WIQL so the conflict analyser still
+        sees one consistent set."""
         states = None if state in ("", "all") else [state]
         types = None if wtype in ("", "all") else [wtype]
         try:
-            return await c.ado.get_work_items_by_assignee(
+            items = await c.ado.get_work_items_by_assignee(
                 assignee, states, types, top=c.config.planning_load_limit
             )
         except Exception:  # noqa: BLE001
             return []
+        if in_scope is None:
+            return items
+        allowed = {p.lower() for p in in_scope}
+        return [i for i in items if (i.project or "").lower() in allowed]
 
     _FILTER_COOKIE = "planning_filter"
 
@@ -734,7 +851,7 @@ def create_dashboard_router() -> APIRouter:
         assignee, state, type = _restore_filter(
             request, assignee, state, type, c.config.auto_transition_assignee
         )
-        loaded = await _planning_load(c, assignee, state, type)
+        loaded = await _planning_load(c, assignee, state, type, scope_of(request, c.config)[1])
         ctx = await _planning_ctx(
             request, loaded=loaded, assignee=assignee, state_filter=state, type_filter=type,
             started=started, scheduled_n=scheduled,
@@ -781,7 +898,7 @@ def create_dashboard_router() -> APIRouter:
         state = str(form.get("state", "all"))
         wtype = str(form.get("type", "all"))
         analysis = await planning_analyzer.analyze(c, ids) if ids else None
-        loaded = await _planning_load(c, assignee, state, wtype)
+        loaded = await _planning_load(c, assignee, state, wtype, scope_of(request, c.config)[1])
         ctx = await _planning_ctx(
             request, loaded=loaded, selected=set(ids), analysis=analysis,
             assignee=assignee, state_filter=state, type_filter=wtype,
@@ -899,10 +1016,12 @@ def create_dashboard_router() -> APIRouter:
         except ValueError:
             page = 1
 
+        _, in_scope = scope_of(request, c.config)
+
         async def _run(pg: int):
             return await c.execution_repo.search(
                 status=status or None, category=cat or None, q=q or None,
-                dfrom=dfrom or None, dto=dto or None,
+                dfrom=dfrom or None, dto=dto or None, projects=in_scope,
                 offset=(pg - 1) * page_size, limit=page_size,
             )
 
@@ -952,6 +1071,7 @@ def create_dashboard_router() -> APIRouter:
         link_base = work_item_link_base(c.config)
         held = [s for s in await c.state_repo.all() if s.state == PipelineState.NEEDS_HUMAN]
         held.sort(key=lambda s: s.updated_at or datetime.min, reverse=True)
+        held = await _scope_rows(request, c, held)
         items = [
             {
                 "id": s.work_item_id, "title": s.title or f"#{s.work_item_id}",
@@ -1030,7 +1150,8 @@ def create_dashboard_router() -> APIRouter:
         now = datetime.now()
         dfrom = (now - timedelta(days=days - 1)).date().isoformat()
         records, _ = await c.execution_repo.search(
-            dfrom=dfrom, trigger_tag=tag or None, limit=5000
+            dfrom=dfrom, trigger_tag=tag or None,
+            projects=scope_of(request, c.config)[1], limit=5000,
         )
         report = compute_analytics(records, days=days, now=now)
         return _TEMPLATES.TemplateResponse(
@@ -1052,18 +1173,108 @@ def create_dashboard_router() -> APIRouter:
         than no number."""
         c: Container = request.app.state.container
         cfg = c.config
-        report, error = await delivery_report.gather(c, days=days, project=project)
+        _, in_scope = scope_of(request, cfg)
+        available = in_scope if in_scope is not None else cfg.effective_ado_projects
+        # The page's own project dropdown narrows WITHIN the selected workspace, so an
+        # unknown/stale value must not widen the scope back out to every project.
+        if project != "all":
+            wanted = [p for p in available if p.lower() == project.lower()]
+            projects = wanted if wanted else []
+        else:
+            projects = in_scope
+        report, error = await delivery_report.gather(c, days=days, projects=projects)
         return _TEMPLATES.TemplateResponse(
             request, "delivery.html",
             _ctx(
                 request, "delivery", report=report, days=report.window_days, error=error,
-                projects=cfg.effective_ado_projects, selected_project=project,
+                projects=available, selected_project=project,
                 item_link=work_item_link_base(cfg),
                 recording=cfg.delivery_history_enabled,
                 bands=delivery.FLOW_BANDS,
                 kind_labels=_ACTION_LABELS,
             ),
         )
+
+    @router.get("/workspaces", response_class=HTMLResponse)
+    async def workspaces_page(request: Request):
+        """Manage the workspaces: which folder builds which ADO project(s), on which
+        base branch.
+
+        Replaces three places that had to agree (the global settings fields, a
+        ``workspaces:`` YAML list and a one-line textarea) with one list. The first row
+        is the default workspace — editable, not removable, because it is also the
+        fallback for any project no other workspace claims."""
+        c: Container = request.app.state.container
+        flash = _take_flash(request)
+        rejected = _take_ws_reject(request)
+        views = rejected.get("views") or workspaces_mod.resolve(c.config)
+        try:
+            discovered = {
+                ws.id: discover_repos(ws.directory) for ws in views if ws.directory
+            }
+        except Exception:  # noqa: BLE001 — the page must render on an unreadable disk
+            discovered = {}
+        response = _TEMPLATES.TemplateResponse(
+            request, "workspaces.html",
+            _ctx(
+                request, "workspaces", flash=flash, views=views,
+                errors=rejected.get("errors") or [], discovered=discovered,
+                projects=c.config.effective_ado_projects,
+            ),
+        )
+        if flash is not None:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        if rejected:
+            response.delete_cookie(_WS_ERROR_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/workspaces")
+    async def save_workspaces(request: Request):
+        """Save the workspace list.
+
+        Validation BLOCKS the save rather than warning, because every problem it
+        catches is invisible at runtime: a project claimed by two workspaces builds in
+        whichever one happens to win, and a workspace with no folder quietly runs its
+        items in the default one — both look like the config was applied."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        views, errors = workspaces_mod.parse_form(form)
+        if errors:
+            _log.info("workspace config rejected", count=len(errors))
+            return _ws_reject(errors, views)
+
+        updates = workspaces_mod.to_settings_updates(views)
+        settings_form.save_to_yaml(config_file_path(), updates)
+        settings_form.apply_to_config(c.config, updates)
+        c.ado.refresh()   # the polled project set just changed
+        _log.info(
+            "workspaces updated via dashboard",
+            names=[v.label for v in views], projects=c.config.effective_ado_projects,
+        )
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.workspaces_updated",
+            target=", ".join(v.label for v in views)[:300],
+        )
+        return _flash("/dashboard/workspaces", "ws_saved")
+
+    @router.post("/workspace/select")
+    async def select_workspace(request: Request):
+        """Point the dashboard at one workspace (or all of them).
+
+        A POST because it writes a cookie, and a redirect back to where the operator
+        was so the selector does not lose their place. It scopes the VIEW only — the
+        autopilot keeps polling and running every workspace either way."""
+        form = await request.form()
+        chosen = str(form.get("workspace", "all") or "all").strip()
+        back = str(form.get("back", "/dashboard") or "/dashboard")
+        if not back.startswith("/dashboard"):
+            back = "/dashboard"   # never bounce off-site on a value from the page
+        response = RedirectResponse(back, status_code=303)
+        response.set_cookie(
+            _WS_COOKIE, chosen, max_age=60 * 60 * 24 * 365, httponly=True,
+            samesite="lax", path="/dashboard",
+        )
+        return response
 
     @router.get("/learning", response_class=HTMLResponse)
     async def learning_page(request: Request, days: int = 30):

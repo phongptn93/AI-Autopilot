@@ -18,6 +18,7 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("executions", "trigger_tag", "VARCHAR(100)"),
     ("executions", "pr_urls", "TEXT"),
     ("executions", "lessons_injected", "INTEGER"),
+    ("executions", "project", "VARCHAR(200)"),
     ("pr_reviewer_states", "reviewed_at", "DATETIME"),
 )
 

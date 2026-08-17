@@ -502,6 +502,20 @@ def parse_workspace_line(line: str) -> WorkspaceConfig | None:
     return ws
 
 
+def _as_workspace(value: Any) -> WorkspaceConfig:
+    """A ``WorkspaceConfig`` from either a model or the plain dict a live save leaves.
+
+    Invalid entries degrade to a disabled, empty workspace rather than raising: a
+    hand-edited ``config.yaml`` must not take the whole dashboard down, and a workspace
+    that resolves to nothing is visible on the Workspaces page and in ``doctor``."""
+    if isinstance(value, WorkspaceConfig):
+        return value
+    if isinstance(value, dict):
+        with contextlib.suppress(Exception):
+            return WorkspaceConfig(**value)
+    return WorkspaceConfig(enabled=False)
+
+
 def parse_workspace_map(lines: list[str]) -> list[WorkspaceConfig]:
     """Parse the dashboard's workspace textarea into workspaces, dropping bad lines."""
     out: list[WorkspaceConfig] = []
@@ -840,7 +854,11 @@ class Settings(BaseSettings):
     delivery_stale_days: int = 3      # in progress, no state change
 
     # ── Multi-workspace (one connection, several projects) ──
-    # Structured form, edited in config.yaml — full control over every override.
+    # What to call the workspace backed by the global fields above (its directory, base
+    # branch and default project). Shown first on the Workspaces page and in the
+    # dashboard's workspace selector.
+    default_workspace_name: str = ""
+    # Structured form, managed on /dashboard/workspaces (or edited in config.yaml).
     workspaces: list[WorkspaceConfig] = Field(default_factory=list)
     # One-line form, edited on the Settings page:
     #   "Khatoco = C:\\ws\\dxfactory | base=main | code=DxFactory"
@@ -1319,8 +1337,14 @@ class Settings(BaseSettings):
         A structured entry WINS over a one-liner that claims the same project — the
         YAML form is the more expressive one, so it is the one an operator reaches for
         when the line form was not enough, and silently letting the line override it
-        would undo exactly the customisation they went there to make."""
-        structured = [ws for ws in self.workspaces if ws.enabled]
+        would undo exactly the customisation they went there to make.
+
+        Entries are coerced from plain dicts when needed: a live save from the
+        dashboard writes settings back with a bare ``setattr``, which does NOT run
+        pydantic validation, so ``workspaces`` holds dicts until the next restart.
+        Reading them as models regardless is what lets a saved workspace take effect
+        immediately instead of appearing to save and doing nothing until a reboot."""
+        structured = [ws for ws in map(_as_workspace, self.workspaces) if ws.enabled]
         claimed = {
             (p or "").strip().lower() for ws in structured for p in ws.ado_projects
         }

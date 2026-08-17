@@ -31,18 +31,14 @@ FIELDS: tuple[Field, ...] = (
     # ── Workspace & Repository ──
     Field("workspace_directory", "Workspace directory", "text", "Workspace & Repository",
           "Folder holding the shared .claude (skills/rules/MCP). Claude runs HERE and the agent "
-          "picks which repo subfolder to edit. Blank = legacy mode (run inside one repo)."),
+          "picks which repo subfolder to edit. Blank = legacy mode (run inside one repo). "
+          "This is the DEFAULT workspace — to run several, use the Workspaces page, which edits "
+          "this same field as its first entry."),
     Field("base_branch", "Base branch", "text", "Workspace & Repository",
           "Branch new feature branches are cut from."),
     Field("repo_descriptions", "Repo descriptions", "list", "Workspace & Repository",
           "What each repo is, so the agent picks the right one. One 'RepoName = description' per "
           "line, e.g. 'Backend-Fresh = .NET API', 'Dxfac-gitops = deploy manifests, don't edit'."),
-    Field("workspace_map", "🗂 Extra workspaces (project → folder)", "list",
-          "Workspace & Repository",
-          "Run SEVERAL workspaces from this one autopilot. One per line: "
-          "'ProjectA, ProjectB = C:\\path\\to\\workspace'. Work items from those ADO projects run "
-          "in THAT folder's repos. Optional overrides after a '|': base=, code=, repo=, repos=, "
-          "tag=. Anything left out is inherited from the settings above. Blank = single workspace."),
     # ── Azure DevOps Connection ──
     Field("ado_organization", "Organization URL", "text", "Azure DevOps Connection",
           "e.g. https://dev.azure.com/your-org"),

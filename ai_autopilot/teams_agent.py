@@ -30,11 +30,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, unquote
 
+from ai_autopilot import delivery
 from ai_autopilot.config import Settings, parse_hhmm
 from ai_autopilot.container import Container
 from ai_autopilot.data.entities import PipelineState
 from ai_autopilot.logging_config import get_logger
-from ai_autopilot.services import planning_analyzer
+from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
 
 _log = get_logger("teams_agent")
@@ -413,7 +414,7 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
     digest_task = None
     if config.teams_agent_digest_interval_hours > 0 or config.teams_agent_digest_at.strip():
         digest_task = asyncio.create_task(
-            _digest_loop(config, container, app, adapter, reviewer_tracker,
+            _digest_loop(config, container, app, adapter,
                          conversation_storage, MessageFactory),
             name="teams-digest",
         )
@@ -442,8 +443,7 @@ def seconds_until(hhmm: str, now: datetime) -> float | None:
 
 async def _digest_loop(
     config: Settings, container: Container, app, adapter,
-    reviewer_tracker: ReviewerTrackerService, storage: _DbConversationStorage,
-    message_factory,
+    storage: _DbConversationStorage, message_factory,
 ) -> None:
     interval = config.teams_agent_digest_interval_hours
     at = config.teams_agent_digest_at.strip()
@@ -476,8 +476,7 @@ async def _digest_loop(
                 # shorter one double-counts the overlap. Single source of truth: interval.
                 window = interval
             await _send_digest(
-                container, app, adapter, reviewer_tracker, storage, message_factory,
-                window_hours=window,
+                container, app, adapter, storage, message_factory, window_hours=window,
             )
         except asyncio.CancelledError:
             raise
@@ -485,7 +484,7 @@ async def _digest_loop(
             _log.error("Teams digest cycle failed", error=str(exc))
 
 
-# ── Full daily digest — activity stats + team standup + PR sections ──────────
+# ── Daily digest — the Delivery report, rendered for chat ────────────────────
 
 def _short(text: str, limit: int = 62) -> str:
     """Trim a title so a digest line stays one line in Teams. Titles here come from ADO
@@ -501,10 +500,16 @@ def _wi_link(cfg, wid: int, label: str = "") -> str:
     if cfg is None:
         return label
     org = (cfg.ado_organization or "").rstrip("/")
-    project = cfg.ado_project or ""
-    if not (org and project):
+    if not org:
         return label
-    return f"[{label}]({org}/{quote(project, safe='')}/_workitems/edit/{wid})"
+    projects = cfg.effective_ado_projects
+    # A chat message carries an id, not a project. Azure DevOps resolves an id
+    # org-wide, so with several projects the project-less URL is the only one that
+    # is right for every item — naming the default project would break the links of
+    # every OTHER project.
+    if len(projects) == 1 and projects[0]:
+        return f"[{label}]({org}/{quote(projects[0], safe='')}/_workitems/edit/{wid})"
+    return f"[{label}]({org}/_workitems/edit/{wid})"
 
 
 def _pr_link(cfg, repo: str, pr_id: int, label: str = "") -> str:
@@ -521,175 +526,225 @@ def _pr_link(cfg, repo: str, pr_id: int, label: str = "") -> str:
             f"{quote(repo, safe='')}/pullrequest/{pr_id})")
 
 
-def _fmt_wi_list(items: list, limit: int = 5, cfg=None) -> str:
-    shown = items[:limit]
-    text = " · ".join(_wi_link(cfg, it.id) for it in shown)
-    extra = len(items) - limit
-    return text + (f" _(+{extra} nữa)_" if extra > 0 else "")
+# Icon per action kind, so the most urgent rows stay scannable in a chat client where
+# there is no colour to work with.
+_ACTION_ICON = {
+    delivery.KIND_BLOCKED_PR: "🔴",
+    delivery.KIND_MERGE_READY: "🔴",
+    delivery.KIND_REVIEW_WAITING: "🟠",
+    delivery.KIND_NEEDS_HUMAN: "🟡",
+    delivery.KIND_STALE: "⚫",
+    delivery.KIND_FAILED: "❌",
+}
+_ACTION_LABEL = {
+    delivery.KIND_BLOCKED_PR: "PR bị từ chối",
+    delivery.KIND_MERGE_READY: "Chờ merge",
+    delivery.KIND_REVIEW_WAITING: "Chờ review",
+    delivery.KIND_NEEDS_HUMAN: "Cần người",
+    delivery.KIND_STALE: "Đứng im",
+    delivery.KIND_FAILED: "Run lỗi",
+}
+# Rows shown in chat. A digest is a prompt to act, not the record: past this the reader
+# is scrolling rather than deciding, and the Delivery page holds the full list.
+_DIGEST_ACTION_LIMIT = 6
+_DIGEST_PEOPLE_LIMIT = 6
 
 
-async def _active_pr_work_item_map(container: Container) -> dict[int, dict]:
-    """work_item_id → its (non-draft) active PR, for every PR whose branch encodes a
-    work item id — the signal for "code done, waiting on PR merge" that a work item's
-    own ADO state can't reliably tell you (the poller may not have moved it yet)."""
-    from ai_autopilot.services.pr_feedback import parse_work_item_id
-
-    mapping: dict[int, dict] = {}
-    for repo in await container.ado.get_repositories():
-        repo_id = repo.get("id")
-        if not repo_id:
-            continue
-        for pr in await container.ado.get_active_pull_requests(repo_id):
-            if pr.get("isDraft"):
-                continue
-            wid = parse_work_item_id(pr.get("sourceRefName", ""))
-            if wid is not None:
-                mapping[wid] = pr
-    return mapping
+def _num(value: float) -> str:
+    """A number as Vietnamese prose: no trailing ``.0``, comma for the decimal mark."""
+    text = f"{value:.1f}".rstrip("0").rstrip(".") if isinstance(value, float) else str(value)
+    return text.replace(".", ",")
 
 
-async def _team_standup(container: Container, cutoff: datetime) -> dict[str, dict[str, list]]:
-    """Every work item in the project changed within ``cutoff``, grouped by assignee
-    and bucketed: done / merge_pending (done but its PR hasn't merged yet) /
-    in-progress / not-started. Best-effort — returns {} on any fetch failure so the
-    digest degrades to its other sections."""
-    try:
-        items = await container.ado.get_all_active_work_items(top=300)
-        categories = await container.ado.get_state_categories()
-        pr_map = await _active_pr_work_item_map(container)
-    except Exception as exc:  # noqa: BLE001 — one failed section must not break the digest
-        _log.warning("team standup fetch failed", error=str(exc))
-        return {}
-    by_person: dict[str, dict[str, list]] = {}
-    for it in items:
-        changed = it.changed_date.replace(tzinfo=UTC) if (
-            it.changed_date and it.changed_date.tzinfo is None
-        ) else it.changed_date
-        if changed is None or changed < cutoff:
-            continue
-        person = it.assigned_to or "(chưa gán)"
-        bucket = by_person.setdefault(
-            person, {"done": [], "merge_pending": [], "active": [], "todo": []}
-        )
-        category = categories.get(it.state, "")
-        if it.id in pr_map:
-            bucket["merge_pending"].append(it)
-        elif category in ("Resolved", "Completed"):
-            bucket["done"].append(it)
-        elif category == "InProgress":
-            bucket["active"].append(it)
-        elif category == "Proposed":
-            bucket["todo"].append(it)
-    return by_person
+def _dashboard_link(cfg, path: str, label: str) -> str:
+    """Markdown link to a dashboard page, or the bare label when no public URL is set.
+
+    Deliberately silent rather than guessing: ``health_host`` defaults to ``0.0.0.0``,
+    so a URL built from it would resolve for nobody reading this on a phone."""
+    base = (getattr(cfg, "dashboard_public_url", "") or "").rstrip("/")
+    return f"[{label}]({base}{path})" if base else label
 
 
-def _format_standup(by_person: dict[str, dict[str, list]], cfg=None) -> str:
-    lines = []
-    for person, buckets in sorted(by_person.items()):
-        done = buckets["done"]
-        merge_pending = buckets["merge_pending"]
-        active, todo = buckets["active"], buckets["todo"]
-        if not (done or merge_pending or active or todo):
-            continue
-        lines.append(f"**{person}**")
-        for icon, label, group in (
-            ("⏳", "Chờ merge", merge_pending),   # most actionable first
-            ("✅", "Xong", done),
-            ("🔧", "Đang làm", active),
-            ("📋", "Chưa làm", todo),
-        ):
-            if group:
-                lines.append(f"- {icon} {label} — {_fmt_wi_list(group, cfg=cfg)}")
-    return "\n".join(lines) if lines else "_Không có work item nào thay đổi trong khoảng này._"
+def _digest_headline(report, delivered_recent: int, window_label: str) -> str:
+    """The one line that decides whether the rest gets read.
 
-
-def _format_pr_stub_list(prs: list[dict], cfg=None) -> str:
-    if not prs:
-        return "_Không có._"
-    return "\n".join(
-        f"- {_pr_link(cfg, p['repo'], p['id'])} **{p['repo']}** — {_short(p['title'])} "
-        f"· _{p['author']}_"
-        for p in prs
+    It answers "is anything on fire, and if so what is the worst of it?" — which the
+    counters below cannot: "3 việc cần xử lý" says nothing about whether that is three
+    PRs one click from merging or one item blocked for a fortnight."""
+    if not report.actions:
+        if delivered_recent:
+            return (
+                f"✅ Không có gì tắc quá ngưỡng · {delivered_recent} item xong "
+                f"trong {window_label} qua."
+            )
+        return "✅ Không có gì tắc quá ngưỡng."
+    worst = report.actions[0]
+    label = _ACTION_LABEL.get(worst.kind, worst.kind).lower()
+    detail = f" ({_short(worst.title, 40)})" if worst.title else ""
+    return (
+        f"⚠️ **{len(report.actions)} việc cần xử lý** — nặng nhất: "
+        f"{label} đã {worst.age_label}{detail}."
     )
 
 
+def _format_kpis(report) -> str:
+    """The counters, as three lines rather than five cards.
+
+    A chat client has no grid, so they are grouped by the question each answers: how
+    much shipped, how long it takes, how much is open."""
+    by_label = {k.label: k for k in report.kpis}
+
+    def arrow(kpi) -> str:
+        if kpi is None or kpi.delta is None or kpi.direction == "flat":
+            return ""
+        return f" {'▲' if kpi.direction == 'up' else '▼'}{_num(abs(kpi.delta))}"
+
+    delivered = by_label.get("Giao được")
+    p50, p85 = by_label.get("Lead time p50"), by_label.get("Lead time p85")
+    wip, ai = by_label.get("Đang mở (WIP)"), by_label.get("Có AI-Autopilot")
+    lines = []
+    if delivered is not None:
+        lines.append(f"- Giao được **{_num(delivered.value)}** item{arrow(delivered)}")
+    # Lead time is omitted entirely rather than printed as 0: an unrecorded history
+    # would otherwise read as "we ship the same day", the most flattering possible lie.
+    if p50 is not None and p85 is not None and (p50.value or p85.value):
+        lines.append(
+            f"- Lead time p50 **{_num(p50.value)}** ngày · "
+            f"p85 **{_num(p85.value)}** ngày{arrow(p50)}"
+        )
+    tail = []
+    if wip is not None:
+        tail.append(f"Đang mở **{_num(wip.value)}** item")
+    if ai is not None:
+        tail.append(f"có AI-Autopilot **{_num(ai.value)}%**")
+    if tail:
+        lines.append("- " + " · ".join(tail))
+    return "\n".join(lines)
+
+
+def _format_actions(report, cfg, limit: int = _DIGEST_ACTION_LIMIT) -> str:
+    """The action list — already ordered by urgency then age by ``compute_delivery``."""
+    lines = []
+    for action in report.actions[:limit]:
+        icon = _ACTION_ICON.get(action.kind, "•")
+        label = _ACTION_LABEL.get(action.kind, action.kind)
+        head = f"{icon} **{label} · {action.age_label}**"
+        tail = []
+        if action.work_item_id:
+            tail.append(_wi_link(cfg, action.work_item_id))
+        if action.title:
+            tail.append(_short(action.title, 46))
+        if action.owner:
+            tail.append(f"_{action.owner}_")
+        if action.pr_id and action.repo:
+            tail.append(_pr_link(cfg, action.repo, action.pr_id))
+        lines.append(f"{head} — " + " · ".join(tail) if tail else head)
+    extra = len(report.actions) - limit
+    if extra > 0:
+        lines.append(f"_… +{extra} việc nữa._")
+    return "\n".join(lines)
+
+
+def _format_people(report, limit: int = _DIGEST_PEOPLE_LIMIT) -> str:
+    """Who is carrying what, heaviest load first.
+
+    Only people with something in flight or delivered appear: listing everyone with
+    three zeroes is what made the old standup section unreadable."""
+    lines = []
+    for person in report.people[:limit]:
+        parts = []
+        if person.wip:
+            parts.append(f"{person.wip} đang làm")
+        if person.waiting_merge:
+            parts.append(f"{person.waiting_merge} chờ merge")
+        if person.delivered:
+            parts.append(f"{person.delivered} xong")
+        if parts:
+            lines.append(f"- **{person.name}** — " + " · ".join(parts))
+    extra = len(report.people) - limit
+    if extra > 0:
+        lines.append(f"_… +{extra} người nữa._")
+    return "\n".join(lines)
+
+
+def build_digest(
+    report, cfg, *, delivered_recent: int = 0, window_label: str = "24h",
+    now: datetime | None = None,
+) -> str:
+    """Render the digest body from a delivery report.
+
+    Pure, so it can be tested without a Teams connection, and separate from the send
+    loop because a wrong number and an undelivered message are different incidents.
+
+    Reads the SAME report object the Delivery page renders, so the chat message cannot
+    drift from the dashboard — which is exactly what happened while each gathered its
+    own figures."""
+    stamp = (now or datetime.now(UTC)).astimezone().strftime("%d/%m %H:%M")
+    link = _dashboard_link(cfg, "/dashboard/delivery", "Bảng đầy đủ ↗")
+    header = f"# 🚚 AI Autopilot — Nhịp giao hàng\n_{stamp} · số liệu {report.window_days} ngày"
+    if link.startswith("["):
+        header += f" · {link}"
+    parts = [f"{header}_", _digest_headline(report, delivered_recent, window_label)]
+
+    kpis = _format_kpis(report)
+    if kpis:
+        parts.append(f"**📊 Chỉ số {report.window_days} ngày**\n{kpis}")
+    if report.actions:
+        parts.append(
+            f"**⚠️ Cần xử lý ({len(report.actions)})**\n{_format_actions(report, cfg)}"
+        )
+    people = _format_people(report)
+    if people:
+        parts.append(f"**👤 Tải theo người**\n{people}")
+    if report.flow_is_partial:
+        parts.append(
+            "_Lịch sử trạng thái chưa phủ hết kỳ — lead time sẽ chuẩn dần theo ngày._"
+        )
+    parts.append("_`/team` PR tắc lâu nhất · `/queue` việc đang chờ người._")
+    return "\n\n".join(parts)
+
+
 async def _send_digest(
-    container: Container, app, adapter, reviewer_tracker: ReviewerTrackerService,
+    container: Container, app, adapter,
     storage: _DbConversationStorage, message_factory, *, window_hours: int = 24,
 ) -> None:
-    """``window_hours`` MUST equal the actual send interval (the caller,
-    ``_digest_loop``, always passes it) — a fixed 24h window regardless of how often
-    the digest fires would leave a silent gap (interval > 24h) or double-count
-    (interval < 24h). The default here only covers direct/manual calls."""
-    cutoff = datetime.now(UTC) - timedelta(hours=window_hours)
-    window_label = f"{window_hours}h"
+    """Build the digest and push it to every conversation the bot is in.
+
+    ``window_hours`` MUST equal the actual send interval (the caller, ``_digest_loop``,
+    always passes it) — it is what "since the last digest" means, and it is used for
+    exactly one figure. The REPORTING window is separate and deliberately longer
+    (``delivery_window_days``): a rate measured over six hours is mostly noise, and it
+    has to match the Delivery page or the two contradict each other.
+    """
     cfg = container.config
-    now_label = datetime.now(UTC).astimezone().strftime("%d/%m %H:%M")
-    parts: list[str] = [
-        f"# 📊 AI Autopilot — Digest\n_{now_label} · {window_label} qua_",
-    ]
-
-    # ── Pace: the three counters read together, not as three separate headlines. A
-    #    digest whose first screen is all section titles hides the numbers.
-    pace: list[str] = []
+    now = datetime.now(UTC)
+    report, error = None, None
     try:
-        stats = await container.execution_repo.get_stats(since=cutoff)
-        pace.append(
-            f"- 🤖 **Autopilot** — {stats.total} task · ✅ {stats.success} · ❌ {stats.failed}"
+        report, error = await delivery_report.gather(container, now=now)
+    except Exception as exc:  # noqa: BLE001
+        # Still send something. A silent digest looks identical to a quiet week, and
+        # the whole point of a scheduled message is that its absence is not information.
+        _log.error("digest: could not build the delivery report", error=_fmt_exc(exc))
+        error = str(exc)
+    if report is None:
+        text = (
+            "# 🚚 AI Autopilot — Nhịp giao hàng\n\n"
+            f"⚠️ Không dựng được báo cáo lần này: {error}"
         )
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: execution stats failed", error=str(exc))
-    try:
-        new_prs = await reviewer_tracker.new_prs_since(cutoff)
-        merged_prs = await reviewer_tracker.merged_prs_since(cutoff)
-        pace.append(
-            f"- 🔀 **Pull request** — {len(new_prs)} mới mở · {len(merged_prs)} đã merge"
+    else:
+        try:
+            delivered_recent = await delivery_report.delivered_since(
+                container, now - timedelta(hours=window_hours), now=now
+            )
+        except Exception:  # noqa: BLE001
+            delivered_recent = 0
+        text = build_digest(
+            report, cfg, delivered_recent=delivered_recent,
+            window_label=f"{window_hours}h", now=now,
         )
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: PR activity failed", error=str(exc))
-    try:
-        reviewer_repo = getattr(container, "pr_reviewer_repo", None)
-        if reviewer_repo is not None:
-            reviewed_n = await reviewer_repo.count_reviewed_since(cutoff)
-            reminded_n = await reviewer_repo.count_reminded_since(cutoff)
-            pace.append(
-                f"- 🔍 **Bot review** — {reviewed_n} PR tự review · {reminded_n} lượt nhắc"
-            )
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: reviewer stats failed", error=str(exc))
-    if pace:
-        parts.append("**⚡ Nhịp độ**\n" + "\n".join(pace))
+        if error:
+            text += f"\n\n_⚠️ Một phần số liệu thiếu: {error}_"
 
-    # ── Needs a decision now. Ready-to-merge leads because it is the only section where
-    #    the reader's next action is obvious.
-    try:
-        ready = await reviewer_tracker.prs_ready_to_merge()
-        if ready:
-            parts.append(
-                f"**✅ Sẵn sàng merge** ({len(ready)})\n{_format_pr_stub_list(ready, cfg)}"
-            )
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: ready-to-merge failed", error=str(exc))
-
-    try:
-        logged = await reviewer_tracker.tickets_logged_since(cutoff)
-        if logged:
-            parts.append(
-                f"**📝 Ticket tạo qua Teams** ({len(logged)})\n"
-                f"{_fmt_wi_list(logged, limit=10, cfg=cfg)}"
-            )
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: logged tickets failed", error=str(exc))
-
-    # ── Who moved what, within the same window as every counter above.
-    try:
-        standup = await _team_standup(container, cutoff)
-        parts.append(f"**👤 Theo người** ({window_label})\n{_format_standup(standup, cfg)}")
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("digest: standup failed", error=str(exc))
-
-    parts.append("_`/team` xem PR tắc lâu nhất · `/queue` việc đang chờ người._")
-    text = "\n\n".join(parts)
     # Read with the keys EXACTLY as stored. ``all_keys`` returns the SDK's own storage
     # keys, which are already prefixed ("proactive/conversations/<id>"); passing one to
     # ``proactive.get_conversation`` — which prefixes the id it's given — looked up
@@ -838,8 +893,10 @@ async def _create_logged_ticket(context, container: Container, title: str) -> No
         return
     cfg = container.config
     org = cfg.ado_organization.rstrip("/")
+    # A ticket logged from chat lands in the DEFAULT project (create_work_item with no
+    # project), so its link names that project explicitly.
     project = cfg.ado_project
-    url = f"{org}/{project}/_workitems/edit/{wid}"
+    url = f"{org}/{quote(project, safe='')}/_workitems/edit/{wid}"
     trigger = (cfg.effective_trigger_tags or ["<trigger-tag>"])[0]
     await container.audit_repo.record(
         actor=email, source="teams", action="ticket.created",

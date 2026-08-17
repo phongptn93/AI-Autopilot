@@ -379,6 +379,154 @@ class RepoConfig(BaseModel):
     categories: list[str] = Field(default_factory=list)
 
 
+class WorkspaceConfig(BaseModel):
+    """One ADO work-item project (or a group of them) bound to its own workspace folder.
+
+    The unit that makes ONE autopilot instance serve SEVERAL projects: an item is routed
+    to the workspace whose ``ado_projects`` names its ``System.TeamProject``, and the run
+    then executes against THAT workspace's directory / repos / base branch.
+
+    Every override is blank-means-inherit — a workspace that only names its project and
+    folder still gets the global trigger tags, states, autonomy, quality gates and so on.
+    That is deliberate: the point of a global config is that adding a second project
+    costs two lines, not a duplicated settings page.
+
+    Distinct from :class:`TenantConfig`, which carries its OWN organization and PAT. A
+    workspace shares the instance's single ADO connection (one org, one credential).
+    """
+
+    name: str = ""                  # display label; blank → first project, else folder name
+    enabled: bool = True
+    # Work-item projects routed to this workspace. Matched case-insensitively against
+    # System.TeamProject. Empty = the workspace is inert (nothing routes to it).
+    ado_projects: list[str] = Field(default_factory=list)
+    # ── overrides (blank/empty = inherit the root Settings value) ──
+    code_project: str = ""          # project holding the repos/PRs for these items
+    workspace_directory: str = ""   # folder with the shared .claude + repo subfolders
+    repo_working_directory: str = ""
+    base_branch: str = ""
+    allowed_repos: list[str] = Field(default_factory=list)
+    repo_descriptions: list[str] = Field(default_factory=list)
+    trigger_tag: str = ""
+
+    @property
+    def label(self) -> str:
+        """What to show in a log line or on the dashboard."""
+        if self.name:
+            return self.name
+        if self.ado_projects:
+            return self.ado_projects[0]
+        return Path(self.workspace_directory).name if self.workspace_directory else "workspace"
+
+    def serves(self, project: str) -> bool:
+        """True if ``project`` (an ADO ``System.TeamProject``) routes to this workspace."""
+        target = (project or "").strip().lower()
+        return bool(target) and any(
+            (p or "").strip().lower() == target for p in self.ado_projects
+        )
+
+    def overrides(self) -> dict[str, Any]:
+        """The non-blank overrides, as a ``Settings`` update dict.
+
+        Only keys the workspace actually sets appear — a blank string or empty list
+        means "inherit", so it must not overwrite the root value with emptiness.
+        """
+        out: dict[str, Any] = {}
+        for key in (
+            "code_project", "workspace_directory", "repo_working_directory",
+            "base_branch", "trigger_tag",
+        ):
+            value = (getattr(self, key) or "").strip()
+            if value:
+                out[key] = value
+        for key in ("allowed_repos", "repo_descriptions"):
+            value = getattr(self, key) or []
+            if value:
+                out[key] = list(value)
+        return out
+
+
+# One workspace, written as a single line on the Settings page:
+#
+#   Khatoco, CMMS = C:\ws\dxfactory | base=main | code=DxFactory | repos=Backend,Frontend
+#
+# Left of "=" are the ADO work-item project(s) routed here; right is the workspace folder;
+# everything after a "|" is an optional override. The structured ``workspaces:`` list in
+# config.yaml stays available for anything this one-liner cannot express.
+_WS_OPTION_KEYS = {
+    "base": "base_branch",
+    "base_branch": "base_branch",
+    "code": "code_project",
+    "code_project": "code_project",
+    "repo": "repo_working_directory",
+    "repo_working_directory": "repo_working_directory",
+    "repos": "allowed_repos",
+    "allowed_repos": "allowed_repos",
+    "tag": "trigger_tag",
+    "trigger_tag": "trigger_tag",
+    "name": "name",
+    "desc": "repo_descriptions",
+}
+
+
+def parse_workspace_line(line: str) -> WorkspaceConfig | None:
+    """Parse one ``projects = directory | key=value …`` line, or ``None`` if unusable.
+
+    A line with no ``=`` before the first ``|`` cannot say which project maps where, so it
+    is dropped rather than guessed at — a mis-parsed line would silently route work items
+    into the wrong repository.
+    """
+    raw = (line or "").strip()
+    if not raw or raw.startswith("#"):
+        return None
+    head, *option_parts = raw.split("|")
+    if "=" not in head:
+        return None
+    projects_raw, directory = head.split("=", 1)
+    projects = [p.strip() for p in projects_raw.split(",") if p.strip()]
+    if not projects:
+        return None
+    ws = WorkspaceConfig(ado_projects=projects, workspace_directory=directory.strip())
+    for part in option_parts:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        field_name = _WS_OPTION_KEYS.get(key.strip().lower())
+        value = value.strip()
+        if not field_name or not value:
+            continue
+        if field_name in ("allowed_repos", "repo_descriptions"):
+            setattr(ws, field_name, [v.strip() for v in value.split(",") if v.strip()])
+        else:
+            setattr(ws, field_name, value)
+    return ws
+
+
+def parse_workspace_map(lines: list[str]) -> list[WorkspaceConfig]:
+    """Parse the dashboard's workspace textarea into workspaces, dropping bad lines."""
+    out: list[WorkspaceConfig] = []
+    for line in lines or []:
+        ws = parse_workspace_line(line)
+        if ws is not None:
+            out.append(ws)
+    return out
+
+
+def format_workspace_line(ws: WorkspaceConfig) -> str:
+    """Render a workspace back to its one-line form (inverse of ``parse_workspace_line``)."""
+    parts = [f"{', '.join(ws.ado_projects)} = {ws.workspace_directory}"]
+    for key, field_name in (
+        ("base", "base_branch"), ("code", "code_project"),
+        ("repo", "repo_working_directory"), ("tag", "trigger_tag"), ("name", "name"),
+    ):
+        value = (getattr(ws, field_name) or "").strip()
+        if value:
+            parts.append(f"{key}={value}")
+    if ws.allowed_repos:
+        parts.append(f"repos={','.join(ws.allowed_repos)}")
+    return " | ".join(parts)
+
+
 class TenantConfig(BaseModel):
     """An isolated ADO organization/project served by the same autopilot instance."""
 
@@ -435,6 +583,9 @@ class ScheduledLoop(BaseModel):
     prompt: str  # e.g. "/update-deps" or a free-form instruction
     interval_minutes: int = 0  # used when cron is empty
     cron: str = ""  # standard 5-field cron expression (overrides interval)
+    # ADO project whose WORKSPACE this loop runs in (multi-workspace setups). Blank =
+    # the root workspace. Only the workspace is taken from it — a loop has no work item.
+    project: str = ""
     repo_path: str = ""  # empty → repo_working_directory
     base_branch: str = ""  # empty → base_branch
     branch_prefix: str = "autopilot/loop"
@@ -466,7 +617,13 @@ class Settings(BaseSettings):
 
     # ── Azure DevOps connection ──
     ado_organization: str = ""
-    ado_project: str = ""              # where the WORK ITEMS live
+    ado_project: str = ""              # where the WORK ITEMS live (the DEFAULT project)
+    # Additional work-item projects polled by this SAME connection (same org, same
+    # credential). ``ado_project`` stays the default — the one used when an item's own
+    # project is unknown, and the one a newly created work item lands in. Every project
+    # named here (and every project named by a workspace below) is polled in ONE
+    # org-level WIQL query, not one query per project.
+    ado_projects: list[str] = Field(default_factory=list)
     # Project where the git repos / PRs / build pipelines live, if different from
     # ado_project (cross-project setup: work items in one project, code in another).
     # Blank = same as ado_project.
@@ -662,6 +819,34 @@ class Settings(BaseSettings):
     allowed_users: list[str] = Field(default_factory=list)
     approver_users: list[str] = Field(default_factory=list)
     allowed_skills: list[str] = Field(default_factory=list)
+
+    # ── Delivery (PM) view ──
+    # Records a row whenever a work item's ADO state changes, which is what makes lead
+    # time, cycle time and the flow chart possible — see services/delivery_tracker.py.
+    # Turning this OFF does not just hide a chart: it stops the clock, and the history
+    # for that period can never be recovered.
+    delivery_history_enabled: bool = True
+    delivery_history_interval_minutes: int = 10
+    delivery_history_retention_days: int = 180
+    # Work items read per recording cycle (most-recently-changed first). An item that
+    # has not changed cannot have changed state, so the cap only bounds cost.
+    delivery_max_items: int = 500
+    # Default reporting window on the Delivery page.
+    delivery_window_days: int = 14
+    # When a wait becomes something a PM should be told about. Defaults suit a team on
+    # 1–2 week sprints; raise them for a monthly release cadence.
+    delivery_merge_hours: int = 24    # approved, unblocked, still not merged
+    delivery_review_hours: int = 24   # PR open, nobody has voted
+    delivery_stale_days: int = 3      # in progress, no state change
+
+    # ── Multi-workspace (one connection, several projects) ──
+    # Structured form, edited in config.yaml — full control over every override.
+    workspaces: list[WorkspaceConfig] = Field(default_factory=list)
+    # One-line form, edited on the Settings page:
+    #   "Khatoco = C:\\ws\\dxfactory | base=main | code=DxFactory"
+    # Merged with ``workspaces`` (a structured entry wins on the same project) so the
+    # dashboard stays usable without giving up the expressive YAML form.
+    workspace_map: list[str] = Field(default_factory=list)
 
     # ── Multi-tenant ──
     tenants: list[TenantConfig] = Field(default_factory=list)
@@ -1045,6 +1230,11 @@ class Settings(BaseSettings):
     # ── Web / health ──
     health_port: int = 5080
     health_host: str = "0.0.0.0"
+    # Base URL the dashboard is reachable at FROM A READER'S BROWSER, e.g.
+    # "https://autopilot.example.com". Used to link chat messages back to the pages
+    # that hold the detail. Blank = no link is offered: a Teams digest is read on a
+    # phone, and a link built from health_host ("0.0.0.0:5080") resolves for nobody.
+    dashboard_public_url: str = ""
     # Security for the web surface. Both are OPT-IN (empty → disabled, preserving
     # current behaviour) but STRONGLY recommended because health_host defaults to
     # 0.0.0.0 (all interfaces):
@@ -1111,11 +1301,110 @@ class Settings(BaseSettings):
     def has_auth(self) -> bool:
         return bool(self.ado_pat or self.oauth_app_id)
 
+    # ── Multi-project / multi-workspace resolution ───────────────────────────
+    #
+    # Three questions, answered in one place so no caller has to re-derive them:
+    #   which projects do we poll?      → effective_ado_projects
+    #   which workspace owns an item?   → workspace_for
+    #   what config does its run use?   → scoped_for_project
+    #
+    # All three degrade to the single-project behaviour when nothing extra is
+    # configured, so an existing config.yaml keeps working untouched.
+
+    @property
+    def effective_workspaces(self) -> list[WorkspaceConfig]:
+        """Every enabled workspace: the one-line ``workspace_map`` entries plus the
+        structured ``workspaces`` list.
+
+        A structured entry WINS over a one-liner that claims the same project — the
+        YAML form is the more expressive one, so it is the one an operator reaches for
+        when the line form was not enough, and silently letting the line override it
+        would undo exactly the customisation they went there to make."""
+        structured = [ws for ws in self.workspaces if ws.enabled]
+        claimed = {
+            (p or "").strip().lower() for ws in structured for p in ws.ado_projects
+        }
+        out = list(structured)
+        for ws in parse_workspace_map(self.workspace_map):
+            if not ws.enabled:
+                continue
+            remaining = [
+                p for p in ws.ado_projects if (p or "").strip().lower() not in claimed
+            ]
+            if remaining:
+                out.append(ws.model_copy(update={"ado_projects": remaining}))
+        return out
+
+    @property
+    def effective_ado_projects(self) -> list[str]:
+        """Every work-item project this instance polls, default first, de-duplicated
+        case-insensitively. Blank when no project is configured at all (offline setup)."""
+        out: list[str] = []
+        seen: set[str] = set()
+        candidates = [self.ado_project, *self.ado_projects]
+        candidates += [p for ws in self.effective_workspaces for p in ws.ado_projects]
+        for project in candidates:
+            name = (project or "").strip()
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                out.append(name)
+        return out
+
+    def workspace_for(self, project: str) -> WorkspaceConfig | None:
+        """The workspace serving ``project``, or ``None`` to use the root config."""
+        for ws in self.effective_workspaces:
+            if ws.serves(project):
+                return ws
+        return None
+
+    def code_project_for(self, project: str = "") -> str:
+        """Project holding the repos/PRs for work items in ``project``.
+
+        Resolution order: the owning workspace's ``code_project`` → the global
+        ``code_project`` → the work item's own project → the default project. The last
+        two matter for multi-project setups: with several work-item projects a single
+        global ``code_project`` would send EVERY project's PRs to one repo host, so an
+        item falls back to its OWN project before the default one."""
+        ws = self.workspace_for(project)
+        if ws and ws.code_project.strip():
+            return ws.code_project.strip()
+        if self.code_project.strip():
+            return self.code_project.strip()
+        return (project or "").strip() or self.ado_project
+
+    def scoped_for_project(self, project: str) -> Settings:
+        """This config as seen by a run on ``project`` — workspace overrides applied.
+
+        Returns ``self`` unchanged when the project has no workspace of its own, so the
+        common single-workspace case allocates nothing. The copy is a snapshot: a live
+        settings edit lands on the root object, and the next run re-derives from it."""
+        name = (project or "").strip()
+        updates: dict[str, Any] = {}
+        ws = self.workspace_for(name) if name else None
+        if ws is not None:
+            updates.update(ws.overrides())
+        if name and name.lower() != (self.ado_project or "").strip().lower():
+            updates["ado_project"] = name
+            # An item's own project is the better fallback for its repos than the
+            # DEFAULT project's — recomputed here so the scoped copy is self-consistent
+            # (its code_project no longer depends on which project it came from).
+            updates.setdefault("code_project", self.code_project_for(name))
+        if not updates:
+            return self
+        return self.model_copy(update=updates)
+
     @property
     def effective_trigger_tags(self) -> list[str]:
-        """All trigger tags (primary + extras), de-duplicated, blanks dropped."""
+        """All trigger tags (primary + extras + any per-workspace tag), de-duplicated,
+        blanks dropped.
+
+        Workspace tags belong here because the poll is a SINGLE query for the whole
+        instance: a workspace that overrides ``trigger_tag`` but whose tag never
+        reached the query would simply never see a work item — an override that
+        silently disables the workspace it was meant to configure."""
         out: list[str] = []
-        for tag in [self.trigger_tag, *self.trigger_tags]:
+        workspace_tags = [ws.trigger_tag for ws in self.effective_workspaces]
+        for tag in [self.trigger_tag, *self.trigger_tags, *workspace_tags]:
             t = (tag or "").strip()
             if t and t not in out:
                 out.append(t)

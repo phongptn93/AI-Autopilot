@@ -58,8 +58,11 @@ class LoopScheduler:
 
     async def _run_loop(self, loop: ScheduledLoop) -> None:
         c, cfg = self._c, self._config
-        repo = loop.repo_path or cfg.repo_working_directory
-        base = loop.base_branch or cfg.base_branch
+        # A loop bound to a project runs in THAT project's workspace, so its repo and
+        # base branch default to the workspace's rather than the root config's.
+        scoped = cfg.scoped_for_project(loop.project)
+        repo = loop.repo_path or scoped.repo_working_directory
+        base = loop.base_branch or scoped.base_branch
         if not repo:
             self._log.warning("scheduled loop has no repo configured", name=loop.name)
             return
@@ -70,7 +73,7 @@ class LoopScheduler:
         item = WorkItemInfo(id=0, title=f"[loop] {loop.name}")
         record_id = await c.execution_repo.start_execution(item, loop.prompt)
         result = await c.executor.run_loop(
-            loop.name, loop.prompt, repo, base, branch, loop.draft_pr
+            loop.name, loop.prompt, repo, base, branch, loop.draft_pr, loop.project
         )
         await c.execution_repo.complete_execution(record_id, result)
         if result.cost_tokens:

@@ -28,6 +28,12 @@ class WorkItemInfo:
 
     id: int
     title: str = ""
+    # ADO ``System.TeamProject`` — which work-item project this item lives in. One
+    # autopilot connection can poll several projects, and an id alone does not say
+    # which: the comments API, work-item creation and the type/state map are all
+    # project-scoped, so an item that did not carry its own project would have its
+    # comments posted against the DEFAULT project and silently 404.
+    project: str = ""
     work_item_type: str = ""
     state: str = ""
     assigned_to: str | None = None          # display name
@@ -47,6 +53,10 @@ class WorkItemInfo:
     area_path: str | None = None
     iteration_path: str | None = None
     changed_date: datetime | None = None
+    # When the item was CREATED. Unlike changed_date (bumped by any edit, including a
+    # comment) this never moves, which makes it the only trustworthy start point for
+    # lead time — see the Delivery page.
+    created_date: datetime | None = None
     created_by: str | None = None
     # ADO Priority field (1=Critical, 2=High, 3=Normal, 4=Low)
     priority: int = 3

@@ -16,14 +16,14 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from ai_autopilot import activity, flows as flows_mod, security
+from ai_autopilot import activity, delivery, flows as flows_mod, security
 from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
 from ai_autopilot.data.entities import PipelineState, QualityKind
 from ai_autopilot.logging_config import get_logger
-from ai_autopilot.services import planning_analyzer
+from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.pr_feedback import parse_work_item_id
 from ai_autopilot.skills_catalog import discover_skills
 from ai_autopilot.workspace import discover_repos
@@ -198,6 +198,36 @@ _PR_OUTCOME_TTL = 60.0
 # The Reviews board scans every repo × active PR × reviewers on each load — cache the
 # assembled view briefly so refreshes don't hammer ADO (the tracker updates state on its
 # own 30s cadence anyway).
+# Label + colour tone per action kind, in the order the report already sorts them.
+# Kept here rather than in delivery.py so the pure module stays free of presentation.
+_ACTION_LABELS: dict[str, tuple[str, str]] = {
+    delivery.KIND_BLOCKED_PR: ("PR bị từ chối", "red"),
+    delivery.KIND_MERGE_READY: ("Chờ merge", "red"),
+    delivery.KIND_REVIEW_WAITING: ("Chờ review", "amber"),
+    delivery.KIND_NEEDS_HUMAN: ("Autopilot cần người", "amber"),
+    delivery.KIND_STALE: ("Đứng im", "grey"),
+    delivery.KIND_FAILED: ("Run thất bại", "grey"),
+}
+
+
+def work_item_link_base(cfg) -> str:
+    """Base URL for "open work item #id in Azure DevOps" links, or "" with no org.
+
+    With several work-item projects polled, most pages do not know which project a
+    given id belongs to (the DB records an id, not a project). Azure DevOps resolves
+    a work item id ORG-wide, so the project-less form redirects to the right project —
+    which is exactly right here, and strictly better than guessing the default project
+    and handing the reader a link that 404s. A single-project setup keeps the explicit,
+    unchanged URL."""
+    org = (cfg.ado_organization or "").rstrip("/")
+    if not org:
+        return ""
+    projects = cfg.effective_ado_projects
+    if len(projects) == 1 and projects[0]:
+        return f"{org}/{quote(projects[0])}/_workitems/edit"
+    return f"{org}/_workitems/edit"
+
+
 _REVIEWS_CACHE: dict = {"at": 0.0, "data": None}
 _REVIEWS_TTL = 30.0
 
@@ -424,6 +454,14 @@ def create_dashboard_router() -> APIRouter:
             sel = selected_tag.lower()
             items = [i for i in items if any(t.lower() == sel for t in i.tags)]
 
+        # With several work-item projects on one board, "which project is this card
+        # from?" is the first question a reader has — so it is also a filter.
+        projects = c.config.effective_ado_projects
+        selected_project = qp.get("project") or "all"
+        if selected_project != "all":
+            sel_proj = selected_project.lower()
+            items = [i for i in items if (i.project or "").lower() == sel_proj]
+
         # Filters: search (id/title), category, changed-date range.
         q = (qp.get("q") or "").strip()
         cat = (qp.get("cat") or "all").strip()
@@ -446,6 +484,8 @@ def create_dashboard_router() -> APIRouter:
         base = {}
         if selected_tag != "all":
             base["tag"] = selected_tag
+        if selected_project != "all":
+            base["project"] = selected_project
         if q:
             base["q"] = q
         if cat and cat != "all":
@@ -460,7 +500,16 @@ def create_dashboard_router() -> APIRouter:
 
         org = c.config.ado_organization.rstrip("/")
         proj = c.config.ado_project
-        ado_item_base = f"{org}/{quote(proj)}/_workitems/edit" if org and proj else ""
+        ado_item_base = work_item_link_base(c.config)
+        # Each card links into ITS OWN project — see BoardCard.url.
+        if org:
+            for column_cards in cols.values():
+                for card in column_cards:
+                    card_project = card.project or proj
+                    if card_project:
+                        card.url = (
+                            f"{org}/{quote(card_project)}/_workitems/edit/{card.id}"
+                        )
         return _ctx(
             request,
             "board",
@@ -469,6 +518,8 @@ def create_dashboard_router() -> APIRouter:
             total=len(items),
             error=error,
             project=c.config.ado_project,
+            projects=projects,
+            selected_project=selected_project,
             interactive=c.config.execution_mode == "interactive",
             tags=tags,
             selected_tag=selected_tag,
@@ -605,8 +656,6 @@ def create_dashboard_router() -> APIRouter:
         """Common context for the Planning workbench page (+ its POST re-renders)."""
         c: Container = request.app.state.container
         cfg = c.config
-        org = cfg.ado_organization.rstrip("/")
-        proj = cfg.ado_project
         try:
             scheduled = await c.planned_run_repo.list_active()
         except Exception:  # noqa: BLE001
@@ -620,7 +669,7 @@ def create_dashboard_router() -> APIRouter:
             enabled=cfg.dependency_scheduling_enabled,
             sibling=cfg.sibling_conflict_scheduling,
             poll_interval=cfg.poll_interval_seconds,
-            ado_item_base=f"{org}/{quote(proj)}/_workitems/edit" if org and proj else "",
+            ado_item_base=work_item_link_base(cfg),
             trigger_tags={t.lower() for t in cfg.effective_trigger_tags},
             default_assignee=cfg.auto_transition_assignee,
             states=sorted({*cfg.trigger_states, *cfg.done_states}),
@@ -900,15 +949,14 @@ def create_dashboard_router() -> APIRouter:
         """Review queue: items the autopilot escalated (needs human) with a reason,
         so a human can Resume them (approve/redirect) in one place."""
         c: Container = request.app.state.container
-        org = c.config.ado_organization.rstrip("/")
-        project = c.config.ado_project
+        link_base = work_item_link_base(c.config)
         held = [s for s in await c.state_repo.all() if s.state == PipelineState.NEEDS_HUMAN]
         held.sort(key=lambda s: s.updated_at or datetime.min, reverse=True)
         items = [
             {
                 "id": s.work_item_id, "title": s.title or f"#{s.work_item_id}",
                 "detail": s.detail or "", "pr_url": s.pr_url or "",
-                "url": f"{org}/{project}/_workitems/edit/{s.work_item_id}",
+                "url": f"{link_base}/{s.work_item_id}" if link_base else "",
                 "updated": s.updated_at,
             }
             for s in held
@@ -988,6 +1036,33 @@ def create_dashboard_router() -> APIRouter:
         return _TEMPLATES.TemplateResponse(
             request, "analytics.html",
             _ctx(request, "analytics", report=report, days=days, tag=tag),
+        )
+
+    @router.get("/delivery", response_class=HTMLResponse)
+    async def delivery_page(request: Request, days: int = 0, project: str = "all"):
+        """The PM view: throughput, lead time, what is stuck, who is loaded.
+
+        Every other page here reports on the AUTOPILOT (runs, tokens, success rate).
+        This one reports on the PROJECT, counting work items rather than runs and
+        putting age — the thing a board cannot show — in front.
+
+        Gathering lives in ``services.delivery_report`` because the Teams digest reads
+        the same report: two gatherers meant the chat message and this page could
+        disagree, and a number that changes depending on where you read it is worse
+        than no number."""
+        c: Container = request.app.state.container
+        cfg = c.config
+        report, error = await delivery_report.gather(c, days=days, project=project)
+        return _TEMPLATES.TemplateResponse(
+            request, "delivery.html",
+            _ctx(
+                request, "delivery", report=report, days=report.window_days, error=error,
+                projects=cfg.effective_ado_projects, selected_project=project,
+                item_link=work_item_link_base(cfg),
+                recording=cfg.delivery_history_enabled,
+                bands=delivery.FLOW_BANDS,
+                kind_labels=_ACTION_LABELS,
+            ),
         )
 
     @router.get("/learning", response_class=HTMLResponse)

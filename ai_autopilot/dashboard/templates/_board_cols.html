@@ -14,10 +14,14 @@
             <div class="board-card {{ css }}" draggable="true" data-id="{{ card.id }}">
                 <div class="board-card-head">
                     {% if card.category %}<span class="cat-badge {{ css }}">{{ label }}</span>{% endif %}
-                    {% if ado_item_base %}
-                    <a class="board-card-id" href="{{ ado_item_base }}/{{ card.id }}" target="_blank" rel="noopener" title="Open #{{ card.id }} in Azure DevOps">#{{ card.id }} ↗</a>
+                    {% set card_url = card.url or (ado_item_base ~ '/' ~ card.id if ado_item_base else '') %}
+                    {% if card_url %}
+                    <a class="board-card-id" href="{{ card_url }}" target="_blank" rel="noopener" title="Open #{{ card.id }}{% if card.project %} ({{ card.project }}){% endif %} in Azure DevOps">#{{ card.id }} ↗</a>
                     {% else %}
                     <span class="board-card-id">#{{ card.id }}</span>
+                    {% endif %}
+                    {% if projects and projects | length > 1 and card.project %}
+                    <span class="board-card-proj" title="Project">{{ card.project }}</span>
                     {% endif %}
                     <span class="board-card-state">{{ card.ado_state }}</span>
                 </div>

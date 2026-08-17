@@ -28,6 +28,7 @@ from ai_autopilot.data.entities import (
     SchedulerDecision,
     SdlcLoopState,
     WorkItemState,
+    WorkItemStateHistory,
 )
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
@@ -368,6 +369,122 @@ class StateRepository:
                 row.updated_at = datetime.now(UTC)
             await session.commit()
             return len(rows)
+
+
+@dataclass(frozen=True)
+class StateChange:
+    """One recorded ADO state transition (detached from the session)."""
+
+    work_item_id: int
+    project: str
+    state: str
+    category: str
+    assigned_to: str
+    title: str
+    entered_at: datetime
+
+
+class StateHistoryRepository:
+    """Append-only log of ADO state transitions — see ``WorkItemStateHistory``.
+
+    Deliberately append-only: a transition is a fact about a moment, so nothing here
+    updates a previous row. That is what lets the flow chart be re-derived for any past
+    window without the numbers changing under it.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def record(
+        self, items: list[WorkItemInfo], categories: dict[str, str], *,
+        now: datetime | None = None,
+    ) -> int:
+        """Record a row for each item whose state differs from its last recorded one.
+
+        Idempotent by construction: calling it twice with unchanged items writes
+        nothing. Returns the number of transitions written.
+
+        ``categories`` maps state name → ADO state category; a state missing from it is
+        recorded with an empty category rather than skipped — losing the transition
+        entirely would put a permanent hole in the item's timeline, while an unknown
+        category only weakens one bar of one chart.
+        """
+        if not items:
+            return 0
+        stamp = now or datetime.now(UTC)
+        latest = await self.latest_states([i.id for i in items])
+        written = 0
+        async with self._db.session() as session:
+            for item in items:
+                state = (item.state or "").strip()
+                if not state or latest.get(item.id) == state:
+                    continue
+                session.add(WorkItemStateHistory(
+                    work_item_id=item.id,
+                    project=item.project or "",
+                    state=state,
+                    category=categories.get(state, ""),
+                    assigned_to=item.assigned_to or "",
+                    title=item.title or "",
+                    entered_at=stamp,
+                ))
+                written += 1
+            if written:
+                await session.commit()
+        return written
+
+    async def latest_states(self, ids: list[int]) -> dict[int, str]:
+        """``{work_item_id: most recently recorded state}`` for ``ids``."""
+        if not ids:
+            return {}
+        async with self._db.session() as session:
+            # The newest row per item = the row whose id is the max for that item
+            # (ids are monotonic within a table, and ties on entered_at are common
+            # because a whole scan shares one timestamp).
+            newest = (
+                select(func.max(WorkItemStateHistory.id))
+                .where(WorkItemStateHistory.work_item_id.in_(ids))
+                .group_by(WorkItemStateHistory.work_item_id)
+            )
+            rows = await session.execute(
+                select(WorkItemStateHistory).where(WorkItemStateHistory.id.in_(newest))
+            )
+            return {r.work_item_id: r.state for r in rows.scalars().all()}
+
+    async def changes_since(self, since: datetime | None = None) -> list[StateChange]:
+        """Every recorded transition at/after ``since`` (all of them when ``None``),
+        oldest first — the input the flow chart and lead-time maths both read."""
+        async with self._db.session() as session:
+            stmt = select(WorkItemStateHistory)
+            if since is not None:
+                stmt = stmt.where(WorkItemStateHistory.entered_at >= since)
+            rows = await session.execute(stmt.order_by(WorkItemStateHistory.entered_at))
+            return [
+                StateChange(
+                    work_item_id=r.work_item_id, project=r.project, state=r.state,
+                    category=r.category, assigned_to=r.assigned_to, title=r.title,
+                    entered_at=r.entered_at,
+                )
+                for r in rows.scalars().all()
+            ]
+
+    async def first_seen(self) -> datetime | None:
+        """When recording started — the point before which the Delivery page has no
+        history and must say so instead of drawing an empty chart as though it were
+        a quiet week."""
+        async with self._db.session() as session:
+            return (
+                await session.execute(select(func.min(WorkItemStateHistory.entered_at)))
+            ).scalar_one_or_none()
+
+    async def prune(self, before: datetime) -> int:
+        """Drop transitions older than ``before`` (retention)."""
+        async with self._db.session() as session:
+            result = await session.execute(
+                delete(WorkItemStateHistory).where(WorkItemStateHistory.entered_at < before)
+            )
+            await session.commit()
+            return result.rowcount or 0
 
 
 class SdlcLoopStateRepository:

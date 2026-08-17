@@ -37,10 +37,23 @@ FIELDS: tuple[Field, ...] = (
     Field("repo_descriptions", "Repo descriptions", "list", "Workspace & Repository",
           "What each repo is, so the agent picks the right one. One 'RepoName = description' per "
           "line, e.g. 'Backend-Fresh = .NET API', 'Dxfac-gitops = deploy manifests, don't edit'."),
+    Field("workspace_map", "🗂 Extra workspaces (project → folder)", "list",
+          "Workspace & Repository",
+          "Run SEVERAL workspaces from this one autopilot. One per line: "
+          "'ProjectA, ProjectB = C:\\path\\to\\workspace'. Work items from those ADO projects run "
+          "in THAT folder's repos. Optional overrides after a '|': base=, code=, repo=, repos=, "
+          "tag=. Anything left out is inherited from the settings above. Blank = single workspace."),
     # ── Azure DevOps Connection ──
     Field("ado_organization", "Organization URL", "text", "Azure DevOps Connection",
           "e.g. https://dev.azure.com/your-org"),
-    Field("ado_project", "Project (work items)", "text", "Azure DevOps Connection"),
+    Field("ado_project", "Project (work items)", "text", "Azure DevOps Connection",
+          "The DEFAULT work-item project — where new items are created and where anything "
+          "without a project of its own is assumed to live."),
+    Field("ado_projects", "↳ More projects (work items)", "list", "Azure DevOps Connection",
+          "Additional work-item projects polled on this SAME connection (one per line). All of "
+          "them are covered by a single query, so adding projects costs no extra polling. Use "
+          "'Extra workspaces' above to give a project its own folder/repos; without one it uses "
+          "the workspace configured here."),
     Field("code_project", "Code project (repos/PRs)", "text", "Azure DevOps Connection",
           "Project where the git repos, PRs and build pipelines live, if different from the "
           "work-item project. Blank = same. (Cross-project setup.)"),
@@ -114,6 +127,42 @@ FIELDS: tuple[Field, ...] = (
     Field("board_drop_map", "Drag & drop (column => tag/state)", "list", "Board columns",
           "Enable dragging cards: one 'Column => value' per line. Value is a tag, or an ADO state "
           "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready to deploy => @Ready to Deploy'."),
+    # ── 🚚 Delivery (PM view) ──
+    Field("delivery_history_enabled", "Record state history", "bool", "🚚 Delivery (PM view)",
+          "Log every work-item state change so the Delivery page can measure lead time, "
+          "cycle time and the flow chart. Turning this OFF stops the clock — the history "
+          "for that period CANNOT be recovered later."),
+    Field("delivery_history_interval_minutes", "↳ Check every (minutes)", "int",
+          "🚚 Delivery (PM view)",
+          "How often to look for state changes. Two API calls per check regardless of how "
+          "many items there are; a cycle where nothing moved writes nothing."),
+    Field("delivery_history_retention_days", "↳ Keep history (days)", "int",
+          "🚚 Delivery (PM view)",
+          "Older transitions are dropped. This also caps how far back any trend on the "
+          "page can look. 0 = keep forever."),
+    Field("delivery_window_days", "Default window (days)", "int", "🚚 Delivery (PM view)",
+          "Reporting period the Delivery page opens on. Each figure is compared against "
+          "the window immediately before it."),
+    Field("delivery_merge_hours", "⚠️ Alert: waiting to merge (hours)", "int",
+          "🚚 Delivery (PM view)",
+          "Flag a PR that is approved, unblocked and STILL not merged after this long. "
+          "This is pure waste — the work is finished and the fix is one click."),
+    Field("delivery_review_hours", "⚠️ Alert: waiting for review (hours)", "int",
+          "🚚 Delivery (PM view)",
+          "Flag a PR nobody has voted on after this long, naming the reviewers it is "
+          "waiting on."),
+    Field("delivery_stale_days", "⚠️ Alert: no movement (days)", "int",
+          "🚚 Delivery (PM view)",
+          "Flag an in-progress item whose STATE has not changed in this long. Edits and "
+          "comments do not count as movement — that is the whole point."),
+    Field("delivery_max_items", "Work items read per check", "int", "🚚 Delivery (PM view)",
+          "Most-recently-changed first. An item that has not changed cannot have changed "
+          "state, so this only bounds cost."),
+    Field("dashboard_public_url", "🔗 Public dashboard URL", "text", "🚚 Delivery (PM view)",
+          "Where this dashboard is reachable FROM A READER'S BROWSER, e.g. "
+          "https://autopilot.example.com. The Teams digest links back to the Delivery "
+          "page with it. Blank = no link is offered — a digest is read on a phone, and a "
+          "URL built from the bind address (0.0.0.0) resolves for nobody."),
     # ── Auto transitions ──
     Field("auto_transition_enabled", "Enable auto transitions", "bool", "Auto transitions",
           "Move the work item when its PR is merged, mark it deployed when a deploy build "
@@ -468,6 +517,9 @@ EXPORT_EXCLUDE = frozenset({
     "config_export_password",
     # ── machine / host specific ──
     "workspace_directory", "repo_working_directory", "worktrees_dir",
+    # Both carry this host's filesystem paths, exactly like workspace_directory —
+    # sharing them would pin a teammate to folders that do not exist on their machine.
+    "workspace_map", "workspaces",
     "database_url", "health_host", "health_port", "plugins_directory",
     "trigger_tag",          # per-host default tag
     "repos",                # RepoConfig entries embed local filesystem paths

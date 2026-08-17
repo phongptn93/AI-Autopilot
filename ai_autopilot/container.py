@@ -25,6 +25,7 @@ from ai_autopilot.data import (
     QualityRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
+    StateHistoryRepository,
     StateRepository,
     SyncStateRepository,
 )
@@ -68,6 +69,8 @@ class Container:
         self.execution_repo = ExecutionRepository(self.database)
         self.state_repo = StateRepository(self.database)
         self.sdlc_state_repo = SdlcLoopStateRepository(self.database)
+        # Append-only ADO state transitions — the clock behind the Delivery page.
+        self.state_history = StateHistoryRepository(self.database)
         self.sync_repo = SyncStateRepository(self.database)
         self.planned_run_repo = PlannedRunRepository(self.database)
         self.ai_conflict_repo = AiConflictRepository(self.database)

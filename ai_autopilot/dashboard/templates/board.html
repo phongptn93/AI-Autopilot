@@ -3,7 +3,8 @@
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
     <div>
         <h2>Board</h2>
-        <p>Live view of every work item tagged for the autopilot in <span class="mono">{{ project }}</span> — {{ total }} item(s)</p>
+        <p>Live view of every work item tagged for the autopilot in
+           <span class="mono">{{ projects | join(', ') if projects else project }}</span> — {{ total }} item(s)</p>
     </div>
     <form method="get" action="/dashboard/board" class="board-filters">
         <input type="text" name="q" value="{{ q }}" placeholder="🔍 id or title" class="bf-input" style="width:160px"/>
@@ -13,6 +14,12 @@
         </select>
         <input type="date" name="from" value="{{ date_from }}" class="bf-input" title="Changed from"/>
         <input type="date" name="to" value="{{ date_to }}" class="bf-input" title="Changed to"/>
+        {% if projects and projects | length > 1 %}
+        <select name="project" class="bf-input" onchange="this.form.submit()" title="Work-item project">
+            <option value="all" {% if selected_project == 'all' %}selected{% endif %}>All projects</option>
+            {% for p in projects %}<option value="{{ p }}" {% if selected_project == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+        </select>
+        {% endif %}
         {% if tags %}
         <select name="tag" class="bf-input" onchange="this.form.submit()">
             <option value="all" {% if selected_tag == 'all' %}selected{% endif %}>All tags</option>
@@ -20,7 +27,7 @@
         </select>
         {% endif %}
         <button type="submit" class="btn-ghost">Apply</button>
-        {% if q or (cat and cat != 'all') or date_from or date_to or selected_tag != 'all' %}
+        {% if q or (cat and cat != 'all') or date_from or date_to or selected_tag != 'all' or selected_project != 'all' %}
         <a href="/dashboard/board" class="btn-ghost" style="text-decoration:none">Reset</a>{% endif %}
         <div class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto 15s</span></div>
     </form>
@@ -58,6 +65,7 @@
   .board-card-id { font-size:11px; color:var(--text-dim); font-family:var(--mono,monospace); }
   a.board-card-id { text-decoration:none; }
   a.board-card-id:hover { color:var(--accent,#818cf8); }
+  .board-card-proj { font-size:10px; color:var(--text-muted); background:var(--bg-card,#16161c); border:1px solid var(--border,#23232b); border-radius:20px; padding:1px 7px; white-space:nowrap; }
   .board-card-state { font-size:10px; color:var(--text-muted); margin-left:auto; text-transform:uppercase; letter-spacing:.04em; }
   .board-card-title { font-size:13px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .board-card-foot { display:flex; align-items:center; gap:10px; margin-top:8px; font-size:11px; color:var(--text-muted); }

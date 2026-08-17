@@ -35,6 +35,7 @@ from ai_autopilot.data.repository import (
     ReworkRow,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
+    StateHistoryRepository,
     StateRepository,
     SyncStateRepository,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "SchedulerHistoryRepository",
     "SdlcLoopState",
     "SdlcLoopStateRepository",
+    "StateHistoryRepository",
     "StateRepository",
     "SyncStateRepository",
     "TeamsConversation",

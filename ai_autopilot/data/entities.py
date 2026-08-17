@@ -47,6 +47,45 @@ class WorkItemState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class WorkItemStateHistory(Base):
+    """One row per observed ADO **state transition** — the raw material for lead time,
+    cycle time and the cumulative-flow chart on the Delivery page.
+
+    Why a table rather than deriving it from ADO on demand: ``System.ChangedDate`` is
+    bumped by ANY edit (a comment, a tag, an assignment), so "how long has this been in
+    review?" computed from it is not just imprecise — it is systematically optimistic,
+    which hides exactly the stuck items a PM is looking for. ADO's revisions API has the
+    truth but costs one request per work item. Recording transitions as we already see
+    them costs nothing extra and is exact from the moment it is switched on.
+
+    Consequence worth stating plainly: **there is no history before the first run of the
+    recorder.** Flow and lead-time figures fill in over the following days rather than
+    appearing complete on day one.
+
+    ``category`` is the ADO *state category* (Proposed / InProgress / Resolved /
+    Completed / Removed) captured alongside the state name. Storing it here rather than
+    resolving it at read time means a chart built months later still groups by what the
+    process template said AT THE TIME, and does not silently rewrite history when
+    someone renames a state or the API is unreachable.
+    """
+
+    __tablename__ = "work_item_state_history"
+    __table_args__ = (
+        # The two access patterns: "this item's timeline" and "everything in a window".
+        Index("ix_wi_history_item_at", "work_item_id", "entered_at"),
+        Index("ix_wi_history_at", "entered_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    work_item_id: Mapped[int] = mapped_column(Integer)
+    project: Mapped[str] = mapped_column(String(200), default="")
+    state: Mapped[str] = mapped_column(String(100), default="")
+    category: Mapped[str] = mapped_column(String(40), default="")
+    assigned_to: Mapped[str] = mapped_column(String(200), default="")
+    title: Mapped[str] = mapped_column(String(500), default="")
+    entered_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class SdlcLoopState(Base):
     """Per-item progress of the closed-loop SDLC engine — resumable across restarts.
 

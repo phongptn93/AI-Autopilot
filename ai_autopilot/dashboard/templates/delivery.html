@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+
+  /* KPI band */
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:18px; }
+  .kpi { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:12px; padding:14px 16px; }
+  .kpi-label { font-size:12px; color:var(--text-muted); display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .kpi-value { font-size:30px; font-weight:700; line-height:1.15; margin-top:6px; }
+  .kpi-unit { font-size:14px; font-weight:500; color:var(--text-muted); margin-left:4px; }
+  .kpi-delta { font-size:12px; font-weight:600; margin-top:4px; }
+  .kpi-delta.good { color:#22c55e; }
+  .kpi-delta.bad { color:#e5484d; }
+  .kpi-delta.flat { color:var(--text-dim); }
+  .kpi-hint { font-size:11px; color:var(--text-dim); margin-top:7px; line-height:1.45; }
+
+  /* Action list */
+  .act-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .act-table th { text-align:left; padding:8px 10px; font-size:11px; text-transform:uppercase;
+                  letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border,#23232b); }
+  .act-table td { padding:9px 10px; border-bottom:1px solid var(--border,#23232b); vertical-align:top; }
+  .act-table tr:last-child td { border-bottom:none; }
+  .act-kind { display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; white-space:nowrap; }
+  .act-kind.red { background:rgba(229,72,77,.15); color:#e5484d; }
+  .act-kind.amber { background:rgba(245,158,11,.15); color:#f59e0b; }
+  .act-kind.grey { background:rgba(148,163,184,.15); color:#94a3b8; }
+  .act-age { font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+  .act-age.red { color:#e5484d; }
+  .act-title { display:block; }
+  .act-detail { display:block; font-size:11px; color:var(--text-muted); margin-top:3px; }
+  .act-links a { color:var(--accent,#818cf8); text-decoration:none; font-size:12px; white-space:nowrap; }
+  .act-links a:hover { text-decoration:underline; }
+
+  .grid-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(380px,1fr)); gap:14px; }
+  .tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .tbl th { text-align:left; padding:7px 10px; font-size:11px; text-transform:uppercase;
+            letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border,#23232b); }
+  .tbl td { padding:7px 10px; border-bottom:1px solid var(--border,#23232b); }
+  .tbl tr:last-child td { border-bottom:none; }
+  .tbl .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .load-bar { display:inline-block; height:6px; border-radius:3px; background:var(--accent,#6366f1); vertical-align:middle; }
+
+  /* Cumulative flow */
+  .cfd { display:flex; align-items:flex-end; gap:2px; height:170px; padding:10px 0; overflow-x:auto; }
+  .cfd-col { flex:1 0 8px; min-width:8px; display:flex; flex-direction:column; justify-content:flex-end; height:100%; }
+  .cfd-seg { width:100%; }
+  .cfd-seg.Proposed { background:#64748b; }
+  .cfd-seg.InProgress { background:#6366f1; }
+  .cfd-seg.Resolved { background:#f59e0b; }
+  .cfd-seg.Completed { background:#22c55e; }
+  .cfd-legend { display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--text-muted); }
+  .cfd-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+  .empty { color:var(--text-dim); font-size:13px; text-align:center; padding:22px 0; }
+  .notice { font-size:12px; color:var(--text-muted); background:var(--bg,#0d0d12);
+            border:1px solid var(--border,#23232b); border-radius:9px; padding:9px 13px; margin-bottom:14px; }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2>🚚 Delivery</h2>
+    <p>Tiến độ dự án trong {{ days }} ngày — đếm theo <b>work item</b>, không phải theo run.</p>
+  </div>
+  <form method="get" action="/dashboard/delivery" style="display:flex;gap:8px;align-items:center">
+    {% if projects and projects | length > 1 %}
+    <select name="project" class="bf-input" onchange="this.form.submit()">
+      <option value="all" {% if selected_project == 'all' %}selected{% endif %}>Tất cả project</option>
+      {% for p in projects %}<option value="{{ p }}" {% if selected_project == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <select name="days" class="bf-input" onchange="this.form.submit()">
+      {% for d in [7, 14, 30, 90] %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
+    </select>
+    <noscript><button type="submit" class="btn-ghost">Áp dụng</button></noscript>
+  </form>
+</div>
+
+{% if error %}
+<div class="card" style="border-color: var(--red,#e5484d);">
+  <div class="card-body" style="padding:14px 22px;color:var(--red,#e5484d)">⚠️ Không đọc được Azure DevOps: {{ error }}</div>
+</div>
+{% endif %}
+
+{% if not recording %}
+<div class="notice">⏸️ <b>Đang tắt ghi lịch sử trạng thái</b> — lead time và biểu đồ dòng chảy sẽ không có dữ liệu.
+  Bật lại ở Settings → <code>delivery_history_enabled</code>. Lưu ý: khoảng thời gian đang tắt <b>không khôi phục lại được</b>.</div>
+{% elif report.flow_is_partial %}
+<div class="notice">📖 Lịch sử trạng thái chỉ có từ
+  <b>{% if report.history_since %}{{ report.history_since.strftime('%d/%m/%Y %H:%M') }}{% else %}chưa có dữ liệu{% endif %}</b>.
+  Phần biểu đồ và lead time trước mốc này còn trống — sẽ đầy dần theo ngày, không phải là kỳ ít việc.</div>
+{% endif %}
+
+<div class="kpis">
+  {% for k in report.kpis %}
+  <div class="kpi">
+    <div class="kpi-label"><span>{{ k.label }}</span></div>
+    <div class="kpi-value">{{ '%g' % k.value }}<span class="kpi-unit">{{ k.unit }}</span></div>
+    {% if k.delta is not none %}
+    <div class="kpi-delta {{ k.tone }}">
+      {% if k.direction == 'up' %}▲{% elif k.direction == 'down' %}▼{% else %}—{% endif %}
+      {{ '%g' % (k.delta | abs) }}{{ k.unit }} so với {{ days }} ngày trước
+    </div>
+    {% else %}
+    <div class="kpi-delta flat">— chưa đủ dữ liệu để so sánh</div>
+    {% endif %}
+    <div class="kpi-hint">{{ k.hint }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h3>⚠️ Cần xử lý ({{ report.actions | length }})</h3>
+    <span style="font-size:11px;color:var(--text-dim)">
+      ngưỡng: merge &gt; {{ report.thresholds.merge_hours }}h · review &gt; {{ report.thresholds.review_hours }}h · đứng im &gt; {{ report.thresholds.stale_days }} ngày
+    </span>
+  </div>
+  <div class="card-body" style="padding:0 6px 6px">
+    {% if report.actions %}
+    <table class="act-table">
+      <thead><tr><th>Loại</th><th>Việc</th><th>Người</th><th style="text-align:right">Đã chờ</th><th></th></tr></thead>
+      <tbody>
+      {% for a in report.actions %}
+      {% set label, tone = kind_labels.get(a.kind, (a.kind, 'grey')) %}
+      <tr>
+        <td><span class="act-kind {{ tone }}">{{ label }}</span></td>
+        <td>
+          <span class="act-title">{{ a.title }}</span>
+          <span class="act-detail">{{ a.detail }}{% if a.repo %} · {{ a.repo }}{% endif %}{% if a.project and projects | length > 1 %} · {{ a.project }}{% endif %}</span>
+        </td>
+        <td>{{ a.owner or '—' }}</td>
+        <td class="act-age {{ 'red' if tone == 'red' else '' }}" style="text-align:right">{{ a.age_label }}</td>
+        <td class="act-links" style="text-align:right">
+          {% if a.pr_id and a.url %}<a href="{{ a.url }}" target="_blank" rel="noopener">PR !{{ a.pr_id }} ↗</a>{% endif %}
+          {% if a.work_item_id and item_link %}<a href="{{ item_link }}/{{ a.work_item_id }}" target="_blank" rel="noopener">#{{ a.work_item_id }} ↗</a>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">✅ Không có gì tắc quá ngưỡng.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-header"><h3>👤 Theo người</h3></div>
+    <div class="card-body" style="padding:0 6px 6px">
+      {% if report.people %}
+      <table class="tbl">
+        <thead><tr>
+          <th>Người</th><th class="num">Đang làm</th><th class="num">Chờ merge</th>
+          <th class="num">Xong</th><th class="num">Có AI</th><th class="num">Tải</th>
+        </tr></thead>
+        <tbody>
+        {% for p in report.people %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td class="num">{{ p.wip }}</td>
+          <td class="num">{{ p.waiting_merge }}</td>
+          <td class="num">{{ p.delivered }}</td>
+          <td class="num">{% if p.delivered %}{{ p.ai_share }}%{% else %}—{% endif %}</td>
+          <td class="num"><span class="load-bar" style="width:{{ [p.load * 12, 90] | min }}px"></span> {{ p.load }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<div class="empty">Chưa có dữ liệu.</div>{% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h3>🗂 Theo project</h3></div>
+    <div class="card-body" style="padding:0 6px 6px">
+      {% if report.projects %}
+      <table class="tbl">
+        <thead><tr>
+          <th>Project</th><th class="num">Xong</th><th class="num">Đang làm</th>
+          <th class="num">Chờ merge</th><th class="num">Chưa làm</th>
+          <th class="num">Có AI</th><th class="num">Cần xử lý</th>
+        </tr></thead>
+        <tbody>
+        {% for p in report.projects %}
+        <tr>
+          <td>{{ p.project }}</td>
+          <td class="num">{{ p.delivered }}</td>
+          <td class="num">{{ p.wip }}</td>
+          <td class="num">{{ p.waiting_merge }}</td>
+          <td class="num">{{ p.todo }}</td>
+          <td class="num">{% if p.delivered %}{{ p.ai_share }}%{% else %}—{% endif %}</td>
+          <td class="num">{{ p.actions }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<div class="empty">Chưa có dữ liệu.</div>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h3>📉 Dòng chảy công việc</h3>
+    <div class="cfd-legend">
+      {% for cat, label in bands %}<span><i class="cfd-seg {{ cat }}" style="display:inline-block"></i>{{ label }}</span>{% endfor %}
+    </div>
+  </div>
+  <div class="card-body">
+    {% set peak = report.flow_peak %}
+    {% if peak > 0 %}
+    <div class="cfd">
+      {% for day, counts in report.flow %}
+      <div class="cfd-col" title="{{ day }} — {% for cat, label in bands %}{{ label }}: {{ counts[cat] }}{% if not loop.last %} · {% endif %}{% endfor %}">
+        {% for cat, label in bands | reverse %}
+        {% if counts[cat] %}<div class="cfd-seg {{ cat }}" style="height:{{ (100 * counts[cat] / peak) | round(2) }}%"></div>{% endif %}
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim)">
+      <span>{{ report.flow[0][0] }}</span><span>{{ report.flow[-1][0] }}</span>
+    </div>
+    {% else %}
+    <div class="empty">Chưa đủ lịch sử trạng thái để vẽ. Biểu đồ sẽ đầy dần sau vài ngày ghi nhận.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

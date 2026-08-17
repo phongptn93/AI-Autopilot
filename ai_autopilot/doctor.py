@@ -111,6 +111,102 @@ def check_workspace(config: Settings) -> list[Finding]:
     return out or [Finding(OK, "Workspace looks complete")]
 
 
+def check_workspaces(config: Settings) -> list[Finding]:
+    """Validate the extra project → workspace routes (multi-workspace setups).
+
+    Silent when nothing extra is configured. A mis-typed line here is invisible at
+    runtime — the work items simply run in the ROOT workspace and edit the wrong
+    repos — so every failure mode is reported rather than defaulted away."""
+    workspaces = config.effective_workspaces
+    if not workspaces:
+        # A line that failed to parse leaves no workspace behind, so a non-empty map
+        # producing nothing is the loudest possible signal that the syntax is wrong.
+        if config.workspace_map:
+            return [Finding(
+                ERROR, "No workspace route could be parsed",
+                f"{len(config.workspace_map)} line(s) in workspace_map, none usable.",
+                "Each line must read 'Project = C:\\path\\to\\workspace' (the '=' is what "
+                "separates the ADO project from its folder).",
+            )]
+        return []
+    out: list[Finding] = []
+    known = {p.lower() for p in config.effective_ado_projects}
+    for ws in workspaces:
+        directory = (ws.workspace_directory or "").strip()
+        if not directory:
+            out.append(Finding(
+                ERROR, f"Workspace '{ws.label}' has no directory",
+                f"projects: {', '.join(ws.ado_projects)}",
+                "Give it a folder, or drop the line — its work items currently run in the "
+                "root workspace, editing another project's repos.",
+            ))
+        elif not Path(directory).is_dir():
+            out.append(Finding(
+                ERROR, f"Workspace '{ws.label}' directory does not exist", directory,
+                "Every run for these projects uses it as its working directory.",
+            ))
+        elif not (Path(directory) / ".claude").is_dir():
+            out.append(Finding(
+                WARN, f"No .claude in workspace '{ws.label}'",
+                str(Path(directory) / ".claude"),
+                "Skills, rules and MCP servers live here; without it /skill commands are inert.",
+            ))
+        unknown = [p for p in ws.ado_projects if p.lower() not in known]
+        if unknown:  # defensive — effective_ado_projects folds these in, so this is a bug net
+            out.append(Finding(
+                WARN, f"Workspace '{ws.label}' names unpolled project(s)",
+                ", ".join(unknown), "Add them under Azure DevOps Connection → More projects.",
+            ))
+    if not out:
+        out.append(Finding(
+            OK, f"{len(workspaces)} extra workspace(s) routed",
+            "; ".join(f"{w.label} → {w.workspace_directory}" for w in workspaces),
+        ))
+    return out
+
+
+def check_projects(config: Settings) -> list[Finding]:
+    """Every polled work-item project should be reachable and unambiguous."""
+    projects = config.effective_ado_projects
+    if len(projects) <= 1:
+        return []
+    routed = {
+        p.lower() for ws in config.effective_workspaces for p in ws.ado_projects
+    }
+    unrouted = [p for p in projects if p.lower() not in routed]
+    findings = [Finding(
+        OK, f"{len(projects)} work-item projects polled", ", ".join(projects),
+    )]
+    if unrouted and config.effective_workspaces:
+        findings.append(Finding(
+            WARN, "Projects with no workspace of their own", ", ".join(unrouted),
+            "They run in the root workspace. That is fine when they share it — otherwise "
+            "give each one a line under 'Extra workspaces'.",
+        ))
+    return findings
+
+
+def check_delivery(config: Settings) -> list[Finding]:
+    """The Delivery page's clock — recording is the part that cannot be caught up later."""
+    if not config.delivery_history_enabled:
+        return [Finding(
+            WARN, "Delivery history recording is off",
+            "No work-item state transitions are being recorded.",
+            "Lead time, cycle time and the flow chart stay empty — and the period spent "
+            "switched off can never be reconstructed, because ADO's ChangedDate is bumped "
+            "by any edit. Enable it under Settings → Delivery.",
+        )]
+    if config.delivery_history_interval_minutes > 60:
+        return [Finding(
+            WARN, "Delivery history sampled coarsely",
+            f"Checking every {config.delivery_history_interval_minutes} minutes.",
+            "A state the item passes through and leaves between two checks is never "
+            "recorded, so short stages vanish from the flow chart. 5–15 minutes is "
+            "cheap: two API calls per check.",
+        )]
+    return [Finding(OK, "Delivery history recording on")]
+
+
 def check_concurrency(config: Settings) -> list[Finding]:
     if config.max_concurrent > 1 and not config.use_worktrees:
         return [Finding(
@@ -598,7 +694,8 @@ def check_state_flows(config: Settings) -> list[Finding]:
 
 
 CHECKS = (
-    check_ado, check_trigger, check_workspace, check_concurrency, check_effort,
+    check_ado, check_trigger, check_projects, check_workspace, check_workspaces,
+    check_concurrency, check_delivery, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
     check_assignee_scoping,

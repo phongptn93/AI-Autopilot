@@ -150,6 +150,21 @@
     </div>
   </div>
 
+  {% if cfg.effective_ado_projects | length > 1 or cfg.effective_workspaces %}
+  <div class="cfg-card">
+    <h3>🗂 Projects &amp; workspaces</h3>
+    <div class="cfg-body">
+      <div class="cfg-row"><span class="k">Work-item projects</span><span class="v">{{ chips(cfg.effective_ado_projects) }}</span></div>
+      {% for ws in cfg.effective_workspaces %}
+      <div class="cfg-row">
+        <span class="k">{{ ws.ado_projects | join(', ') }}</span>
+        <span class="v">{{ ws.workspace_directory or '(root workspace)' }}{% if ws.base_branch %} · base {{ ws.base_branch }}{% endif %}{% if ws.code_project %} · code {{ ws.code_project }}{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {% if cfg.tenants %}
   <div class="cfg-card">
     <h3>🏢 Tenants</h3>

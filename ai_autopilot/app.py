@@ -21,6 +21,7 @@ from ai_autopilot.dashboard import create_dashboard_router
 from ai_autopilot.logging_config import configure_logging, get_logger
 from ai_autopilot.services import (
     AdoPollerService,
+    DeliveryTrackerService,
     LoopScheduler,
     PrMonitorService,
     ReviewerTrackerService,
@@ -153,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 AdoPollerService(container),
                 PrMonitorService(container),
                 StateSyncService(container),
+                DeliveryTrackerService(container),
                 reviewer_tracker,
                 LoopScheduler(container),
             ):

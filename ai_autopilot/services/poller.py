@@ -151,7 +151,8 @@ class AdoPollerService:
         self._log.info(
             "ADO Autopilot started",
             org=cfg.ado_organization,
-            project=cfg.ado_project,
+            projects=cfg.effective_ado_projects,
+            workspaces=[w.label for w in cfg.effective_workspaces],
             trigger_tag=cfg.trigger_tag,
             poll_interval=cfg.poll_interval_seconds,
             dry_run=cfg.dry_run,

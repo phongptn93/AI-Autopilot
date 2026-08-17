@@ -22,8 +22,12 @@ class RequirementDecomposer:
         self._log.info("decomposing requirement", id=parent.id, title=parent.title)
         created: list[int] = []
         for title, item_type in self._child_tasks(parent):
+            # Children land in the PARENT's project (and carry that workspace's trigger
+            # tag), not the default one — otherwise decomposing an item from a secondary
+            # project scatters its tasks into a project that stream never polls.
+            scoped = self._config.scoped_for_project(parent.project)
             new_id = await self._ado.create_work_item(
-                title, item_type, parent.id, self._config.trigger_tag
+                title, item_type, parent.id, scoped.trigger_tag, project=parent.project
             )
             if new_id > 0:
                 created.append(new_id)

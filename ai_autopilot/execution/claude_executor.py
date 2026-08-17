@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import json
 import os
@@ -22,9 +23,11 @@ import tempfile
 import time
 import unicodedata
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from ai_autopilot import activity, lessons, policy
 from ai_autopilot.config import (
@@ -125,11 +128,57 @@ class _Workspace:
     keep: bool = False  # cached revise worktree: survive release, reused next round
 
 
+# The settings the CURRENT run sees — the root config with its work item's workspace
+# overrides applied (``Settings.scoped_for_project``). A ContextVar rather than an
+# argument because ~40 places inside this class read ``self._config``, and threading a
+# config parameter through all of them would be a large, error-prone diff whose failure
+# mode is silent: ONE missed site reads the root workspace and the run edits the wrong
+# repository. Scoping at the entry points instead means every read is correct by
+# construction. Per-task isolation is what makes this safe under ``max_concurrent`` > 1:
+# ``asyncio.create_task`` copies the context, so two runs in different workspaces cannot
+# observe each other's scope.
+_run_settings: ContextVar[Settings | None] = ContextVar("autopilot_run_settings", default=None)
+
+
+def _project_of(target: Any) -> str:
+    """The ADO project an entry point's first argument belongs to ("" if unknown)."""
+    if isinstance(target, WorkItemInfo):
+        return target.project
+    if isinstance(target, list):
+        return next((i.project for i in target if isinstance(i, WorkItemInfo) and i.project), "")
+    return str(target or "")
+
+
+def _scoped(method):
+    """Entry point decorator: run ``method`` under its work item's workspace settings.
+
+    Applied to every public method that starts a piece of agent work, so callers
+    (poller, SDLC engine, PR babysitter) need to know nothing about workspaces."""
+
+    @functools.wraps(method)
+    async def wrapper(self, first, *args, **kwargs):
+        with self.workspace_scope(_project_of(first)):
+            return await method(self, first, *args, **kwargs)
+
+    return wrapper
+
+
+def _scoped_sync(method):
+    """:func:`_scoped` for a synchronous entry point."""
+
+    @functools.wraps(method)
+    def wrapper(self, first, *args, **kwargs):
+        with self.workspace_scope(_project_of(first)):
+            return method(self, first, *args, **kwargs)
+
+    return wrapper
+
+
 class ClaudeExecutor:
     def __init__(
         self, config: Settings, reviewer: AutoReviewer, session_repo=None
     ) -> None:
-        self._config = config
+        self._root_config = config
         self._reviewer = reviewer
         self._test_gate = TestGate(config)  # runs the repo's tests before a PR (opt-in)
         self._session_repo = session_repo  # ClaudeSessionRepository | None
@@ -138,6 +187,32 @@ class ClaudeExecutor:
         # touching the SAME repo must not run `worktree add`/`prune` at once (they
         # write the same .git and would collide on locks). Keyed by repo path.
         self._repo_locks: dict[str, asyncio.Lock] = {}
+
+    @property
+    def _config(self) -> Settings:
+        """Settings for the run in progress — the current workspace's view, or the root
+        config outside any run. Every read in this class goes through here."""
+        return _run_settings.get() or self._root_config
+
+    @contextlib.contextmanager
+    def workspace_scope(self, project: str):
+        """Bind the settings for work in ``project`` for the duration of the block.
+
+        No-op when the project has no workspace of its own (``scoped_for_project``
+        hands back the same object), which is the single-workspace case."""
+        scoped = self._root_config.scoped_for_project(project)
+        if scoped is self._root_config:
+            yield
+            return
+        token = _run_settings.set(scoped)
+        self._log.info(
+            "run scoped to workspace", project=project,
+            workspace=scoped.workspace_directory, base_branch=scoped.base_branch,
+        )
+        try:
+            yield
+        finally:
+            _run_settings.reset(token)
 
     def _repo_lock(self, repo_path: str) -> asyncio.Lock:
         """Get-or-create the lock guarding git bookkeeping for one source repo.
@@ -151,6 +226,7 @@ class ClaudeExecutor:
             self._repo_locks[repo_path] = lock
         return lock
 
+    @_scoped
     async def execute(
         self, item: WorkItemInfo, skill_command: str, draft_pr: bool = False
     ) -> ExecutionResult:
@@ -224,6 +300,7 @@ class ClaudeExecutor:
 
     # ── AI-native flow (Phase 1): control plane + agent + structured contract ──
 
+    @_scoped
     async def run_agent(
         self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool
     ) -> ExecutionResult:
@@ -301,6 +378,7 @@ class ClaudeExecutor:
         result.lessons_injected = injected
         return result
 
+    @_scoped
     async def run_agent_batch(
         self, items: list[WorkItemInfo], *, autonomy: str, draft_pr: bool
     ) -> dict[int, ExecutionResult]:
@@ -556,7 +634,18 @@ class ClaudeExecutor:
         ]
         return "\n".join(lines)
 
-    async def review_pr(self, repo_name: str, pr_id: int, pr_url: str = "") -> str:
+    async def review_pr(
+        self, repo_name: str, pr_id: int, pr_url: str = "", project: str = ""
+    ) -> str:
+        """:meth:`_review_pr` under the workspace owning ``project``.
+
+        ``project`` is the linked work item's ADO project when the caller knows it (the
+        PR babysitter usually does). Blank → the root workspace, which is correct
+        whenever only one is configured."""
+        with self.workspace_scope(project):
+            return await self._review_pr(repo_name, pr_id, pr_url)
+
+    async def _review_pr(self, repo_name: str, pr_id: int, pr_url: str = "") -> str:
         """Run the real code-review SKILL on a PR, evaluating the diff against the
         codebase (not just PR metadata). Claude runs the ``review-pr`` skill in an
         isolated worktree with the workspace's .claude skills + ADO MCP, fetches the
@@ -832,6 +921,7 @@ class ClaudeExecutor:
 
     # ── Interactive mode: a real Remote-Control session per task ──────────────
 
+    @_scoped
     async def dispatch_interactive(
         self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool
     ) -> tuple[bool, str, str]:
@@ -907,6 +997,7 @@ class ClaudeExecutor:
             await self.release_scratch(scratch)
             return False, session, workspace
 
+    @_scoped_sync
     def finalize_interactive(self, item: WorkItemInfo, run_dir: str) -> ExecutionResult | None:
         """Map a live session's result if it has finished; ``None`` while running."""
         agent = find_result(run_dir, item.id)
@@ -1116,6 +1207,7 @@ class ClaudeExecutor:
         ]
         return "\n".join(lines)
 
+    @_scoped
     async def revise(
         self, item: WorkItemInfo, branch: str, prompt: str,
         draft_pr: bool = False, repo: str = "", allow_no_changes: bool = False,
@@ -1207,20 +1299,25 @@ class ClaudeExecutor:
         return result
 
     async def run_loop(
-        self, name: str, prompt: str, repo: str, base_branch: str, branch: str, draft_pr: bool
+        self, name: str, prompt: str, repo: str, base_branch: str, branch: str,
+        draft_pr: bool, project: str = "",
     ) -> ExecutionResult:
-        """Run a scheduled loop's prompt on a fresh branch and open a PR."""
-        return await self._run_in_workspace(
-            item_id=0,
-            repo=repo,
-            branch=branch,
-            base_branch=base_branch,
-            prompt=prompt,
-            commit_msg=f"chore(autopilot): {name}",
-            draft_pr=draft_pr,
-            existing_branch=False,
-            create_pr=True,
-        )
+        """Run a scheduled loop's prompt on a fresh branch and open a PR.
+
+        ``project`` picks the workspace the loop runs in (``ScheduledLoop.project``),
+        so a sweeper can be pointed at a second workspace's repos."""
+        with self.workspace_scope(project):
+            return await self._run_in_workspace(
+                item_id=0,
+                repo=repo,
+                branch=branch,
+                base_branch=base_branch,
+                prompt=prompt,
+                commit_msg=f"chore(autopilot): {name}",
+                draft_pr=draft_pr,
+                existing_branch=False,
+                create_pr=True,
+            )
 
     # ── shared core ─────────────────────────────────────────────────────────
 

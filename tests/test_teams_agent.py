@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import ai_autopilot.execution.claude_client as claude_client
-from ai_autopilot import teams_agent
+from ai_autopilot import delivery, teams_agent
 from ai_autopilot.config import Settings
 
 
@@ -744,7 +744,7 @@ async def test_digest_sends_to_every_stored_conversation():
 
     await teams_agent._send_digest(
         container=container, app=_App(), adapter=None,
-        reviewer_tracker=_EmptyTracker(), storage=storage,
+        storage=storage,
         message_factory=SimpleNamespace(text=lambda t: SimpleNamespace(text=t)),
         window_hours=24,
     )
@@ -1083,24 +1083,33 @@ _LINK_CFG = Settings(
 )
 
 
-def test_pr_and_work_item_ids_are_clickable():
+def test_work_item_and_pr_ids_are_clickable_in_the_digest():
     """An id the reader has to copy and search for is not a report. PRs resolve against
     `code_project` and work items against `ado_project` — they are often different."""
-    pr = [{"id": 1400, "repo": "Micro-Frontend", "title": "fix: unlock picker", "author": "Dat"}]
-    out = teams_agent._format_pr_stub_list(pr, _LINK_CFG)
-    assert "[!1400](https://dev.azure.com/org/Code/_git/Micro-Frontend/pullrequest/1400)" in out
+    report = _delivery_report(actions=[
+        _action(delivery.KIND_MERGE_READY, work_item_id=7188, pr_id=1400,
+                repo="Micro-Frontend", title="tồn khả dụng"),
+    ])
+    body = teams_agent.build_digest(report, _LINK_CFG)
+    assert "[#7188](https://dev.azure.com/org/Track/_workitems/edit/7188)" in body
+    assert "[!1400](https://dev.azure.com/org/Code/_git/Micro-Frontend/pullrequest/1400)" in body
 
-    items = [SimpleNamespace(id=7188, title="tồn khả dụng")]
-    wi = teams_agent._fmt_wi_list(items, cfg=_LINK_CFG)
-    assert "[#7188](https://dev.azure.com/org/Track/_workitems/edit/7188)" in wi
+
+def test_digest_degrades_to_plain_ids_without_an_organization():
+    report = _delivery_report(actions=[_action(delivery.KIND_MERGE_READY, work_item_id=9)])
+    body = teams_agent.build_digest(report, Settings())
+    assert "#9" in body
+    assert "](" not in body
 
 
-def test_formatters_degrade_to_plain_ids_without_config():
-    """Every formatter is also called from paths that have no Settings to hand; they must
-    still render, just without links."""
-    pr = [{"id": 9, "repo": "R", "title": "t", "author": "a"}]
-    assert "!9" in teams_agent._format_pr_stub_list(pr)
-    assert "](" not in teams_agent._format_pr_stub_list(pr)
+def test_digest_offers_the_dashboard_link_only_when_it_would_resolve():
+    """health_host defaults to 0.0.0.0, so a link built from it resolves for nobody —
+    the digest is read on a phone."""
+    report = _delivery_report()
+    assert "/dashboard/delivery" not in teams_agent.build_digest(report, Settings())
+    linked = teams_agent.build_digest(
+        report, Settings(dashboard_public_url="https://ap.example.com/"))
+    assert "(https://ap.example.com/dashboard/delivery)" in linked
 
 
 def test_zero_vote_counters_are_omitted():
@@ -1122,25 +1131,115 @@ def test_long_titles_are_trimmed_to_one_line():
     assert teams_agent._short("short").endswith("short")   # untouched when it fits
 
 
-async def test_digest_drops_the_oldest_pr_section_and_leads_with_pace():
-    """The oldest-active-PR list was 10 rows of unchanged text every cycle, which pushed
-    the numbers off the first screen. `/team` still shows it on demand."""
+# ── Digest content: what a PM reads first ────────────────────────────────────
+
+
+def _kpi(label, value, previous=None, unit="", higher_is_better=True):
+    return delivery.Kpi(label=label, value=value, previous=previous, unit=unit,
+                        higher_is_better=higher_is_better)
+
+
+def _action(kind, *, age_hours=72.0, title="Add login API", owner="An",
+            work_item_id=123, pr_id=0, repo=""):
+    return delivery.ActionItem(
+        kind=kind, title=title, age_hours=age_hours, owner=owner,
+        work_item_id=work_item_id, pr_id=pr_id, repo=repo, detail="",
+    )
+
+
+def _delivery_report(*, actions=None, people=None, kpis=None, history_days=40):
+    now = datetime.now(UTC)
+    return delivery.DeliveryReport(
+        window_days=14, generated_at=now, thresholds=delivery.Thresholds(),
+        kpis=kpis if kpis is not None else [
+            _kpi("Giao được", 4, 2, "item"),
+            _kpi("Lead time p50", 3.2, None, "ngày", higher_is_better=False),
+            _kpi("Lead time p85", 7.0, None, "ngày", higher_is_better=False),
+            _kpi("Đang mở (WIP)", 9, None, "item", higher_is_better=False),
+            _kpi("Có AI-Autopilot", 50, None, "%"),
+        ],
+        actions=actions or [], people=people or [],
+        history_since=now - timedelta(days=history_days),
+    )
+
+
+def test_digest_leads_with_the_worst_thing_not_a_count():
+    """"3 việc cần xử lý" says nothing about whether that is three one-click merges or
+    one item blocked for a fortnight."""
+    report = _delivery_report(actions=[
+        _action(delivery.KIND_MERGE_READY, age_hours=72, title="Add login API"),
+        _action(delivery.KIND_REVIEW_WAITING, age_hours=30, work_item_id=124),
+    ])
+    body = teams_agent.build_digest(report, _LINK_CFG)
+    headline = body.split("\n\n")[1]
+    assert "2 việc cần xử lý" in headline
+    assert "chờ merge" in headline and "3 ngày" in headline
+
+
+def test_digest_says_so_plainly_when_nothing_is_stuck():
+    body = teams_agent.build_digest(_delivery_report(), _LINK_CFG, delivered_recent=3,
+                                    window_label="24h")
+    assert "Không có gì tắc" in body
+    assert "3 item xong" in body
+    assert "Cần xử lý" not in body      # an empty section is noise
+
+
+def test_digest_shows_deltas_and_drops_the_arrow_when_incomparable():
+    report = _delivery_report(kpis=[
+        _kpi("Giao được", 4, 2, "item"),
+        _kpi("Đang mở (WIP)", 9, None, "item", higher_is_better=False),
+    ])
+    body = teams_agent.build_digest(report, _LINK_CFG)
+    assert "**4** item ▲2" in body
+    assert "Đang mở **9** item" in body
+
+
+def test_lead_time_is_omitted_rather_than_shown_as_zero():
+    """A zero would read as "we ship same-day" — the most flattering possible lie about
+    a history that simply has not been recorded yet."""
+    report = _delivery_report(kpis=[
+        _kpi("Giao được", 1, None, "item"),
+        _kpi("Lead time p50", 0, None, "ngày", higher_is_better=False),
+        _kpi("Lead time p85", 0, None, "ngày", higher_is_better=False),
+    ])
+    assert "Lead time" not in teams_agent.build_digest(report, _LINK_CFG)
+
+
+def test_digest_caps_the_action_list_and_says_how_many_it_hid():
+    actions = [
+        _action(delivery.KIND_STALE, work_item_id=i, age_hours=100 - i) for i in range(10)
+    ]
+    body = teams_agent.build_digest(_delivery_report(actions=actions), _LINK_CFG)
+    assert "Cần xử lý (10)" in body
+    assert "+4 việc nữa" in body
+
+
+def test_digest_lists_people_by_load_and_skips_the_idle():
+    people = [
+        delivery.PersonStat(name="An", wip=2, waiting_merge=1, delivered=3),
+        delivery.PersonStat(name="Rảnh", wip=0, waiting_merge=0, delivered=0),
+    ]
+    body = teams_agent.build_digest(_delivery_report(people=people), _LINK_CFG)
+    assert "**An** — 2 đang làm · 1 chờ merge · 3 xong" in body
+    assert "Rảnh" not in body
+
+
+def test_digest_warns_when_history_does_not_cover_the_window():
+    partial = _delivery_report(history_days=2)
+    assert "chuẩn dần" in teams_agent.build_digest(partial, _LINK_CFG)
+    assert "chuẩn dần" not in teams_agent.build_digest(_delivery_report(), _LINK_CFG)
+
+
+async def test_digest_still_sends_when_the_report_cannot_be_built(monkeypatch):
+    """A silent digest is indistinguishable from a quiet week — the absence of a
+    scheduled message must never be the message."""
     sent: list[str] = []
 
-    class _Tracker:
-        async def new_prs_since(self, cutoff): return [{}] * 17
-        async def merged_prs_since(self, cutoff): return []
-        async def tickets_logged_since(self, cutoff): return []
-        async def prs_ready_to_merge(self):
-            return [{"id": 1400, "repo": "MF", "title": "fix", "author": "Dat"}]
-        async def team_overview(self, limit=10):
-            raise AssertionError("digest must not fetch the oldest-PR list any more")
+    async def boom(*_a, **_kw):
+        raise RuntimeError("ADO unreachable")
 
-    class _Repo:
-        async def get_stats(self, since): return SimpleNamespace(total=4, success=3, failed=0)
+    monkeypatch.setattr(teams_agent.delivery_report, "gather", boom)
 
-    # One conversation so the send loop runs and we can read the rendered body; the
-    # conversation object is only passed through, so a sentinel is enough.
     class _Storage:
         async def all_keys(self): return ["k"]
         async def read(self, keys, target_cls=None): return {"k": object()}
@@ -1150,18 +1249,48 @@ async def test_digest_drops_the_oldest_pr_section_and_leads_with_pace():
             sent.append(activity.text)
 
     await teams_agent._send_digest(
-        container=SimpleNamespace(config=_LINK_CFG, execution_repo=_Repo()),
-        app=SimpleNamespace(proactive=_Proactive()), adapter=None,
-        reviewer_tracker=_Tracker(), storage=_Storage(),
+        container=SimpleNamespace(config=_LINK_CFG),
+        app=SimpleNamespace(proactive=_Proactive()), adapter=None, storage=_Storage(),
         message_factory=SimpleNamespace(text=lambda t: SimpleNamespace(text=t)),
-        window_hours=5,
+        window_hours=24,
     )
     assert len(sent) == 1
-    body = sent[0]
-    assert "PR active cũ nhất" not in body
-    assert body.index("Nhịp độ") < body.index("Sẵn sàng merge")
-    assert "17 mới mở" in body
-    assert "/team" in body   # pointer to where the dropped list now lives
+    assert "ADO unreachable" in sent[0]
+
+
+async def test_digest_reads_the_same_report_the_dashboard_renders(monkeypatch):
+    """One gatherer, so a number cannot change depending on where it is read."""
+    report = _delivery_report(actions=[_action(delivery.KIND_MERGE_READY)])
+    seen: list = []
+    sent: list[str] = []
+
+    async def fake_gather(container, **kw):
+        seen.append(container)
+        return report, None
+
+    async def fake_delivered_since(container, since, **kw):
+        return 2
+
+    monkeypatch.setattr(teams_agent.delivery_report, "gather", fake_gather)
+    monkeypatch.setattr(teams_agent.delivery_report, "delivered_since", fake_delivered_since)
+
+    class _Storage:
+        async def all_keys(self): return ["k"]
+        async def read(self, keys, target_cls=None): return {"k": object()}
+
+    class _Proactive:
+        async def send_activity(self, adapter, conversation, activity):
+            sent.append(activity.text)
+
+    container = SimpleNamespace(config=_LINK_CFG)
+    await teams_agent._send_digest(
+        container=container, app=SimpleNamespace(proactive=_Proactive()), adapter=None,
+        storage=_Storage(),
+        message_factory=SimpleNamespace(text=lambda t: SimpleNamespace(text=t)),
+        window_hours=24,
+    )
+    assert seen == [container]
+    assert "Cần xử lý (1)" in sent[0]
 
 
 # ── Advisory runs must not be able to mutate, not merely be told not to ────────
@@ -1248,7 +1377,7 @@ async def test_digest_at_wins_over_the_interval(monkeypatch):
     cfg = Settings(teams_agent_digest_at="09:00", teams_agent_digest_interval_hours=6)
 
     with contextlib.suppress(asyncio.CancelledError):
-        await teams_agent._digest_loop(cfg, None, None, None, None, None, None)
+        await teams_agent._digest_loop(cfg, None, None, None, None, None)
 
     assert 6 * 3600 not in slept                      # the interval is not what it waited
     assert all(0 < s <= 24 * 3600 for s in slept)
@@ -1271,7 +1400,7 @@ async def test_digest_loop_stops_on_a_time_it_cannot_parse(monkeypatch):
     monkeypatch.setattr(teams_agent, "_send_digest", fake_send)
 
     await teams_agent._digest_loop(
-        Settings(teams_agent_digest_at="9am"), None, None, None, None, None, None)
+        Settings(teams_agent_digest_at="9am"), None, None, None, None, None)
     assert sent == []
 
 
@@ -1294,7 +1423,7 @@ async def test_digest_without_a_fixed_time_still_uses_the_interval(monkeypatch):
     with contextlib.suppress(asyncio.CancelledError):
         await teams_agent._digest_loop(
             Settings(teams_agent_digest_interval_hours=6),
-            None, None, None, None, None, None)
+            None, None, None, None, None)
 
     assert slept == [6 * 3600, 6 * 3600]
     assert windows == [6]

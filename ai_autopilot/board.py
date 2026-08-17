@@ -43,6 +43,11 @@ class BoardCard:
     title: str
     ado_state: str
     column: str
+    # The item's own ADO project. With several projects on one board, the link to
+    # Azure DevOps has to be built per card — a single board-wide project would send
+    # every card from the other projects to a URL that does not resolve.
+    project: str = ""
+    url: str = ""  # filled by the dashboard (needs the org URL, which board.py has no I/O for)
     category: str = ""  # BackendTask / FrontendTask / ... for the colour badge
     assigned_to: str | None = None
     pr_url: str | None = None
@@ -166,6 +171,7 @@ def build_board(
                 title=item.title,
                 ado_state=item.state,
                 column=column,
+                project=item.project,
                 category=_category(item.title),
                 assigned_to=item.assigned_to,
                 pr_url=record.pr_url if record else None,

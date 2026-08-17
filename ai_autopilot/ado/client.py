@@ -40,11 +40,16 @@ def _terse(body: str, limit: int = 300) -> str:
     """
     return " ".join((body or "").split())[:limit]
 _FIELDS = (
-    "System.Id,System.Title,System.WorkItemType,System.State,"
+    "System.Id,System.Title,System.TeamProject,System.WorkItemType,System.State,"
     "System.AssignedTo,System.Description,Microsoft.VSTS.Common.AcceptanceCriteria,"
     "System.Parent,System.Tags,System.AreaPath,System.IterationPath,System.ChangedDate,"
+    "System.CreatedDate,"
     "Microsoft.VSTS.Common.Priority,System.CreatedBy"
 )
+# Bound on the id → project memo. Work-item ids only ever accumulate, and the memo
+# exists to save a lookup, not to be authoritative — so it is capped and dropped
+# oldest-first rather than allowed to grow for the life of the process.
+_MAX_PROJECT_MEMO = 5000
 
 # ADO relation types used for dependency-aware scheduling (P1).
 _REL_PREDECESSOR = "System.LinkTypes.Dependency-Reverse"  # this item depends on target
@@ -79,13 +84,20 @@ class AdoClient:
         self._config = config
         self._log = get_logger("ado.client")
         self._base = config.ado_organization.rstrip("/")
-        # (fetched_at, {type: [state dicts]}) — see _type_states.
-        self._type_states: tuple[float, dict[str, list[dict]]] | None = None
+        # project → (fetched_at, {type: [state dicts]}) — see _type_state_map. Keyed by
+        # project because the process template (and therefore the types and their
+        # states) is a per-project thing: sharing one cache across projects would hand
+        # a Bug's states to a project that has no Bug type.
+        self._type_states: dict[str, tuple[float, dict[str, list[dict]]]] = {}
+        # work-item id → its System.TeamProject, learned whenever we map an item.
+        # Saves a round trip on the project-scoped endpoints (comments).
+        self._item_projects: dict[int, str] = {}
 
     def refresh(self) -> None:
         """Re-read the organization URL after a live config change."""
         self._base = self._config.ado_organization.rstrip("/")
-        self._type_states = None  # a different org/project has different types
+        self._type_states = {}  # a different org/project has different types
+        self._item_projects = {}
 
     async def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         headers = await self._auth.get_auth_header()
@@ -114,15 +126,76 @@ class AdoClient:
             resp = await self._http.request(method, url, **kwargs)
         return resp
 
-    def _url(self, path: str) -> str:
-        """Work-item API URL (scoped to ado_project — where work items live)."""
-        return f"{self._base}/{self._config.ado_project}/_apis/{path}"
+    def _url(self, path: str, project: str = "") -> str:
+        """Work-item API URL scoped to a project — ``project`` when given, else the
+        default ``ado_project``.
 
-    def _git_url(self, path: str) -> str:
-        """Git / PR / build API URL — scoped to code_project when set (repos and
-        PRs may live in a different project than the work items)."""
-        project = self._config.code_project or self._config.ado_project
-        return f"{self._base}/{project}/_apis/{path}"
+        Only use this for the endpoints ADO genuinely scopes to a project (comments,
+        work-item creation, the type/state map). Reads and PATCHes by id must go
+        through :meth:`_org_url`: with several projects polled, an id from project B
+        addressed under project A's route 404s."""
+        name = (project or self._config.ado_project).strip()
+        return f"{self._base}/{quote(name, safe='')}/_apis/{path}"
+
+    def _org_url(self, path: str) -> str:
+        """Organization-level API URL — no project segment.
+
+        ADO resolves a work-item id org-wide, so ``GET``/``PATCH``/``wiql`` all work
+        here. That is what lets ONE query span every configured project instead of one
+        request per project, and what makes an item's own project irrelevant to reading
+        or updating it."""
+        return f"{self._base}/_apis/{path}"
+
+    def _git_url(self, path: str, project: str = "") -> str:
+        """Git / PR / build API URL — scoped to the code project for ``project``
+        (repos and PRs may live in a different project than the work items).
+
+        ``project`` is the WORK-ITEM project whose code we want; blank asks for the
+        default. See ``Settings.code_project_for`` for the resolution order."""
+        return f"{self._base}/{quote(self._config.code_project_for(project), safe='')}/_apis/{path}"
+
+    def _project_clause(self) -> str:
+        """WIQL predicate restricting a query to the configured work-item project(s).
+
+        One project → equality (what a single-project setup has always emitted);
+        several → ``IN``, so all of them come back from a SINGLE org-level query."""
+        projects = self._config.effective_ado_projects
+        if not projects:
+            # Nothing configured: emit the empty-equality the single-project code always
+            # emitted (matches no item) rather than an empty string, which would splice
+            # a dangling AND into every caller's WIQL and hard-fail the whole query.
+            return "[System.TeamProject] = ''"
+        if len(projects) == 1:
+            return f"[System.TeamProject] = '{_wiql_lit(projects[0])}'"
+        joined = ", ".join(f"'{_wiql_lit(p)}'" for p in projects)
+        return f"[System.TeamProject] IN ({joined})"
+
+    def _remember_projects(self, items: list[WorkItemInfo]) -> None:
+        """Memoise id → project for the project-scoped endpoints (see ``_item_projects``)."""
+        for item in items:
+            if item.project:
+                self._item_projects[item.id] = item.project
+        overflow = len(self._item_projects) - _MAX_PROJECT_MEMO
+        if overflow > 0:  # dict preserves insertion order → drops the oldest entries
+            for key in list(self._item_projects)[:overflow]:
+                self._item_projects.pop(key, None)
+
+    async def _project_for(self, work_item_id: int) -> str:
+        """Which project work item ``work_item_id`` lives in.
+
+        Answered from the memo when we have already seen the item (the normal case —
+        the poller maps an item before ever commenting on it). With a single project
+        configured there is nothing to resolve. Otherwise the item is fetched once, and
+        a failed lookup falls back to the default project rather than raising: the
+        caller's job (posting a comment) is better attempted than abandoned."""
+        cached = self._item_projects.get(work_item_id)
+        if cached:
+            return cached
+        projects = self._config.effective_ado_projects
+        if len(projects) <= 1:
+            return self._config.ado_project
+        await self.get_work_item(work_item_id)  # fills the memo via _work_item_batch
+        return self._item_projects.get(work_item_id) or self._config.ado_project
 
     def _tag_clause(self) -> str:
         """WIQL predicate matching ANY configured trigger tag, e.g.
@@ -163,13 +236,13 @@ class AdoClient:
             "SELECT [System.Id] FROM WorkItems "
             f"WHERE {self._candidate_clause()} "
             f"AND [System.State] IN ({states}) "
-            f"AND [System.TeamProject] = '{_wiql_lit(self._config.ado_project)}' "
+            f"AND {self._project_clause()} "
             "ORDER BY [System.ChangedDate] DESC"
         )
         try:
             resp = await self._send(
                 "POST",
-                self._url(f"wit/wiql?{_API}"),
+                self._org_url(f"wit/wiql?{_API}"),
                 json={"query": wiql},
                 headers=await self._headers(),
             )
@@ -192,7 +265,7 @@ class AdoClient:
             "ADO poll",
             tags=self._config.effective_trigger_tags,
             states=self._config.trigger_states,
-            project=self._config.ado_project,
+            projects=self._config.effective_ado_projects,
             matched=len(ids),
         )
         if not ids:
@@ -217,7 +290,7 @@ class AdoClient:
             for p in re.split(r"[,;]", assignee or "")
             if p.strip()
         ]
-        clauses = [f"[System.TeamProject] = '{_wiql_lit(self._config.ado_project)}'"]
+        clauses = [self._project_clause()]
         if len(people) == 1:
             clauses.append(f"[System.AssignedTo] = '{people[0]}'")
         elif people:
@@ -236,7 +309,8 @@ class AdoClient:
         )
         try:
             resp = await self._http.post(
-                self._url(f"wit/wiql?{_API}"), json={"query": wiql}, headers=await self._headers()
+                self._org_url(f"wit/wiql?{_API}"), json={"query": wiql},
+                headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
             self._log.warning("assignee WIQL request error", error=str(exc))
@@ -262,12 +336,12 @@ class AdoClient:
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
             f"WHERE {self._candidate_clause()} "
-            f"AND [System.TeamProject] = '{_wiql_lit(self._config.ado_project)}' "
+            f"AND {self._project_clause()} "
             "ORDER BY [System.ChangedDate] DESC"
         )
         try:
             resp = await self._http.post(
-                self._url(f"wit/wiql?{_API}"),
+                self._org_url(f"wit/wiql?{_API}"),
                 json={"query": wiql},
                 headers=await self._headers(),
             )
@@ -289,12 +363,13 @@ class AdoClient:
         the true match count exceeds it so truncation is never silent."""
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
-            f"WHERE [System.TeamProject] = '{_wiql_lit(self._config.ado_project)}' "
+            f"WHERE {self._project_clause()} "
             "ORDER BY [System.ChangedDate] DESC"
         )
         try:
             resp = await self._http.post(
-                self._url(f"wit/wiql?{_API}"), json={"query": wiql}, headers=await self._headers()
+                self._org_url(f"wit/wiql?{_API}"), json={"query": wiql},
+                headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
             self._log.warning("get_all_active_work_items request error", error=str(exc))
@@ -314,7 +389,7 @@ class AdoClient:
         """State name → ADO state category (``Proposed``/``InProgress``/``Resolved``/
         ``Completed``/``Removed``). Best-effort — ``{}`` on any error."""
         out: dict[str, str] = {}
-        for states in (await self._type_state_map()).values():
+        for states in (await self._type_state_map_all()).values():
             for s in states:
                 name = s.get("name")
                 if name and name not in out:
@@ -341,7 +416,7 @@ class AdoClient:
         # wrong), so one stale link in a batch of 200 used to blank out all 200 — and the
         # callers read that empty list as "none of these work items exist".
         resp = await self._http.get(
-            self._url(
+            self._org_url(
                 f"wit/workitems?ids={ids_param}&fields={_FIELDS}&errorPolicy=Omit&{_API}"
             ),
             headers=await self._auth.get_auth_header(),
@@ -360,11 +435,12 @@ class AdoClient:
         # With errorPolicy=Omit ADO returns a null in place of each id it could not read,
         # so the array is positional and _map() would raise on those.
         found = [self._map(wi) for wi in values if wi]
+        self._remember_projects(found)
         missing = sorted(set(ids) - {item.id for item in found})
         if missing:
             self._log.info(
-                "work items skipped — not readable in this project", ids=missing,
-                hint="deleted, moved to another project, or the PAT cannot see them",
+                "work items skipped — not readable", ids=missing,
+                hint="deleted, or the PAT cannot see them",
             )
         return found
 
@@ -375,8 +451,13 @@ class AdoClient:
     async def add_comment(self, work_item_id: int, comment: str) -> bool:
         # Lead with the bot icon so this comment is recognisable as ours at a glance —
         # the comment-reaction loop skips it (see config.BOT_COMMENT_PREFIX).
+        # The comments API is one of the few genuinely project-scoped work-item routes,
+        # so the item's OWN project decides the URL (see _project_for).
+        project = await self._project_for(work_item_id)
         resp = await self._http.post(
-            self._url(f"wit/workitems/{work_item_id}/comments?api-version=7.1-preview.4"),
+            self._url(
+                f"wit/workitems/{work_item_id}/comments?api-version=7.1-preview.4", project
+            ),
             json={"text": BOT_COMMENT_PREFIX + comment},
             headers=await self._headers(),
         )
@@ -390,7 +471,10 @@ class AdoClient:
         Each dict: ``{"id", "text", "is_bot", "created_by"}``. ``is_bot`` is decided by
         the bot icon in the content (the author is same-account, so it cannot
         distinguish bot from human)."""
-        url = self._url(f"wit/workItems/{work_item_id}/comments?api-version=7.1-preview.4")
+        url = self._url(
+            f"wit/workItems/{work_item_id}/comments?api-version=7.1-preview.4",
+            await self._project_for(work_item_id),
+        )
         try:
             resp = await self._http.get(url, headers=await self._headers())
         except httpx.HTTPError as exc:
@@ -440,7 +524,7 @@ class AdoClient:
         the whole field with a stale snapshot."""
         for attempt in range(3):
             resp = await self._send(
-                "GET", self._url(f"wit/workitems/{work_item_id}?{_API}"),
+                "GET", self._org_url(f"wit/workitems/{work_item_id}?{_API}"),
                 headers=await self._auth.get_auth_header(),
             )
             if resp.status_code >= 400:
@@ -485,8 +569,17 @@ class AdoClient:
 
     async def create_work_item(
         self, title: str, item_type: str, parent_id: int | None, tag: str,
-        description: str = "",
+        description: str = "", project: str = "",
     ) -> int:
+        """Create a work item, in ``project`` when given else the default project.
+
+        A child MUST land in its parent's project: ADO cannot make a hierarchy link
+        across projects, so decomposing an item from a secondary project into the
+        default one would fail the link (or, worse, orphan the children somewhere the
+        poller for that stream never looks). Callers pass the parent's project;
+        ``parent_id`` alone resolves it when they don't."""
+        if not project.strip() and parent_id is not None:
+            project = await self._project_for(parent_id)
         patch: list[dict[str, Any]] = [
             {"op": "add", "path": "/fields/System.Title", "value": title},
             {"op": "add", "path": "/fields/System.Tags", "value": tag},
@@ -502,14 +595,13 @@ class AdoClient:
                     "path": "/relations/-",
                     "value": {
                         "rel": "System.LinkTypes.Hierarchy-Reverse",
-                        "url": (
-                            f"{self._base}/{self._config.ado_project}"
-                            f"/_apis/wit/workitems/{parent_id}"
-                        ),
+                        # Org-level link URL — ADO resolves the parent by id, and this
+                        # cannot then name the wrong project for a cross-project parent.
+                        "url": f"{self._base}/_apis/wit/workitems/{parent_id}",
                     },
                 }
             )
-        url = self._url(f"wit/workitems/${quote(item_type, safe='')}?{_API}")
+        url = self._url(f"wit/workitems/${quote(item_type, safe='')}?{_API}", project)
         resp = await self._http.post(
             url, content=_json(patch), headers=await self._headers("application/json-patch+json")
         )
@@ -519,8 +611,10 @@ class AdoClient:
         return int(resp.json().get("id", 0))
 
     async def _patch(self, work_item_id: int, patch: list[dict[str, Any]]) -> httpx.Response:
+        # Org-level on purpose: ADO resolves an id across the whole organization, so a
+        # state/tag update works regardless of which polled project the item is in.
         return await self._http.patch(
-            self._url(f"wit/workitems/{work_item_id}?{_API}"),
+            self._org_url(f"wit/workitems/{work_item_id}?{_API}"),
             content=_json(patch),
             headers=await self._headers("application/json-patch+json"),
         )
@@ -577,11 +671,12 @@ class AdoClient:
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
             f"WHERE [System.Parent] = {parent_id} "
-            f"AND [System.TeamProject] = '{_wiql_lit(self._config.ado_project)}'"
+            f"AND {self._project_clause()}"
         )
         try:
             resp = await self._http.post(
-                self._url(f"wit/wiql?{_API}"), json={"query": wiql}, headers=await self._headers()
+                self._org_url(f"wit/wiql?{_API}"), json={"query": wiql},
+                headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
             self._log.warning("get_children request error", error=str(exc))
@@ -610,7 +705,7 @@ class AdoClient:
         ids_param = ",".join(str(i) for i in list(ids)[:200])
         try:
             resp = await self._http.get(
-                self._url(f"wit/workitems?ids={ids_param}&$expand=relations&{_API}"),
+                self._org_url(f"wit/workitems?ids={ids_param}&$expand=relations&{_API}"),
                 headers=await self._auth.get_auth_header(),
             )
         except httpx.HTTPError as exc:
@@ -809,8 +904,8 @@ class AdoClient:
 
     # ── Work-item states (for the Settings picker + the Flow editor) ─────────
 
-    async def _type_state_map(self) -> dict[str, list[dict]]:
-        """``{work-item type: [raw state dicts]}`` for the project, briefly cached.
+    async def _type_state_map(self, project: str = "") -> dict[str, list[dict]]:
+        """``{work-item type: [raw state dicts]}`` for one project, briefly cached.
 
         This is the primitive the three public readers share. It matters that the
         per-type grouping is preserved here: ADO states belong to a TYPE, and every
@@ -823,13 +918,15 @@ class AdoClient:
         an error yields ``{}`` (or omits the failing type) so the pages that depend on
         this still render with a manual-entry fallback.
         """
-        cached = self._type_states
+        project = (project or self._config.ado_project or "").strip()
+        cached = self._type_states.get(project.lower())
         if cached is not None and time.monotonic() - cached[0] < _TYPE_STATE_TTL_SECONDS:
             return cached[1]
         out: dict[str, list[dict]] = {}
         try:
             resp = await self._http.get(
-                self._url(f"wit/workitemtypes?{_API}"), headers=await self._auth.get_auth_header()
+                self._url(f"wit/workitemtypes?{_API}", project),
+                headers=await self._auth.get_auth_header(),
             )
             if resp.status_code >= 400:
                 self._log.warning("list work-item types failed", status=resp.status_code,
@@ -842,7 +939,9 @@ class AdoClient:
             ]
             for type_name in types:
                 sresp = await self._http.get(
-                    self._url(f"wit/workitemtypes/{quote(type_name, safe='')}/states?{_API}"),
+                    self._url(
+                        f"wit/workitemtypes/{quote(type_name, safe='')}/states?{_API}", project
+                    ),
                     headers=await self._auth.get_auth_header(),
                 )
                 if sresp.status_code >= 400:
@@ -853,8 +952,27 @@ class AdoClient:
         except httpx.HTTPError as exc:
             self._log.warning("work-item type/state request error", error=str(exc))
             return {}
-        self._type_states = (time.monotonic(), out)
+        self._type_states[project.lower()] = (time.monotonic(), out)
         return out
+
+    async def _type_state_map_all(self) -> dict[str, list[dict]]:
+        """``_type_state_map`` unioned over every polled project.
+
+        The Settings state picker and the Flow editor offer states for the WHOLE
+        instance, so with several projects they must show the union — a state that
+        exists only in the second project is still one an operator needs to pick. Types
+        that exist in more than one project keep the FIRST project's state list; the
+        alternative (merging state lists across projects) would invent combinations no
+        single project actually accepts, which is exactly what the per-type grouping is
+        there to prevent."""
+        projects = self._config.effective_ado_projects
+        if len(projects) <= 1:
+            return await self._type_state_map(projects[0] if projects else "")
+        merged: dict[str, list[dict]] = {}
+        for project in projects:
+            for type_name, states in (await self._type_state_map(project)).items():
+                merged.setdefault(type_name, states)
+        return merged
 
     async def get_states_by_type(self) -> dict[str, list[str]]:
         """``{work-item type: [state names]}`` in the type's own board order.
@@ -864,7 +982,7 @@ class AdoClient:
         """
         return {
             type_name: [s["name"] for s in sorted(states, key=lambda s: int(s.get("order", 0)))]
-            for type_name, states in (await self._type_state_map()).items()
+            for type_name, states in (await self._type_state_map_all()).items()
         }
 
     async def get_states(self) -> list[str]:
@@ -879,7 +997,7 @@ class AdoClient:
         cat_rank = {"Proposed": 0, "InProgress": 1, "Resolved": 2, "Completed": 3, "Removed": 4}
         # name → (category_rank, order) — keep the strongest (lowest) seen.
         seen: dict[str, tuple[int, int]] = {}
-        for states in (await self._type_state_map()).values():
+        for states in (await self._type_state_map_all()).values():
             for s in states:
                 name = s["name"]
                 key = (cat_rank.get(s.get("stateCategory", ""), 9), int(s.get("order", 0)))
@@ -896,6 +1014,7 @@ class AdoClient:
         return WorkItemInfo(
             id=wi["id"],
             title=str(f.get("System.Title", "")),
+            project=str(f.get("System.TeamProject", "")),
             work_item_type=str(f.get("System.WorkItemType", "")),
             state=str(f.get("System.State", "")),
             assigned_to=_identity(f.get("System.AssignedTo")),
@@ -908,6 +1027,7 @@ class AdoClient:
             area_path=f.get("System.AreaPath"),
             iteration_path=f.get("System.IterationPath"),
             changed_date=_as_dt(f.get("System.ChangedDate")),
+            created_date=_as_dt(f.get("System.CreatedDate")),
             priority=_as_int(f.get("Microsoft.VSTS.Common.Priority")) or 3,
             created_by=_identity(f.get("System.CreatedBy")),
             category=TaskCategory.UNKNOWN,

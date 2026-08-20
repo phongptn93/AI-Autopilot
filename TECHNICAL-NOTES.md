@@ -90,6 +90,49 @@ the session writes the same `result.json` contract; the poller finalises it on a
 cycle. On dispatch the item is tagged **`autopilot-live`** (a skip tag) so a restart
 never launches a duplicate console for the same item.
 
+**Session lifetime.** The CLI is a REPL: it writes its result and then sits idle
+forever, so nothing closes the console on its own. On dispatch the console's pid is
+recorded in `.autopilot/runs/<id>.session.json` (on disk, so a restarted autopilot can
+still close a session it did not launch). `interactive_close_on` decides when
+`close_interactive` fires — it kills the whole tree (`taskkill /T` on Windows, the
+process group elsewhere) after checking the pid is still ours, so pid reuse can't hit a
+bystander:
+
+| Value | Behaviour |
+|---|---|
+| `pr_closed` *(default)* | Console **and** scratch survive finalisation while the PR is open, so review feedback can be worked in the same session/worktree. The PR babysitter's scan closes both once the item has no active PR (merged or abandoned) — guarded on the item having already written a result, so a task that simply has no PR yet is never touched. |
+| `result` | Closed the moment the task writes its result (scratch released with it). |
+| `never` | Left open — consoles pile up; for debugging only. |
+
+A work item deleted from ADO always closes immediately: nothing can reuse it.
+
+**Re-entry resumes the session too.** A human comment or @mention on an item the bot
+already worked goes through `_dispatch_with_comment` → `dispatch_interactive`, which used
+to *wipe* the deterministic `agent-<id>` scratch and open a virgin console. It now reuses
+that scratch when a session reserved it, closes the old console, and launches with
+`--continue` — same worktree, same conversation, plus the new comment.
+
+### Process health (`process_health.py` + `ProcessHealthService`)
+A team's process doc assigns standing reviews — ad-hoc ratio each sprint, escaped
+defects per module each month, tag catalogue each quarter — and those are the first
+duties to lapse, because each is a manual query nobody owns on a busy week. The metrics
+module is a **leaf** and **pure** (items in, numbers out) so every threshold is testable
+without ADO; the service fetches, renders and broadcasts through the notifier's single
+fan-out. It **only reads**: every finding is a judgement the process assigns to a
+person, and silently "fixing" one would erase the evidence that the process needs
+attention. Two guards keep it credible — a clean report is computed but not sent (a
+digest that pings daily saying "nothing" gets muted, and then the real one is too), and
+a metric whose ADO field the project never defined reports nothing rather than a
+confident zero.
+
+**Rework resumes the session** (`interactive_resume_on_rework`, default on). Claude Code
+keys its transcripts by cwd, so running the rework anywhere else means starting from
+zero. When `/ai` feedback lands on a PR an interactive session opened, `revise` closes
+that (idle) console, then runs in the session's **own scratch worktree** with
+`resume = <newest transcript id for that cwd>` — the branch, the build state and the
+conversation are all already there. Any failure to reuse falls back to a normal fresh
+checkout: a rework is never blocked by the optimisation.
+
 Both modes converge on the same `result.json` contract and the same outcome handling.
 
 ---
@@ -113,8 +156,11 @@ checkout and concurrent tasks never collide (`_acquire_agent_scratch`):
 - `fetch` uses `--no-recurse-submodules` (some repos vendor a private/relative submodule
   that isn't reachable from a dev machine).
 - **Teardown** (`release_scratch`): `git worktree remove --force` each repo, `worktree
-  prune`, then remove the dir — best-effort, never raises. (A dir pinned by a still-open
-  interactive console remains as an empty shell until that console closes.)
+  prune`, then remove the dir — best-effort, never raises. Interactive scratches are
+  released only when their console is closed (see `interactive_close_on`), which is also
+  why the console is killed *first*: on Windows a live CLI holding the scratch as cwd
+  makes `worktree remove` fail. Startup pruning likewise skips any scratch that still
+  holds a `*.session.json` handle.
 - **Stale branch claims** (`_free_branch_for_checkout`, run before every `checkout -B` /
   `worktree add -B`): a scratch that outlived its run — an interactive session never
   finalised, a killed task — keeps its branch checked out, and git then refuses every

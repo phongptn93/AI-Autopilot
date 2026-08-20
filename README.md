@@ -172,6 +172,11 @@ Most‑used keys:
 | `trigger_states` | `New, To Do, Proposed, Active` | ADO states eligible for pickup |
 | `autonomy_level` | `assisted` | `report` / `assisted` / `unattended` (L1 / L2 / L3) |
 | `execution_mode` | `interactive` | `interactive` (steerable session) or `headless` |
+| `interactive_close_on` | `pr_closed` | When an interactive console is closed: `pr_closed` (keep it + its worktree while the PR is open, close on merge/abandon), `result`, or `never` |
+| `interactive_resume_on_rework` | `true` | PR feedback runs in that session's own worktree and **resumes its conversation** instead of a fresh worktree + fresh read |
+| `process_health_enabled` | `false` | Periodic **process-health digest**: ad-hoc ratio, escaped defects per module, stuck items, tag rot. Read-only — it reports, never edits |
+| `process_health_interval_hours` | `168` | How often the digest runs (0 = on demand only) |
+| `process_health_window_days` | `14` | Window it measures (one sprint) |
 | `use_worktrees` | `true` | Isolated git worktree per task (required for `max_concurrent > 1`) |
 | `max_concurrent` | `1` | Concurrent executions |
 | `dependency_scheduling_enabled` | `true` | Order work by the ADO link graph (0 tokens) |

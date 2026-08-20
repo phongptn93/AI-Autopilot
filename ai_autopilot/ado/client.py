@@ -444,6 +444,62 @@ class AdoClient:
             )
         return found
 
+    async def get_raw_work_items(
+        self, project: str, since_days: int, top: int = 1000
+    ) -> list[dict]:
+        """Raw ``fields`` dicts for one project's recently-changed items.
+
+        Process-health metrics read fields that are NOT part of ``_FIELDS`` and are not
+        guaranteed to exist at all (``Blocked``, ``Found In Environment`` — a process
+        may simply never have defined them). Naming them in the ``fields=`` parameter
+        would 400 the whole batch on a project that lacks one, so this fetches the full
+        field set and lets the caller take what is there. Scoped per project for the
+        same reason: one project's missing field must not blank the other's report.
+        """
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems "
+            f"WHERE [System.TeamProject] = '{_wiql_lit(project)}' "
+            f"AND [System.ChangedDate] >= @today-{int(since_days)} "
+            "ORDER BY [System.ChangedDate] DESC"
+        )
+        try:
+            resp = await self._http.post(
+                self._org_url(f"wit/wiql?{_API}"), json={"query": wiql},
+                headers=await self._headers(),
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("health WIQL request error", project=project, error=str(exc))
+            return []
+        if resp.status_code >= 400 or not resp.text.lstrip().startswith("{"):
+            self._log.warning("health WIQL failed", project=project, status=resp.status_code)
+            return []
+        ids = [r["id"] for r in (resp.json().get("workItems") or [])][:top]
+        out: list[dict] = []
+        for start in range(0, len(ids), _MAX_IDS_PER_BATCH):
+            chunk = ",".join(str(i) for i in ids[start : start + _MAX_IDS_PER_BATCH])
+            try:
+                batch = await self._http.get(
+                    self._org_url(f"wit/workitems?ids={chunk}&errorPolicy=Omit&{_API}"),
+                    headers=await self._auth.get_auth_header(),
+                )
+            except httpx.HTTPError as exc:
+                self._log.warning("health fetch error", project=project, error=str(exc))
+                continue
+            if batch.status_code >= 400:
+                self._log.warning(
+                    "health fetch failed", project=project, status=batch.status_code,
+                    detail=_terse(batch.text),
+                )
+                continue
+            # ``id`` lives on the work item, NOT inside ``fields`` — folding it in keeps
+            # the caller's contract "one dict per item, all of it addressable by ADO
+            # reference name" true, instead of silently yielding id-less rows.
+            out += [
+                {**(wi.get("fields") or {}), "System.Id": wi.get("id")}
+                for wi in (batch.json().get("value") or []) if wi
+            ]
+        return out
+
     async def get_work_item(self, work_item_id: int) -> WorkItemInfo | None:
         items = await self.get_work_items_by_ids([work_item_id])
         return items[0] if items else None

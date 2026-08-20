@@ -24,6 +24,7 @@ from ai_autopilot.services import (
     DeliveryTrackerService,
     LoopScheduler,
     PrMonitorService,
+    ProcessHealthService,
     ReviewerTrackerService,
     StateSyncService,
 )
@@ -157,6 +158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 DeliveryTrackerService(container),
                 reviewer_tracker,
                 LoopScheduler(container),
+                ProcessHealthService(container),
             ):
                 svc.start()
                 started.append(svc)

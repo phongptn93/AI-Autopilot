@@ -125,6 +125,17 @@ class AdoNotifier:
             NotificationMessage(work_item=item, type=NotificationType.ERROR, error=error)
         )
 
+    async def broadcast_digest(self, heading: str, text: str) -> None:
+        """Send a free-form notice (no work item) to every enabled channel.
+
+        Routed through the same ``_broadcast`` as everything else so a digest inherits
+        the per-channel error isolation rather than growing a second, subtly different
+        fan-out loop."""
+        await self._broadcast(NotificationMessage(
+            work_item=WorkItemInfo(id=0), type=NotificationType.INFO,
+            heading=heading, text=text,
+        ))
+
     async def _broadcast(self, message: NotificationMessage) -> None:
         for channel in self._channels:
             if not channel.is_enabled:

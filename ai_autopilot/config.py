@@ -1261,6 +1261,31 @@ class Settings(BaseSettings):
     # if it isn't already in a trigger state. Blank → the first trigger_states entry.
     planning_start_state: str = ""
 
+    # ── Process health (periodic review of HOW the team works) ──
+    # A process doc assigns standing reviews — ad-hoc ratio each sprint, escaped
+    # defects each month, tag catalogue each quarter. This computes them and pushes
+    # the findings to the notification channels; it never changes a work item, because
+    # every finding is a judgement call the process assigns to a person.
+    process_health_enabled: bool = False
+    process_health_interval_hours: int = 168      # weekly; 0 = compute on demand only
+    process_health_window_days: int = 14          # one sprint
+    process_health_blocked_days: int = 3          # doc: blocked >3 days → PM follow-up
+    process_health_adhoc_threshold_pct: float = 30.0
+    # Tag taxonomy. Classification = what a ticket IS (exactly one per ticket);
+    # ad-hoc = the unplanned subset of those; routing = "somebody must look", meant to
+    # be removed once they have.
+    process_health_classification_tags: list[str] = Field(
+        default_factory=lambda: [
+            "BUG", "Change Request", "New Request", "Pre-Sales", "Support", "Spike", "Ops",
+        ]
+    )
+    process_health_adhoc_tags: list[str] = Field(
+        default_factory=lambda: ["Support", "Spike", "Ops", "Pre-Sales"]
+    )
+    process_health_routing_tags: list[str] = Field(
+        default_factory=lambda: ["PM - Need Review", "Product - Review"]
+    )
+
     # ── Scheduling ──
     schedule_start: str = ""
     schedule_end: str = ""

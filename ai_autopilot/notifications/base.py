@@ -14,6 +14,7 @@ class NotificationType(enum.Enum):
     COMPLETED = "Completed"
     ERROR = "Error"
     REMINDER = "Reminder"
+    INFO = "Info"        # a free-form notice (digest) — not about one work item
 
 
 @dataclass
@@ -26,9 +27,16 @@ class NotificationMessage:
     # Optional call-to-action links (label, url) rendered as buttons on channels that
     # support them (Teams Adaptive Card Action.OpenUrl). E.g. ("Open PR", "https://…").
     actions: list[tuple[str, str]] = field(default_factory=list)
+    # A notice that is NOT about one work item (e.g. a periodic digest). When set,
+    # these are what every channel renders — the per-type wording below all reads
+    # ``work_item``, which such a notice has none of.
+    heading: str = ""
+    text: str = ""
 
     @property
     def title(self) -> str:
+        if self.heading:
+            return self.heading
         wid = self.work_item.id
         if self.type is NotificationType.STARTED:
             return f"🤖 Processing #{wid}"
@@ -56,6 +64,8 @@ class NotificationMessage:
 
     @property
     def summary(self) -> str:
+        if self.text:
+            return self.text
         item = self.work_item
         if self.type is NotificationType.STARTED:
             return (f"**{item.title}**\nSkill: `{self.skill}` | Category: {item.category}"

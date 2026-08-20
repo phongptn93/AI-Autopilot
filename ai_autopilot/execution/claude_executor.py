@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -126,6 +127,7 @@ class _Workspace:
     is_worktree: bool
     claude_cwd: str = ""  # dir Claude runs in (workspace root); "" → same as path
     keep: bool = False  # cached revise worktree: survive release, reused next round
+    resume_from: str = ""  # conversation to continue (interactive session's transcript)
 
 
 # The settings the CURRENT run sees — the root config with its work item's workspace
@@ -775,8 +777,15 @@ class ClaudeExecutor:
             return None
         base_dir = self._scratch_base()
         Path(base_dir).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 - fast local mkdir
-        if stable:  # interactive: deterministic path (reused across restarts); clean any leftover
+        if stable:  # interactive: deterministic path (reused across restarts)
             scratch = str(Path(base_dir) / f"agent-{item_id}")
+            # A scratch this item's own session left behind is not leftover junk — it
+            # holds that session's worktree AND (via cwd) its conversation. Re-entering
+            # the item (a human comment, an @mention) must land there, or the follow-up
+            # starts from zero. Anything else is cleaned as before.
+            if self._reusable_session_scratch(scratch, item_id, repos):
+                self._log.info("reusing interactive scratch", id=item_id, path=scratch)
+                return scratch
             await self.release_scratch(scratch)
         else:  # headless: unique path
             scratch = str(Path(base_dir) / f"agent-{item_id}-{uuid.uuid4().hex[:8]}")
@@ -938,6 +947,13 @@ class ClaudeExecutor:
         repos = self._allowed_repos(workspace)
         scratch = await self._acquire_agent_scratch(item.id, repos, stable=True)
         run_dir = scratch or workspace
+        # Re-entry (human comment / @mention on an item this bot already worked): the
+        # scratch above was REUSED, so the previous conversation is still on disk for
+        # this cwd. Continue it instead of re-reading the codebase from scratch — and
+        # close the old console first, or two processes share one transcript.
+        resuming = bool(scratch) and self._read_session_handle(run_dir, item.id) is not None
+        if resuming:
+            await self.close_interactive(run_dir, item.id)
         # A fresh scratch is an unknown path to Claude Code — accept the workspace
         # trust dialog up front, or this session blocks on it and never starts.
         pretrust_claude_dir(run_dir)
@@ -972,24 +988,33 @@ class ClaudeExecutor:
         cli_args = [
             "--remote-control", session,
             "--permission-mode", interactive_perm,
+            # Boolean flag, so it can't swallow the positional prompt (see NOTE above).
+            *(["--continue"] if resuming else []),
             prompt,
         ]
 
         try:
             if sys.platform == "win32":
-                # `cmd /k` keeps the console window open (so any startup error is
-                # visible instead of vanishing) and lets cmd resolve claude.cmd via
-                # PATHEXT — passing the bare `claude` shim to Popen does not work.
-                subprocess.Popen(  # noqa: ASYNC220 — fire-and-forget launch
-                    ["cmd", "/k", "claude", *cli_args], cwd=run_dir,
+                # `cmd /c` lets cmd resolve claude.cmd via PATHEXT (passing the bare
+                # `claude` shim to Popen does not work) and — unlike `/k` — lets the
+                # console close once the CLI exits. `|| pause` keeps the window up
+                # ONLY on a non-zero exit, so a startup error is still readable.
+                proc = subprocess.Popen(  # noqa: ASYNC220 — fire-and-forget launch
+                    ["cmd", "/c", "claude", *cli_args, "||", "pause"], cwd=run_dir,
                     creationflags=subprocess.CREATE_NEW_CONSOLE,
                 )
             else:
                 claude = shutil.which("claude") or "claude"
-                subprocess.Popen([claude, *cli_args], cwd=run_dir, start_new_session=True)  # noqa: ASYNC220
+                proc = subprocess.Popen(  # noqa: ASYNC220
+                    [claude, *cli_args], cwd=run_dir, start_new_session=True
+                )
+            # Remember the console's pid so `close_interactive` can shut the whole
+            # tree down when the item finalises. Persisted (not just in memory) so an
+            # autopilot restart can still close a session it did not launch itself.
+            self._write_session_handle(run_dir, item.id, proc.pid, session)
             self._log.info(
                 "launched interactive session", id=item.id, session=session,
-                cwd=run_dir, isolated=bool(scratch),
+                pid=proc.pid, cwd=run_dir, isolated=bool(scratch), resumed=resuming,
             )
             return True, session, run_dir
         except Exception as exc:  # noqa: BLE001
@@ -1004,6 +1029,183 @@ class ClaudeExecutor:
         if agent is None:
             return None
         return self._result_from_agent(item, agent, self._config.autonomy_level)
+
+    # ── Interactive session lifetime: close the console when the item is done ──
+
+    def _session_handle_path(self, run_dir: str, item_id: int) -> Path:
+        """Sidecar holding the launched console's pid — survives an autopilot restart."""
+        return Path(run_dir) / ".autopilot" / "runs" / f"{item_id}.session.json"
+
+    def _write_session_handle(self, run_dir: str, item_id: int, pid: int, session: str) -> None:
+        self._save_session_handle(run_dir, item_id, {
+            "pid": pid, "session": session, "started": time.time(),
+        })
+
+    def _save_session_handle(self, run_dir: str, item_id: int, handle: dict) -> None:
+        path = self._session_handle_path(run_dir, item_id)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(handle), encoding="utf-8")
+        except OSError as exc:  # noqa: BLE001 — never fail a launch on bookkeeping
+            self._log.warning("could not record session handle", id=item_id, error=str(exc))
+
+    def _read_session_handle(self, run_dir: str, item_id: int) -> dict | None:
+        try:
+            handle = json.loads(
+                self._session_handle_path(run_dir, item_id).read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            return None
+        return handle if isinstance(handle, dict) else None
+
+    async def _process_matches(self, pid: int, session: str) -> bool:
+        """True when ``pid`` is still OUR session — guards against pid reuse, which on
+        a long-running box would otherwise make us kill an innocent process."""
+        if sys.platform == "win32":
+            ps = (
+                f'$p = Get-CimInstance Win32_Process -Filter "ProcessId={pid}" '
+                "-ErrorAction SilentlyContinue; if ($p) { $p.CommandLine }"
+            )
+            out = await self._run_capture(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps]
+            )
+            if out is None:  # PowerShell unavailable → fall back to a liveness check
+                out = await self._run_capture(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"]
+                )
+                return bool(out) and "cmd.exe" in out.lower()
+            return session in out
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        try:  # Linux: confirm identity from the cmdline; elsewhere liveness is all we get
+            cmdline = Path(  # noqa: ASYNC240 — /proc read is memory-backed, never blocks
+                f"/proc/{pid}/cmdline"
+            ).read_bytes().decode("utf-8", "replace")
+        except OSError:
+            return True
+        return session in cmdline
+
+    async def _run_capture(self, cmd: list[str]) -> str | None:
+        """Run a short helper command, returning stdout (``None`` if it can't run)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+        except (OSError, TimeoutError):
+            return None
+        return out.decode("utf-8", "replace")
+
+    def rework_scratch(self, item_id: int, repo_name: str) -> str | None:
+        """The interactive scratch to run this item's rework in, or ``None``.
+
+        Reusing it is what makes PR feedback cheap: the worktree already has the
+        branch and the build state, and — because Claude Code keys its transcripts by
+        cwd — running there is the ONLY way to resume the conversation the live
+        session had. A rework from a fresh worktree re-reads the whole codebase and
+        re-derives everything the session already knew.
+        """
+        if not self._config.interactive_resume_on_rework or not repo_name:
+            return None
+        scratch = self.interactive_scratch_dir(item_id)
+        if self._read_session_handle(scratch, item_id) is None:
+            return None  # no session held this item (headless run, or already released)
+        return scratch if (Path(scratch) / repo_name / ".git").exists() else None
+
+    def _reusable_session_scratch(self, scratch: str, item_id: int, repos: list[str]) -> bool:
+        """True when ``scratch`` is this item's own session scratch and still usable —
+        i.e. it was reserved by a session and the repos it holds are still real
+        worktrees (a half-torn-down scratch is rebuilt from clean instead). Repos the
+        original scratch skipped (no usable base branch there) don't block reuse —
+        they were not in it the first time either."""
+        if not self._config.interactive_resume_on_rework:
+            return False
+        if self._read_session_handle(scratch, item_id) is None:
+            return False
+        present = [r for r in repos if (Path(scratch) / r).is_dir()]
+        return bool(present) and all((Path(scratch) / r / ".git").exists() for r in present)
+
+    def _transcript_session_id(self, cwd: str) -> str | None:
+        """Session id of the newest Claude Code conversation recorded for ``cwd``.
+
+        Claude Code files transcripts under ``<config>/projects/<cwd-with-separators-
+        dashed>/<session-id>.jsonl``; the interactive CLI never tells us its session
+        id, so this is how a headless rework picks the conversation back up. Returns
+        None when the directory doesn't exist — then the rework simply starts fresh.
+        """
+        config_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
+        project = config_dir / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd)))
+        try:
+            newest = max(project.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, default=None)
+        except OSError:
+            return None
+        return newest.stem if newest else None
+
+    def session_finished(self, run_dir: str, item_id: int) -> bool:
+        """True when the interactive session for ``item_id`` already wrote its result
+        (so the console is idle and only being kept around for possible rework)."""
+        return find_result(run_dir, item_id) is not None
+
+    def list_open_sessions(self) -> dict[int, str]:
+        """``{work_item_id: scratch}`` for every interactive session still holding a
+        console (i.e. one we launched and have not closed). Read off disk, so it is
+        correct after a restart too."""
+        base = Path(self._scratch_base())
+        sessions: dict[int, str] = {}
+        if not base.is_dir():
+            return sessions
+        for sub in base.iterdir():
+            if not sub.name.startswith("agent-"):
+                continue
+            suffix = sub.name.removeprefix("agent-")
+            if not suffix.isdigit():  # headless scratches carry a -<uuid> suffix
+                continue
+            item_id = int(suffix)
+            if self._session_handle_path(str(sub), item_id).is_file():
+                sessions[item_id] = str(sub)
+        return sessions
+
+    async def close_interactive(self, run_dir: str | None, item_id: int) -> bool:
+        """Close the console/session launched for ``item_id``. Best-effort, never raises.
+
+        Called when the item finalises: the Remote-Control CLI is a REPL, so it sits
+        idle forever after writing its result and the console never goes away on its
+        own. Killing the tree first also unblocks ``release_scratch`` on Windows,
+        where a live CLI holding the scratch as cwd makes ``worktree remove`` fail.
+        """
+        if not run_dir:
+            return False
+        handle = self._read_session_handle(run_dir, item_id)
+        try:
+            pid, session = int(handle["pid"]), str(handle.get("session", ""))  # type: ignore[index]
+        except (KeyError, TypeError, ValueError):
+            return False  # no handle, or already closed (pid dropped)
+        closed = False
+        if await self._process_matches(pid, session):
+            if sys.platform == "win32":
+                # /T kills the whole tree (cmd → claude → its node children); without
+                # it the console dies but the CLI keeps holding the worktree.
+                await self._run_capture(["taskkill", "/PID", str(pid), "/T", "/F"])
+            else:
+                for sig in (signal.SIGTERM, signal.SIGKILL):
+                    with contextlib.suppress(OSError):
+                        os.killpg(pid, sig)
+                    await asyncio.sleep(1)
+                    if not await self._process_matches(pid, session):
+                        break
+            closed = True
+            self._log.info("closed interactive session", id=item_id, pid=pid, session=session)
+        else:
+            self._log.info("interactive session already gone", id=item_id, pid=pid)
+        # Drop the pid but KEEP the handle: it also marks the scratch as this item's
+        # (kept for rework), which is what the PR-close sweep releases on. The file
+        # goes away with the scratch itself.
+        self._save_session_handle(
+            run_dir, item_id, {"session": session, "closed": time.time()}
+        )
+        return closed
 
     # A scratch with no result file and younger than this is assumed to belong to a
     # live interactive session (its own process survives an autopilot restart), so
@@ -1028,6 +1230,11 @@ class ClaudeExecutor:
                     continue
                 runs = sub / ".autopilot" / "runs"
                 finished = runs.is_dir() and any(runs.glob("*.json"))
+                # A scratch kept alive for review (console still open, PR still open)
+                # is NOT an orphan — its worktree is where the rework happens.
+                if runs.is_dir() and any(runs.glob("*.session.json")):
+                    self._log.info("prune_orphans: keeping open session scratch", path=str(sub))
+                    continue
                 try:
                     old = (now - sub.stat().st_mtime) > self._ORPHAN_AGE_LIMIT_SECONDS
                 except OSError:
@@ -1224,8 +1431,16 @@ class ClaudeExecutor:
         repo_path, base_branch = self._revise_repo(item, repo)
         if read_only:
             return await self._run_read_only(item.id, repo_path, branch, prompt)
+        # Feedback on a PR an interactive session opened: work it in that session's
+        # own scratch so the conversation can be resumed (see ``rework_scratch``).
+        # Its console is idle by now — close it first, or two processes would be
+        # writing the same transcript.
+        scratch = self.rework_scratch(item.id, Path(repo_path).name)
+        if scratch:
+            await self.close_interactive(scratch, item.id)
         return await self._run_in_workspace(
             item_id=item.id,
+            scratch=scratch or "",
             repo=repo_path,
             branch=branch,
             base_branch=base_branch,
@@ -1334,6 +1549,7 @@ class ClaudeExecutor:
         existing_branch: bool,
         create_pr: bool,
         allow_no_changes: bool = False,
+        scratch: str = "",
     ) -> ExecutionResult:
         # Workspace mode checks the branch out IN-PLACE in the shared repo working tree, so
         # two concurrent runs on the SAME repo would stomp each other and corrupt the index
@@ -1347,13 +1563,13 @@ class ClaudeExecutor:
         workspace: _Workspace | None = None
         try:
             workspace = await self._acquire_workspace(
-                repo, branch, base_branch, item_id, existing_branch
+                repo, branch, base_branch, item_id, existing_branch, scratch=scratch
             )
             work_dir = workspace.path  # git operates here (the repo checkout)
             claude_cwd = workspace.claude_cwd or work_dir  # Claude runs here
 
             self._log.info("running claude", id=item_id, branch=branch, cwd=claude_cwd)
-            resume = await self._resume_for(repo, branch)
+            resume = workspace.resume_from or await self._resume_for(repo, branch)
             claude_run = await self._run_claude(
                 prompt, claude_cwd, repo=work_dir, resume=resume
             )
@@ -1480,7 +1696,8 @@ class ClaudeExecutor:
     # ── workspace lifecycle ─────────────────────────────────────────────────
 
     async def _acquire_workspace(
-        self, repo: str, branch: str, base_branch: str, item_id: int, existing_branch: bool = False
+        self, repo: str, branch: str, base_branch: str, item_id: int,
+        existing_branch: bool = False, scratch: str = "",
     ) -> _Workspace:
         """Create an isolated checkout for one execution.
 
@@ -1490,7 +1707,14 @@ class ClaudeExecutor:
 
         ``existing_branch=True`` checks out an already-pushed branch (used to
         revise an open PR) instead of branching from ``base_branch``.
+
+        ``scratch`` reuses an interactive session's worktree (see ``rework_scratch``)
+        — same cwd, so the run resumes that session's conversation.
         """
+        if scratch:
+            reused = await self._reuse_interactive_scratch(repo, branch, item_id, scratch)
+            if reused is not None:
+                return reused
         if existing_branch:
             await self._git(["fetch", "origin", branch], repo, check=False)
         from_ref = f"origin/{branch}" if existing_branch else f"origin/{base_branch}"
@@ -1557,6 +1781,44 @@ class ClaudeExecutor:
         await self._free_branch_for_checkout(repo, branch, item_id)
         await self._git(["checkout", "-B", branch, from_ref], repo)
         return _Workspace(repo, repo, branch, base_branch, is_worktree=False)
+
+    async def _reuse_interactive_scratch(
+        self, repo: str, branch: str, item_id: int, scratch: str
+    ) -> _Workspace | None:
+        """Check the PR branch out inside the interactive session's own worktree.
+
+        Best-effort: any failure returns ``None`` so the caller falls back to a normal
+        (fresh) checkout — a rework must never be blocked by an optimisation. The
+        worktree is reset to ``origin/<branch>`` rather than merged into: everything
+        the session did is already pushed (the PR exists), so the remote is the truth,
+        and leftovers from a half-finished turn would otherwise ride along into the
+        next commit. ``keep=True`` leaves the scratch standing for the next round —
+        the PR-close sweep is what releases it.
+        """
+        worktree = str(Path(scratch) / Path(repo).name)
+        try:
+            await self._git(["fetch", "origin", branch], repo, check=False)
+            # This worktree very likely holds the branch already (the session left it
+            # checked out) — that is not a stale claim, so exclude it from eviction.
+            await self._free_branch_for_checkout(repo, branch, item_id, exclude=worktree)
+            await self._git(["reset", "--hard"], worktree, check=False)
+            await self._git(["clean", "-fd"], worktree, check=False)
+            await self._git(["checkout", "-B", branch, f"origin/{branch}"], worktree)
+        except Exception as exc:  # noqa: BLE001 — fall back to a fresh checkout
+            self._log.warning(
+                "could not reuse interactive scratch — fresh checkout",
+                id=item_id, scratch=scratch, error=str(exc),
+            )
+            return None
+        resume = self._transcript_session_id(scratch) or ""
+        self._log.info(
+            "reusing interactive scratch for rework",
+            id=item_id, branch=branch, path=worktree, resuming=bool(resume),
+        )
+        return _Workspace(
+            repo, worktree, branch, base_branch=self._config.base_branch,
+            is_worktree=True, claude_cwd=scratch, keep=True, resume_from=resume,
+        )
 
     async def _worktree_holding_branch(
         self, repo: str, branch: str, exclude: str | None = None

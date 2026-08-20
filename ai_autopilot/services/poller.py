@@ -461,9 +461,15 @@ class AdoPollerService:
         Takes the ITEM rather than its id so the work-item type is always available to
         pick the per-type flow. An id-only signature let a call site silently fall back
         to the flat project-wide state, which is the bug this indirection prevents.
+
+        Resolved against the item's OWN project: state names come from that project's
+        process, so on an instance serving two projects the root vocabulary would be
+        wrong for one of them (see ``Settings.scoped_for_project``).
         """
         await apply_outcome(
-            self._c.ado, self._config, item.id, outcome, item.work_item_type
+            self._c.ado,
+            self._config.scoped_for_project(item.project),
+            item.id, outcome, item.work_item_type,
         )
 
     async def _reconcile_reopened(self) -> None:
@@ -975,6 +981,8 @@ class AdoPollerService:
             item = await c.ado.get_work_item(item_id)
             if item is None:
                 self._live.pop(item_id, None)
+                # The work item is gone — nothing can reuse this session any more.
+                await c.executor.close_interactive(run_dir, item_id)
                 await c.executor.release_scratch(self._live_dirs.pop(item_id, None))
                 continue
             result = c.executor.finalize_interactive(item, run_dir)
@@ -988,13 +996,34 @@ class AdoPollerService:
             await self._handle_agent_result(item, result)
             self._processed[item_id] = datetime.now(UTC)
             self._live.pop(item_id, None)
-            await c.executor.release_scratch(self._live_dirs.pop(item_id, None))
+            closed = await self._close_live_session(item_id, run_dir)
+            scratch = self._live_dirs.pop(item_id, None)
+            if closed:
+                await c.executor.release_scratch(scratch)
             self._log.info(
                 "interactive session finalized",
                 id=item_id,
                 status="SUCCESS" if result.success else "FAILED",
             )
         await self._finalize_orphan_sessions()
+
+    async def _close_live_session(self, item_id: int, run_dir: str) -> bool:
+        """Shut the item's Remote-Control console now that it is finalised.
+
+        The CLI is a REPL: it writes ``result.json`` and then sits idle forever, so
+        nothing closes the console on its own. Whether *now* is the right moment is
+        the operator's call (``interactive_close_on``) — under the default
+        ``pr_closed`` the console and its scratch stay alive while the PR is open, so
+        review feedback can be worked in the SAME session; the PR monitor closes it
+        when the PR merges. Returns True when the scratch may also be released.
+        """
+        if self._config.interactive_close_on != "result":
+            return False
+        try:
+            await self._c.executor.close_interactive(run_dir, item_id)
+        except Exception as exc:  # noqa: BLE001 — never block finalise on cleanup
+            self._log.warning("could not close interactive session", id=item_id, error=str(exc))
+        return True
 
     async def _remove_live_tag(self, item_id: int) -> None:
         cfg = self._config
@@ -1023,7 +1052,8 @@ class AdoPollerService:
             await self._remove_live_tag(item.id)
             await self._handle_agent_result(item, result)
             self._processed[item.id] = datetime.now(UTC)
-            await c.executor.release_scratch(run_dir)
+            if await self._close_live_session(item.id, run_dir):
+                await c.executor.release_scratch(run_dir)
             self._log.info("orphan interactive session finalized", id=item.id)
 
     def _score_run(self, result: ExecutionResult) -> RunScore | None:

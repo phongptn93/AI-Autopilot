@@ -250,3 +250,54 @@ async def test_bot_signed_command_never_triggers():
     await svc._inspect_pr("repo-1", "repo-a", _PR)
     await asyncio.gather(*svc._tasks)
     assert feedback.calls == []
+
+
+class _FakeSessionExec:
+    """Executor stub exposing just the interactive-session surface the sweep uses."""
+
+    def __init__(self, sessions: dict[int, str], finished: set[int]) -> None:
+        self._sessions, self._finished = sessions, finished
+        self.closed: list[int] = []
+        self.released: list[str] = []
+
+    def list_open_sessions(self):
+        return dict(self._sessions)
+
+    def session_finished(self, run_dir, item_id):
+        return item_id in self._finished
+
+    async def close_interactive(self, run_dir, item_id):
+        self.closed.append(item_id)
+        return True
+
+    async def release_scratch(self, run_dir):
+        self.released.append(run_dir)
+
+
+def _sweep_service(sessions, finished, **overrides):
+    svc = _service(_FakeAdo([]), _FakeFeedback(), **overrides)
+    svc._c.executor = _FakeSessionExec(sessions, finished)
+    return svc
+
+
+async def test_session_closed_once_its_pr_is_no_longer_open():
+    # 42 merged (finished, no active PR) → close. 43 still has an open PR → keep,
+    # so its review feedback can be reworked in the same session.
+    svc = _sweep_service({42: "/ws/agent-42", 43: "/ws/agent-43"}, finished={42, 43})
+    await svc._close_finished_sessions(active_items={43})
+    assert svc._c.executor.closed == [42]
+    assert svc._c.executor.released == ["/ws/agent-42"]
+
+
+async def test_session_still_working_is_never_closed():
+    # No result yet → the task is mid-flight and simply has no PR yet. Closing on
+    # "not in active_items" alone would kill the console out from under it.
+    svc = _sweep_service({42: "/ws/agent-42"}, finished=set())
+    await svc._close_finished_sessions(active_items=set())
+    assert svc._c.executor.closed == []
+
+
+async def test_sweep_is_off_under_other_close_policies():
+    svc = _sweep_service({42: "/ws/agent-42"}, finished={42}, interactive_close_on="result")
+    await svc._close_finished_sessions(active_items=set())
+    assert svc._c.executor.closed == []

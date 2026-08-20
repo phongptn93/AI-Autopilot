@@ -408,7 +408,6 @@ class WorkspaceConfig(BaseModel):
     allowed_repos: list[str] = Field(default_factory=list)
     repo_descriptions: list[str] = Field(default_factory=list)
     trigger_tag: str = ""
-
     @property
     def label(self) -> str:
         """What to show in a log line or on the dashboard."""
@@ -814,6 +813,19 @@ class Settings(BaseSettings):
     # the underlying CLI refuses to run it as root for safety — use it only when
     # the service runs as a non-root user.
     claude_permission_mode: str = "acceptEdits"
+    # When to close the console launched for an interactive task. The CLI is a REPL:
+    # it writes its result and then sits idle forever, so nothing closes on its own.
+    #   "pr_closed" – keep it (and its scratch worktree) alive while the PR is open,
+    #                 close once the PR is merged/abandoned (default). Review feedback
+    #                 can then still be worked in the SAME session/worktree.
+    #   "result"    – close as soon as the task writes its result.
+    #   "never"     – leave every console open (old behaviour; they pile up).
+    interactive_close_on: str = "pr_closed"
+    # PR feedback on an item an interactive session built: run the rework inside that
+    # session's own scratch worktree and RESUME its conversation, instead of paying a
+    # fresh worktree + a fresh read of the codebase. Requires the scratch to still be
+    # there, i.e. interactive_close_on = "pr_closed".
+    interactive_resume_on_rework: bool = True
     claude_allowed_tools: list[str] = Field(default_factory=list)  # empty → all tools
 
     # ── Retry & recovery ──

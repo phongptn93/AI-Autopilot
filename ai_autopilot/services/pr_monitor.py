@@ -218,6 +218,41 @@ class PrMonitorService:
         if repos:
             self._prune_caches(active_pr_ids, active_branches, active_items)
             await self._release_closed_budgets(active_items)
+            await self._close_finished_sessions(active_items)
+
+    async def _close_finished_sessions(self, active_items: set[int]) -> None:
+        """Close the interactive console of items whose PR is no longer open.
+
+        Under ``interactive_close_on: pr_closed`` the poller deliberately leaves a
+        finished session (and its scratch worktree) alive so review feedback can be
+        worked in the SAME session instead of paying for a fresh one. This is the
+        other half of that deal: once the PR is merged or abandoned there is nothing
+        left to rework, so the console is shut and the worktree released — otherwise
+        every task would leave a window behind forever.
+
+        Two guards keep it from closing a session that is still needed: it only ever
+        looks at sessions that already wrote a result (so a task still working, which
+        has no PR yet, is never touched), and "no active PR" is derived from the scan
+        that just ran, so a missed scan simply defers the close to the next one.
+        """
+        c = self._c
+        if c.config.interactive_close_on != "pr_closed":
+            return
+        try:
+            sessions = c.executor.list_open_sessions()
+        except Exception as exc:  # noqa: BLE001 — housekeeping must not break the scan
+            self._log.warning("session sweep failed", error=str(exc))
+            return
+        for item_id, run_dir in sessions.items():
+            if item_id in active_items or not c.executor.session_finished(run_dir, item_id):
+                continue
+            try:
+                await c.executor.close_interactive(run_dir, item_id)
+                await c.executor.release_scratch(run_dir)
+            except Exception as exc:  # noqa: BLE001
+                self._log.warning("could not close session", id=item_id, error=str(exc))
+                continue
+            self._log.info("interactive session closed — PR no longer open", id=item_id)
 
     async def _release_closed_budgets(self, active_items: set[int]) -> None:
         """Give back the revision budget of work items whose PR is no longer open.

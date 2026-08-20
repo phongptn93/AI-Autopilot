@@ -52,6 +52,7 @@ class _FakeExec:
     def __init__(self, dispatch=(True, "autopilot-7"), final=None):
         self._dispatch, self._final = dispatch, final
         self.released: list[str | None] = []
+        self.closed: list[tuple[int, str | None]] = []
 
     async def dispatch_interactive(self, item, *, autonomy, draft_pr):
         launched, session = self._dispatch
@@ -65,6 +66,10 @@ class _FakeExec:
 
     async def release_scratch(self, run_dir):
         self.released.append(run_dir)
+
+    async def close_interactive(self, run_dir, item_id):
+        self.closed.append((item_id, run_dir))
+        return True
 
     async def prune_orphans(self):
         pass
@@ -480,9 +485,25 @@ async def test_finalize_live_session_when_result_ready():
     await p._finalize_live_sessions()
     assert p._live == {}                                       # cleared after finalise
     assert p._live_dirs == {}                                  # run dir cleared
-    assert c.executor.released == ["/ws/scratch"]              # scratch torn down
     assert c.execution_repo.completed == [(99, True)]
     assert (7, c.config.review_tag) in c.ado.tags              # went to In review
+    # Default policy keeps console + worktree until the PR closes, so review
+    # feedback can be reworked in the SAME session (PR monitor closes them).
+    assert c.executor.closed == []
+    assert c.executor.released == []
+
+
+async def test_finalize_closes_session_when_policy_is_result():
+    p, c = _poller()
+    c.config.interactive_close_on = "result"
+    done = ExecutionResult.ok(7, "agent", "done")
+    done.pr_url = "https://pr"
+    c.executor = _FakeExec(final=done)
+    p._live = {7: 99}
+    p._live_dirs = {7: "/ws/scratch"}
+    await p._finalize_live_sessions()
+    assert c.executor.closed == [(7, "/ws/scratch")]           # console shut
+    assert c.executor.released == ["/ws/scratch"]              # scratch torn down
 
 
 async def test_finalize_skips_while_session_running():

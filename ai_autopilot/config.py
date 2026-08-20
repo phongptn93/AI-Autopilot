@@ -408,6 +408,16 @@ class WorkspaceConfig(BaseModel):
     allowed_repos: list[str] = Field(default_factory=list)
     repo_descriptions: list[str] = Field(default_factory=list)
     trigger_tag: str = ""
+    # ── state vocabulary overrides ──
+    # ADO state names belong to a PROJECT's process, not just to a work-item type: two
+    # projects on one instance can name the same lifecycle stage differently ("Ready to
+    # Review" vs "Ready for Review"), and ``work_item_flows`` alone cannot express that
+    # — it keys on type. A workspace that names its own flows/done-states therefore owns
+    # the vocabulary for the projects routed to it; blank = inherit the root's.
+    work_item_flows: list[Any] = Field(default_factory=list)
+    done_states: list[str] = Field(default_factory=list)
+    parent_rollup_map: list[str] = Field(default_factory=list)
+
     @property
     def label(self) -> str:
         """What to show in a log line or on the dashboard."""
@@ -438,7 +448,10 @@ class WorkspaceConfig(BaseModel):
             value = (getattr(self, key) or "").strip()
             if value:
                 out[key] = value
-        for key in ("allowed_repos", "repo_descriptions"):
+        for key in (
+            "allowed_repos", "repo_descriptions",
+            "work_item_flows", "done_states", "parent_rollup_map",
+        ):
             value = getattr(self, key) or []
             if value:
                 out[key] = list(value)

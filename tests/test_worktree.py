@@ -291,8 +291,8 @@ async def test_run_in_workspace_serialises_same_repo(
     )
     active = max_active = 0
 
-    async def fake_acquire(repo_, branch, base, item_id, existing=False):
-        return SimpleNamespace(path=repo_, claude_cwd=repo_)
+    async def fake_acquire(repo_, branch, base, item_id, existing=False, scratch=""):
+        return SimpleNamespace(path=repo_, claude_cwd=repo_, resume_from="")
 
     async def fake_release(ws):
         pass

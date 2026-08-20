@@ -41,16 +41,18 @@ from ai_autopilot.services.pr_feedback import is_bot_branch, parse_work_item_id
 _POLL_INTERVAL_SECONDS = 90
 
 
-def items_awaiting_deploy(tagged: list[WorkItemInfo], cfg: object) -> list[int]:
+def items_awaiting_deploy(tagged: list[WorkItemInfo], cfg: object, scope=None) -> list[int]:
     """Ids of tagged items sitting in their own merge state (merged, awaiting deploy).
 
     Resolved per item: with per-type flows the "merged" state differs by work-item type
     (``Ready to Deploy`` for a Task, ``Implement Done`` for a Requirement), so a single
-    state comparison would only ever find one type's items.
+    state comparison would only ever find one type's items. ``scope`` (optional) narrows
+    the config to the item's own project first, for instances serving several.
     """
     out: list[int] = []
     for item in tagged:
-        target = resolve_state(cfg, "on_merge", item.work_item_type).strip().lower()
+        item_cfg = scope(item) if scope else cfg
+        target = resolve_state(item_cfg, "on_merge", item.work_item_type).strip().lower()
         if target and (item.state or "").strip().lower() == target:
             out.append(item.id)
     return out
@@ -219,11 +221,12 @@ class StateSyncService:
             return  # no new successful build since last check
         self._last_deploy_build = newest
         tagged = await c.ado.get_all_tagged_work_items()
-        awaiting = set(items_awaiting_deploy(tagged, cfg))
+        awaiting = set(items_awaiting_deploy(tagged, cfg, self._cfg_for))
         for item in tagged:
             if item.id not in awaiting or not self._assignee_ok(item):
                 continue
-            target = resolve_state(cfg, "on_deploy", item.work_item_type)
+            item_cfg = self._cfg_for(item)
+            target = resolve_state(item_cfg, "on_deploy", item.work_item_type)
             if not target:
                 continue  # this type's flow doesn't track deploys
             if cfg.dry_run:
@@ -235,11 +238,20 @@ class StateSyncService:
                 self._log.error("deploy transition failed", id=item.id, state=target,
                                 type=item.work_item_type, build=newest)
                 continue
-            if should_comment(cfg, "on_deploy", item.work_item_type):
+            if should_comment(item_cfg, "on_deploy", item.work_item_type):
                 await c.ado.add_comment(
                     item.id, "<div><b>🚀 Deployed</b> — deploy pipeline succeeded.</div>"
                 )
             self._log.info("marked deployed", id=item.id, state=target, build=newest)
+
+    def _cfg_for(self, item: WorkItemInfo):
+        """Config as the item's OWN project sees it.
+
+        State names are a property of the project's process, so an instance serving two
+        projects resolves two different vocabularies for the same stage. Resolving from
+        the root config here would send one project's state names to the other, where
+        ADO rejects them (and the item silently stops advancing)."""
+        return self._config.scoped_for_project(getattr(item, "project", "") or "")
 
     def _has_trigger_tag(self, item: WorkItemInfo) -> bool:
         item_tags = {t.lower() for t in item.tags}
@@ -274,10 +286,11 @@ class StateSyncService:
         # Never pull an item BACKWARD: if it's already at/after the merge state
         # (merged / deployed / done), just remember the PR and leave it alone. This
         # keeps the transition idempotent even when the in-memory dedup was lost.
-        if already_at_or_past_merge(item.state, cfg, item.work_item_type):
+        item_cfg = self._cfg_for(item)
+        if already_at_or_past_merge(item.state, item_cfg, item.work_item_type):
             await self._remember(pr_id, work_item_id, item.state or "")
             return
-        target = resolve_state(cfg, "on_merge", item.work_item_type)
+        target = resolve_state(item_cfg, "on_merge", item.work_item_type)
         if cfg.dry_run:
             self._merged.add(pr_id)
             self._log.info("[DRY-RUN] would transition on merge", id=work_item_id, pr=pr_id,
@@ -296,7 +309,8 @@ class StateSyncService:
             )
             return
         await c.ado.add_tag(
-            work_item_id, resolve_tag(cfg, "on_merge", item.work_item_type, cfg.processed_tag)
+            work_item_id,
+            resolve_tag(item_cfg, "on_merge", item.work_item_type, cfg.processed_tag),
         )
         if should_comment(cfg, "on_merge", item.work_item_type):
             await c.ado.add_comment(
@@ -324,7 +338,7 @@ class StateSyncService:
         parent = await c.ado.get_work_item(parent_id)
         if parent is None or not self._assignee_ok(parent):
             return
-        pairs = parse_rollup_map(resolve_rollup(cfg, parent.work_item_type))
+        pairs = parse_rollup_map(resolve_rollup(self._cfg_for(parent), parent.work_item_type))
         if not pairs:
             return
         # Parent = the parent-state mapped from its least-advanced child.

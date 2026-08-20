@@ -143,3 +143,38 @@ def test_doctor_warns_about_projects_sharing_the_root_workspace(tmp_path):
     )
     warnings = [f for f in check_projects(cfg) if f.level == WARN]
     assert warnings and "IIoT" in warnings[0].detail
+
+
+def test_workspace_owns_its_projects_state_vocabulary():
+    """Two projects on one instance name the same stage differently ("Ready to Review"
+    vs "Ready for Review"). work_item_flows keys on TYPE, so without a per-workspace
+    override one project's states get sent to the other, where ADO rejects them."""
+    from ai_autopilot.flows import resolve_state
+
+    cfg = Settings(
+        ado_project="TLCL-DxFac",
+        work_item_flows=[{
+            "name": "legacy", "types": ["Bug", "Task"],
+            "states": {"review": "Ready to Review", "on_merge": "Ready to Deploy"},
+        }],
+        workspaces=[{
+            "name": "DxFac", "ado_projects": ["DxFactory"],
+            "workspace_directory": "C:/ws",
+            "work_item_flows": [{
+                "name": "dxfac", "types": ["Bug", "Task"],
+                "states": {"review": "Ready for Review", "on_merge": "Ready for Deploy"},
+            }],
+        }],
+    )
+    root = cfg.scoped_for_project("TLCL-DxFac")
+    dxfac = cfg.scoped_for_project("DxFactory")
+    assert resolve_state(root, "review", "Bug") == "Ready to Review"
+    assert resolve_state(dxfac, "review", "Bug") == "Ready for Review"
+    assert resolve_state(dxfac, "on_merge", "Task") == "Ready for Deploy"
+    # A workspace that overrides nothing still inherits the root vocabulary.
+    plain = Settings(
+        ado_project="TLCL-DxFac",
+        work_item_flows=cfg.work_item_flows,
+        workspaces=[{"name": "X", "ado_projects": ["Other"], "workspace_directory": "C:/x"}],
+    )
+    assert resolve_state(plain.scoped_for_project("Other"), "review", "Bug") == "Ready to Review"

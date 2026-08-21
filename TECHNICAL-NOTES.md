@@ -112,6 +112,38 @@ to *wipe* the deterministic `agent-<id>` scratch and open a virgin console. It n
 that scratch when a session reserved it, closes the old console, and launches with
 `--continue` — same worktree, same conversation, plus the new comment.
 
+### Task room (`/dashboard/task/<id>`, `task_room.py` + `diffs.py`)
+Answering "what happened with #4021?" used to mean opening six places — the board for its
+state, Activity for what the agent did, History for its runs, ADO for the comments, the
+PR for the code, Spec drift for what it decided. Each is correct and none of them is the
+answer, so the reader assembles it by hand every time and mostly ends up just reading the
+PR.
+
+One page, one task, tabs in the order a person actually asks: overview (state timeline +
+runs) · conversation (agent log + ADO comments) · **brief** (the instructions this run
+actually ran on — the honest answer to "why did it do that") · spec drift · **code** ·
+preview · audit.
+
+The **diff is read from the local clone**, not the ADO API: the API wants an iteration
+id, then a call per file, then a blob per side — a dozen round trips to rebuild what one
+`git diff origin/<base>...FETCH_HEAD` already knows. Three dots, not two, or commits that
+landed on the base after the branch forked would be shown as this task's work. Parsing
+lives in `diffs.py` (pure, bounded): renames, binary files, "\ No newline", and a file
+with no hunks at all are the tedious cases, and they are trivial to test once separated
+from fetching. Everything is capped, and a cut is stated rather than silently applied —
+a generated migration is a hundred thousand lines and a page that renders all of it stops
+being a page.
+
+The **preview** turns a query string into a file read, so it has two hard rails: the
+resolved path must stay inside the workspace, and it must be a `.html` file. A repo is
+full of keys and source, and "render any file" would be an exfiltration endpoint wearing
+a feature's clothes. The page is then shown in a sandboxed iframe with its own CSP.
+
+Every section is gathered independently and best-effort: a page that renders with the
+diff missing because a repo was not fetchable beats a 500 that hides the six sections
+that were fine. The diff is only gathered when its tab is open — otherwise every glance
+at a task would pay for a network round trip nobody asked to see.
+
 ### Spec drift (`spec_drift.py` + `SpecGuard`)
 The agent is told to DECIDE rather than ask — that is what keeps a run from stalling on
 a clarifying question nobody answers. The cost is that each decision is taken on the

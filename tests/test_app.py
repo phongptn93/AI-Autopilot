@@ -1103,3 +1103,38 @@ def test_spec_drift_shows_on_the_dashboard_and_can_be_ticked_off(tmp_path):
         after = client.get("/dashboard/specs")
         assert "Tính tồn theo lô" not in after.text
         assert "spec đang khớp" in client.get("/dashboard").text
+
+
+def test_task_room_renders_every_tab(client: TestClient):
+    """One page per task is only useful if it survives an item that ADO cannot return —
+    the sections that come from our own database must still render."""
+    for tab in ("overview", "conversation", "plan", "drift", "code", "preview", "audit"):
+        resp = client.get(f"/dashboard/task/4021?tab={tab}")
+        assert resp.status_code == 200, tab
+        assert "4021" in resp.text
+
+
+def test_task_preview_refuses_to_leave_the_workspace(tmp_path):
+    """The preview turns a query string into a file read. A repo is full of keys and
+    source, so escaping the workspace — or reading a non-.html file — must be refused,
+    not merely discouraged."""
+    ws = tmp_path / "ws"
+    (ws / "docs").mkdir(parents=True)
+    (ws / "docs" / "note.html").write_text("<h1>hi</h1>", encoding="utf-8")
+    (ws / "secrets.env").write_text("TOKEN=abc", encoding="utf-8")
+    (tmp_path / "outside.html").write_text("<h1>nope</h1>", encoding="utf-8")
+
+    settings = Settings(
+        dry_run=True, workspace_directory=str(ws),
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+    )
+    with TestClient(create_app(settings)) as client:
+        ok = client.get("/dashboard/task/1/preview", params={"path": "docs/note.html"})
+        assert ok.status_code == 200 and "<h1>hi</h1>" in ok.text
+        assert "frame-ancestors" in ok.headers.get("content-security-policy", "")
+
+        for bad in ("../outside.html", r"..\outside.html", "secrets.env",
+                    str(tmp_path / "outside.html")):
+            resp = client.get("/dashboard/task/1/preview", params={"path": bad})
+            assert resp.status_code == 400, bad
+            assert "nope" not in resp.text and "TOKEN" not in resp.text

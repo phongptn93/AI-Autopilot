@@ -88,7 +88,7 @@
       {% for r in rows %}
         <tr>
           <td>
-            <a href="/dashboard/activity/{{ r.work_item_id }}">#{{ r.work_item_id }}</a>
+            <a href="/dashboard/task/{{ r.work_item_id }}">#{{ r.work_item_id }}</a>
             <div class="q-title q-sub">{{ titles.get(r.work_item_id, '') }}</div>
           </td>
           <td class="n">
@@ -131,7 +131,7 @@
       {% for e in events %}
         <tr>
           <td style="white-space:nowrap;color:var(--text-dim)">{{ e.at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-          <td><a href="/dashboard/activity/{{ e.work_item_id }}">#{{ e.work_item_id }}</a></td>
+          <td><a href="/dashboard/task/{{ e.work_item_id }}">#{{ e.work_item_id }}</a></td>
           <td class="q-kind">
             {% if e.kind in rework_kinds %}<span class="pill pill-warn">{{ e.kind }}</span>
             {% else %}{{ e.kind }}{% endif %}

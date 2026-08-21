@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .tr-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:14px; }
+  .tr-title { font-size:20px; font-weight:600; }
+  .tr-meta { color:var(--text-dim); font-size:13px; margin-top:4px; }
+  .tr-stats { display:flex; gap:18px; flex-wrap:wrap; margin:12px 0 16px; }
+  .tr-stat .n { font-size:20px; font-weight:600; }
+  .tr-stat .l { color:var(--text-dim); font-size:12px; }
+  .tr-tabs { display:flex; gap:4px; border-bottom:1px solid var(--border,#23232b); margin-bottom:16px; flex-wrap:wrap; }
+  .tr-tab { padding:8px 14px; border:1px solid transparent; border-bottom:none; border-radius:8px 8px 0 0;
+            color:var(--text-dim); text-decoration:none; font-size:14px; }
+  .tr-tab.on { background:var(--bg-card); border-color:var(--border,#23232b); color:inherit; font-weight:600; }
+  .tr-tab .c { font-size:11px; opacity:.75; }
+  .tr-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  .tr-log { font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:pre-wrap;
+            max-height:520px; overflow:auto; margin:0; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid; }
+  .pill-warn { color:#fbbf24; border-color:#78350f; background:#78350f22; }
+  .pill-ok   { color:#34d399; border-color:#065f46; background:#065f4622; }
+  .pill-dim  { color:var(--text-dim); border-color:var(--border,#23232b); }
+  .tr-empty { color:var(--text-dim); padding:18px 0; }
+  /* diff */
+  .d-file { border:1px solid var(--border,#23232b); border-radius:8px; margin-bottom:14px; overflow:hidden; }
+  .d-file-h { display:flex; justify-content:space-between; gap:12px; padding:8px 12px;
+              background:#ffffff08; font-family:ui-monospace,Consolas,monospace; font-size:12px; }
+  .d-body { margin:0; overflow-x:auto; }
+  .d-row { display:grid; grid-template-columns:52px 52px 1fr; font-family:ui-monospace,Consolas,monospace;
+           font-size:12px; line-height:1.5; white-space:pre; }
+  .d-row.add { background:#065f4622; } .d-row.del { background:#7f1d1d22; }
+  .d-row.meta { background:#ffffff06; color:var(--text-dim); }
+  .d-no { color:var(--text-dim); text-align:right; padding-right:10px; user-select:none; }
+  .d-txt { padding-left:8px; }
+  .d-add { color:#34d399; } .d-del { color:#f87171; }
+  .tr-frame { width:100%; height:640px; border:1px solid var(--border,#23232b); border-radius:8px; background:#fff; }
+  .tr-list { list-style:none; padding:0; margin:0; }
+  .tr-list li { padding:8px 0; border-bottom:1px solid var(--border,#23232b); }
+  .tr-when { color:var(--text-dim); font-size:12px; }
+</style>
+
+{% set item = room.item %}
+<div class="tr-head">
+  <div>
+    <div class="tr-title">
+      {% if item_url %}<a href="{{ item_url }}" target="_blank">#{{ room.work_item_id }}</a>
+      {% else %}#{{ room.work_item_id }}{% endif %}
+      — {{ item.title if item else 'không đọc được' }}
+    </div>
+    <div class="tr-meta">
+      {% if item %}
+        {{ item.work_item_type }} · <span class="pill pill-dim">{{ item.state }}</span>
+        {% if item.project %} · {{ item.project }}{% endif %}
+        {% if item.assigned_to %} · {{ item.assigned_to }}{% endif %}
+        {% if item.tags %} · {% for t in item.tags %}<span class="pill pill-dim">{{ t }}</span> {% endfor %}{% endif %}
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if room.error %}<div class="tr-card"><span class="pill pill-warn">{{ room.error }}</span></div>{% endif %}
+
+<div class="tr-stats">
+  <div class="tr-stat"><div class="n">{{ room.runs | length }}</div><div class="l">lần chạy</div></div>
+  <div class="tr-stat"><div class="n">{{ room.prs | length }}</div><div class="l">pull request</div></div>
+  <div class="tr-stat"><div class="n">{{ room.open_drifts | length }}</div><div class="l">spec chờ cập nhật</div></div>
+  <div class="tr-stat"><div class="n">{{ room.timeline | length }}</div><div class="l">lần đổi trạng thái</div></div>
+</div>
+
+{% set tabs = [
+     ('overview', '📋 Tổng quan', room.timeline | length),
+     ('conversation', '💬 Diễn biến', room.comments | length),
+     ('plan', '🧭 Brief', 0),
+     ('drift', '📐 Spec drift', room.open_drifts | length),
+     ('code', '🔀 Code', room.prs | length),
+     ('preview', '👁️ Preview', room.artifacts | length),
+     ('audit', '🔎 Audit', room.audit | length),
+   ] %}
+<div class="tr-tabs">
+  {% for key, label, count in tabs %}
+    <a class="tr-tab {{ 'on' if tab == key else '' }}"
+       href="/dashboard/task/{{ room.work_item_id }}?tab={{ key }}">{{ label }}{% if count %} <span class="c">{{ count }}</span>{% endif %}</a>
+  {% endfor %}
+</div>
+
+{% if tab == 'overview' %}
+  <div class="tr-card">
+    <h4>Trạng thái đã đi qua</h4>
+    {% if room.timeline %}
+      <ul class="tr-list">
+        {% for row in room.timeline %}
+          <li><span class="pill pill-dim">{{ row.state }}</span>
+              <span class="tr-when">{{ row.entered_at.strftime('%d/%m %H:%M') }}</span>
+              {% if row.assigned_to %} · {{ row.assigned_to }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    {% else %}<div class="tr-empty">Chưa ghi nhận lần đổi trạng thái nào.</div>{% endif %}
+  </div>
+  <div class="tr-card">
+    <h4>Các lần chạy</h4>
+    {% if room.runs %}
+      <ul class="tr-list">
+        {% for run in room.runs %}
+          <li>
+            <span class="pill {{ 'pill-ok' if run.status.value == 'success' else 'pill-warn' }}">{{ run.status.value }}</span>
+            {{ run.skill_used }} · <span class="tr-when">{{ run.started_at.strftime('%d/%m %H:%M') }}</span>
+            {% if run.branch_name %} · <code>{{ run.branch_name }}</code>{% endif %}
+            {% if run.pr_url %} · <a href="{{ run.pr_url }}" target="_blank">PR</a>{% endif %}
+            {% if run.error %}<div class="tr-when">{{ run.error }}</div>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}<div class="tr-empty">Chưa có lần chạy nào được ghi lại.</div>{% endif %}
+  </div>
+
+{% elif tab == 'conversation' %}
+  <div class="tr-card">
+    <h4>Nhật ký agent</h4>
+    {% if room.activity_log %}<pre class="tr-log">{{ room.activity_log }}</pre>
+    {% else %}<div class="tr-empty">Không có nhật ký cho item này.</div>{% endif %}
+  </div>
+  <div class="tr-card">
+    <h4>Bình luận trên ADO</h4>
+    {% if room.comments %}
+      <ul class="tr-list">
+        {% for cmt in room.comments %}
+          <li>
+            <div class="tr-when">{{ cmt.get('createdBy', {}).get('displayName', '?') }} ·
+              {{ (cmt.get('createdDate') or '')[:16] | replace('T', ' ') }}</div>
+            <div>{{ cmt.get('text', '') | safe }}</div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}<div class="tr-empty">Chưa có bình luận, hoặc không đọc được từ ADO.</div>{% endif %}
+  </div>
+
+{% elif tab == 'plan' %}
+  <div class="tr-card">
+    <h4>Brief agent nhận được</h4>
+    <p class="tr-when">Đây là chỉ dẫn thực tế run này chạy theo — câu trả lời thành thật cho
+       “vì sao nó làm như vậy”.</p>
+    {% if room.brief %}<pre class="tr-log">{{ room.brief }}</pre>
+    {% else %}<div class="tr-empty">Không tìm thấy brief (run cũ, hoặc scratch đã được dọn).</div>{% endif %}
+  </div>
+
+{% elif tab == 'drift' %}
+  {% if room.drifts %}
+    {% for row in room.drifts %}
+      <div class="tr-card">
+        <div>{{ drift_icon(row.kind) }} <b>{{ drift_label(row.kind) }}</b>
+          {% if row.where %}<code>{{ row.where }}</code>{% endif %}
+          {% if row.resolved_at %}<span class="pill pill-ok">đã cập nhật spec</span>
+          {% else %}<span class="pill pill-warn">chờ BA</span>{% endif %}
+        </div>
+        <div>{{ row.summary }}</div>
+        {% if row.detail %}<div class="tr-when">{{ row.detail }}</div>{% endif %}
+      </div>
+    {% endfor %}
+    {% if room.open_drifts %}
+      <form method="post" action="/dashboard/specs/resolve">
+        <input type="hidden" name="work_item_id" value="{{ room.work_item_id }}">
+        <button type="submit" class="btn">✅ Đã cập nhật spec</button>
+      </form>
+    {% endif %}
+  {% else %}
+    <div class="tr-empty">Agent không báo điểm nào lệch mô tả — code khớp với item.</div>
+  {% endif %}
+
+{% elif tab == 'code' %}
+  {% if not room.prs %}
+    <div class="tr-empty">Task này chưa tạo pull request nào.</div>
+  {% endif %}
+  {% for pr in room.prs %}
+    <div class="tr-card">
+      <div class="tr-head" style="margin:0">
+        <div>
+          <b><a href="{{ pr.url }}" target="_blank">{{ pr.repo }} !{{ pr.pr_id }}</a></b>
+          {% if pr.title %} — {{ pr.title }}{% endif %}
+          <div class="tr-meta">
+            {% if pr.status %}<span class="pill pill-dim">{{ pr.status }}</span>{% endif %}
+            {% if pr.branch %} <code>{{ pr.branch }}</code>{% endif %}
+            {% if pr.diff %} · {{ pr.diff.files | length }} file
+              <span class="d-add">+{{ pr.diff.added }}</span>
+              <span class="d-del">−{{ pr.diff.removed }}</span>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% if pr.diff_error %}
+      <div class="tr-card"><span class="pill pill-warn">Không dựng được diff: {{ pr.diff_error }}</span>
+        — mở PR để xem trực tiếp.</div>
+    {% endif %}
+    {% if pr.diff %}
+      {% if pr.diff.truncated_files %}
+        <div class="tr-card"><span class="pill pill-warn">
+          Đã bỏ bớt {{ pr.diff.truncated_files }} file — xem đầy đủ trên PR.</span></div>
+      {% endif %}
+      {% for f in pr.diff.files %}
+        <div class="d-file">
+          <div class="d-file-h">
+            <span>
+              {% if f.is_renamed %}{{ f.old_path }} → {% endif %}{{ f.path }}
+              <span class="pill pill-dim">{{ f.status }}</span>
+            </span>
+            <span><span class="d-add">+{{ f.added }}</span> <span class="d-del">−{{ f.removed }}</span></span>
+          </div>
+          <div class="d-body">
+            {% for ln in f.lines %}
+              <div class="d-row {{ ln.kind }}"><span class="d-no">{{ ln.old_no or '' }}</span><span class="d-no">{{ ln.new_no or '' }}</span><span class="d-txt">{% if ln.kind == 'add' %}+{% elif ln.kind == 'del' %}-{% elif ln.kind == 'ctx' %} {% endif %}{{ ln.text }}</span></div>
+            {% endfor %}
+            {% if f.truncated %}
+              <div class="d-row meta"><span class="d-no"></span><span class="d-no"></span><span class="d-txt">… phần còn lại đã cắt bớt, xem trên PR</span></div>
+            {% endif %}
+            {% if not f.lines and f.status != 'binary' %}
+              <div class="d-row meta"><span class="d-no"></span><span class="d-no"></span><span class="d-txt">(không có thay đổi nội dung)</span></div>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endfor %}
+
+{% elif tab == 'preview' %}
+  {% if room.artifacts %}
+    <div class="tr-card">
+      <p class="tr-when">File HTML mới nhất trong workspace (mockup spec, dev brief, technical note,
+        báo cáo). Hiển thị trong khung cách ly — script trong file không chạm được dashboard.</p>
+      <form method="get" action="/dashboard/task/{{ room.work_item_id }}">
+        <input type="hidden" name="tab" value="preview">
+        <select name="path" class="btn-ghost" style="padding:6px 10px;max-width:640px">
+          {% for a in room.artifacts %}
+            <option value="{{ a.rel_path }}" {{ 'selected' if request.query_params.get('path') == a.rel_path else '' }}>{{ a.rel_path }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn-ghost">Xem</button>
+      </form>
+    </div>
+    {% set chosen = request.query_params.get('path') or room.artifacts[0].rel_path %}
+    <iframe class="tr-frame" sandbox="allow-same-origin"
+            src="/dashboard/task/{{ room.work_item_id }}/preview?path={{ chosen | urlencode }}"></iframe>
+  {% else %}
+    <div class="tr-empty">Workspace chưa có file HTML nào để xem.</div>
+  {% endif %}
+
+{% elif tab == 'audit' %}
+  <div class="tr-card">
+    {% if room.audit %}
+      <ul class="tr-list">
+        {% for ev in room.audit %}
+          <li><code>{{ ev.action }}</code> · {{ ev.actor }} ({{ ev.source }})
+            <span class="tr-when">{{ ev.at.strftime('%d/%m %H:%M') }}</span>
+            {% if ev.detail %}<div class="tr-when">{{ ev.detail }}</div>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    {% else %}<div class="tr-empty">Chưa có sự kiện audit nào cho item này.</div>{% endif %}
+  </div>
+{% endif %}
+{% endblock %}

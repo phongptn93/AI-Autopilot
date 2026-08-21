@@ -27,6 +27,7 @@
                 </div>
                 <div class="board-card-title">{{ card.title }}</div>
                 <div class="board-card-foot">
+                    <a class="board-card-act" href="/dashboard/task/{{ card.id }}">📋 task</a>
                     <a class="board-card-act" href="/dashboard/activity/{{ card.id }}">👁 activity</a>
                     {% if card.pr_urls %}
                     <span class="board-card-pr">

@@ -50,6 +50,8 @@
             <a href="{{ work_item_url(group.work_item_id) }}" target="_blank">#{{ group.work_item_id }}</a>
           {% else %}#{{ group.work_item_id }}{% endif %}
           — {{ group.title or '(không có tiêu đề)' }}
+          <a href="/dashboard/task/{{ group.work_item_id }}?tab=drift" class="pill pill-warn"
+             style="text-decoration:none">mở task</a>
         </div>
         <div class="s-meta">
           <span class="pill pill-warn">{{ group.rows | length }} điểm</span>

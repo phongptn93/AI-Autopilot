@@ -37,6 +37,7 @@ from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.pr_feedback import parse_work_item_id
 from ai_autopilot.services.spec_guard import SpecGuard
+from ai_autopilot.services.task_room import TaskRoomService
 from ai_autopilot.skills_catalog import discover_skills
 from ai_autopilot.workspace import discover_repos
 
@@ -1171,6 +1172,63 @@ def create_dashboard_router() -> APIRouter:
                 titles=titles, days=days, kind=kind,
                 kinds=sorted(totals), rework_kinds=set(QualityKind.REWORK),
             ),
+        )
+
+    @router.get("/task/{work_item_id}", response_class=HTMLResponse)
+    async def task_room(request: Request, work_item_id: int, tab: str = "overview"):
+        """One task, one page: what it is, what the agent decided, what it changed.
+
+        The diff is the expensive part (a fetch + a diff per repo), so it is gathered
+        only when its tab is being shown — otherwise every glance at a task would pay
+        for a network round trip nobody asked to see.
+        """
+        c: Container = request.app.state.container
+        room = await TaskRoomService(c).gather(work_item_id, with_diff=(tab == "code"))
+        org = (c.config.ado_organization or "").rstrip("/")
+        return _TEMPLATES.TemplateResponse(
+            request, "task_room.html",
+            _ctx(
+                request, "task", room=room, tab=tab,
+                item_url=f"{org}/_workitems/edit/{work_item_id}" if org else "",
+                drift_label=spec_drift.label_for, drift_icon=spec_drift.icon_for,
+            ),
+        )
+
+    @router.get("/task/{work_item_id}/preview")
+    async def task_preview(request: Request, work_item_id: int, path: str):
+        """Serve one HTML artifact the run produced, for the preview pane.
+
+        Two rails, because this turns a path in a query string into a file read:
+        the resolved path must stay INSIDE the workspace (``..`` and absolute paths
+        cannot escape it), and it must be a ``.html`` file — a repo is full of secrets,
+        keys and source, and "render any file" would be an exfiltration endpoint
+        wearing a feature's clothes. The page itself is then shown in a sandboxed
+        iframe, so its scripts cannot reach the dashboard session around it.
+        """
+        c: Container = request.app.state.container
+        # noqa on the path math below: these are local stats, not blocking reads, and
+        # resolving BEFORE any read is the whole point of the containment check.
+        root = Path(c.config.workspace_directory or "").resolve()  # noqa: ASYNC240
+        try:
+            target = (root / path).resolve()  # noqa: ASYNC240 — local path math
+            target.relative_to(root)                     # raises if it escaped
+        except (ValueError, OSError):
+            return PlainTextResponse("Đường dẫn không hợp lệ.", status_code=400)
+        if target.suffix.lower() != ".html" or not target.is_file():
+            return PlainTextResponse("Chỉ xem được file .html trong workspace.", status_code=400)
+        try:
+            body = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return PlainTextResponse(f"Không đọc được file: {exc}", status_code=500)
+        return HTMLResponse(
+            body,
+            headers={
+                # Belt and braces with the iframe sandbox: even if the artifact is
+                # hostile, it gets no network and no frame ancestors but ours.
+                "Content-Security-Policy":
+                    "default-src 'self' 'unsafe-inline' data:; frame-ancestors 'self'",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     @router.get("/specs", response_class=HTMLResponse)

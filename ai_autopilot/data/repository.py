@@ -170,6 +170,17 @@ class ExecutionRepository:
             await session.commit()
             return len(rows)
 
+    async def for_item(self, work_item_id: int, limit: int = 50) -> list[ExecutionRecord]:
+        """Every run of ONE work item, newest first (the task page's history tab)."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(ExecutionRecord)
+                .where(ExecutionRecord.work_item_id == work_item_id)
+                .order_by(ExecutionRecord.started_at.desc())
+                .limit(max(1, limit))
+            )
+            return list(rows.scalars().all())
+
     async def search(
         self,
         *,
@@ -469,6 +480,17 @@ class StateHistoryRepository:
                 await session.commit()
         return written
 
+    async def timeline(self, work_item_id: int, limit: int = 100) -> list[WorkItemStateHistory]:
+        """Every recorded transition of ONE item, oldest first — how it got to here."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(WorkItemStateHistory)
+                .where(WorkItemStateHistory.work_item_id == work_item_id)
+                .order_by(WorkItemStateHistory.entered_at.asc())
+                .limit(max(1, limit))
+            )
+            return list(rows.scalars().all())
+
     async def latest_states(self, ids: list[int]) -> dict[int, str]:
         """``{work_item_id: most recently recorded state}`` for ``ids``."""
         if not ids:
@@ -709,6 +731,17 @@ class AuditRepository:
         except Exception:  # noqa: BLE001 — auditing must never break the audited action
             get_logger("data.audit").warning("audit write failed", action=action)
 
+    async def for_target(self, target: str, limit: int = 50) -> list[AuditEvent]:
+        """Events about one thing (a work-item id, a PR) — newest first."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(AuditEvent)
+                .where(AuditEvent.target == str(target))
+                .order_by(AuditEvent.at.desc())
+                .limit(max(1, limit))
+            )
+            return list(rows.scalars().all())
+
     async def recent(self, limit: int = 100, action: str = "") -> list[AuditEvent]:
         """Newest-first events, optionally filtered by action prefix (e.g. "config.")."""
         async with self._db.session() as session:
@@ -912,6 +945,16 @@ class SpecDriftRepository:
                 .where(SpecDrift.resolved_at.is_(None))
                 .order_by(SpecDrift.created_at.desc())
                 .limit(limit)
+            )
+            return list(rows.scalars().all())
+
+    async def for_item(self, work_item_id: int) -> list[SpecDrift]:
+        """Every drift ever reported on one item, open or ticked off."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(SpecDrift)
+                .where(SpecDrift.work_item_id == work_item_id)
+                .order_by(SpecDrift.created_at.desc())
             )
             return list(rows.scalars().all())
 

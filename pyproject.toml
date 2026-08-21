@@ -1,6 +1,6 @@
 [project]
 name = "ai-autopilot"
-version = "2.14.0"
+version = "2.15.0"
 description = "Autonomously process Azure DevOps work items with the Claude Agent SDK"
 readme = "README.md"
 requires-python = ">=3.11"

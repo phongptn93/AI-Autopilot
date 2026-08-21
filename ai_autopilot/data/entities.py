@@ -167,6 +167,23 @@ class MergedPr(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class HeldNotification(Base):
+    """A notice raised outside the notification window, waiting for it to open.
+
+    Persisted rather than kept in memory: the whole point is that it survives the night,
+    and a restart at 03:00 must not be what makes the morning summary lie.
+    """
+
+    __tablename__ = "held_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(40), default="")     # started / completed / …
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String(500), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class SpecDrift(Base):
     """One place a run's code stopped agreeing with the work item that described it.
 

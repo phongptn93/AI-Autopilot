@@ -9,6 +9,10 @@ from ai_autopilot.scheduling import ScheduleGuard
 
 
 def _guard(**overrides) -> ScheduleGuard:
+    # Pin the zone: without it the window follows the MACHINE's timezone, so this suite
+    # would pass in CI (UTC) and fail on a laptop in UTC+7 — the very confusion the
+    # timezone setting exists to end.
+    overrides.setdefault("timezone", "UTC")
     return ScheduleGuard(Settings(**overrides))
 
 

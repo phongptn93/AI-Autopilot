@@ -1302,10 +1302,26 @@ class Settings(BaseSettings):
         default_factory=lambda: ["PM - Need Review", "Product - Review"]
     )
 
-    # ── Scheduling ──
+    # ── Scheduling & quiet hours ──
+    # IANA timezone every window below is read in, e.g. "Asia/Ho_Chi_Minh". REQUIRED for
+    # any window to apply: the system clock is usually UTC (containers, VMs), so applying
+    # "18:00" to it would silently mean 01:00 for a team in UTC+7. Blank = no windows.
+    timezone: str = ""
+    # When a run may START. Outside it the poller idles; work already running continues.
     schedule_start: str = ""
     schedule_end: str = ""
     schedule_days: str = "Mon,Tue,Wed,Thu,Fri"
+    # When we may PING a human. Deliberately separate from the schedule: a team is
+    # usually happy for the autopilot to keep working in the evening — what they do not
+    # want is a phone going off at 22:40 about something nobody can act on until
+    # morning. Notices raised outside the window are HELD (never dropped) and delivered
+    # as ONE summary when it opens. Blank = notify at any hour, as before.
+    notify_hours_start: str = ""
+    notify_hours_end: str = ""
+    notify_days: str = "Mon,Tue,Wed,Thu,Fri"
+    # Ceiling on held notices, so a quiet weekend cannot grow the table without bound.
+    # Oldest are dropped first and the summary says how many.
+    notify_quiet_max_held: int = 200
 
     # ── Board ──
     # Max cards shown per board column before a "Load more" appears (0 = no cap).

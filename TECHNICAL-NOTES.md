@@ -112,6 +112,35 @@ to *wipe* the deterministic `agent-<id>` scratch and open a virgin console. It n
 that scratch when a session reserved it, closes the old console, and launches with
 `--continue` — same worktree, same conversation, plus the new comment.
 
+### Time windows (`scheduling.py`)
+Two windows, one piece of arithmetic, deliberately separate: **schedule** (may a run
+START?) guards the poller; **notification** (may we PING a human?) guards the channels.
+Conflating them means turning off the work to turn off the noise — a team is usually
+happy for the autopilot to keep going in the evening; what they do not want is a phone
+going off at 22:40 about something nobody can act on until morning.
+
+Both used to be compared against `datetime.now(UTC)`, so a team in UTC+7 that set
+08:00–18:00 was really configuring 15:00–01:00 their own time: it ran, reported no
+error, and did close to the opposite of what it said. Windows are now read in an
+explicit `timezone`, and the two treat a MISSING one differently on purpose — the work
+window falls back to the machine's zone (what cron means by "18:00", identical to the
+old behaviour on a UTC server), because silently ceasing to apply a configured window
+would leave the autopilot running all night; the notification window stays **off**
+until a timezone is set, because guessing wrong there suppresses notifications through
+the workday and delivers them at midnight, which is exactly what it was turned on to
+prevent.
+
+Outside the notification window a notice is **held, never dropped** — persisted, so it
+survives a restart at 03:00 — and the queue is delivered as ONE summary when the window
+opens, because forty pings at 08:00 is the same wall of noise, just later. The queue is
+capped and what had to be dropped is reported. Three details keep it honest: the gate
+sits in `AdoNotifier._broadcast`, the single point every notice passes through (a rule
+applied at seven call sites is a rule that will be missed at the eighth); **ADO comments
+are not gated**, because a comment is the record on the item, not an interruption, and a
+record with holes in it overnight is worse than a late ping; and if the queue itself
+fails, the notice is SENT rather than swallowed — losing it entirely is worse than an
+out-of-hours ping.
+
 ### Task room (`/dashboard/task/<id>`, `task_room.py` + `diffs.py`)
 Answering "what happened with #4021?" used to mean opening six places — the board for its
 state, Activity for what the agent did, History for its runs, ADO for the comments, the

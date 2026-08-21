@@ -16,6 +16,7 @@ from ai_autopilot.notifications.base import (
     NotificationMessage,
     NotificationType,
 )
+from ai_autopilot.scheduling import QuietHours, render_held_summary
 
 
 def _mmss(seconds: float) -> str:
@@ -27,12 +28,18 @@ def _mmss(seconds: float) -> str:
 
 class AdoNotifier:
     def __init__(
-        self, ado: AdoClient, config: Settings, channels: list[NotificationChannel]
+        self, ado: AdoClient, config: Settings, channels: list[NotificationChannel],
+        hold_repo: object | None = None,
     ) -> None:
         self._ado = ado
         self._config = config
         self._channels = channels
         self._log = get_logger("ado.notifier")
+        self._quiet = QuietHours(config)
+        self._hold_repo = hold_repo
+        # Set at startup so the FIRST in-hours broadcast checks the queue: a restart
+        # loses the in-memory flag, and notices held before it must still get out.
+        self._maybe_held = True
 
     async def notify_started(
         self, item: WorkItemInfo, skill: str, *, post_comment: bool = True
@@ -137,6 +144,22 @@ class AdoNotifier:
         ))
 
     async def _broadcast(self, message: NotificationMessage) -> None:
+        """Send to every enabled channel — unless we are outside notification hours.
+
+        This is the ONE place every notice passes through, which is why the quiet window
+        is enforced here rather than at each caller: a rule applied at seven call sites
+        is a rule that will be missed at the eighth.
+
+        ADO comments are deliberately NOT gated (they are written by the callers above,
+        before this): a comment is the record on the work item, not an interruption, and
+        a record with holes in it overnight would be worse than a late ping.
+        """
+        if await self._hold_if_quiet(message):
+            return
+        await self._flush_held()
+        await self._send_now(message)
+
+    async def _send_now(self, message: NotificationMessage) -> None:
         for channel in self._channels:
             if not channel.is_enabled:
                 continue
@@ -144,3 +167,51 @@ class AdoNotifier:
                 await channel.send(message)
             except Exception as exc:  # noqa: BLE001
                 self._log.warning("notification failed", channel=channel.name, error=str(exc))
+
+    async def _hold_if_quiet(self, message: NotificationMessage) -> bool:
+        """Queue the notice if it is outside hours. Returns True when it was held."""
+        if self._hold_repo is None or not self._quiet.is_quiet():
+            return False
+        try:
+            dropped = await self._hold_repo.hold(
+                kind=message.type.value, title=message.title, body=message.summary,
+                work_item_id=getattr(message.work_item, "id", 0) or 0,
+                cap=self._config.notify_quiet_max_held,
+            )
+        except Exception as exc:  # noqa: BLE001 — a queue failure must not lose the notice
+            self._log.warning("could not hold notification — sending", error=str(exc))
+            return False
+        self._maybe_held = True
+        self._log.info(
+            "notification held — outside notify hours",
+            title=message.title, dropped=dropped,
+        )
+        return True
+
+    async def flush_quiet(self) -> int:
+        """Deliver anything held, if the window is open now. Returns how many were held.
+
+        Called on the poller's tick as well as before every live broadcast: without a
+        tick, a quiet night with nothing happening in the morning would keep yesterday's
+        notices queued until the next event, which may be hours away.
+        """
+        return await self._flush_held()
+
+    async def _flush_held(self) -> int:
+        if self._hold_repo is None or not self._maybe_held or self._quiet.is_quiet():
+            return 0
+        try:
+            held = await self._hold_repo.drain()
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("could not read held notifications", error=str(exc))
+            return 0
+        self._maybe_held = False
+        if not held:
+            return 0
+        heading, body = render_held_summary(held)
+        self._log.info("delivering held notifications", count=len(held))
+        await self._send_now(NotificationMessage(
+            work_item=WorkItemInfo(id=0), type=NotificationType.INFO,
+            heading=heading, text=body,
+        ))
+        return len(held)

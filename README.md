@@ -175,6 +175,10 @@ Most‑used keys:
 | `interactive_close_on` | `pr_closed` | When an interactive console is closed: `pr_closed` (keep it + its worktree while the PR is open, close on merge/abandon), `result`, or `never` |
 | `interactive_resume_on_rework` | `true` | PR feedback runs in that session's own worktree and **resumes its conversation** instead of a fresh worktree + fresh read |
 | — | — | **Task room** at `/dashboard/task/<id>`: one page per work item — timeline, runs, agent log, the brief it ran on, spec drift, PR **diffs** and HTML preview |
+| `timezone` | — | IANA zone every time window is read in, e.g. `Asia/Ho_Chi_Minh`. **Required** for quiet hours; the work window falls back to the machine's zone |
+| `notify_hours_start` / `notify_hours_end` | — | When the autopilot may PING a human. Outside it, notices are **held** and delivered as one summary when the window opens |
+| `notify_days` | `Mon…Fri` | Days the notification window applies |
+| `notify_quiet_max_held` | `200` | Ceiling on held notices; oldest dropped first, the summary says how many |
 | `spec_drift_enabled` | `true` | Agent reports what it had to decide that the item never settled; the autopilot files it as a **⚠️ SPEC-DRIFT** comment + tag + a row on `/dashboard/specs` |
 | `spec_drift_tag` | `spec-update-needed` | Tag applied until a human marks the spec updated |
 | `spec_drift_holds_item` | `false` | Hold the item for a human instead of letting it advance while the spec is stale |

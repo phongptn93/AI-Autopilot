@@ -19,13 +19,14 @@ from ai_autopilot.data import (
     ClaudeSessionRepository,
     Database,
     ExecutionRepository,
+    NotificationHoldRepository,
     PlannedRunRepository,
     PrCommandRepository,
-    SpecDriftRepository,
     PrReviewerRepository,
     QualityRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
+    SpecDriftRepository,
     StateHistoryRepository,
     StateRepository,
     SyncStateRepository,
@@ -99,7 +100,10 @@ class Container:
             ZaloNotifier(config, self.http),
             EmailNotifier(config),
         ]
-        self.notifier = AdoNotifier(self.ado, config, self.channels)
+        self.notification_hold_repo = NotificationHoldRepository(self.database)
+        self.notifier = AdoNotifier(
+            self.ado, config, self.channels, self.notification_hold_repo
+        )
 
         # Execution.
         self.reviewer = AutoReviewer(config)

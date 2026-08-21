@@ -210,6 +210,12 @@ class AdoPollerService:
         with contextlib.suppress(Exception):
             await run_due_plans(c)
 
+        # Anything held overnight goes out as soon as the notification window opens —
+        # BEFORE the schedule check, or a team whose work window opens later would get
+        # yesterday's summary hours late (or not at all on a day with no new work).
+        with contextlib.suppress(Exception):
+            await c.notifier.flush_quiet()
+
         if not c.schedule.is_within_window():
             self._log.debug("outside schedule window — skipping")
             return

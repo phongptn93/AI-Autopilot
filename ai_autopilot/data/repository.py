@@ -17,6 +17,7 @@ from ai_autopilot.data.entities import (
     ExecutionRecord,
     ExecutionStatus,
     HandledPrComment,
+    HeldNotification,
     MergedPr,
     PipelineState,
     PlannedRun,
@@ -907,6 +908,77 @@ class AiConflictRepository:
                 edges.setdefault(row.a_id, set()).add(row.b_id)
                 edges.setdefault(row.b_id, set()).add(row.a_id)
         return edges
+
+
+class NotificationHoldRepository:
+    """Notices waiting for the notification window to open.
+
+    Deliberately a queue, not a log: it is drained when the window opens and stays
+    empty the rest of the time.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def hold(
+        self, kind: str, title: str, body: str, work_item_id: int = 0, *, cap: int = 200
+    ) -> int:
+        """Queue one notice; returns how many older ones had to be dropped.
+
+        Dropping oldest-first (rather than refusing the newest) keeps the summary
+        useful: after a long weekend the recent notices are the ones somebody will act
+        on, and the count of what was dropped is reported rather than hidden.
+        """
+        async with self._db.session() as session:
+            session.add(HeldNotification(
+                kind=kind or "", title=(title or "")[:500], body=body or "",
+                work_item_id=work_item_id, at=datetime.now(UTC),
+            ))
+            await session.commit()
+            total = int((await session.execute(
+                select(func.count()).select_from(HeldNotification)
+            )).scalar() or 0)
+            if total <= cap:
+                return 0
+            excess = total - cap
+            old = (await session.execute(
+                select(HeldNotification.id).order_by(HeldNotification.id.asc()).limit(excess)
+            )).scalars().all()
+            await session.execute(
+                delete(HeldNotification).where(HeldNotification.id.in_(list(old)))
+            )
+            await session.commit()
+            return excess
+
+    async def pending(self) -> list[HeldNotification]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(HeldNotification).order_by(HeldNotification.at.asc())
+            )
+            return list(rows.scalars().all())
+
+    async def count(self) -> int:
+        async with self._db.session() as session:
+            return int((await session.execute(
+                select(func.count()).select_from(HeldNotification)
+            )).scalar() or 0)
+
+    async def drain(self) -> list[HeldNotification]:
+        """Take everything held and clear the queue in ONE transaction.
+
+        Read-then-delete separately would re-send the batch if the process died between
+        the two — the summary is a notification, and a duplicate wall of them at 08:00
+        is the noise this feature exists to prevent.
+        """
+        async with self._db.session() as session:
+            rows = list((await session.execute(
+                select(HeldNotification).order_by(HeldNotification.at.asc())
+            )).scalars().all())
+            if rows:
+                session.expunge_all()
+                await session.execute(delete(HeldNotification))
+                await session.commit()
+            return rows
 
 
 class SpecDriftRepository:

@@ -20,7 +20,7 @@ import yaml
 class Field:
     key: str
     label: str
-    kind: str  # text | password | int | bool | select | list | stateset | stateone | map
+    kind: str  # text | password | int | float | bool | select | list | stateset | stateone | map
     section: str
     help: str = ""
     options: tuple[str, ...] = field(default_factory=tuple)
@@ -190,6 +190,18 @@ FIELDS: tuple[Field, ...] = (
           "interactive = launch a Remote-Control Claude session per task you can /rc into and steer; "
           "headless = autonomous SDK run (no human attach).",
           ("interactive", "headless")),
+    Field("interactive_close_on", "↳ Close the console when", "select", "Execution & Autonomy",
+          "The CLI is a REPL: it writes its result and then sits idle forever, so nothing "
+          "closes the window on its own. pr_closed = keep it (and its scratch worktree) alive "
+          "while the PR is open, so review feedback is worked in the SAME session, then close "
+          "on merge/abandon. result = close as soon as the task finishes. never = leave every "
+          "console open (they pile up).",
+          ("pr_closed", "result", "never")),
+    Field("interactive_resume_on_rework", "↳ Resume the session on rework", "bool",
+          "Execution & Autonomy",
+          "PR feedback runs in that session's own worktree and RESUMES its conversation, "
+          "instead of a fresh worktree and a fresh read of the codebase. Claude Code keys "
+          "transcripts by folder, so running anywhere else throws the context away."),
     Field("autonomy_level", "Autonomy level", "select", "Execution & Autonomy",
           "report = comment only, assisted = draft PR, unattended = auto PR.",
           ("report", "assisted", "unattended")),
@@ -397,6 +409,69 @@ FIELDS: tuple[Field, ...] = (
     Field("planning_start_state", "Start → state", "stateone", "Planning workbench",
           "State the Start action moves an item to (so the poller picks it up) if it isn't "
           "already in a trigger state. Blank = the first trigger state."),
+    # ── Working hours & quiet time ──
+    Field("timezone", "Timezone", "text", "Working hours & quiet time",
+          "IANA zone every time window below is read in, e.g. Asia/Ho_Chi_Minh. REQUIRED for "
+          "quiet hours (they stay off without it). Do not rely on the machine clock: a server "
+          "or container usually runs as UTC, so '18:00' there is 01:00 for a team in UTC+7."),
+    Field("schedule_start", "Work window — from", "text", "Working hours & quiet time",
+          "HH:MM. When a run may START. Outside it the poller idles; work already running "
+          "continues. Blank = no window (run at any hour)."),
+    Field("schedule_end", "Work window — to", "text", "Working hours & quiet time",
+          "HH:MM. An end EARLIER than the start reads as an overnight window (22:00–06:00)."),
+    Field("schedule_days", "Work window — days", "text", "Working hours & quiet time",
+          "e.g. Mon,Tue,Wed,Thu,Fri. Blank = every day."),
+    Field("notify_hours_start", "Notify window — from", "text", "Working hours & quiet time",
+          "HH:MM. When a human may be PINGED. Deliberately separate from the work window: a "
+          "team is usually happy for the autopilot to keep working in the evening — what they "
+          "do not want is a phone going off at 22:40 about something nobody can act on until "
+          "morning. Blank = notify at any hour."),
+    Field("notify_hours_end", "Notify window — to", "text", "Working hours & quiet time",
+          "HH:MM. Notices raised outside the window are HELD (never dropped) and delivered as "
+          "ONE summary when it opens. ADO comments are never held — a comment is the record on "
+          "the work item, not an interruption."),
+    Field("notify_days", "Notify window — days", "text", "Working hours & quiet time",
+          "e.g. Mon,Tue,Wed,Thu,Fri. Blank = every day."),
+    Field("notify_quiet_max_held", "↳ Max held notices", "int", "Working hours & quiet time",
+          "Ceiling on the held queue so a quiet weekend cannot grow it without bound. Oldest "
+          "are dropped first and the summary says how many."),
+
+    # ── Spec drift & PR traceability ──
+    Field("spec_drift_enabled", "Report spec drift", "bool", "Spec drift & PR traceability",
+          "The agent is told to DECIDE rather than ask, so every ambiguity it resolves is a "
+          "decision taken on the team's behalf that the work item does not reflect. When on, "
+          "those are filed as a ⚠️ SPEC-DRIFT comment, a tag, a PR comment, and a row on "
+          "/dashboard/specs a BA ticks off."),
+    Field("spec_drift_tag", "↳ Tag until the spec is updated", "text",
+          "Spec drift & PR traceability",
+          "Applied to the item until a human marks the specification back in line."),
+    Field("spec_drift_holds_item", "↳ Hold the item for a human", "bool",
+          "Spec drift & PR traceability",
+          "Off by default: a drift is documentation debt, not a reason to stop delivery. Turn "
+          "on to stop the item advancing while its spec is stale."),
+    Field("pr_require_work_item_link", "Every PR must name its work item", "bool",
+          "Spec drift & PR traceability",
+          "Verified against ADO after the fact, and attached when missing. An instruction in "
+          "the brief is advice a model can drop on a long run — and when it does, nothing "
+          "notices."),
+
+    # ── Process health ──
+    Field("process_health_enabled", "Process-health digest", "bool", "Process health",
+          "Computes the standing reviews a process doc assigns — share of capacity that went "
+          "to unplanned work, escaped defects per module, stuck items, tag rot — and pushes "
+          "the findings to the notification channels. Read-only: it reports, never edits."),
+    Field("process_health_interval_hours", "↳ Every (hours)", "int", "Process health",
+          "168 = weekly. 0 = compute on demand only."),
+    Field("process_health_window_days", "↳ Window (days)", "int", "Process health",
+          "How far back each run measures. 14 = one sprint."),
+    Field("process_health_blocked_days", "↳ Blocked longer than (days)", "int",
+          "Process health",
+          "Items flagged Blocked and untouched this long become the follow-up list."),
+    Field("process_health_adhoc_threshold_pct", "↳ Ad-hoc alert threshold (%)", "float",
+          "Process health",
+          "Flag when unplanned work exceeds this share. Ignored on small samples — one ad-hoc "
+          "ticket in a quiet week is 100% and says nothing."),
+
     # ── Notifications ──
     # Neither `teams_webhook_url` nor `teams_webhook_urls` is a Field. Both are edited as
     # rows of the "📣 Teams channels" card, which renders INSIDE this section — one list, in
@@ -627,6 +702,11 @@ def parse_form(form: Mapping[str, Any]) -> dict[str, Any]:
             if value:
                 with contextlib.suppress(ValueError):
                     updates[f.key] = int(value)
+        elif f.kind == "float":
+            value = str(form.get(f.key, "")).strip()
+            if value:
+                with contextlib.suppress(ValueError):
+                    updates[f.key] = float(value)
         elif f.kind == "list":
             raw = str(form.get(f.key, ""))
             updates[f.key] = [x.strip() for x in re.split(r"[,\n]", raw) if x.strip()]

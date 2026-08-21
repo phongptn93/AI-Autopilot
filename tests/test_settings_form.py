@@ -289,3 +289,61 @@ def test_the_old_bare_url_list_is_no_longer_a_form_field():
     legacy multi-channel setup the first time anyone saved the page."""
     assert "teams_webhook_urls" not in {f.key for f in settings_form.FIELDS}
     assert "teams_webhook_urls" not in settings_form.parse_form({})
+
+
+def test_every_form_field_exists_on_settings():
+    """A control that saves to a key `Settings` does not have is a control that does
+    nothing — and the page gives no sign of it. This is the check that catches the typo,
+    and the reason the whole session's new settings were reachable only by hand-editing
+    YAML until they were added here."""
+    unknown = sorted(
+        f.key for f in settings_form.FIELDS
+        if f.key not in Settings.model_fields and f.key != "dashboard_auth_password"
+    )
+    assert unknown == []          # dashboard_auth_password is hashed into *_hash on save
+
+
+def test_time_windows_and_guards_are_editable_in_the_ui():
+    """These decide when the autopilot may work and when it may interrupt someone. If
+    they are not on the page, the only way to set them is to edit YAML on the server."""
+    keys = {f.key for f in settings_form.FIELDS}
+    for key in (
+        "timezone", "schedule_start", "schedule_end", "schedule_days",
+        "notify_hours_start", "notify_hours_end", "notify_days", "notify_quiet_max_held",
+        "spec_drift_enabled", "spec_drift_tag", "pr_require_work_item_link",
+        "process_health_enabled", "interactive_close_on", "interactive_resume_on_rework",
+    ):
+        assert key in keys, key
+
+
+def test_parse_form_round_trips_a_quiet_hours_setup():
+    updates = settings_form.parse_form({
+        "timezone": " Asia/Ho_Chi_Minh ",
+        "notify_hours_start": "08:00",
+        "notify_hours_end": "18:00",
+        "notify_days": "Mon,Tue,Wed,Thu,Fri",
+        "notify_quiet_max_held": "150",
+        "process_health_adhoc_threshold_pct": "27.5",
+        "interactive_close_on": "pr_closed",
+        "spec_drift_enabled": "on",          # checkbox present
+        # pr_require_work_item_link absent → unchecked → False
+    })
+    cfg = Settings(**{k: v for k, v in updates.items() if k in Settings.model_fields})
+    assert cfg.timezone == "Asia/Ho_Chi_Minh"          # trimmed
+    assert cfg.notify_quiet_max_held == 150
+    assert cfg.process_health_adhoc_threshold_pct == 27.5   # float kind, not truncated
+    assert cfg.spec_drift_enabled is True
+    assert cfg.pr_require_work_item_link is False
+
+    from ai_autopilot.scheduling import QuietHours
+    assert QuietHours(cfg).enabled is True
+
+
+def test_float_field_ignores_a_blank_or_broken_value():
+    """Blank must keep the existing value rather than send "" to a float field."""
+    assert "process_health_adhoc_threshold_pct" not in settings_form.parse_form(
+        {"process_health_adhoc_threshold_pct": "  "}
+    )
+    assert "process_health_adhoc_threshold_pct" not in settings_form.parse_form(
+        {"process_health_adhoc_threshold_pct": "thirty"}
+    )

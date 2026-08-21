@@ -316,6 +316,8 @@
                    placeholder="{{ '•••••• set — leave blank to keep' if secrets_set.get(f.key) else 'not set' }}" autocomplete="off" />
           {% elif f.kind == 'int' %}
             <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
+          {% elif f.kind == 'float' %}
+            <input type="number" step="any" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
           {% elif f.kind == 'list' %}
             <textarea id="{{ f.key }}" name="{{ f.key }}" rows="2">{{ (current.get(f.key) or [])|join(', ') }}</textarea>
           {% elif f.kind == 'map' %}

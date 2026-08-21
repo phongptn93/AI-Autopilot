@@ -10,6 +10,7 @@ import contextlib
 from pathlib import Path
 
 import pytest
+import yaml
 from starlette.testclient import TestClient
 
 from ai_autopilot import dashboard
@@ -1138,3 +1139,39 @@ def test_task_preview_refuses_to_leave_the_workspace(tmp_path):
             resp = client.get("/dashboard/task/1/preview", params={"path": bad})
             assert resp.status_code == 400, bad
             assert "nope" not in resp.text and "TOKEN" not in resp.text
+
+
+def test_settings_page_shows_the_time_windows_and_saves_them(tmp_path, monkeypatch):
+    """End to end through the real page: the window settings must be visible AND
+    persistable from the UI — until they were added to the form, the only way to set
+    them was to edit YAML on the server."""
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings")
+        assert page.status_code == 200
+        for label in ("Timezone", "Notify window", "Work window", "Process-health digest"):
+            assert label in page.text, label
+
+        resp = client.post(
+            "/dashboard/settings",
+            data={
+                "timezone": "Asia/Ho_Chi_Minh",
+                "notify_hours_start": "08:00",
+                "notify_hours_end": "18:00",
+                "notify_days": "Mon,Tue,Wed,Thu,Fri",
+                "workspace_directory": "/ws",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code in (200, 303)
+
+    saved = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+    assert saved["timezone"] == "Asia/Ho_Chi_Minh"
+    assert saved["notify_hours_start"] == "08:00"
+    # And it actually takes effect, rather than merely being stored.
+    from ai_autopilot.scheduling import QuietHours
+    assert QuietHours(Settings(**{
+        k: v for k, v in saved.items() if k in Settings.model_fields
+    })).enabled is True

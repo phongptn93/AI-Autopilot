@@ -174,6 +174,10 @@ Most‑used keys:
 | `execution_mode` | `interactive` | `interactive` (steerable session) or `headless` |
 | `interactive_close_on` | `pr_closed` | When an interactive console is closed: `pr_closed` (keep it + its worktree while the PR is open, close on merge/abandon), `result`, or `never` |
 | `interactive_resume_on_rework` | `true` | PR feedback runs in that session's own worktree and **resumes its conversation** instead of a fresh worktree + fresh read |
+| `spec_drift_enabled` | `true` | Agent reports what it had to decide that the item never settled; the autopilot files it as a **⚠️ SPEC-DRIFT** comment + tag + a row on `/dashboard/specs` |
+| `spec_drift_tag` | `spec-update-needed` | Tag applied until a human marks the spec updated |
+| `spec_drift_holds_item` | `false` | Hold the item for a human instead of letting it advance while the spec is stale |
+| `pr_require_work_item_link` | `true` | Verify every PR names its work item — and attach the link when it does not |
 | `process_health_enabled` | `false` | Periodic **process-health digest**: ad-hoc ratio, escaped defects per module, stuck items, tag rot. Read-only — it reports, never edits |
 | `process_health_interval_hours` | `168` | How often the digest runs (0 = on demand only) |
 | `process_health_window_days` | `14` | Window it measures (one sprint) |

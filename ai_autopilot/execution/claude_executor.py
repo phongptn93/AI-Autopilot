@@ -1269,10 +1269,12 @@ class ClaudeExecutor:
             result = ExecutionResult.fail(item.id, "agent", agent.reason or "needs human input")
             result.needs_human = True
             result.output = agent.summary
+            result.deviations = list(agent.deviations)
             return result
         # report mode completes without a PR; otherwise a PR URL is required.
         if agent.is_completed and (agent.pr_url or autonomy == "report"):
             result = ExecutionResult.ok(item.id, "agent", agent.summary)
+            result.deviations = list(agent.deviations)
             result.pr_urls = [a.pr_url for a in agent.artifacts if a.pr_url]
             result.pr_url = result.pr_urls[0] if result.pr_urls else None
             if agent.artifacts:
@@ -1393,6 +1395,9 @@ class ClaudeExecutor:
             "(no `head`/`grep`/`find`/`printenv`), so don't retry the same command across shells.",
             "- For EACH repo you change: start from a clean base branch, create a feature branch, "
             "commit, push, and open a pull request with the pr-create skill.",
+            f"- The PR MUST be linked to work item #{item.id} (the pr-create skill does this; "
+            "branch names starting with the item id let ADO do it too). The control plane "
+            "verifies the link afterwards and attaches it if it is missing.",
             f"- {action}",
             "- Run a self-review (e.g. security-review / review-pr skill) before opening the PR.",
             ambiguity,
@@ -1407,10 +1412,30 @@ class ClaudeExecutor:
             "loses the whole run.",
             '  {"status":"completed|failed|needs_human","summary":"<what you did>",',
             '   "artifacts":[{"repo":"<name>","branch":"<branch>","pr_url":"<url>"}],',
-            '   "needs_human":false,"reason":"<why, if failed/needs_human>"}',
+            '   "needs_human":false,"reason":"<why, if failed/needs_human>",',
+            '   "deviations":[{"kind":"spec_unclear|logic_differs|spec_gap|out_of_scope|assumption",',
+            '                  "summary":"<one line: what differs from the item>",',
+            '                  "detail":"<why you chose this>","where":"<AC id / file / endpoint>"}]}',
             "List EVERY PR you opened in artifacts. Set status=completed only if at least one PR "
             "was opened (or, in report mode, the plan was commented). Use needs_human=true with a "
             "clear reason when you need a human.",
+            "",
+            "## deviations — REQUIRED whenever you decided something the item did not settle",
+            "You were told above to decide instead of asking. Every such decision is a place "
+            "where the work item and the code you just wrote no longer say the same thing, and "
+            "the person who keeps the specification true has no other way to find out. Record "
+            "one entry for EACH of these:",
+            "- the description or AC was unclear and you picked an interpretation (`spec_unclear`)",
+            "- you deliberately implemented something differently from what was described, "
+            "because the description was wrong, impossible, or inconsistent with the code "
+            "(`logic_differs`)",
+            "- you hit a case the item never covers and had to define the behaviour (`spec_gap`)",
+            "- you found a real problem this item does not cover and left it alone (`out_of_scope`)",
+            "- you proceeded on an assumption a human should confirm (`assumption`)",
+            "Write what a BA needs to update the spec: the specific rule/field/case, not "
+            "\"clarified requirements\". Leave the list EMPTY when the item described the work "
+            "exactly and you followed it — do not invent entries, and do not use this for "
+            "ordinary implementation detail (naming, file layout, refactors).",
         ]
         return "\n".join(lines)
 

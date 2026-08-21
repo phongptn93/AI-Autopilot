@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .s-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
+  .s-tile { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px; padding:14px 16px; }
+  .s-tile .n { font-size:26px; font-weight:600; line-height:1.1; }
+  .s-tile .l { color:var(--text-dim); font-size:12px; margin-top:4px; }
+  .s-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px;
+            padding:14px 16px; margin-bottom:12px; }
+  .s-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+  .s-title { font-weight:600; }
+  .s-meta { color:var(--text-dim); font-size:12px; margin-top:2px; }
+  .s-list { margin:10px 0 0; padding-left:18px; }
+  .s-list li { margin-bottom:8px; }
+  .s-where { font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--text-dim); }
+  .s-detail { color:var(--text-dim); font-size:13px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid; }
+  .pill-warn { color:#fbbf24; border-color:#78350f; background:#78350f22; }
+  .pill-ok   { color:#34d399; border-color:#065f46; background:#065f4622; }
+  .s-empty { color:var(--text-dim); padding:24px 0; }
+  .s-done { width:100%; border-collapse:collapse; font-size:13px; }
+  .s-done th, .s-done td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border,#23232b); }
+</style>
+
+<div class="page-header">
+  <h2>📐 Spec drift — chỗ code không khớp mô tả</h2>
+  <p>Agent được yêu cầu tự quyết thay vì hỏi, nên mỗi mục dưới đây là một quyết định nó
+     đưa ra thay cho team — và là một chỗ spec hiện <b>không</b> phản ánh đúng code.
+     BA cập nhật mô tả/AC cho khớp rồi bấm <b>Đã cập nhật spec</b>.</p>
+</div>
+
+<div class="s-tiles">
+  <div class="s-tile"><div class="n">{{ open_items | length }}</div><div class="l">Work item chờ cập nhật spec</div></div>
+  <div class="s-tile"><div class="n">{{ open_count }}</div><div class="l">Điểm chênh lệch đang mở</div></div>
+  {% for kind, n in kind_totals %}
+    <div class="s-tile"><div class="n">{{ n }}</div><div class="l">{{ icon(kind) }} {{ label(kind) }}</div></div>
+  {% endfor %}
+</div>
+
+{% if not open_items %}
+  <div class="s-empty">Không có điểm chênh lệch nào đang mở — spec đang khớp với code. 🎉</div>
+{% endif %}
+
+{% for group in open_items %}
+  <div class="s-card">
+    <div class="s-head">
+      <div>
+        <div class="s-title">
+          {% if work_item_url %}
+            <a href="{{ work_item_url(group.work_item_id) }}" target="_blank">#{{ group.work_item_id }}</a>
+          {% else %}#{{ group.work_item_id }}{% endif %}
+          — {{ group.title or '(không có tiêu đề)' }}
+        </div>
+        <div class="s-meta">
+          <span class="pill pill-warn">{{ group.rows | length }} điểm</span>
+          {% if group.project %} · {{ group.project }}{% endif %}
+          {% if group.pr_url %} · <a href="{{ group.pr_url }}" target="_blank">PR</a>{% endif %}
+          · báo lúc {{ group.created_at.strftime('%d/%m %H:%M') }}
+        </div>
+      </div>
+      <form method="post" action="/dashboard/specs/resolve">
+        <input type="hidden" name="work_item_id" value="{{ group.work_item_id }}">
+        <button type="submit" class="btn">✅ Đã cập nhật spec</button>
+      </form>
+    </div>
+    <ul class="s-list">
+      {% for row in group.rows %}
+        <li>
+          {{ icon(row.kind) }} <b>{{ label(row.kind) }}</b>
+          {% if row.where %}<span class="s-where">{{ row.where }}</span>{% endif %}
+          <div>{{ row.summary }}</div>
+          {% if row.detail %}<div class="s-detail">{{ row.detail }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endfor %}
+
+{% if resolved %}
+  <h3 style="margin-top:26px">Đã xử lý gần đây</h3>
+  <table class="s-done">
+    <thead><tr><th>Work item</th><th>Điểm</th><th>Người xác nhận</th><th>Lúc</th></tr></thead>
+    <tbody>
+      {% for group in resolved %}
+        <tr>
+          <td>#{{ group.work_item_id }} — {{ group.title }}</td>
+          <td><span class="pill pill-ok">{{ group.rows | length }}</span></td>
+          <td>{{ group.resolved_by or '—' }}</td>
+          <td>{{ group.resolved_at.strftime('%d/%m %H:%M') if group.resolved_at else '—' }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+{% endblock %}

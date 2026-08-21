@@ -706,6 +706,74 @@ class AdoClient:
             return []
         return resp.json().get("value") or []
 
+    async def get_pull_request(self, repo_id: str, pr_id: int, project: str = "") -> dict | None:
+        resp = await self._send(
+            "GET",
+            self._git_url(f"git/repositories/{repo_id}/pullrequests/{pr_id}?{_API}", project),
+            headers=await self._auth.get_auth_header(),
+        )
+        if resp.status_code >= 400:
+            self._log.warning("get_pull_request failed", pr=pr_id, status=resp.status_code)
+            return None
+        return resp.json()
+
+    async def get_pull_request_work_items(
+        self, repo_id: str, pr_id: int, project: str = ""
+    ) -> list[int]:
+        """Ids of the work items linked to a PR (empty when none, or on error)."""
+        resp = await self._send(
+            "GET",
+            self._git_url(
+                f"git/repositories/{repo_id}/pullrequests/{pr_id}/workitems?{_API}", project
+            ),
+            headers=await self._auth.get_auth_header(),
+        )
+        if resp.status_code >= 400:
+            self._log.warning(
+                "get_pull_request_work_items failed", pr=pr_id, status=resp.status_code
+            )
+            return []
+        return [
+            int(w["id"]) for w in (resp.json().get("value") or [])
+            if str(w.get("id", "")).isdigit()
+        ]
+
+    async def link_work_item_to_pr(
+        self, work_item_id: int, project_guid: str, repo_guid: str, pr_id: int, pr_url: str = ""
+    ) -> bool:
+        """Attach a pull request to a work item as an ``ArtifactLink``.
+
+        This is the ONLY way the link exists: ADO stores it on the work item, not on the
+        PR, so a PR opened without it shows "no work item" forever and the traceability
+        the process depends on — which ticket shipped this change — is simply absent.
+        The artifact URI wants the GUIDs, URL-encoded, in the order project/repo/pr.
+        """
+        artifact = (
+            f"vstfs:///Git/PullRequestId/{project_guid}%2F{repo_guid}%2F{pr_id}"
+        )
+        patch = [{
+            "op": "add", "path": "/relations/-",
+            "value": {
+                "rel": "ArtifactLink", "url": artifact,
+                "attributes": {"name": "Pull Request"},
+            },
+        }]
+        resp = await self._patch(work_item_id, patch)
+        if resp.status_code >= 400:
+            body = _terse(resp.text)
+            # A link that is already there comes back 400 with this message; that is the
+            # desired end state, not a failure — reporting it as one would make the
+            # caller retry (and comment) on every poll.
+            if "RelationAlreadyExists" in body or "already exists" in body.lower():
+                return True
+            self._log.warning(
+                "link_work_item_to_pr failed", id=work_item_id, pr=pr_id,
+                status=resp.status_code, detail=body,
+            )
+            return False
+        self._log.info("linked PR to work item", id=work_item_id, pr=pr_id, url=pr_url)
+        return True
+
     async def get_successful_builds(
         self, definition_id: int, branch: str
     ) -> list[dict[str, Any]]:

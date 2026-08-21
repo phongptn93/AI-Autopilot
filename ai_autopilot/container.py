@@ -21,6 +21,7 @@ from ai_autopilot.data import (
     ExecutionRepository,
     PlannedRunRepository,
     PrCommandRepository,
+    SpecDriftRepository,
     PrReviewerRepository,
     QualityRepository,
     SchedulerHistoryRepository,
@@ -76,6 +77,7 @@ class Container:
         self.ai_conflict_repo = AiConflictRepository(self.database)
         self.scheduler_history_repo = SchedulerHistoryRepository(self.database)
         self.pr_command_repo = PrCommandRepository(self.database)
+        self.spec_drift_repo = SpecDriftRepository(self.database)
         self.pr_reviewer_repo = PrReviewerRepository(self.database)
         self.claude_session_repo = ClaudeSessionRepository(self.database)
         self.audit_repo = AuditRepository(self.database)

@@ -1261,6 +1261,22 @@ class Settings(BaseSettings):
     # if it isn't already in a trigger state. Blank → the first trigger_states entry.
     planning_start_state: str = ""
 
+    # ── Spec drift & PR traceability ──
+    # The agent is told to DECIDE rather than ask, so every ambiguity it resolves is a
+    # decision taken on the team's behalf that the written item does not reflect. When
+    # on, the run reports those decisions and the control plane files them: a prefixed
+    # comment (⚠️ SPEC-DRIFT — stable, so it stays queryable), a tag, a PR comment for
+    # the reviewer, and a row the BA ticks off once the spec is back in line.
+    spec_drift_enabled: bool = True
+    spec_drift_tag: str = "spec-update-needed"
+    # Hold the item for a human instead of letting it advance while the spec is stale.
+    # Off by default: a drift is a documentation debt, not a reason to stop delivery.
+    spec_drift_holds_item: bool = False
+    # Verify after the fact that every PR the autopilot opens names its work item, and
+    # attach the link when it does not. An instruction in the brief is advice a model
+    # can drop on a long run; this is the check that notices.
+    pr_require_work_item_link: bool = True
+
     # ── Process health (periodic review of HOW the team works) ──
     # A process doc assigns standing reviews — ad-hoc ratio each sprint, escaped
     # defects each month, tag catalogue each quarter. This computes them and pushes

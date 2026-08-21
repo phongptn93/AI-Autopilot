@@ -112,6 +112,35 @@ to *wipe* the deterministic `agent-<id>` scratch and open a virgin console. It n
 that scratch when a session reserved it, closes the old console, and launches with
 `--continue` — same worktree, same conversation, plus the new comment.
 
+### Spec drift (`spec_drift.py` + `SpecGuard`)
+The agent is told to DECIDE rather than ask — that is what keeps a run from stalling on
+a clarifying question nobody answers. The cost is that each decision is taken on the
+team's behalf and is invisible: the item still says one thing, the merged code now does
+another, and whoever keeps the specification true never finds out until it surfaces in
+UAT.
+
+So the run reports those decisions **structurally** — `deviations[]` in the result
+contract, not prose in a PR body — because the point is that somebody acts on them
+later, and a sentence buried in a PR cannot be queried, counted, or ticked off. The
+control plane then files each one: a work-item comment carrying the fixed
+**`⚠️ SPEC-DRIFT`** prefix (a contract with future queries, so it stays stable across
+releases), the `spec-update-needed` tag, a PR thread comment (the reviewer is the last
+person who can catch a wrong call before merge), and a row on `/dashboard/specs` that a
+BA ticks off — which clears the tag and writes **`✅ SPEC-UPDATED`** back to the item.
+
+Two design points worth keeping: the parser accepts a plain string as readily as an
+object (a model told to "list what differed" writes both, and rejecting one would drop
+exactly the reports this exists to collect), and a repeat run does NOT re-report — a
+rework re-derives the same decisions, and one identical notice per revision is how a BA
+learns to skip them.
+
+`SpecGuard` also enforces the thing a brief cannot: **every PR names its work item**. An
+instruction is advice a model can drop on a long run, and when it does nothing notices —
+so the link is verified against ADO afterwards and attached if missing (ADO stores it on
+the work item as an `ArtifactLink`, not on the PR). All of it is best-effort: this runs
+after the work already shipped, so a traceability check must never be what turns a
+finished task into a failed one.
+
 ### Process health (`process_health.py` + `ProcessHealthService`)
 A team's process doc assigns standing reviews — ad-hoc ratio each sprint, escaped
 defects per module each month, tag catalogue each quarter — and those are the first

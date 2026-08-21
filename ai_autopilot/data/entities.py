@@ -167,6 +167,31 @@ class MergedPr(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class SpecDrift(Base):
+    """One place a run's code stopped agreeing with the work item that described it.
+
+    Persisted rather than left in the ADO comment because the comment answers "was this
+    reported"; this answers the questions the BA actually works from — what is still
+    outstanding, on which items, of what kind — and holds the tick-off (``resolved_at``)
+    that says the specification has been brought back in line.
+    """
+
+    __tablename__ = "spec_drifts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    work_item_id: Mapped[int] = mapped_column(Integer, index=True)
+    project: Mapped[str] = mapped_column(String(200), default="")
+    title: Mapped[str] = mapped_column(String(500), default="")
+    pr_url: Mapped[str] = mapped_column(String(500), default="")
+    kind: Mapped[str] = mapped_column(String(40), default="assumption")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    where: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_by: Mapped[str] = mapped_column(String(200), default="")
+
+
 class PrCommandState(Base):
     """PR babysitter memory per work item: how much of the revision budget /ai
     commands have spent — persisted so a restart neither resets the cap (runaway

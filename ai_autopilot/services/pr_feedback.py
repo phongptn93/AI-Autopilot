@@ -6,7 +6,9 @@ human-authored) and map a PR's source branch back to its work item id.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+from urllib.parse import unquote
 
 from ai_autopilot.config import BotIdentity, find_bot_mention, is_bot_signed, match_command
 
@@ -25,6 +27,17 @@ def parse_work_item_id(source_ref: str) -> int | None:
     name = source_ref.rsplit("/", 1)[-1]  # "123-foo"
     head = name.split("-", 1)[0]
     return int(head) if head.isdigit() else None
+
+
+_PR_URL_RE = re.compile(r"/_git/([^/\s?#]+)/pullrequest/(\d+)", re.IGNORECASE)
+
+
+def parse_pr_url(url: str | None) -> tuple[str, int] | None:
+    """``(repo, pr_id)`` from a PR url, or ``None`` if it isn't one."""
+    m = _PR_URL_RE.search(url or "")
+    if not m:
+        return None
+    return unquote(m.group(1)), int(m.group(2))
 
 
 def is_bot_branch(source_ref: str, prefixes: tuple[str, ...]) -> bool:

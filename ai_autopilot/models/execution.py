@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 
 @dataclass
@@ -31,6 +32,11 @@ class ExecutionResult:
     # How many past lessons the learning loop injected into this run's brief
     # (0 = loop off / nothing learned yet). Surfaced as History's 🧠 badge.
     lessons_injected: int = 0
+    # Places the agent had to decide something the work item did not settle — carried
+    # from the agent's result file so the control plane can file them (see
+    # ``ai_autopilot.spec_drift``). Typed loosely to keep this model free of the
+    # execution package it would otherwise import.
+    deviations: list[Any] = field(default_factory=list)
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod

@@ -27,6 +27,7 @@ from ai_autopilot.data.entities import (
     QualityKind,
     SchedulerDecision,
     SdlcLoopState,
+    SpecDrift,
     WorkItemState,
     WorkItemStateHistory,
 )
@@ -873,6 +874,89 @@ class AiConflictRepository:
                 edges.setdefault(row.a_id, set()).add(row.b_id)
                 edges.setdefault(row.b_id, set()).add(row.a_id)
         return edges
+
+
+class SpecDriftRepository:
+    """Where the agent's "this is not what the item said" reports are kept.
+
+    Two readers, two shapes: the dashboard wants what is still OUTSTANDING, grouped by
+    work item, so a BA can walk the list; the overview wants a count. Both come from
+    here rather than from re-reading ADO comments, which cannot be filtered or ticked
+    off.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def add(self, item: WorkItemInfo, pr_url: str, deviations: list) -> int:
+        """Record this run's deviations for ``item``; returns how many were stored."""
+        if not deviations:
+            return 0
+        now = datetime.now(UTC)
+        async with self._db.session() as session:
+            for dev in deviations:
+                session.add(SpecDrift(
+                    work_item_id=item.id, project=item.project or "",
+                    title=(item.title or "")[:500], pr_url=pr_url or "",
+                    kind=dev.kind, summary=dev.summary, detail=dev.detail,
+                    where=dev.where, created_at=now,
+                ))
+            await session.commit()
+        return len(deviations)
+
+    async def open_drifts(self, limit: int = 500) -> list[SpecDrift]:
+        """Everything not yet ticked off, newest first."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(SpecDrift)
+                .where(SpecDrift.resolved_at.is_(None))
+                .order_by(SpecDrift.created_at.desc())
+                .limit(limit)
+            )
+            return list(rows.scalars().all())
+
+    async def recent_resolved(self, limit: int = 50) -> list[SpecDrift]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(SpecDrift)
+                .where(SpecDrift.resolved_at.is_not(None))
+                .order_by(SpecDrift.resolved_at.desc())
+                .limit(limit)
+            )
+            return list(rows.scalars().all())
+
+    async def open_count(self) -> int:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(func.count())
+                .select_from(SpecDrift)
+                .where(SpecDrift.resolved_at.is_(None))
+            )
+            return int(rows.scalar() or 0)
+
+    async def open_item_ids(self) -> set[int]:
+        """Work items with at least one outstanding drift — for board/queue badges."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(SpecDrift.work_item_id).where(SpecDrift.resolved_at.is_(None))
+            )
+            return {int(r) for (r,) in rows.all()}
+
+    async def resolve(self, work_item_id: int, by: str = "") -> int:
+        """Tick off every outstanding drift on one item; returns how many were closed."""
+        now = datetime.now(UTC)
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(SpecDrift).where(
+                    SpecDrift.work_item_id == work_item_id, SpecDrift.resolved_at.is_(None)
+                )
+            )
+            found = list(rows.scalars().all())
+            for row in found:
+                row.resolved_at, row.resolved_by = now, (by or "")[:200]
+            if found:
+                await session.commit()
+        return len(found)
 
 
 class PrCommandRepository:

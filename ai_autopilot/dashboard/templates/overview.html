@@ -59,6 +59,14 @@
         <div style="font-size:12px;color:var(--text-muted)">{{ efficiency.total_runs }} runs · {{ efficiency.distinct_items }} items</div>
     </div>
     <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Spec cần cập nhật</span><div class="stat-card-icon">📐</div></div>
+        <div class="stat-card-value" {% if spec_drift_open %}style="color:var(--amber)"{% endif %}>{{ spec_drift_open or 0 }}</div>
+        <div style="font-size:12px;color:var(--text-muted)">
+          {% if spec_drift_open %}<a href="/dashboard/specs">điểm code khác mô tả — BA xử lý</a>
+          {% else %}spec đang khớp code{% endif %}
+        </div>
+    </div>
+    <div class="stat-card">
         <div class="stat-card-header"><span class="stat-card-label">Tokens / Merged PR</span><div class="stat-card-icon">💰</div></div>
         <div class="stat-card-value" {% if not prs.ok %}style="color:var(--amber)"{% endif %}>{% if not prs.ok %}?{% elif tokens_per_merged is not none %}{{ '{:,}'.format(tokens_per_merged) }}{% else %}—{% endif %}</div>
         <div style="font-size:12px;color:var(--text-muted)">{{ '{:,}'.format(efficiency.total_tokens) }} tokens total{% if prs.ok and not prs.merged %} · no merged PR yet{% endif %}</div>

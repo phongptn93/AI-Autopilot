@@ -6,13 +6,13 @@ import contextlib
 import json
 import secrets
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 
 import yaml
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -20,6 +20,7 @@ from ai_autopilot import (
     activity,
     delivery,
     security,
+    spec_drift,
 )
 from ai_autopilot import (
     flows as flows_mod,
@@ -35,10 +36,39 @@ from ai_autopilot.data.entities import PipelineState, QualityKind
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.pr_feedback import parse_work_item_id
+from ai_autopilot.services.spec_guard import SpecGuard
 from ai_autopilot.skills_catalog import discover_skills
 from ai_autopilot.workspace import discover_repos
 
 _log = get_logger("dashboard")
+
+def _group_drifts(rows: list) -> list:
+    """Deviations grouped by work item — the unit a BA actually edits.
+
+    A flat list would have them open the same item once per deviation, and the "mark
+    updated" action is per item too. Order of first appearance is kept, so the newest
+    report stays at the top.
+    """
+    groups: OrderedDict[int, dict] = OrderedDict()
+    for row in rows:
+        group = groups.get(row.work_item_id)
+        if group is None:
+            group = groups[row.work_item_id] = {
+                "work_item_id": row.work_item_id, "title": row.title,
+                "project": row.project, "pr_url": row.pr_url,
+                "created_at": row.created_at, "resolved_at": row.resolved_at,
+                "resolved_by": row.resolved_by, "rows": [],
+            }
+        group["rows"].append(row)
+        group["pr_url"] = group["pr_url"] or row.pr_url
+    return [_DriftGroup(**g) for g in groups.values()]
+
+
+class _DriftGroup(dict):
+    """Attribute access for the template (``group.rows`` reads better than ``group['rows']``)."""
+
+    __getattr__ = dict.get
+
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
@@ -490,6 +520,9 @@ def create_dashboard_router() -> APIRouter:
                 tokens_per_merged=tokens_per_merged,
                 tags=c.config.effective_trigger_tags,
                 selected_tag=selected_tag,
+                # Outstanding spec drift belongs on the landing page: it is work owed to
+                # a HUMAN, so it has to be visible without navigating to find it.
+                spec_drift_open=await c.spec_drift_repo.open_count(),
             ),
         )
 
@@ -1139,6 +1172,50 @@ def create_dashboard_router() -> APIRouter:
                 kinds=sorted(totals), rework_kinds=set(QualityKind.REWORK),
             ),
         )
+
+    @router.get("/specs", response_class=HTMLResponse)
+    async def specs_page(request: Request):
+        """Spec drift: what the agent decided that the work item never said.
+
+        Grouped by work item, because that is the unit a BA edits — a flat list of
+        deviations would have them opening the same item three times.
+        """
+        c: Container = request.app.state.container
+        org = (c.config.ado_organization or "").rstrip("/")
+
+        def _url(work_item_id: int) -> str:
+            return f"{org}/_workitems/edit/{work_item_id}" if org else ""
+
+        open_rows = await c.spec_drift_repo.open_drifts()
+        resolved_rows = await c.spec_drift_repo.recent_resolved(limit=30)
+        kinds = Counter(r.kind for r in open_rows)
+        return _TEMPLATES.TemplateResponse(
+            request, "specs.html",
+            _ctx(
+                request, "specs",
+                open_items=_group_drifts(open_rows),
+                resolved=_group_drifts(resolved_rows),
+                open_count=len(open_rows),
+                kind_totals=kinds.most_common(),
+                label=spec_drift.label_for, icon=spec_drift.icon_for,
+                work_item_url=_url if org else None,
+            ),
+        )
+
+    @router.post("/specs/resolve")
+    async def specs_resolve(request: Request, work_item_id: int = Form(...)):
+        """A human says the specification is back in line: clear the tag, say so on the
+        item, and tick the rows off."""
+        c: Container = request.app.state.container
+        # The dashboard authenticates with a shared password, not per-person accounts,
+        # so "who" is the surface, not a name — same convention as the audit log.
+        await SpecGuard(c).mark_resolved(work_item_id, by="dashboard")
+        with contextlib.suppress(Exception):
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="spec_drift.resolved",
+                target=str(work_item_id), detail="",
+            )
+        return RedirectResponse("/dashboard/specs", status_code=303)
 
     @router.get("/analytics", response_class=HTMLResponse)
     async def analytics_page(request: Request, days: int = 30, tag: str = ""):

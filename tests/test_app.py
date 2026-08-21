@@ -48,6 +48,7 @@ def test_metrics_endpoint(client: TestClient):
         "/dashboard/analytics",
         "/dashboard/learning",
         "/dashboard/quality",
+        "/dashboard/specs",
         "/dashboard/queue",
         "/dashboard/audit",
     ],
@@ -1062,3 +1063,43 @@ def test_every_form_control_gets_the_dashboard_styling(tmp_path, monkeypatch):
     # The compact-checkbox utility replaced the repeated inline sizing.
     assert 'class="chk"' in page
     assert 'style="width:15px;height:15px' not in page
+
+
+def test_spec_drift_shows_on_the_dashboard_and_can_be_ticked_off(tmp_path):
+    """The BA-facing half, end to end through the real app: a recorded deviation is
+    listed, and "Đã cập nhật spec" takes it off the list. dry_run keeps ADO out of it."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from ai_autopilot.data.database import Database
+    from ai_autopilot.data.repository import SpecDriftRepository
+
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'drift.db'}"
+    settings = Settings(dry_run=True, database_url=db_url)
+    with TestClient(create_app(settings)) as client:      # startup creates the tables
+        async def _seed():
+            db = Database(db_url)
+            await SpecDriftRepository(db).add(
+                SimpleNamespace(id=4021, project="DxFactory", title="Nhập lô NVL"),
+                "https://dev.azure.com/o/p/_git/api/pullrequest/77",
+                [SimpleNamespace(kind="logic_differs", summary="Tính tồn theo lô",
+                                 detail="AC không nói tới", where="AC-3")],
+            )
+            await db.dispose()
+
+        asyncio.run(_seed())
+
+        page = client.get("/dashboard/specs")
+        assert page.status_code == 200
+        assert "4021" in page.text and "Tính tồn theo lô" in page.text
+        assert "AC-3" in page.text
+
+        done = client.post(
+            "/dashboard/specs/resolve", data={"work_item_id": "4021"},
+            follow_redirects=False,
+        )
+        assert done.status_code == 303
+
+        after = client.get("/dashboard/specs")
+        assert "Tính tồn theo lô" not in after.text
+        assert "spec đang khớp" in client.get("/dashboard").text

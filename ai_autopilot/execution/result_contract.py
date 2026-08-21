@@ -14,8 +14,16 @@ The schema (all fields optional; the parser is tolerant):
       "artifacts": [{"repo": "Backend-Fresh", "branch": "...", "pr_url": "https://...",
                      "work_item_id": 4021}],
       "needs_human": false,
-      "reason": "why human input is needed / why it failed"
+      "reason": "why human input is needed / why it failed",
+      "deviations": [{"kind": "spec_unclear", "summary": "...", "detail": "...",
+                      "where": "AC-3 / OrderService.cs"}]
     }
+
+``deviations`` is how the agent says "what I built is not exactly what the item
+described". It is STRUCTURED rather than left to prose in the PR because the point
+of collecting it is that somebody acts on it later: a BA has to find every item
+whose spec drifted, and a sentence buried in a PR description cannot be queried,
+counted, or ticked off. See :mod:`ai_autopilot.spec_drift`.
 
 A BATCHED run (several linked items handled in one agent run) writes ONE file,
 keyed ``batch-<lead id>.json``, whose artifacts carry ``work_item_id`` so each PR
@@ -48,6 +56,32 @@ class Artifact:
     work_item_id: int = 0
 
 
+# What kind of gap the agent is reporting. Kept as a small, closed vocabulary so the
+# dashboard can group them and a BA can triage by type instead of reading every note.
+DEVIATION_KINDS = (
+    "spec_unclear",    # the item did not say; the agent had to choose
+    "logic_differs",   # built deliberately differently from what was described
+    "spec_gap",        # a case the item never covers at all
+    "out_of_scope",    # found something real that this item does not cover
+    "assumption",      # proceeded on an assumption that should be confirmed
+)
+_DEFAULT_KIND = "assumption"
+
+
+@dataclass
+class Deviation:
+    """One place where the implementation and the written item do not agree."""
+
+    kind: str = _DEFAULT_KIND
+    summary: str = ""
+    detail: str = ""
+    where: str = ""      # AC id, file, endpoint — where to look
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.summary or self.detail).strip()
+
+
 @dataclass
 class AgentResult:
     status: str = "failed"  # "completed" | "failed" | "needs_human"
@@ -55,6 +89,7 @@ class AgentResult:
     artifacts: list[Artifact] = field(default_factory=list)
     needs_human: bool = False
     reason: str = ""
+    deviations: list[Deviation] = field(default_factory=list)
 
     @property
     def pr_url(self) -> str | None:
@@ -136,7 +171,36 @@ def _parse(data: object) -> AgentResult | None:
         artifacts=artifacts,
         needs_human=needs_human,
         reason=str(data.get("reason", "")),
+        deviations=_parse_deviations(data.get("deviations")),
     )
+
+
+def _parse_deviations(raw: object) -> list[Deviation]:
+    """Tolerant read of ``deviations``.
+
+    A model that is told "list what differed" writes a list of strings about as often
+    as a list of objects, and both are the same information. Rejecting the string form
+    would lose exactly the reports this feature exists to collect, so it is accepted and
+    filed under the default kind. An unknown ``kind`` is likewise kept (as the default)
+    rather than dropped — the note matters more than its label.
+    """
+    out: list[Deviation] = []
+    for entry in raw or []:
+        if isinstance(entry, str):
+            dev = Deviation(summary=entry.strip())
+        elif isinstance(entry, dict):
+            kind = str(entry.get("kind", "")).strip().lower().replace("-", "_")
+            dev = Deviation(
+                kind=kind if kind in DEVIATION_KINDS else _DEFAULT_KIND,
+                summary=str(entry.get("summary", "")).strip(),
+                detail=str(entry.get("detail", "")).strip(),
+                where=str(entry.get("where", "")).strip(),
+            )
+        else:
+            continue
+        if not dev.is_empty:
+            out.append(dev)
+    return out
 
 
 def read_result(workspace: str, item_id: int | str) -> AgentResult | None:

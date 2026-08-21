@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import re
 from datetime import UTC, datetime, timedelta
-from urllib.parse import unquote
 
 from ai_autopilot import metrics
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
@@ -27,21 +25,13 @@ from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.routing import plan_schedule, sort_by_priority
 from ai_autopilot.routing.planning_groups import group_by_links
 from ai_autopilot.services.planning_analyzer import run_due_plans
-
+from ai_autopilot.services.pr_feedback import parse_pr_url
+from ai_autopilot.services.spec_guard import SpecGuard
 
 # An ADO pull-request URL, e.g.
 # https://dev.azure.com/org/Project/_git/Micro-Frontend/pullrequest/2470
 # The repo NAME is captured on purpose: the git REST endpoints accept a name wherever
 # they accept a repository id, so no extra lookup is needed to reach the PR.
-_PR_URL_RE = re.compile(r"/_git/([^/\s?#]+)/pullrequest/(\d+)", re.IGNORECASE)
-
-
-def parse_pr_url(url: str | None) -> tuple[str, int] | None:
-    """``(repo, pr_id)`` from a PR url, or ``None`` if it isn't one."""
-    m = _PR_URL_RE.search(url or "")
-    if not m:
-        return None
-    return unquote(m.group(1)), int(m.group(2))
 
 
 def _scheduler_snapshot(items: list[WorkItemInfo], plan: object, at: datetime) -> dict:
@@ -97,6 +87,9 @@ class AdoPollerService:
         self._c = c
         self._config = c.config
         self._log = get_logger("services.poller")
+        # Post-run obligations: the PR names its work item, and decisions the agent had
+        # to make on the team's behalf reach a human.
+        self._spec_guard = SpecGuard(c)
         self._processed: dict[int, datetime] = {}
         # Interactive mode: live Remote-Control sessions awaiting their result.json.
         self._live: dict[int, int] = {}  # work_item_id → execution record id
@@ -1167,6 +1160,23 @@ class AdoPollerService:
             badge = score_badge_html(score) if score else ""
             if result.pr_url or result.pr_urls:
                 await self._add_reviewers(item, result)
+                # Traceability first: the link must exist before anyone is told the PR
+                # is ready, or the reviewer opens a PR that names no ticket.
+                await self._spec_guard.ensure_pr_links(item, result)
+            drifts = await self._spec_guard.report_drift(item, result, result.deviations)
+            if drifts:
+                badge += (
+                    f"<div><b>⚠️ {drifts} điểm code khác mô tả</b> — xem comment "
+                    "SPEC-DRIFT bên dưới, spec cần cập nhật.</div>"
+                )
+                if cfg.spec_drift_holds_item:
+                    await c.state_repo.set(
+                        item.id, PipelineState.NEEDS_HUMAN, detail=f"{drifts} spec drift(s)"
+                    )
+                    await self._apply_outcome(item, "needs_human")
+                    await c.notifier.notify_completed(item, result)
+                    self._log.info("held for spec update", id=item.id, drifts=drifts)
+                    return
             if result.pr_url and cfg.pr_is_draft:
                 await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
                 await self._apply_outcome(item, "review")

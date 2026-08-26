@@ -115,7 +115,7 @@ The webhook endpoint filters bot-signed comments and plain chatter — only real
 | **Board** | Live Kanban of every autopilot item; drag‑and‑drop, search / type / date filters, per‑column cap + *Load more*, 15s auto‑refresh. |
 | **Planning** | Load your assigned work, run AI grouping & conflict analysis, then **Start now** or **Schedule**. Live scheduling view with history. |
 | **Reviews** | Every active PR grouped by target branch — status badge, reviewer votes, conflicts, age, linked work item. Command‑palette reference for the role commands. |
-| **History** | Paginated, filterable log of every execution (skill, PR, duration, tokens). |
+| **History** | Paginated, filterable log of every execution (skill, PR, duration). Each row shows **which model** served the run and what it **cost** — hover the token count for the input / output / cache split. A run whose usage was never reported shows `—`, never `0`. |
 | **Settings** | Edit all configuration in 16 grouped sections, an *Active tags* overview, live‑apply, and two transfer modes (below). |
 | **Configuration** | Read‑only snapshot of the live config (secrets shown as set / not‑set). |
 | **Queue** | Work the autopilot is holding for a human, with the reason, and one‑click **Resume**. |
@@ -176,6 +176,15 @@ Most‑used keys:
 | `interactive_resume_on_rework` | `true` | PR feedback runs in that session's own worktree and **resumes its conversation** instead of a fresh worktree + fresh read |
 | — | — | **Task room** at `/dashboard/task/<id>`: one page per work item — timeline, runs, agent log, the brief it ran on, spec drift, PR **diffs** and HTML preview |
 | `timezone` | — | IANA zone every time window is read in, e.g. `Asia/Ho_Chi_Minh`. **Required** for quiet hours; the work window falls back to the machine's zone |
+| — | — | **🔔 Alerts** — one Settings section holding everything that decides whether a human is interrupted. Thresholds, the digest, quiet hours and reviewer nudges used to live in five different sections while *Notifications* held only credentials |
+| `alert_events` | `completed,failed,error,reminder,digest` | Which event kinds may be broadcast at all. `started` is **off by default** — "the bot picked up #123" is not actionable and doubles the traffic. Blank = everything |
+| `alert_min_severity` | `info` | Floor applied after the event list: `info` / `warning` (somebody should look today) / `critical` (blocked right now) |
+| `alert_dedup_enabled` | `true` | An alert already reported returns only when it **escalates** (the wait doubled) or after `alert_repeat_hours`. Without it, one PR stuck for a week is eight identical digest lines |
+| `alert_repeat_hours` | `24` | Hours before an unactioned alert is raised again. `0` = report once, then only on escalation |
+| `digest_skip_when_empty` | `true` | Nothing over a threshold **and** nothing shipped → the digest is not sent. A daily "✅ nothing is stuck" teaches a channel to skim past it |
+| `digest_respect_quiet_hours` | `true` | Hold the digest inside `notify_hours_*` like every other notice. It used to be the one sender that ignored them |
+| — | — | Per-channel routing: each entry in `teams_webhook_channels` may carry its own `events` / `severity`, so a dev channel takes failures while a PM channel takes the digest. Omit both and the channel inherits the global policy |
+| — | — | In chat: **`/alerts`** (what is open, and what is silenced), **`/ack <id>`** (I am on it), **`/snooze <id> [days]`**, **`/unack <id>`** |
 | `notify_hours_start` / `notify_hours_end` | — | When the autopilot may PING a human. Outside it, notices are **held** and delivered as one summary when the window opens |
 | `notify_days` | `Mon…Fri` | Days the notification window applies |
 | `notify_quiet_max_held` | `200` | Ceiling on held notices; oldest dropped first, the summary says how many |

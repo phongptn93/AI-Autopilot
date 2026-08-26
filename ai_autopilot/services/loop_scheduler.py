@@ -88,13 +88,13 @@ class LoopScheduler:
         await self._notify(item, result)
 
     async def _notify(self, item: WorkItemInfo, result) -> None:
-        message = NotificationMessage(
-            work_item=item, type=NotificationType.COMPLETED, result=result
-        )
-        for channel in self._c.channels:
-            if channel.is_enabled:
-                with contextlib.suppress(Exception):
-                    await channel.send(message)
+        # Through the notifier, not straight at the channels: a scheduled loop's result
+        # is an ordinary "completed" notice and must obey the same event list, severity
+        # floor and quiet window as one from the poller.
+        with contextlib.suppress(Exception):
+            await self._c.notifier.notify(NotificationMessage(
+                work_item=item, type=NotificationType.COMPLETED, result=result
+            ))
 
 
 def _trigger(loop: ScheduledLoop):

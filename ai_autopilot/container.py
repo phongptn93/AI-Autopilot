@@ -15,6 +15,7 @@ from ai_autopilot.ado import AdoAuthService, AdoClient, AdoNotifier
 from ai_autopilot.config import BotIdentity, Settings
 from ai_autopilot.data import (
     AiConflictRepository,
+    AlertStateRepository,
     AuditRepository,
     ClaudeSessionRepository,
     Database,
@@ -101,6 +102,7 @@ class Container:
             EmailNotifier(config),
         ]
         self.notification_hold_repo = NotificationHoldRepository(self.database)
+        self.alert_state_repo = AlertStateRepository(self.database)
         self.notifier = AdoNotifier(
             self.ado, config, self.channels, self.notification_hold_repo
         )
@@ -124,7 +126,9 @@ class Container:
         self.rbac = RbacPolicy(config)
 
         # Cross-cutting.
-        self.cost_tracker = CostTracker(self.execution_repo, config, self.channels)
+        self.cost_tracker = CostTracker(
+            self.execution_repo, config, self.channels, self.notifier
+        )
         self.tenants = TenantManager(config)
         self.plugins = PluginManager()
         self.webhook_queue = WebhookQueue()

@@ -38,7 +38,7 @@ from ai_autopilot.config import (
 )
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
 from ai_autopilot.execution.test_gate import TestGate
-from ai_autopilot.execution.claude_client import ClaudeRun, run_claude
+from ai_autopilot.execution.claude_client import ClaudeRun, apply_usage, run_claude
 from ai_autopilot.execution.result_contract import (
     batch_key,
     clear_result,
@@ -365,8 +365,7 @@ class ClaudeExecutor:
                         workspace, item.id, "⚠️ result file missing — recovered from agent output"
                     )
             result = self._result_from_agent(item, agent, autonomy, run_text=claude_run.text)
-            result.cost_tokens = claude_run.total_tokens
-            result.cost_usd = claude_run.cost_usd
+            apply_usage(result, claude_run)
         except TimeoutError:
             mins = self._config.task_timeout_minutes
             self._log.error("agent timed out", id=item.id, minutes=mins)
@@ -442,8 +441,7 @@ class ClaudeExecutor:
             )
             # One run, one bill — charge it to the lead so the totals stay honest
             # instead of being multiplied by the number of items.
-            results[lead.id].cost_tokens = claude_run.total_tokens
-            results[lead.id].cost_usd = claude_run.cost_usd
+            apply_usage(results[lead.id], claude_run)
         except TimeoutError:
             mins = self._config.task_timeout_minutes
             self._log.error("agent batch timed out", ids=ids, minutes=mins)
@@ -1517,8 +1515,7 @@ class ClaudeExecutor:
             )
             await self._save_session(repo, branch, claude_run)
             result = ExecutionResult.ok(item_id, prompt, claude_run.text)
-            result.cost_tokens = claude_run.total_tokens
-            result.cost_usd = claude_run.cost_usd
+            apply_usage(result, claude_run)
         except TimeoutError:
             minutes = self._config.task_timeout_minutes
             self._log.error("read-only run timed out", id=item_id, minutes=minutes)
@@ -1610,8 +1607,7 @@ class ClaudeExecutor:
                     result = ExecutionResult.fail(item_id, prompt, "No file changes produced")
                 result.branch_name = branch
                 result.duration_seconds = time.monotonic() - started
-                result.cost_tokens = claude_run.total_tokens
-                result.cost_usd = claude_run.cost_usd
+                apply_usage(result, claude_run)
                 return result
 
             changed_files = await self._changed_files(work_dir)
@@ -1630,7 +1626,7 @@ class ClaudeExecutor:
                 result.branch_name = branch
                 result.files_changed = changed_files
                 result.duration_seconds = time.monotonic() - started
-                result.cost_tokens = claude_run.total_tokens
+                apply_usage(result, claude_run)
                 return result
             await self._git("add -A", work_dir)
             await self._git(["commit", "-m", commit_msg], work_dir)
@@ -1665,7 +1661,7 @@ class ClaudeExecutor:
                 result.branch_name = branch
                 result.files_changed = changed_files
                 result.duration_seconds = time.monotonic() - started
-                result.cost_tokens = claude_run.total_tokens
+                apply_usage(result, claude_run)
                 return result
 
             # Auto-test-gate: run the repo's tests in the worktree BEFORE opening a
@@ -1680,7 +1676,7 @@ class ClaudeExecutor:
                 result.tests_passed = False
                 result.output = tests.output_tail
                 result.duration_seconds = time.monotonic() - started
-                result.cost_tokens = claude_run.total_tokens
+                apply_usage(result, claude_run)
                 return result
 
             pr_run = None
@@ -1695,8 +1691,7 @@ class ClaudeExecutor:
             result.files_changed = changed_files
             result.tests_passed = tests.passed if tests.ran else None
             result.duration_seconds = time.monotonic() - started
-            result.cost_tokens = sum(r.total_tokens for r in runs)
-            result.cost_usd = _sum_cost(*runs)
+            apply_usage(result, *runs)
             result.pr_url = _extract_pr_url(pr_run.text) if pr_run else None
             result.pr_urls = [result.pr_url] if result.pr_url else []
             return result
@@ -2228,8 +2223,3 @@ def _last_words(text: str, limit: int = 400) -> str:
     if not flat:
         return ""
     return flat if len(flat) <= limit else "…" + flat[-limit:]
-
-
-def _sum_cost(*runs: ClaudeRun) -> float | None:
-    costs = [r.cost_usd for r in runs if r.cost_usd is not None]
-    return sum(costs) if costs else None

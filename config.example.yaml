@@ -226,8 +226,50 @@ scheduled_loops: []
 # ── Plugins ──
 plugins_directory: "plugins"
 
-# ── Notifications ──
+# ── 🔔 Alerts — what is worth interrupting a human for ──
+# WHERE to send lives under Notifications below; WHAT to send lives here.
+#
+# Which event kinds may be broadcast at all. Valid: started, completed, failed, error,
+# reminder, digest. Blank = everything. "started" is left out on purpose — "the bot
+# picked up #123" is not a decision anyone can act on, and it doubles the traffic.
+alert_events: "completed,failed,error,reminder,digest"
+# Floor applied after the event list: info (everything the list allows) / warning
+# (things somebody should look at today) / critical (only what is blocked right now).
+alert_min_severity: "info"
+
+# Repetition. An alert already reported is only raised again when it ESCALATES (the wait
+# has doubled) or after alert_repeat_hours. Without this, one PR stuck for a week is
+# eight identical digest lines, which is what teaches a channel to skim past the digest.
+alert_dedup_enabled: true
+alert_repeat_hours: 24          # 0 = report once, then only on escalation
+alert_snooze_default_days: 3    # `/snooze <id>` with no number
+# In chat: /alerts (what is open), /ack <id> (I am on it), /snooze <id> [days], /unack <id>
+
+# The scheduled digest.
+digest_skip_when_empty: true      # nothing over a threshold and nothing shipped → say nothing
+digest_respect_quiet_hours: true  # hold it inside notify_hours_* like every other notice
+
+# When a wait becomes a problem worth reporting.
+delivery_merge_hours: 24        # approved, unblocked, still not merged — pure waste
+delivery_review_hours: 24       # PR open with nobody having voted
+delivery_stale_days: 3          # in progress, state unchanged (edits do not count)
+
+# When a human may be pinged at all. REQUIRES `timezone` — the host clock is usually
+# UTC, so without it an evening window silences the working day instead. Notices raised
+# outside the window are HELD and delivered as ONE summary when it opens.
+notify_hours_start: ""          # e.g. "08:00"
+notify_hours_end: ""            # e.g. "18:00"
+notify_days: "Mon,Tue,Wed,Thu,Fri"
+notify_quiet_max_held: 200
+
+# ── Notifications — the channels (credentials only) ──
 teams_webhook_url: ""        # MS Teams Workflows webhook URL
+# Named channels, each able to take only what it cares about. Omit `events`/`severity`
+# and the channel inherits the global policy above, which is the pre-upgrade behaviour.
+# teams_webhook_channels:
+#   - {name: "#dev", url: "https://…", events: "failed,error", severity: "warning"}
+#   - {name: "#pm",  url: "https://…", events: "digest"}
+#   - {name: "#old", url: "https://…", active: false}
 # zalo_oa_access_token: ""   # prefer env
 zalo_recipient_user_id: ""
 smtp_host: ""

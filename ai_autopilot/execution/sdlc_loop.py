@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from ai_autopilot.config import SdlcStage, Settings
+from ai_autopilot.execution.claude_client import ClaudeRun, Usage
 from ai_autopilot.execution.claude_executor import ClaudeExecutor, _branch_name
 from ai_autopilot.execution.pr_scorer import score_badge_html, score_run
 from ai_autopilot.execution.result_contract import clear_result, find_result
@@ -94,7 +95,9 @@ class SdlcLoopEngine:
 
         scratch = await self._exec._acquire_agent_scratch(item.id, repos)
         run_dir = scratch or workspace
-        total_tokens = 0
+        # An SDLC item is many Claude calls; History reports per ITEM, so the run
+        # detail is accumulated rather than reduced to a token count on the way past.
+        usage = Usage()
         touched: set[str] = set()
         pr_url: str | None = None
         try:
@@ -111,10 +114,10 @@ class SdlcLoopEngine:
 
             while stage_index < len(stages):
                 stage = stages[stage_index]
-                run_text, is_error, tokens = await self._run_stage(
+                run_text, is_error, stage_run = await self._run_stage(
                     item, stage, run_dir, scratch, repos, branch, touched
                 )
-                total_tokens += tokens
+                usage.add(stage_run)
 
                 self._absorb(signals, stage, run_text, is_error)
                 agent = find_result(run_dir, item.id)
@@ -130,7 +133,7 @@ class SdlcLoopEngine:
                 if signals.needs_human:
                     return await self._escalate(
                         item, profile, stage_index, iterations, branch, signals,
-                        total_tokens, pr_url, started,
+                        usage, pr_url, started,
                         reason=f"agent needs human at '{stage.name}'",
                     )
 
@@ -160,7 +163,7 @@ class SdlcLoopEngine:
                 else:  # ESCALATE — shared budget spent
                     return await self._escalate(
                         item, profile, stage_index, iterations, branch, signals,
-                        total_tokens, pr_url, started,
+                        usage, pr_url, started,
                         reason=f"budget exhausted at '{stage.name}' (score {score.score})",
                     )
 
@@ -173,14 +176,17 @@ class SdlcLoopEngine:
             signals.completed = True
             await self._repo.clear(item.id)
             activity.append(workspace, item.id, f"✅ SDLC completed · profile '{profile}'")
-            self._log.info("sdlc completed", id=item.id, profile=profile, tokens=total_tokens)
+            self._log.info(
+                "sdlc completed", id=item.id, profile=profile,
+                tokens=usage.tokens, model=usage.model_label,
+            )
             res = ExecutionResult.ok(
                 item.id, f"sdlc:{profile}", f"SDLC profile '{profile}' completed"
             )
             res.branch_name = branch
             res.pr_url = pr_url
             res.pr_urls = [pr_url] if pr_url else []
-            res.cost_tokens = total_tokens
+            usage.apply(res)
             res.duration_seconds = time.monotonic() - started
             return res
 
@@ -188,11 +194,11 @@ class SdlcLoopEngine:
             mins = cfg.task_timeout_minutes
             self._log.error("sdlc timed out", id=item.id, minutes=mins)
             return self._fail(
-                item, branch, total_tokens, started, f"Timed out after {mins} minutes"
+                item, branch, usage, started, f"Timed out after {mins} minutes"
             )
         except Exception as exc:  # noqa: BLE001 — never leave the item stuck IN_PROGRESS
             self._log.error("sdlc crashed", id=item.id, error=str(exc))
-            return self._fail(item, branch, total_tokens, started, str(exc))
+            return self._fail(item, branch, usage, started, str(exc))
         finally:
             await self._exec.release_scratch(scratch)
 
@@ -201,8 +207,8 @@ class SdlcLoopEngine:
     async def _run_stage(
         self, item: WorkItemInfo, stage: SdlcStage, run_dir: str,
         scratch: str | None, repos: list[str], branch: str, touched: set[str],
-    ) -> tuple[str, bool, int]:
-        """Run one stage; return (output text, is_error, tokens). Commits changes,
+    ) -> tuple[str, bool, ClaudeRun | None]:
+        """Run one stage; return (output text, is_error, the ClaudeRun). Commits changes,
         runs AutoReviewer for the review gate, and pushes + parses the PR for the
         pr stage."""
         ws = self._config.workspace_directory
@@ -231,7 +237,10 @@ class SdlcLoopEngine:
                         item.id, QualityKind.TEST_FAILED, stage=stage.name,
                         actor="test-gate", detail=tests.summary,
                     )
-            return review.raw_output, False, 0
+            # The review gate makes its own Claude call; hand it back so its tokens are
+            # billed to the item. Returning 0 here is what made an SDLC run report less
+            # than it actually spent. None when auto-review is off or the call failed.
+            return review.raw_output, False, review.run
 
         # For the pr stage, make sure the branch is on origin before /pr-create.
         if stage.produces_pr and scratch and touched:
@@ -248,7 +257,7 @@ class SdlcLoopEngine:
             self._pending_files = sum(len(v) for v in committed.values())
         else:
             self._pending_files = 0
-        return run.text, run.is_error, run.total_tokens
+        return run.text, run.is_error, run
 
     def _absorb(
         self, signals: StageSignals, stage: SdlcStage, run_text: str, is_error: bool
@@ -328,7 +337,7 @@ class SdlcLoopEngine:
 
     async def _escalate(
         self, item, profile, stage_index, iterations, branch, signals,
-        tokens, pr_url, started, *, reason: str,
+        usage, pr_url, started, *, reason: str,
     ) -> ExecutionResult:
         await self._repo.save(
             item.id, profile=profile, stage_index=stage_index, iterations=iterations,
@@ -340,13 +349,13 @@ class SdlcLoopEngine:
             error=reason, needs_human=True, branch_name=branch,
         )
         res.pr_url = pr_url
-        res.cost_tokens = tokens
+        usage.apply(res)
         res.duration_seconds = time.monotonic() - started
         return res
 
-    def _fail(self, item, branch, tokens, started, error: str) -> ExecutionResult:
+    def _fail(self, item, branch, usage, started, error: str) -> ExecutionResult:
         res = ExecutionResult.fail(item.id, "sdlc", error)
         res.branch_name = branch
-        res.cost_tokens = tokens
+        usage.apply(res)
         res.duration_seconds = time.monotonic() - started
         return res

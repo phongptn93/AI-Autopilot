@@ -139,18 +139,9 @@ FIELDS: tuple[Field, ...] = (
     Field("delivery_window_days", "Default window (days)", "int", "🚚 Delivery (PM view)",
           "Reporting period the Delivery page opens on. Each figure is compared against "
           "the window immediately before it."),
-    Field("delivery_merge_hours", "⚠️ Alert: waiting to merge (hours)", "int",
-          "🚚 Delivery (PM view)",
-          "Flag a PR that is approved, unblocked and STILL not merged after this long. "
-          "This is pure waste — the work is finished and the fix is one click."),
-    Field("delivery_review_hours", "⚠️ Alert: waiting for review (hours)", "int",
-          "🚚 Delivery (PM view)",
-          "Flag a PR nobody has voted on after this long, naming the reviewers it is "
-          "waiting on."),
-    Field("delivery_stale_days", "⚠️ Alert: no movement (days)", "int",
-          "🚚 Delivery (PM view)",
-          "Flag an in-progress item whose STATE has not changed in this long. Edits and "
-          "comments do not count as movement — that is the whole point."),
+
+
+
     Field("delivery_max_items", "Work items read per check", "int", "🚚 Delivery (PM view)",
           "Most-recently-changed first. An item that has not changed cannot have changed "
           "state, so this only bounds cost."),
@@ -301,13 +292,8 @@ FIELDS: tuple[Field, ...] = (
     Field("pr_auto_review_on_added", "↳ Auto-review when bot added", "bool",
           "🔁 PR review & feedback",
           "Bot added as PR reviewer → structured AI review + vote. Re-arms on new commits."),
-    Field("pr_reviewer_reminder_hours", "↳ Remind reviewers after (hours)", "int",
-          "🔁 PR review & feedback",
-          "A reviewer with no vote after this many hours gets one polite PR reminder. 0 = off."),
-    Field("pr_reviewer_reminder_repeat_hours", "↳ Repeat the reminder every (hours)", "int",
-          "🔁 PR review & feedback",
-          "Keep nudging a reviewer who still hasn't voted, this many hours after the last "
-          "reminder. 0 = nudge once then stay quiet."),
+
+
     Field("pr_advisory_max_per_commit", "↳ Max advisory reviews / commit", "int",
           "🔁 PR review & feedback",
           "How often /review (and other comment-only commands) may run against the SAME "
@@ -421,20 +407,10 @@ FIELDS: tuple[Field, ...] = (
           "HH:MM. An end EARLIER than the start reads as an overnight window (22:00–06:00)."),
     Field("schedule_days", "Work window — days", "text", "Working hours & quiet time",
           "e.g. Mon,Tue,Wed,Thu,Fri. Blank = every day."),
-    Field("notify_hours_start", "Notify window — from", "text", "Working hours & quiet time",
-          "HH:MM. When a human may be PINGED. Deliberately separate from the work window: a "
-          "team is usually happy for the autopilot to keep working in the evening — what they "
-          "do not want is a phone going off at 22:40 about something nobody can act on until "
-          "morning. Blank = notify at any hour."),
-    Field("notify_hours_end", "Notify window — to", "text", "Working hours & quiet time",
-          "HH:MM. Notices raised outside the window are HELD (never dropped) and delivered as "
-          "ONE summary when it opens. ADO comments are never held — a comment is the record on "
-          "the work item, not an interruption."),
-    Field("notify_days", "Notify window — days", "text", "Working hours & quiet time",
-          "e.g. Mon,Tue,Wed,Thu,Fri. Blank = every day."),
-    Field("notify_quiet_max_held", "↳ Max held notices", "int", "Working hours & quiet time",
-          "Ceiling on the held queue so a quiet weekend cannot grow it without bound. Oldest "
-          "are dropped first and the summary says how many."),
+
+
+
+
 
     # ── Spec drift & PR traceability ──
     Field("spec_drift_enabled", "Report spec drift", "bool", "Spec drift & PR traceability",
@@ -482,6 +458,90 @@ FIELDS: tuple[Field, ...] = (
     # Field, so a `list` field would have parsed an untouched empty textarea as [] and wiped
     # an existing multi-channel setup on the first save of any unrelated setting. They stay
     # honoured by `teams_webhook_targets`, seed the card, and are absorbed into it on save.
+
+
+
+
+
+
+
+    # ── 🔔 Cảnh báo (alerts) ──
+    # Everything that decides WHETHER a human is interrupted lives here, in one
+    # place. It used to be spread over five sections — thresholds under Delivery,
+    # the digest under the Teams bot, quiet hours under Working hours, reviewer
+    # nudges under PR review — while "Notifications" held only credentials, so the
+    # page could be read end to end without ever finding the alert settings.
+    Field("alert_events", "Gửi cảnh báo cho sự kiện nào", "text", '🔔 Cảnh báo',
+          "Danh sách sự kiện, cách nhau bởi dấu phẩy: started, completed, failed, error, "
+          "reminder, digest. Bỏ trống = gửi tất cả. Mặc định KHÔNG có 'started' — tin "
+          "'bot vừa nhận việc #123' không giúp ai quyết định gì, nhưng nhân đôi số tin."),
+    Field("alert_min_severity", "Mức tối thiểu để gửi", "select", '🔔 Cảnh báo',
+          "Lọc sau danh sách sự kiện. info = gửi mọi thứ đã bật · warning = chỉ việc cần "
+          "xem trong ngày (chạy lỗi, reviewer chưa vote) · critical = chỉ việc đang bị chặn.",
+          ("info", "warning", "critical")),
+    Field("delivery_merge_hours", "Ngưỡng: PR đã duyệt mà chưa merge (giờ)", "int",
+          '🔔 Cảnh báo',
+          "Flag a PR that is approved, unblocked and STILL not merged after this long. "
+          "This is pure waste — the work is finished and the fix is one click."),
+    Field("delivery_review_hours", "Ngưỡng: PR chưa ai review (giờ)", "int",
+          '🔔 Cảnh báo',
+          "Flag a PR nobody has voted on after this long, naming the reviewers it is "
+          "waiting on."),
+    Field("delivery_stale_days", "Ngưỡng: việc đứng im (ngày)", "int",
+          '🔔 Cảnh báo',
+          "Flag an in-progress item whose STATE has not changed in this long. Edits and "
+          "comments do not count as movement — that is the whole point."),
+    Field("alert_dedup_enabled", "Không lặp lại cảnh báo đã báo", "bool", '🔔 Cảnh báo',
+          "Một việc đã báo sẽ chỉ nhắc lại khi NẶNG THÊM (thời gian chờ tăng gấp đôi) hoặc "
+          "sau số giờ dưới đây. Tắt = mọi việc quá ngưỡng đều xuất hiện lại trong từng digest."),
+    Field("alert_repeat_hours", "↳ Nhắc lại sau (giờ)", "int", '🔔 Cảnh báo',
+          "Số giờ trước khi một cảnh báo chưa ai xử lý được nêu lại. 0 = không bao giờ lặp."),
+    Field("alert_snooze_default_days", "↳ Số ngày mặc định của /snooze", "int", '🔔 Cảnh báo',
+          "Khi gõ `/snooze <id>` mà không ghi số ngày thì ẩn bấy nhiêu ngày."),
+    Field("pr_reviewer_reminder_hours", "Nhắc reviewer chưa vote sau (giờ)", "int",
+          '🔔 Cảnh báo',
+          "A reviewer with no vote after this many hours gets one polite PR reminder. 0 = off."),
+    Field("pr_reviewer_reminder_repeat_hours", "↳ Lặp lại lời nhắc mỗi (giờ)", "int",
+          '🔔 Cảnh báo',
+          "Keep nudging a reviewer who still hasn't voted, this many hours after the last "
+          "reminder. 0 = nudge once then stay quiet."),
+    Field("teams_agent_digest_interval_hours", "Digest định kỳ mỗi (giờ)", "int",
+          '🔔 Cảnh báo',
+          "Proactively post a full activity digest to every channel/chat the bot has "
+          "been added to: autopilot run stats, auto-reviews + reminders sent, PRs "
+          "opened/merged, /log tickets, PRs ready to merge, oldest stuck PRs, and a "
+          "per-person work item standup. 0 = off. Requires the bot to have been "
+          "messaged/added at least once so its conversation is stored (persists "
+          "across restarts)."),
+    Field("teams_agent_digest_at", "↳ Hoặc gửi cố định lúc (HH:MM)", "text",
+          '🔔 Cảnh báo',
+          "Post it at a fixed local time instead, e.g. 09:00. Wins over the interval "
+          "above, which counts from process start — so a restart at 14:00 moves a 24h "
+          "digest to 14:00 permanently. Blank = use the interval."),
+    Field("digest_skip_when_empty", "Không gửi digest khi không có gì mới", "bool",
+          '🔔 Cảnh báo',
+          "Không có việc nào quá ngưỡng VÀ không có gì xong trong kỳ → im lặng. Một tin "
+          "'✅ không có gì tắc' mỗi sáng dạy người đọc lướt qua digest, và rồi lướt qua "
+          "luôn hôm nó có tin thật."),
+    Field("digest_respect_quiet_hours", "Digest tuân theo khung giờ báo", "bool",
+          '🔔 Cảnh báo',
+          "Giữ digest trong cùng khung giờ với mọi thông báo khác. Trước đây digest là "
+          "kênh DUY NHẤT bỏ qua giờ im lặng nên vẫn ping lúc 3h sáng."),
+    Field("notify_hours_start", "Khung giờ được phép báo — từ", "text", '🔔 Cảnh báo',
+          "HH:MM. When a human may be PINGED. Deliberately separate from the work window: a "
+          "team is usually happy for the autopilot to keep working in the evening — what they "
+          "do not want is a phone going off at 22:40 about something nobody can act on until "
+          "morning. Blank = notify at any hour."),
+    Field("notify_hours_end", "Khung giờ được phép báo — đến", "text", '🔔 Cảnh báo',
+          "HH:MM. Notices raised outside the window are HELD (never dropped) and delivered as "
+          "ONE summary when it opens. ADO comments are never held — a comment is the record on "
+          "the work item, not an interruption."),
+    Field("notify_days", "Khung giờ được phép báo — ngày", "text", '🔔 Cảnh báo',
+          "e.g. Mon,Tue,Wed,Thu,Fri. Blank = every day."),
+    Field("notify_quiet_max_held", "↳ Tối đa thông báo giữ lại ngoài giờ", "int", '🔔 Cảnh báo',
+          "Ceiling on the held queue so a quiet weekend cannot grow it without bound. Oldest "
+          "are dropped first and the summary says how many."),
+    # ── Notifications: kênh nhận (credentials) ──
     Field("smtp_host", "SMTP host", "text", "Notifications", "Blank = email off."),
     Field("smtp_port", "SMTP port", "int", "Notifications", "Default 587 (STARTTLS)."),
     Field("smtp_user", "SMTP user", "text", "Notifications"),
@@ -524,19 +584,8 @@ FIELDS: tuple[Field, ...] = (
           "Free-text Teams messages that don't match a /command are classified by Claude "
           "into items/prs/status/help — never an action. Costs one Claude call per "
           "unmatched message. Off = unmatched text just gets the command list."),
-    Field("teams_agent_digest_interval_hours", "↳ Daily digest every (hours)", "int",
-          "💬 Teams bot (2-way chat)",
-          "Proactively post a full activity digest to every channel/chat the bot has "
-          "been added to: autopilot run stats, auto-reviews + reminders sent, PRs "
-          "opened/merged, /log tickets, PRs ready to merge, oldest stuck PRs, and a "
-          "per-person work item standup. 0 = off. Requires the bot to have been "
-          "messaged/added at least once so its conversation is stored (persists "
-          "across restarts)."),
-    Field("teams_agent_digest_at", "↳ Daily digest at (HH:MM)", "text",
-          "💬 Teams bot (2-way chat)",
-          "Post it at a fixed local time instead, e.g. 09:00. Wins over the interval "
-          "above, which counts from process start — so a restart at 14:00 moves a 24h "
-          "digest to 14:00 permanently. Blank = use the interval."),
+
+
     Field("teams_agent_app_id", "↳ Agent (App) ID", "text", "💬 Teams bot (2-way chat)",
           "Azure Bot's Application (client) ID. Also requires `pip install .[teams-bot]`."),
     Field("teams_agent_tenant_id", "↳ Tenant ID", "text", "💬 Teams bot (2-way chat)",

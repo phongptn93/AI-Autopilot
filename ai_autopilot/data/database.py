@@ -20,6 +20,12 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("executions", "lessons_injected", "INTEGER"),
     ("executions", "project", "VARCHAR(200)"),
     ("pr_reviewer_states", "reviewed_at", "DATETIME"),
+    ("executions", "model_used", "VARCHAR(120)"),
+    ("executions", "cost_usd", "FLOAT"),
+    ("executions", "input_tokens", "INTEGER"),
+    ("executions", "output_tokens", "INTEGER"),
+    ("executions", "cache_read_tokens", "INTEGER"),
+    ("executions", "cache_creation_tokens", "INTEGER"),
 )
 
 

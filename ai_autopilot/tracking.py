@@ -25,10 +25,15 @@ class CostTracker:
         repo: ExecutionRepository,
         config: Settings,
         channels: list[NotificationChannel],
+        notifier: object | None = None,
     ) -> None:
         self._repo = repo
         self._config = config
         self._channels = channels
+        # Optional so the existing three-argument construction still works (tests build
+        # this directly). When present the budget alarm goes through the alert policy;
+        # without it, it falls back to the old direct fan-out rather than going silent.
+        self._notifier = notifier
         self._log = get_logger("tracking.cost")
         self._daily_tokens = 0
         self._daily_reset: date = datetime.now(UTC).date()
@@ -78,6 +83,10 @@ class CostTracker:
                 f"Daily token budget exceeded: {self._daily_tokens:,} / {budget:,} tokens"
             ),
         )
+        if self._notifier is not None:
+            with contextlib.suppress(Exception):
+                await self._notifier.notify(message)
+            return
         for channel in self._channels:
             if not channel.is_enabled:
                 continue

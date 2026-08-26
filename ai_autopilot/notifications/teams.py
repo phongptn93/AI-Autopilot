@@ -39,7 +39,7 @@ class TeamsNotifier(NotificationChannel):
         the others — otherwise adding a second channel would make notifications less reliable
         than having one. So each post is awaited independently and failures are logged per
         URL, never raised."""
-        targets = self._config.teams_webhook_targets
+        targets = self._interested(message)
         if not targets:
             return
         payload = self._payload(message)  # built once — identical for every channel
@@ -57,6 +57,32 @@ class TeamsNotifier(NotificationChannel):
             )
         else:
             self._log.debug("teams notification sent", title=message.title, channels=sent)
+
+    def _interested(self, message: NotificationMessage) -> list[WebhookTarget]:
+        """The channels that asked for THIS notice.
+
+        A channel with no opinion of its own inherits the global alert policy, so an
+        install that never touches per-channel routing behaves exactly as before. One
+        that narrows a channel gets the point of having more than one: the dev channel
+        can take failures only, while the PM channel takes the digest and nothing else.
+        """
+        cfg = self._config
+        default_events = cfg.alert_event_set
+        default_severity = cfg.alert_severity_floor
+        event, severity = message.event, int(message.severity)
+        wanted, skipped = [], []
+        for target in cfg.teams_webhook_targets:
+            if target.wants(event, severity, default_events=default_events,
+                            default_severity=default_severity):
+                wanted.append(target)
+            else:
+                skipped.append(target.label)
+        if skipped:
+            self._log.debug(
+                "teams channels skipped by routing",
+                event=event, severity=message.severity.name, channels=skipped,
+            )
+        return wanted
 
     async def _post(self, target: WebhookTarget, payload: dict) -> bool:
         """True when this one webhook accepted the card. Never raises."""

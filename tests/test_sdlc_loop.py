@@ -14,8 +14,15 @@ _PR = "https://dev.azure.com/o/p/_git/r/pullrequest/123"
 
 
 class FakeRun:
+    """Stands in for a ClaudeRun. Carries the full usage shape, not just the total:
+    the loop now accumulates the breakdown so History can say where the tokens went,
+    and a double missing those fields would pass here while the real path failed."""
+
     def __init__(self, text="ok", is_error=False, tokens=10):
         self.text, self.is_error, self.total_tokens, self.cost_usd = text, is_error, tokens, None
+        self.input_tokens, self.output_tokens = tokens, 0
+        self.cache_read_tokens = self.cache_creation_tokens = 0
+        self.models: dict[str, int] = {}
 
 
 class FakeExecutor:

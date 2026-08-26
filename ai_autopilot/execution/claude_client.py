@@ -9,10 +9,9 @@ of scraping stdout the way the legacy .NET CLI shell-out did.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
-
-from collections.abc import Callable
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -82,6 +81,13 @@ class ClaudeRun:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    # Which model actually served the run, as the CLI reports it. Read from the result
+    # rather than from what we ASKED for: a blank ``claude_model`` means "SDK default",
+    # and an alias like "sonnet" resolves to a dated id — recording the request would
+    # make the history unable to answer "what did this cost us, on what".
+    # A run can legitimately touch more than one (a sub-agent on a cheaper tier), so the
+    # breakdown is kept and ``model`` is the one that did the most work.
+    models: dict[str, int] = field(default_factory=dict)   # model -> tokens
     transcript: list[str] = field(default_factory=list)
 
     @property
@@ -92,6 +98,87 @@ class ClaudeRun:
             + self.cache_read_tokens
             + self.cache_creation_tokens
         )
+
+    @property
+    def model(self) -> str:
+        """The model that did most of the work, or "" when the CLI reported none."""
+        return max(self.models, key=lambda k: self.models[k]) if self.models else ""
+
+    @property
+    def model_label(self) -> str:
+        """What to show a human: the main model, and how many others chipped in."""
+        if not self.models:
+            return ""
+        main = self.model
+        extra = len(self.models) - 1
+        return f"{main} +{extra}" if extra > 0 else main
+
+
+@dataclass
+class Usage:
+    """Token/cost totals across every Claude call that made up ONE work item's result.
+
+    A work item is rarely one call — a task run, a retry, a ``/pr-create``, or a whole
+    SDLC profile of stages. History reports per ITEM, so the numbers have to be summed
+    somewhere, and doing it here means every caller sums them the same way instead of
+    each one remembering which four fields exist.
+
+    ``models`` is a token count per model rather than a set of names, so "which model
+    did this work item actually run on" has a defensible answer when more than one was
+    involved: the one that burned the most.
+    """
+
+    tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cost_usd: float | None = None
+    models: dict[str, int] = field(default_factory=dict)
+
+    def add(self, *runs: ClaudeRun | None) -> Usage:
+        for run in runs:
+            if run is None:
+                continue
+            self.tokens += run.total_tokens
+            self.input_tokens += run.input_tokens
+            self.output_tokens += run.output_tokens
+            self.cache_read_tokens += run.cache_read_tokens
+            self.cache_creation_tokens += run.cache_creation_tokens
+            if run.cost_usd is not None:
+                # None means "the CLI did not report a cost", which is NOT zero. Only
+                # start summing once there is at least one real figure, so a run whose
+                # cost is unknown stays unknown instead of being reported as free.
+                self.cost_usd = (self.cost_usd or 0.0) + run.cost_usd
+            for name, count in run.models.items():
+                self.models[name] = self.models.get(name, 0) + count
+        return self
+
+    @property
+    def model(self) -> str:
+        return max(self.models, key=lambda k: self.models[k]) if self.models else ""
+
+    @property
+    def model_label(self) -> str:
+        if not self.models:
+            return ""
+        extra = len(self.models) - 1
+        return f"{self.model} +{extra}" if extra > 0 else self.model
+
+    def apply(self, result) -> None:
+        """Write the totals onto an ``ExecutionResult``. The one place that mapping lives."""
+        result.cost_tokens = self.tokens
+        result.cost_usd = self.cost_usd
+        result.model_used = self.model_label
+        result.input_tokens = self.input_tokens
+        result.output_tokens = self.output_tokens
+        result.cache_read_tokens = self.cache_read_tokens
+        result.cache_creation_tokens = self.cache_creation_tokens
+
+
+def apply_usage(result, *runs: ClaudeRun | None) -> None:
+    """Shorthand for the common case: one or more runs, straight onto the result."""
+    Usage().add(*runs).apply(result)
 
 
 async def run_claude(
@@ -207,6 +294,20 @@ async def run_claude(
                     run.cache_creation_tokens = int(
                         usage.get("cache_creation_input_tokens", 0) or 0
                     )
+                    # ``model_usage`` is keyed by model id with a camelCase payload
+                    # passed through verbatim from the CLI. Read defensively: it is
+                    # absent on older CLIs, and losing the token TOTAL because the
+                    # breakdown changed shape would be a bad trade.
+                    for name, mu in (getattr(message, "model_usage", None) or {}).items():
+                        try:
+                            run.models[str(name)] = (
+                                int(mu.get("inputTokens", 0) or 0)
+                                + int(mu.get("outputTokens", 0) or 0)
+                                + int(mu.get("cacheReadInputTokens", 0) or 0)
+                                + int(mu.get("cacheCreationInputTokens", 0) or 0)
+                            )
+                        except (AttributeError, TypeError, ValueError):
+                            run.models[str(name)] = 0
                     if message.result:
                         run.text = message.result
 

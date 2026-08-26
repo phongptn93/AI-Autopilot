@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 
 from ai_autopilot.config import Settings
-from ai_autopilot.execution.claude_client import run_claude
+from ai_autopilot.execution.claude_client import ClaudeRun, run_claude
 from ai_autopilot.logging_config import get_logger
 
 
@@ -16,6 +16,10 @@ class ReviewResult:
     critical_issues: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     raw_output: str = ""
+    # The Claude call this review made, so the caller can bill its tokens to the work
+    # item. The review gate is a full model run and was being counted as zero, which
+    # understated the cost of every SDLC item by an entire stage.
+    run: ClaudeRun | None = None
 
 
 class AutoReviewer:
@@ -35,7 +39,7 @@ class AutoReviewer:
         self._log.info("running auto-review", dir=work_dir)
 
         result = ReviewResult()
-        output = await self._run_review(work_dir)
+        output, result.run = await self._run_review(work_dir)
         result.raw_output = output + "\n"
         _parse_issues(output, result, blocked)
 
@@ -47,7 +51,7 @@ class AutoReviewer:
         result.passed = len(result.critical_issues) == 0
         return result
 
-    async def _run_review(self, work_dir: str) -> str:
+    async def _run_review(self, work_dir: str) -> tuple[str, ClaudeRun | None]:
         prompt = (
             "Review the changes on this branch for security issues. Output EACH real "
             "finding on its own line, starting with a bracketed severity tag, exactly like:\n"
@@ -67,10 +71,10 @@ class AutoReviewer:
                 model=self._config.claude_model or None,
                 permission_mode="plan",
             )
-            return run.text
+            return run.text, run
         except Exception as exc:  # noqa: BLE001
             self._log.warning("auto-review command failed", error=str(exc))
-            return ""
+            return "", None
 
 
 # A finding line MUST lead with a bracketed severity tag (after an optional bullet), e.g.

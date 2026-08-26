@@ -1151,8 +1151,15 @@ def test_settings_page_shows_the_time_windows_and_saves_them(tmp_path, monkeypat
     with TestClient(create_app(settings)) as client:
         page = client.get("/dashboard/settings")
         assert page.status_code == 200
-        for label in ("Timezone", "Notify window", "Work window", "Process-health digest"):
+        for label in ("Timezone", "Work window", "Process-health digest"):
             assert label in page.text, label
+        # The notify window moved into the consolidated "🔔 Cảnh báo" section and was
+        # relabelled with it. Anchor on the field NAMES rather than the wording: what
+        # this test is really about is the controls being present and persistable, and
+        # tying it to display copy makes every future rewording look like a regression.
+        assert "🔔 Cảnh báo" in page.text
+        for name in ("notify_hours_start", "notify_hours_end", "notify_days"):
+            assert f'name="{name}"' in page.text, name
 
         resp = client.post(
             "/dashboard/settings",

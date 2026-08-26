@@ -23,6 +23,15 @@ class ExecutionResult:
     duration_seconds: float = 0.0
     cost_tokens: int = 0
     cost_usd: float | None = None
+    # Which model served the run, and where the tokens went. A single total could not
+    # answer either question a cost review actually asks — "is this run expensive
+    # because it re-read the repo, or because it thought hard?" and "was this on the
+    # model we meant to be paying for?" — so both are carried through to History.
+    model_used: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     # The agent ran but reports it needs a human (ambiguous AC, missing info).
     # Not a failure to retry — escalate and stop.
     needs_human: bool = False

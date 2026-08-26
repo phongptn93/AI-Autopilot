@@ -22,6 +22,7 @@ from pathlib import Path
 
 from ai_autopilot import flows as flows_mod
 from ai_autopilot.config import Settings, describe_users, is_ambiguous_user, parse_hhmm
+from ai_autopilot.scheduling import resolve_tz
 
 ERROR, WARN, OK = "error", "warn", "ok"
 ERROR_ICON, WARN_ICON, OK_ICON = "❌", "⚠️ ", "✅"
@@ -342,6 +343,71 @@ def check_notifications(config: Settings) -> list[Finding]:
         "Add a Teams Workflows webhook URL (Notifications), or enable the bot. Otherwise "
         "results only appear on the dashboard and in ADO.",
     ))
+    return out
+
+
+def check_alerts(config: Settings) -> list[Finding]:
+    """Whether the alert policy will actually let anything through.
+
+    Every finding here is a way to be silent WITHOUT it looking like a fault: nothing
+    errors, nothing logs, the dashboard is green, and a stuck PR simply never gets
+    mentioned. That is the failure this check exists to make visible.
+    """
+    from ai_autopilot.notifications.base import ALL_EVENTS, Severity
+
+    out: list[Finding] = []
+    raw = (config.alert_events or "").strip()
+    if raw:
+        named = {p.strip().lower() for p in raw.split(",") if p.strip()}
+        unknown = sorted(named - set(ALL_EVENTS))
+        if unknown:
+            out.append(Finding(
+                WARN, "Alert events that match nothing",
+                ", ".join(unknown),
+                "These are dropped, so they look enabled on the Settings page and fire "
+                f"for nothing. Valid: {', '.join(ALL_EVENTS)}.",
+            ))
+        if named and not (named & set(ALL_EVENTS)):
+            out.append(Finding(
+                ERROR, "No valid alert event is enabled",
+                f"alert_events={raw!r}",
+                "Not one name is recognised, so NOTHING will ever be notified. Clear the "
+                "field to allow everything, or fix the names.",
+            ))
+
+    floor = (config.alert_min_severity or "").strip()
+    if floor and floor.upper() not in Severity.__members__:
+        out.append(Finding(
+            WARN, "Alert severity floor is not a severity",
+            f"alert_min_severity={floor!r}",
+            'Falling back to "info" (deliver everything). Use info / warning / critical.',
+        ))
+    elif Severity.parse(floor, Severity.INFO) is Severity.CRITICAL:
+        out.append(Finding(
+            WARN, "Only blocking alerts will be delivered",
+            'alert_min_severity="critical"',
+            "Failed runs and reviewer reminders are WARNING, so they are suppressed. "
+            'Use "warning" unless total quiet is what you want.',
+        ))
+
+    if config.digest_respect_quiet_hours and config.notify_hours_start \
+            and not resolve_tz(config.timezone):
+        out.append(Finding(
+            WARN, "Quiet hours are set but have no timezone",
+            f"notify_hours={config.notify_hours_start}-{config.notify_hours_end}",
+            "Quiet hours need `timezone` (e.g. Asia/Ho_Chi_Minh) or they do not apply "
+            "at all — the host clock is usually UTC, so an evening window would mean "
+            "the middle of the afternoon.",
+        ))
+
+    if config.alert_dedup_enabled and config.alert_repeat_hours == 0:
+        out.append(Finding(
+            OK, "Alerts are reported once and never repeated",
+            "alert_repeat_hours=0",
+            "An item nobody acts on is mentioned once, then only if the wait doubles. "
+            "Fine if the team works the Delivery page; set a value if chat is the only "
+            "place anyone looks.",
+        ))
     return out
 
 
@@ -709,7 +775,8 @@ def check_state_flows(config: Settings) -> list[Finding]:
 CHECKS = (
     check_ado, check_trigger, check_projects, check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort,
-    check_autonomy, check_dashboard_security, check_notifications, check_teams_bot,
+    check_autonomy, check_dashboard_security, check_notifications, check_alerts,
+    check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
     check_assignee_scoping,
 )

@@ -264,6 +264,53 @@ def _category_badge(category: str) -> tuple[str, str]:
     return label, css
 
 
+def _model_label(name: str | None) -> str:
+    """A model id trimmed to what a person reads in a table cell.
+
+    "claude-haiku-4-5-20251001" is 25 characters of which four carry the meaning. The
+    vendor prefix and the release date are dropped for display and kept in the cell's
+    tooltip, so the column stays narrow without losing the exact id a cost review needs.
+    """
+    raw = (name or "").strip()
+    if not raw:
+        return ""
+    extra = ""
+    if " +" in raw:                       # "claude-opus-5 +1" — more than one model ran
+        raw, _, tail = raw.partition(" +")
+        extra = f" +{tail}"
+    short = raw.removeprefix("claude-")
+    head, sep, tail = short.rpartition("-")
+    if sep and tail.isdigit() and len(tail) == 8:   # trailing YYYYMMDD
+        short = head
+    return short + extra
+
+
+def _tokens_detail(record) -> str:
+    """The tooltip behind a token count: where the tokens went, and what it cost.
+
+    A single total cannot distinguish a run that re-read the whole repo from one that
+    reasoned hard, and those have very different fixes. Rows written before the
+    breakdown existed return "" so the UI shows the bare number rather than a row of
+    fabricated zeroes.
+    """
+    parts = []
+    for label, value in (
+        ("Input", getattr(record, "input_tokens", None)),
+        ("Output", getattr(record, "output_tokens", None)),
+        ("Cache read", getattr(record, "cache_read_tokens", None)),
+        ("Cache write", getattr(record, "cache_creation_tokens", None)),
+    ):
+        if value:
+            parts.append(f"{label}: {value:,}")
+    cost = getattr(record, "cost_usd", None)
+    if cost is not None:
+        parts.append(f"Chi phi: ${cost:.4f}")
+    model = getattr(record, "model_used", None)
+    if model:
+        parts.append(f"Model: {model}")
+    return " | ".join(parts)
+
+
 def _status_class(status: str) -> str:
     return _STATUS_CLASS.get(status, "badge-retrying")
 
@@ -402,6 +449,8 @@ def create_dashboard_router() -> APIRouter:
             "fmt_duration": _fmt_duration,
             "category_badge": _category_badge,
             "status_class": _status_class,
+            "model_label": _model_label,
+            "tokens_detail": _tokens_detail,
             **extra,
         }
 

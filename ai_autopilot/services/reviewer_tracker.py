@@ -943,10 +943,10 @@ class ReviewerTrackerService:
         self, repo_name: str, pr: dict, reviewers: list[dict], why: str
     ) -> None:
         """Push the reminder to the configured notification channels (Teams/Email/Zalo)
-        with an "Open PR" button. Best-effort — a channel failure never affects the flow."""
-        channels = getattr(self._c, "channels", None)
-        if not channels:
-            return
+        with an "Open PR" button, THROUGH the notifier so it obeys the alert policy and
+        the quiet window. Best-effort — a channel failure never affects the flow."""
+        if not getattr(self._c, "channels", None):
+            return          # nothing configured to send to; skip the work entirely
         pr_id = pr.get("pullRequestId") or 0
         who = ", ".join(r.get("displayName") or r.get("uniqueName") or "?" for r in reviewers)
         item = WorkItemInfo(
@@ -959,14 +959,13 @@ class ReviewerTrackerService:
         url = self._pr_web_url(repo_name, pr_id)
         if url:
             actions.append(("🔗 Mở PR", url))
-        msg = NotificationMessage(
-            work_item=item, type=NotificationType.REMINDER, actions=actions
-        )
-        for ch in channels:
-            if not getattr(ch, "is_enabled", False):
-                continue
-            with contextlib.suppress(Exception):
-                await ch.send(msg)
+        # Through the notifier so the nudge obeys quiet hours. This is the politeness
+        # feature: a reminder that arrives at 23:40 about a PR nobody can review until
+        # morning is the single notice most likely to get the whole bot muted.
+        with contextlib.suppress(Exception):
+            await self._c.notifier.notify(NotificationMessage(
+                work_item=item, type=NotificationType.REMINDER, actions=actions
+            ))
 
     def _pr_web_url(self, repo_name: str, pr_id: int) -> str:
         """Browser URL of a PR (for notification action buttons)."""

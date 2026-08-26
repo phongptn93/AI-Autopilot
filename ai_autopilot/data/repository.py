@@ -5,13 +5,14 @@ from __future__ import annotations
 import contextlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, false, func, select
+from sqlalchemy import delete, false, func, or_, select
 
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
     AiConflict,
+    AlertState,
     AuditEvent,
     ClaudeSession,
     ExecutionRecord,
@@ -120,6 +121,16 @@ class ExecutionRepository:
                 result.duration_seconds = record.duration_seconds
             if result.cost_tokens:
                 record.cost_tokens = result.cost_tokens
+                # The breakdown is written under the same guard as the total: a run that
+                # reported no usage at all must keep NULLs, so History can distinguish
+                # "we don't know" from "this was free". ``cost_usd`` stays None when the
+                # CLI did not price the run, which is not the same as costing nothing.
+                record.model_used = result.model_used or None
+                record.cost_usd = result.cost_usd
+                record.input_tokens = result.input_tokens
+                record.output_tokens = result.output_tokens
+                record.cache_read_tokens = result.cache_read_tokens
+                record.cache_creation_tokens = result.cache_creation_tokens
             record.lessons_injected = result.lessons_injected
             await session.commit()
 
@@ -979,6 +990,213 @@ class NotificationHoldRepository:
                 await session.execute(delete(HeldNotification))
                 await session.commit()
             return rows
+
+
+@dataclass(frozen=True)
+class AlertDecision:
+    """Whether one alert should be spoken about now, and why.
+
+    ``reason`` is carried so the digest can SAY why a line reappeared ("tang tu 3 gio")
+    instead of silently repeating itself, which is what made repetition read as a
+    malfunction rather than as an escalation."""
+
+    send: bool
+    reason: str = ""
+    escalated: bool = False
+    first_time: bool = False
+
+
+class AlertStateRepository:
+    """The memory that stops an alert being reported in every single digest.
+
+    One row per (kind, work item). The policy lives here rather than in the digest
+    renderer because the same question is asked by chat, e-mail and anything else that
+    reports actions: a rule implemented per channel is a rule that drifts.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+        self._log = get_logger("data.alerts")
+
+    async def decide(
+        self, kind: str, work_item_id: int, *, age_hours: float, title: str = "",
+        repeat_hours: int = 24, now: datetime | None = None,
+    ) -> AlertDecision:
+        """Should this alert be included in the message being built right now?
+
+        Three ways the answer is yes, in the order they are checked:
+
+        * **never reported** - always news;
+        * **escalated** - the wait has at least DOUBLED since we last said so, which is
+          the difference between "still waiting" and "now seriously stuck";
+        * **overdue** - ``repeat_hours`` has passed and nobody acted.
+
+        Snoozed and acknowledged alerts answer no, and an ack is deliberately NOT
+        time-limited: someone said they were handling it, and asking again in an hour is
+        how a tool teaches people to ignore it.
+        """
+        now = now or datetime.now(UTC)
+        async with self._db.session() as session:
+            row = (await session.execute(
+                select(AlertState).where(
+                    AlertState.kind == kind, AlertState.work_item_id == work_item_id
+                )
+            )).scalar_one_or_none()
+
+            if row is None:
+                session.add(AlertState(
+                    kind=kind, work_item_id=work_item_id, title=(title or "")[:500],
+                    first_seen_at=_naive(now), last_notified_at=_naive(now),
+                    last_age_hours=age_hours, notify_count=1,
+                ))
+                await session.commit()
+                return AlertDecision(send=True, first_time=True, reason="moi")
+
+            # A row left over from a previous occurrence: the condition had cleared, so
+            # this is a fresh problem that happens to reuse the key.
+            if row.resolved_at is not None:
+                row.resolved_at = None
+                row.first_seen_at = _naive(now)
+                row.last_notified_at = _naive(now)
+                row.last_age_hours = age_hours
+                row.notify_count = 1
+                row.acked_at, row.acked_by, row.snoozed_until = None, "", None
+                row.title = (title or row.title)[:500]
+                await session.commit()
+                return AlertDecision(send=True, first_time=True, reason="tai phat")
+
+            if row.snoozed_until is not None and row.snoozed_until > _naive(now):
+                return AlertDecision(send=False, reason="dang snooze")
+            if row.acked_at is not None:
+                return AlertDecision(send=False, reason="da ack")
+
+            baseline = row.last_age_hours or 0.0
+            escalated = baseline > 0 and age_hours >= baseline * 2
+            due = False
+            if repeat_hours > 0 and row.last_notified_at is not None:
+                elapsed = (_naive(now) - row.last_notified_at).total_seconds() / 3600
+                due = elapsed >= repeat_hours
+
+            if not (escalated or due):
+                return AlertDecision(send=False, reason="da bao")
+
+            reason = f"tang tu {_hours_label(baseline)}" if escalated else "van chua xu ly"
+            # A snooze that has run out is SPENT, not merely inactive. Leaving the stale
+            # timestamp behind kept the row looking muted to ``muted_count``, so the
+            # dashboard reported alerts as silenced while they were in fact being sent —
+            # exactly the kind of unexplainable silence this table exists to remove.
+            row.snoozed_until = None
+            row.last_notified_at = _naive(now)
+            row.last_age_hours = age_hours
+            row.notify_count = int(row.notify_count or 0) + 1
+            row.title = (title or row.title)[:500]
+            await session.commit()
+            return AlertDecision(send=True, escalated=escalated, reason=reason)
+
+    async def clear(
+        self, kind: str, keep_ids: set[int], *, now: datetime | None = None
+    ) -> int:
+        """Mark every alert of ``kind`` that is no longer active as resolved.
+
+        Called with the ids the current report DID raise, so anything else has gone
+        away. Resolving rather than deleting keeps ``notify_count`` and the first-seen
+        time, and makes a recurrence visibly a recurrence.
+        """
+        now = now or datetime.now(UTC)
+        async with self._db.session() as session:
+            rows = (await session.execute(
+                select(AlertState).where(
+                    AlertState.kind == kind, AlertState.resolved_at.is_(None)
+                )
+            )).scalars().all()
+            cleared = 0
+            for row in rows:
+                if row.work_item_id in keep_ids:
+                    continue
+                row.resolved_at = _naive(now)
+                row.acked_at, row.acked_by, row.snoozed_until = None, "", None
+                cleared += 1
+            if cleared:
+                await session.commit()
+            return cleared
+
+    async def ack(self, work_item_id: int, by: str = "", kind: str = "") -> int:
+        """Acknowledge every open alert on an item (or one ``kind``). Returns how many."""
+        return await self._mark(
+            work_item_id, kind, acked_at=datetime.now(UTC), acked_by=(by or "")[:200],
+        )
+
+    async def snooze(self, work_item_id: int, days: int, kind: str = "") -> int:
+        """Hide an item's alerts for ``days``. Returns how many were snoozed."""
+        until = datetime.now(UTC) + timedelta(days=max(1, days))
+        return await self._mark(work_item_id, kind, snoozed_until=until)
+
+    async def unack(self, work_item_id: int, kind: str = "") -> int:
+        """Undo an ack/snooze - the alert becomes reportable on the next digest."""
+        return await self._mark(
+            work_item_id, kind, acked_at=None, acked_by="", snoozed_until=None
+        )
+
+    async def _mark(self, work_item_id: int, kind: str, **fields) -> int:
+        async with self._db.session() as session:
+            stmt = select(AlertState).where(
+                AlertState.work_item_id == work_item_id, AlertState.resolved_at.is_(None)
+            )
+            if kind:
+                stmt = stmt.where(AlertState.kind == kind)
+            rows = (await session.execute(stmt)).scalars().all()
+            for row in rows:
+                for key, value in fields.items():
+                    setattr(
+                        row, key,
+                        _naive(value) if isinstance(value, datetime) else value,
+                    )
+            if rows:
+                await session.commit()
+            return len(rows)
+
+    async def open_alerts(self) -> list[AlertState]:
+        """Every alert currently live, oldest problem first - what the dashboard lists."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(AlertState)
+                .where(AlertState.resolved_at.is_(None))
+                .order_by(AlertState.first_seen_at.asc())
+            )
+            return list(rows.scalars().all())
+
+    async def muted_count(self, now: datetime | None = None) -> int:
+        """How many live alerts are acked or snoozed - shown so silence is explainable."""
+        cutoff = _naive(now or datetime.now(UTC))
+        async with self._db.session() as session:
+            return int((await session.execute(
+                select(func.count()).select_from(AlertState).where(
+                    AlertState.resolved_at.is_(None),
+                    or_(
+                        AlertState.acked_at.is_not(None),
+                        AlertState.snoozed_until > cutoff,
+                    ),
+                )
+            )).scalar() or 0)
+
+
+def _naive(value: datetime | None) -> datetime | None:
+    """Drop tzinfo for comparison with DateTime columns, which SQLite stores naive.
+
+    Mixing an aware ``now`` with a naive column raises at comparison time, which would
+    turn "is this snoozed?" into a crashed digest."""
+    if value is None:
+        return None
+    return value.replace(tzinfo=None) if value.tzinfo is not None else value
+
+
+def _hours_label(hours: float) -> str:
+    """A wait as Vietnamese prose - the same vocabulary the Delivery page uses."""
+    if hours < 1:
+        return f"{int(hours * 60)} phut"
+    if hours < 48:
+        return f"{int(hours)} gio"
+    return f"{int(hours // 24)} ngay"
 
 
 class SpecDriftRepository:

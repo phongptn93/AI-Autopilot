@@ -5,7 +5,17 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, Index, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -182,6 +192,45 @@ class HeldNotification(Base):
     title: Mapped[str] = mapped_column(String(500), default="")
     body: Mapped[str] = mapped_column(Text, default="")
     at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AlertState(Base):
+    """What has already been said about one problem, so it is not said again daily.
+
+    The row is the alert's LIFE, not an event log: one row per (kind, work item), updated
+    in place. That is the whole point — a table of occurrences would answer "how often did
+    we mention it", and the question the digest needs answered is "have we mentioned it,
+    and has it got worse since".
+
+    ``last_age_hours`` is what makes escalation possible without a second table: an item
+    reported at 26 hours and now sitting at 100 is materially different news, while the
+    same item at 27 hours is the same news. ``acked_at`` and ``snoozed_until`` are the two
+    ways a human says "I know" — the first permanently (until the alert clears and
+    returns), the second until a date.
+    """
+
+    __tablename__ = "alert_states"
+    __table_args__ = (
+        UniqueConstraint("kind", "work_item_id", name="uq_alert_kind_item"),
+        Index("ix_alert_states_snoozed_until", "snoozed_until"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(40), default="")       # delivery.KIND_*
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String(500), default="")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime)
+    last_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Age (hours) at the moment we last reported it — the baseline escalation is measured
+    # against. Float because an alert can legitimately fire under an hour old.
+    last_age_hours: Mapped[float] = mapped_column(Float, default=0.0)
+    notify_count: Mapped[int] = mapped_column(Integer, default=0)
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acked_by: Mapped[str] = mapped_column(String(200), default="")
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Cleared when the underlying condition goes away, so the SAME problem recurring next
+    # month is new news rather than something we think we already reported.
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class SpecDrift(Base):
@@ -426,6 +475,15 @@ class ExecutionRecord(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     cost_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # Cost detail. All nullable: rows written before these columns existed genuinely do
+    # not know, and a 0 would be read as "this run was free" — the one wrong answer a
+    # cost table must never give. The UI renders None as an em dash, not as a zero.
+    model_used: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Lessons the learning loop injected into this run's brief. NULL on rows written
     # before the column existed → rendered as "no badge", never as a zero claim.
     lessons_injected: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)

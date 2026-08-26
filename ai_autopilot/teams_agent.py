@@ -35,6 +35,7 @@ from ai_autopilot.config import Settings, parse_hhmm
 from ai_autopilot.container import Container
 from ai_autopilot.data.entities import PipelineState
 from ai_autopilot.logging_config import get_logger
+from ai_autopilot.scheduling import QuietHours, resolve_tz
 from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
 
@@ -285,6 +286,10 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "/queue": ("/queue", "việc autopilot đang chờ người xử lý (needs human)"),
     "/resume": ("/resume <id>", "tiếp tục 1 việc đang chờ (có xác nhận)"),
     "/log": ("/log <mô tả>", "tạo nhanh 1 Requirement trong ADO (có xác nhận trước khi tạo)"),
+    "/alerts": ("/alerts", "cảnh báo đang mở, kèm cái nào đã ack / đang snooze"),
+    "/ack": ("/ack <id>", "xác nhận đang xử lý — ngừng nhắc lại việc đó trong digest"),
+    "/snooze": ("/snooze <id> [ngày]", "tạm ẩn cảnh báo của việc đó (mặc định theo cấu hình)"),
+    "/unack": ("/unack <id>", "bỏ ack/snooze — cho cảnh báo xuất hiện lại"),
     "/status": ("/status", "tình trạng hoạt động"),
     "/help": ("/help", "bảng lệnh này"),
 }
@@ -449,18 +454,28 @@ async def _digest_loop(
     at = config.teams_agent_digest_at.strip()
     # A fixed time wins over the interval — see teams_agent_digest_at in config. The
     # interval stays the fallback so an install that never set a time is unchanged.
+    quiet = QuietHours(config)
+    # "09:00" must mean 09:00 WHERE THE TEAM IS. The host clock is UTC on every
+    # container we deploy to, so reading the wall clock made a Vietnamese team's morning
+    # digest arrive at 16:00 — the same class of bug ``timezone`` exists to prevent for
+    # the work window, which this loop never opted into.
+    tz = resolve_tz(config.timezone)
+
+    def _now() -> datetime:
+        return datetime.now(tz) if tz else datetime.now()  # noqa: DTZ005 — host fallback
+
     previous: datetime | None = None
     while True:
         try:
             if at:
-                delay = seconds_until(at, datetime.now())  # noqa: DTZ005 — host wall-clock
+                delay = seconds_until(at, _now())
                 if delay is None:
                     # A constant that doesn't parse cannot start parsing on the next
                     # cycle, so retrying would only spin. doctor names the bad value.
                     _log.error("Teams digest disabled — digest_at is not HH:MM", value=at)
                     return
                 await asyncio.sleep(delay)
-                fired = datetime.now()  # noqa: DTZ005 — same clock the sleep was measured on
+                fired = _now()  # same clock the sleep was measured on
                 # Same contract as the interval branch below: the window is the REAL gap,
                 # never a nominal 24h. A restart, an overrunning cycle or a DST shift all
                 # move it, and a fixed figure would then either skip activity or count it
@@ -475,6 +490,13 @@ async def _digest_loop(
                 # otherwise a longer interval leaves a silent gap between digests, and a
                 # shorter one double-counts the overlap. Single source of truth: interval.
                 window = interval
+            # Outside the notify window the digest is DROPPED, not queued. Unlike a
+            # per-item notice, it is a snapshot of "right now": delivering this
+            # morning's picture tomorrow morning would be worse than not sending it,
+            # and the next scheduled one is never far away.
+            if config.digest_respect_quiet_hours and quiet.is_quiet():
+                _log.info("Teams digest skipped — outside notify hours")
+                continue
             await _send_digest(
                 container, app, adapter, storage, message_factory, window_hours=window,
             )
@@ -622,10 +644,15 @@ def _format_kpis(report) -> str:
     return "\n".join(lines)
 
 
-def _format_actions(report, cfg, limit: int = _DIGEST_ACTION_LIMIT) -> str:
-    """The action list — already ordered by urgency then age by ``compute_delivery``."""
+def _format_actions(rows, cfg, limit: int = _DIGEST_ACTION_LIMIT) -> str:
+    """The action list — already ordered by urgency then age by ``compute_delivery``.
+
+    ``rows`` are ``(action, note)`` pairs. The note is why this line is being shown
+    again ("tang tu 26 gio"); repeating a line without saying what changed is what made
+    the digest read as a broken record rather than as an escalation.
+    """
     lines = []
-    for action in report.actions[:limit]:
+    for action, note in rows[:limit]:
         icon = _ACTION_ICON.get(action.kind, "•")
         label = _ACTION_LABEL.get(action.kind, action.kind)
         head = f"{icon} **{label} · {action.age_label}**"
@@ -638,11 +665,71 @@ def _format_actions(report, cfg, limit: int = _DIGEST_ACTION_LIMIT) -> str:
             tail.append(f"_{action.owner}_")
         if action.pr_id and action.repo:
             tail.append(_pr_link(cfg, action.repo, action.pr_id))
+        if note:
+            tail.append(f"↑ _{note}_")
         lines.append(f"{head} — " + " · ".join(tail) if tail else head)
-    extra = len(report.actions) - limit
+    extra = len(rows) - limit
     if extra > 0:
         lines.append(f"_… +{extra} việc nữa._")
     return "\n".join(lines)
+
+
+# Every action kind the digest can raise — the keys of the label map, so a kind added
+# there is cleared here too rather than leaving a stale alert row behind forever.
+_ALL_ACTION_KINDS: tuple[str, ...] = tuple(_ACTION_LABEL)
+
+
+def _alert_key(action) -> int:
+    """A stable id for one alert. PR-only actions have no work item, and they all
+    reported ``0`` — which made every such alert the SAME alert, so the first one
+    silenced the rest. PRs are keyed negatively so the two spaces cannot collide."""
+    return action.work_item_id or -(action.pr_id or 0)
+
+
+async def filter_new_actions(container, report, *, now=None):
+    """Reduce the report to what is actually NEWS, and say how much was held back.
+
+    Returns ``(rows, suppressed)`` where ``rows`` are ``(action, note)`` pairs. With
+    dedup off this is the whole list with empty notes, so the behaviour a team already
+    had is one setting away.
+    """
+    cfg = container.config
+    actions = list(report.actions)
+    repo = getattr(container, "alert_state_repo", None)
+    # No repo (a caller that never wired one) or dedup switched off → report everything.
+    # Failing OPEN is the only safe default here: the cost of a repeated line is a line,
+    # the cost of a swallowed one is a PR nobody hears about again.
+    if repo is None or not getattr(cfg, "alert_dedup_enabled", True):
+        return [(a, "") for a in actions], 0
+
+    now = now or datetime.now(UTC)
+    live: dict[str, set[int]] = {kind: set() for kind in _ALL_ACTION_KINDS}
+    for action in actions:
+        live.setdefault(action.kind, set()).add(_alert_key(action))
+    # Resolve first: an alert that has cleared must lose its ack BEFORE we decide
+    # anything, so a problem that comes back is new news rather than still-acked.
+    for kind, keep in live.items():
+        try:
+            await repo.clear(kind, keep, now=now)
+        except Exception as exc:  # noqa: BLE001 — never let bookkeeping kill the digest
+            _log.warning("alert clear failed", kind=kind, error=_fmt_exc(exc))
+
+    rows, suppressed = [], 0
+    for action in actions:
+        try:
+            decision = await repo.decide(
+                action.kind, _alert_key(action), age_hours=action.age_hours,
+                title=action.title, repeat_hours=cfg.alert_repeat_hours, now=now,
+            )
+        except Exception as exc:  # noqa: BLE001 — on doubt, REPORT it
+            _log.warning("alert decide failed — reporting", error=_fmt_exc(exc))
+            rows.append((action, ""))
+            continue
+        if decision.send:
+            rows.append((action, "" if decision.first_time else decision.reason))
+        else:
+            suppressed += 1
+    return rows, suppressed
 
 
 def _format_people(report, limit: int = _DIGEST_PEOPLE_LIMIT) -> str:
@@ -669,7 +756,7 @@ def _format_people(report, limit: int = _DIGEST_PEOPLE_LIMIT) -> str:
 
 def build_digest(
     report, cfg, *, delivered_recent: int = 0, window_label: str = "24h",
-    now: datetime | None = None,
+    now: datetime | None = None, rows=None, suppressed: int = 0,
 ) -> str:
     """Render the digest body from a delivery report.
 
@@ -684,14 +771,27 @@ def build_digest(
     header = f"# 🚚 AI Autopilot — Nhịp giao hàng\n_{stamp} · số liệu {report.window_days} ngày"
     if link.startswith("["):
         header += f" · {link}"
+    if rows is None:                       # no alert state (tests, dedup off)
+        rows = [(a, "") for a in report.actions]
     parts = [f"{header}_", _digest_headline(report, delivered_recent, window_label)]
 
     kpis = _format_kpis(report)
     if kpis:
         parts.append(f"**📊 Chỉ số {report.window_days} ngày**\n{kpis}")
-    if report.actions:
+    if rows:
+        # The heading counts what is NEW; the total is only worth printing when the two
+        # differ, so a normal digest is not cluttered by arithmetic that always agrees.
+        total = len(report.actions)
+        count = f"{len(rows)}" if len(rows) == total else f"{len(rows)}/{total}"
         parts.append(
-            f"**⚠️ Cần xử lý ({len(report.actions)})**\n{_format_actions(report, cfg)}"
+            f"**⚠️ Cần xử lý ({count})**\n{_format_actions(rows, cfg)}"
+        )
+    if suppressed:
+        # Say what was withheld. Silence a reader cannot account for is indistinguishable
+        # from a broken integration, and that suspicion is what kills trust in a digest.
+        parts.append(
+            f"_🔕 {suppressed} cảnh báo đã báo trước đó / đang snooze — "
+            "`/alerts` để xem, `/ack <id>` để tắt._"
         )
     people = _format_people(report)
     if people:
@@ -700,7 +800,10 @@ def build_digest(
         parts.append(
             "_Lịch sử trạng thái chưa phủ hết kỳ — lead time sẽ chuẩn dần theo ngày._"
         )
-    parts.append("_`/team` PR tắc lâu nhất · `/queue` việc đang chờ người._")
+    parts.append(
+        "_`/team` PR tắc lâu nhất · `/queue` việc đang chờ người · "
+        "`/ack <id>` · `/snooze <id> <ngày>`._"
+    )
     return "\n\n".join(parts)
 
 
@@ -717,13 +820,21 @@ async def _send_digest(
     has to match the Delivery page or the two contradict each other.
     """
     cfg = container.config
+    # The digest reaches Teams through the bot rather than through AdoNotifier, so it
+    # would otherwise be the one notice `alert_events` could not switch off — a setting
+    # that visibly does nothing is worse than no setting.
+    from ai_autopilot.notifications.base import EVENT_DIGEST, Severity
+
+    if not cfg.wants_alert(EVENT_DIGEST, int(Severity.INFO)):
+        _log.info("Teams digest skipped — 'digest' is not an enabled alert event")
+        return
     now = datetime.now(UTC)
     report, error = None, None
     try:
         report, error = await delivery_report.gather(container, now=now)
     except Exception as exc:  # noqa: BLE001
-        # Still send something. A silent digest looks identical to a quiet week, and
-        # the whole point of a scheduled message is that its absence is not information.
+        # A report we could not build IS news, and unlike the empty-digest case below it
+        # is not something the next run necessarily fixes — so this one is always sent.
         _log.error("digest: could not build the delivery report", error=_fmt_exc(exc))
         error = str(exc)
     if report is None:
@@ -738,9 +849,26 @@ async def _send_digest(
             )
         except Exception:  # noqa: BLE001
             delivered_recent = 0
+        rows, suppressed = await filter_new_actions(container, report, now=now)
+        # Nothing new to act on and nothing shipped since the last one: say nothing.
+        # A daily "nothing is stuck" is not reassurance, it is training — a channel
+        # learns the digest can be skimmed past, and then skims past the day it matters.
+        # An `error` overrides this: a report we could only partly build is itself news.
+        if (
+            cfg.digest_skip_when_empty
+            and not rows
+            and not delivered_recent
+            and not error
+        ):
+            _log.info(
+                "Teams digest skipped — nothing new",
+                open_actions=len(report.actions), suppressed=suppressed,
+            )
+            return
         text = build_digest(
             report, cfg, delivered_recent=delivered_recent,
             window_label=f"{window_hours}h", now=now,
+            rows=rows, suppressed=suppressed,
         )
         if error:
             text += f"\n\n_⚠️ Một phần số liệu thiếu: {error}_"
@@ -994,6 +1122,11 @@ _PR_URL_RE = re.compile(
 _REVIEW_INTENT = ("review", "duyệt", "rà soát", "soát", "kiểm tra", "check", "xem lại")
 _PR_LOOKUP_RE = re.compile(r"^/pr\s+(\S+)\s+(\d+)\s*$", re.IGNORECASE)
 _ITEM_LOOKUP_RE = re.compile(r"^/item\s+(\d+)\s*$", re.IGNORECASE)
+# Alert acknowledgement. The trailing count on /snooze is optional so the common case
+# ("not this week") is one word plus a number, and the default comes from config.
+_ACK_RE = re.compile(r"^/ack\s+(\d+)\s*$", re.IGNORECASE)
+_UNACK_RE = re.compile(r"^/unack\s+(\d+)\s*$", re.IGNORECASE)
+_SNOOZE_RE = re.compile(r"^/snooze\s+(\d+)(?:\s+(\d+))?\s*$", re.IGNORECASE)
 _SLASH_WORD_RE = re.compile(r"^(/\w+)")
 # A PR named by NUMBER rather than a full link — "Pull request 2488", "PR 2488", "!2488".
 # Teams unfurls a pasted ADO link into a preview card titled "Pull request <n>: <title>",
@@ -1120,6 +1253,88 @@ def _format_pr_detail(detail: dict) -> str:
     return "\n".join(lines)
 
 
+async def _reply_alerts(context, container: Container) -> None:
+    """What is currently alerting, and what has been silenced.
+
+    The muted rows are listed rather than merely counted: an alert somebody acked three
+    weeks ago and forgot is the failure mode this whole feature introduces, so it must
+    be visible to the same people who silenced it."""
+    try:
+        alerts = await container.alert_state_repo.open_alerts()
+    except Exception as exc:  # noqa: BLE001
+        await context.send_activity(f"Không đọc được danh sách cảnh báo: {_fmt_exc(exc)}")
+        return
+    if not alerts:
+        await context.send_activity("🔔 Không có cảnh báo nào đang mở.")
+        return
+    cfg = container.config
+    now = datetime.now(UTC).replace(tzinfo=None)
+    live, muted = [], []
+    for a in alerts:
+        label = _ACTION_LABEL.get(a.kind, a.kind)
+        link = _wi_link(cfg, a.work_item_id) if a.work_item_id > 0 else f"PR !{-a.work_item_id}"
+        row = f"- {_ACTION_ICON.get(a.kind, '•')} **{label}** — {link} {_short(a.title, 44)}"
+        if a.acked_at is not None:
+            muted.append(f"{row} · _ack bởi {a.acked_by or 'ai đó'}_")
+        elif a.snoozed_until is not None and a.snoozed_until > now:
+            muted.append(f"{row} · _snooze tới {a.snoozed_until.strftime('%d/%m')}_")
+        else:
+            live.append(f"{row} · _đã báo {a.notify_count} lần_")
+    parts = [f"🔔 **Cảnh báo đang mở ({len(alerts)})**"]
+    if live:
+        parts.append("**Đang chờ xử lý**\n" + "\n".join(live))
+    if muted:
+        parts.append(f"**Đã tắt tiếng ({len(muted)})**\n" + "\n".join(muted))
+    parts.append("_`/ack <id>` · `/snooze <id> <ngày>` · `/unack <id>`_")
+    await context.send_activity("\n\n".join(parts))
+
+
+async def _reply_ack(context, container: Container, work_item_id: int) -> None:
+    count = await container.alert_state_repo.ack(
+        work_item_id, by=_speaker_name(context)
+    )
+    if not count:
+        await context.send_activity(
+            f"Không có cảnh báo nào đang mở cho #{work_item_id}."
+        )
+        return
+    await context.send_activity(
+        f"✅ Đã ghi nhận #{work_item_id} — {count} cảnh báo sẽ không nhắc lại. "
+        "Dùng `/unack` nếu muốn bật lại."
+    )
+
+
+async def _reply_snooze(context, container: Container, work_item_id: int, days: int) -> None:
+    count = await container.alert_state_repo.snooze(work_item_id, days)
+    if not count:
+        await context.send_activity(
+            f"Không có cảnh báo nào đang mở cho #{work_item_id}."
+        )
+        return
+    await context.send_activity(
+        f"😴 Đã tạm ẩn {count} cảnh báo của #{work_item_id} trong {max(1, days)} ngày."
+    )
+
+
+async def _reply_unack(context, container: Container, work_item_id: int) -> None:
+    count = await container.alert_state_repo.unack(work_item_id)
+    if not count:
+        await context.send_activity(f"#{work_item_id} không có cảnh báo nào bị tắt tiếng.")
+        return
+    await context.send_activity(
+        f"🔔 Đã bật lại {count} cảnh báo của #{work_item_id}."
+    )
+
+
+def _speaker_name(context) -> str:
+    """Who typed the command, for the ack record. Best-effort: an ack from "ai đó" is
+    still worth more than no ack, so this never raises."""
+    try:
+        return str(getattr(context.activity.from_property, "name", "") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 async def _handle_command(
     context, config: Settings, container: Container,
     reviewer_tracker: ReviewerTrackerService, text: str,
@@ -1161,6 +1376,22 @@ async def _handle_command(
         return
     if word == "/queue":
         await _reply_queue(context, container)
+        return
+    if word == "/alerts":
+        await _reply_alerts(context, container)
+        return
+    m = _ACK_RE.match(text.strip())
+    if m:
+        await _reply_ack(context, container, int(m.group(1)))
+        return
+    m = _UNACK_RE.match(text.strip())
+    if m:
+        await _reply_unack(context, container, int(m.group(1)))
+        return
+    m = _SNOOZE_RE.match(text.strip())
+    if m:
+        days = int(m.group(2)) if m.group(2) else container.config.alert_snooze_default_days
+        await _reply_snooze(context, container, int(m.group(1)), days)
         return
     m = _REVIEW_RE.match(text.strip())
     if m:

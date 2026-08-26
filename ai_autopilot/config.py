@@ -116,20 +116,73 @@ def match_command(text: str | None, commands: list[str] | tuple[str, ...]) -> st
 
 @dataclass(frozen=True)
 class WebhookTarget:
-    """One notification channel: a human-recognisable ``name`` and the URL to post to.
+    """One notification channel: a human-recognisable ``name``, the URL to post to, and
+    what that particular channel wants to hear about.
 
     The name exists for the log. A Workflows URL is a long opaque token, so a failure could
     only ever be reported by host — every channel in the same tenant looks identical there,
     which made "which channel is broken?" unanswerable.
+
+    ``events`` and ``min_severity`` are the reason a second channel is worth having. With
+    every channel receiving everything, a dev channel got the PM's lead-time digest and the
+    PM channel got run traces — so both were muted, and muting is indiscriminate. Empty
+    ``events`` means "no per-channel opinion, use the global list", which is what every
+    existing config becomes on upgrade: unchanged behaviour until someone narrows it.
     """
 
     url: str
     name: str = ""
+    events: tuple[str, ...] = ()
+    min_severity: str = ""
 
     @property
     def label(self) -> str:
         """What to put in a log line — never the URL, which carries the posting token."""
         return self.name or _host(self.url) or "unnamed"
+
+    def wants(self, event: str, severity: int, *, default_events: frozenset[str],
+              default_severity: int) -> bool:
+        """Should this notice go to this channel?
+
+        Falls back to the global setting for whichever of the two this channel does not
+        state, so narrowing one dimension per channel does not silently reset the other.
+        """
+        allowed = frozenset(self.events) if self.events else default_events
+        floor = default_severity
+        if self.min_severity:
+            from ai_autopilot.notifications.base import Severity
+            floor = int(Severity.parse(self.min_severity, Severity(default_severity)))
+        return event in allowed and severity >= floor
+
+
+def parse_event_csv(value: object) -> tuple[str, ...]:
+    """Read an event list from CSV, a real list, or nothing.
+
+    Accepts both shapes because the same field is written by three different hands: the
+    dashboard posts a CSV string, config.yaml is usually hand-written as a YAML list, and
+    a per-tenant override may carry either. Unknown names are DROPPED rather than kept:
+    a typo that survived would look enabled in the UI and match nothing at send time.
+    """
+    from ai_autopilot.notifications.base import ALL_EVENTS
+
+    if value is None:
+        return ()
+    raw: list[str]
+    if isinstance(value, str):
+        raw = value.split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        raw = [str(v) for v in value]
+    else:
+        return ()
+    known = set(ALL_EVENTS)
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in raw:
+        name = item.strip().lower()
+        if name in known and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return tuple(out)
 
 
 def _host(url: str) -> str:
@@ -1385,6 +1438,46 @@ class Settings(BaseSettings):
     # pasting a plain list still works.
     teams_webhook_channels: list[Any] = Field(default_factory=list)
 
+    # ── 🔔 Alerts: what is worth interrupting a human for ──
+    # Everything below answers "which notices go out, how loud, how often" — the policy
+    # layer that did not exist before. Until this section, the only configuration was
+    # WHERE to send (SMTP host, webhook URL) and the answer to WHAT was always
+    # "everything, to everyone", which is why a working install still got muted.
+    #
+    # Comma-separated event kinds that may be broadcast at all. See
+    # ``notifications.base.ALL_EVENTS`` for the vocabulary. ``started`` is deliberately
+    # absent from the default: "the bot picked up #123" is not actionable, and on a busy
+    # board it doubles the message count for no decision anyone can make from it.
+    alert_events: str = "completed,failed,error,reminder,digest"
+    # Floor on severity, applied after the event list. "info" = deliver everything the
+    # event list allows (the default, so an upgrade changes nothing but the started
+    # notices); "warning" = only things somebody should look at today; "critical" = only
+    # what is blocked right now.
+    alert_min_severity: str = "info"
+
+    # ── 🔔 Alerts: repetition, acknowledgement and snoozing ──
+    # An action the digest has already reported is not news the next morning. With this
+    # on, an alert for the same (kind, work item) is repeated only when it ESCALATES —
+    # crosses the next threshold multiple — or after ``alert_repeat_hours``, whichever
+    # comes first. Off = the previous behaviour: everything currently over the threshold,
+    # in full, every time.
+    alert_dedup_enabled: bool = True
+    # Hours before an alert nobody acted on is raised again. 0 = never repeat (report it
+    # once and rely on the Delivery page), which suits a team that works the page.
+    alert_repeat_hours: int = 24
+    # Days ``/snooze <id>`` hides an alert for when no duration is given.
+    alert_snooze_default_days: int = 3
+
+    # ── 🔔 Alerts: the scheduled digest ──
+    # Do not post the digest at all when there is nothing over a threshold AND nothing
+    # was delivered in the window. A daily "✅ nothing is stuck" trains a channel to
+    # skim past the digest, which then also costs the day it says something.
+    digest_skip_when_empty: bool = True
+    # Hold the digest inside the same notify window as every other notice
+    # (``notify_hours_*``). Without this the digest loop was the ONE sender that ignored
+    # quiet hours, so a team that had switched them on still got pinged at 03:00.
+    digest_respect_quiet_hours: bool = True
+
     # ── Notifications: Zalo OA ──
     zalo_oa_access_token: str = ""
     zalo_recipient_user_id: str = ""
@@ -1560,21 +1653,52 @@ class Settings(BaseSettings):
         seen: set[str] = set()
         out: list[WebhookTarget] = []
 
-        def add(url: str, name: str = "") -> None:
+        def add(url: str, name: str = "", events: tuple[str, ...] = (),
+                min_severity: str = "") -> None:
             url = (url or "").strip()
             if url and url not in seen:
                 seen.add(url)
-                out.append(WebhookTarget(name=(name or "").strip(), url=url))
+                out.append(WebhookTarget(
+                    name=(name or "").strip(), url=url, events=events,
+                    min_severity=(min_severity or "").strip(),
+                ))
 
         add(self.teams_webhook_url, "primary")
         for entry in self.teams_webhook_channels or []:
             if isinstance(entry, str):        # a plain pasted URL
                 add(entry)
             elif isinstance(entry, dict) and entry.get("active", True):
-                add(str(entry.get("url") or ""), str(entry.get("name") or ""))
+                add(
+                    str(entry.get("url") or ""), str(entry.get("name") or ""),
+                    parse_event_csv(entry.get("events")),
+                    str(entry.get("severity") or entry.get("min_severity") or ""),
+                )
         for url in self.teams_webhook_urls or []:
             add(url)
         return out
+
+    @property
+    def alert_event_set(self) -> frozenset[str]:
+        """The globally enabled event kinds, as a set.
+
+        An EMPTY setting means "everything" rather than "nothing": a blanked field is
+        far more likely to be someone clearing a box than a deliberate request for total
+        silence, and silence is the failure you do not notice."""
+        from ai_autopilot.notifications.base import ALL_EVENTS
+
+        parsed = parse_event_csv(self.alert_events)
+        return frozenset(parsed) if parsed else frozenset(ALL_EVENTS)
+
+    @property
+    def alert_severity_floor(self) -> int:
+        """``alert_min_severity`` as a comparable number. Unparseable → INFO (deliver)."""
+        from ai_autopilot.notifications.base import Severity
+
+        return int(Severity.parse(self.alert_min_severity, Severity.INFO))
+
+    def wants_alert(self, event: str, severity: int) -> bool:
+        """The global gate every notice passes before any channel sees it."""
+        return event in self.alert_event_set and severity >= self.alert_severity_floor
 
     @property
     def teams_webhooks(self) -> list[str]:

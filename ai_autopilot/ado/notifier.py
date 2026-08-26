@@ -143,6 +143,15 @@ class AdoNotifier:
             heading=heading, text=text,
         ))
 
+    async def notify(self, message: NotificationMessage) -> None:
+        """Send a pre-built notice through the alert policy and the quiet window.
+
+        For callers that assemble their own message (scheduled loops, the reviewer
+        nudge, the budget alarm) and used to iterate ``channels`` themselves — which
+        meant every alert setting silently did not apply to them.
+        """
+        await self._broadcast(message)
+
     async def _broadcast(self, message: NotificationMessage) -> None:
         """Send to every enabled channel — unless we are outside notification hours.
 
@@ -153,7 +162,18 @@ class AdoNotifier:
         ADO comments are deliberately NOT gated (they are written by the callers above,
         before this): a comment is the record on the work item, not an interruption, and
         a record with holes in it overnight would be worse than a late ping.
+
+        Order matters. The alert POLICY (is this kind of notice wanted at all?) is
+        applied before the quiet window, so a notice the team switched off is dropped
+        outright rather than queued and then delivered in the morning summary — being
+        held is for things you still want, just not now.
         """
+        if not self._config.wants_alert(message.event, int(message.severity)):
+            self._log.debug(
+                "notification suppressed by alert policy",
+                event=message.event, severity=message.severity.name,
+            )
+            return
         if await self._hold_if_quiet(message):
             return
         await self._flush_held()

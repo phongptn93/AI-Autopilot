@@ -21,6 +21,7 @@ from ai_autopilot.services.pr_feedback import (
     command_threads,
     is_bot_branch,
     parse_work_item_id,
+    unowned_reason,
 )
 
 
@@ -54,6 +55,8 @@ class PrMonitorService:
         # (expires_at_monotonic, repo_name, minimal pr dict).
         self._hot: dict[tuple[str, int], tuple[float, str, dict]] = {}
         self._hot_task: asyncio.Task | None = None
+        # PRs this loop does not own, already explained once (see _inspect_pr).
+        self._unowned: set[int] = set()
 
     def start(self) -> None:
         if not self._config.feedback_loop_enabled:
@@ -382,9 +385,27 @@ class PrMonitorService:
         Draft PRs are handled too. Bounded by ``max_revisions`` per work item."""
         c, cfg = self._c, self._config
         source_ref = pr.get("sourceRefName", "")
-        if not is_bot_branch(source_ref, tuple(cfg.bot_branch_prefixes)):
-            return
         pr_id = pr.get("pullRequestId")
+        # This loop only owns PRs the autopilot opened: the branch carries a known
+        # prefix and ends in "<work item id>-slug". A PR that fails either test is
+        # somebody's hand-made branch — the reviewer tracker is what answers commands
+        # there. Say so ONCE per PR: silence here cost an afternoon of "why does the
+        # bot ignore my @mention", because nothing in the log mentioned the PR at all.
+        why = unowned_reason(source_ref, tuple(cfg.bot_branch_prefixes))
+        if why:
+            if pr_id is not None and pr_id not in self._unowned:
+                self._unowned.add(pr_id)
+                if len(self._unowned) > 500:  # a marker set, not storage
+                    self._unowned.clear()
+                self._log.info(
+                    "PR not owned by the feedback loop — commands there need PR "
+                    "reviewer tracking",
+                    pr=pr_id, repo=repo_name, branch=source_ref.removeprefix("refs/heads/"),
+                    reason=why,
+                    hint="enable pr_reviewer_tracking_enabled to answer /commands on "
+                         "hand-made PRs",
+                )
+            return
         work_item_id = parse_work_item_id(source_ref)
         if pr_id is None or work_item_id is None:
             return

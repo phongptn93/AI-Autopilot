@@ -24,6 +24,10 @@ class Field:
     section: str
     help: str = ""
     options: tuple[str, ...] = field(default_factory=tuple)
+    # Example shown in an empty list/map box. Every map used to print the SAME one
+    # ("ba => Ready for Dev"), so the tag map and the type map both told you to type
+    # a state — the fields that are hardest to tell apart were the ones lying.
+    placeholder: str = ""
 
 
 # Order here is the order rendered on the page. Sections group consecutive fields.
@@ -355,32 +359,48 @@ FIELDS: tuple[Field, ...] = (
           "Item 2 branches off item 1 and targets it (no conflicts, fixed merge order). "
           "Off = every branch cut from the base branch (any merge order, may conflict)."),
     # ── Closed-loop SDLC (v2) ──
+    # Ordered as the three questions the engine asks, in the order it asks them:
+    # is the loop on, WHICH stages run, how much rework is allowed, and WHERE the
+    # item goes when they finish. The two hand-off maps sit together, under the
+    # switch that decides whether a draft PR delays them.
     Field("sdlc_loop_enabled", "Enable SDLC loop", "bool", "Closed-loop SDLC (v2)",
           "Drive items through profile-selected SDLC stages (gate + revise + escalate + handoff). "
           "Off = one-shot behaviour, unchanged. Headless only."),
-    Field("sdlc_profile", "This machine's profile", "select", "Closed-loop SDLC (v2)",
-          "Role this machine runs. Blank = fall through to type-map / default.",
+    # — which stages run, most specific first (this is the resolution order) —
+    Field("sdlc_profile", "Profile: pinned to this machine", "select", "Closed-loop SDLC (v2)",
+          "The role THIS machine runs, whatever the item is. Blank = decide per item, below. "
+          "Resolution order: an item's own 'sdlc:<profile>' tag (which the Board's ▶ Run "
+          "sets) → this field → the type map → the default.",
           ("", "ba", "dev", "qc", "review", "design", "full")),
-    Field("sdlc_default_profile", "Default profile", "select", "Closed-loop SDLC (v2)",
-          "Used when neither a per-item sdlc:* tag nor this machine's profile resolves.",
+    Field("sdlc_type_profiles", "↳ Profile: per work-item type", "map",
+          "Closed-loop SDLC (v2)",
+          "One 'work-item type => profile' per line. This is how a Bug runs end to end while "
+          "a Requirement stops for a human: 'Bug => full', 'User Story => ba'.",
+          placeholder="Bug => full"),
+    Field("sdlc_default_profile", "↳ Profile: default", "select", "Closed-loop SDLC (v2)",
+          "Used when nothing above resolves — no item tag, no pinned profile, no type entry.",
           ("full", "dev", "ba", "qc", "review", "design")),
+    # — how much rework the engine may do before it asks a person —
     Field("sdlc_max_iterations", "Max revise iterations", "int", "Closed-loop SDLC (v2)",
           "Shared budget across all stages of one item before escalating to a human. Default 3."),
-    Field("sdlc_advance_on_draft", "Advance on draft PR", "bool", "Closed-loop SDLC (v2)",
-          "Apply the handoff state even for a draft PR. Off = a draft awaits human review."),
-    Field("sdlc_profile_states", "Handoff (profile => state)", "map",
+    # — where the item goes when the profile finishes —
+    Field("sdlc_advance_on_draft", "Hand off even on a draft PR", "bool",
+          "Closed-loop SDLC (v2)",
+          "Apply the hand-offs below even when the PR is still a draft. Off (recommended) = a "
+          "draft waits for human review before the next role is called."),
+    Field("sdlc_profile_states", "Hand off by ADO state (profile => state)", "map",
           "Closed-loop SDLC (v2)",
           "One 'profile => ADO state' per line — set when that profile completes, so the next "
-          "machine's trigger_states picks it up. E.g. 'ba => Ready for Dev'."),
-    Field("sdlc_profile_tags", "Handoff (profile => tag)", "map",
+          "machine's trigger_states picks it up. Visible to anyone reading the ADO board, but "
+          "the state must exist on that work-item type.",
+          placeholder="ba => Ready for Dev"),
+    Field("sdlc_profile_tags", "Hand off by tag (profile => tag)", "map",
           "Closed-loop SDLC (v2)",
           "One 'profile => tag' per line — added when that profile completes. Needs no ADO "
-          "state change: the poller already ignores a tagged item, so it waits there until "
-          "someone presses ▶ Run on the Board process that claims the tag. "
-          "E.g. 'ba => handoff-dev', 'dev => handoff-qc'."),
-    Field("sdlc_type_profiles", "Type → profile", "map",
-          "Closed-loop SDLC (v2)",
-          "Optional: map a work-item type to a profile, e.g. 'Bug => dev', 'User Story => full'."),
+          "state change at all: the poller already ignores a tagged item, so it waits there "
+          "until someone presses ▶ Run on the Board process that claims the tag "
+          "(/dashboard/board-views). Use either hand-off, or both.",
+          placeholder="ba => handoff-dev"),
     # ── Planning workbench ──
     Field("planning_ai_analysis", "AI conflict analysis", "bool", "Planning workbench",
           "The Analyze action runs bounded Claude judges over keyword-overlapping pairs "

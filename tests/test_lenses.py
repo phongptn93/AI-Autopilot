@@ -771,3 +771,30 @@ def test_a_lane_can_claim_several_states_at_once():
     stage = parse_lens_form(form, COLS)[0]["stages"][0]
     assert stage["states"] == ["Ready for Testing", "In Testing", "Ready for UAT", "In UAT"]
     assert stage["tags"] == ["autopilot-done"]
+
+
+def test_every_map_field_shows_its_own_example():
+    """One placeholder for all of them told the tag map and the type map to type a
+    state — the fields hardest to tell apart were the ones giving wrong examples."""
+    from ai_autopilot.dashboard.settings_form import FIELDS
+
+    maps = [(f.key, f.placeholder) for f in FIELDS if f.kind == "map"]
+    assert maps, "no map fields — this test is watching the wrong thing"
+    assert all(ph for _, ph in maps), [k for k, ph in maps if not ph]
+    assert len({ph for _, ph in maps}) == len(maps)      # no two share an example
+    by_key = dict(maps)
+    assert "=>" in by_key["sdlc_profile_tags"] and "Ready for" not in by_key["sdlc_profile_tags"]
+
+
+def test_profile_resolution_order_is_stated_where_it_is_chosen():
+    """Four knobs pick the profile (item tag, machine, type, default). The field that
+    starts that chain has to say the order, or the other three read as alternatives."""
+    from ai_autopilot.dashboard.settings_form import FIELDS
+
+    pinned = next(f for f in FIELDS if f.key == "sdlc_profile")
+    assert "sdlc:" in pinned.help and "type map" in pinned.help and "default" in pinned.help
+    order = [f.key for f in FIELDS if f.section.startswith("Closed-loop SDLC")]
+    assert order.index("sdlc_profile") < order.index("sdlc_type_profiles")
+    assert order.index("sdlc_type_profiles") < order.index("sdlc_default_profile")
+    # The hand-offs sit last, together, under the draft switch that delays them.
+    assert order[-3:] == ["sdlc_advance_on_draft", "sdlc_profile_states", "sdlc_profile_tags"]

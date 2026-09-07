@@ -46,6 +46,22 @@ def is_bot_branch(source_ref: str, prefixes: tuple[str, ...]) -> bool:
     return any(branch.startswith(p) for p in prefixes)
 
 
+def unowned_reason(source_ref: str, prefixes: tuple[str, ...]) -> str:
+    """Why the feedback loop does not own this PR, or "" when it does.
+
+    The loop answers commands on PRs the AUTOPILOT opened, recognised purely by the
+    branch: a known prefix, and a last segment starting with the work item id. Both
+    tests used to fail in silence, so a hand-made PR that @mentioned the bot left no
+    trace anywhere — the log never mentioned the PR at all. Naming the reason is what
+    turns "the bot is broken" into "that PR belongs to the reviewer tracker".
+    """
+    if not is_bot_branch(source_ref, prefixes):
+        return "branch prefix is not one of " + ", ".join(prefixes)
+    if parse_work_item_id(source_ref) is None:
+        return "branch does not end in '<work item id>-slug'"
+    return ""
+
+
 def actionable_comments(threads: list[dict[str, Any]], bot_name: str = "") -> list[str]:
     """Return unresolved, human-authored review comments from PR threads."""
     out: list[str] = []

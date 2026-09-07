@@ -301,3 +301,26 @@ async def test_sweep_is_off_under_other_close_policies():
     svc = _sweep_service({42: "/ws/agent-42"}, finished={42}, interactive_close_on="result")
     await svc._close_finished_sessions(active_items=set())
     assert svc._c.executor.closed == []
+
+
+async def test_unowned_pr_is_explained_once(caplog):
+    """A hand-made PR is not this loop's business — but silence there reads as a broken
+    bot, so it now says why, once, instead of ignoring the PR without a trace."""
+    from ai_autopilot.services.pr_feedback import unowned_reason
+
+    prefixes = tuple(Settings().bot_branch_prefixes)
+    # The two ways a PR falls outside the loop, each named.
+    assert "prefix" in unowned_reason("refs/heads/dxmpm/material-usage", prefixes)
+    assert "work item id" in unowned_reason("refs/heads/feature/no-id-here", prefixes)
+    assert unowned_reason("refs/heads/feature/be/42-thing", prefixes) == ""
+
+    class _Ado:
+        async def get_pull_request_threads(self, *a, **k):
+            raise AssertionError("must not fetch threads for a PR it does not own")
+
+    c = SimpleNamespace(config=Settings(feedback_loop_enabled=True), ado=_Ado())
+    svc = PrMonitorService(c)
+    pr = {"pullRequestId": 3861, "sourceRefName": "refs/heads/dxmpm/material-usage"}
+    await svc._inspect_pr("repo-id", "Micro-Frontend", pr)
+    await svc._inspect_pr("repo-id", "Micro-Frontend", pr)   # a rescan stays quiet
+    assert svc._unowned == {3861}

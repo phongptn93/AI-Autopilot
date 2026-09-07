@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 
 from ai_autopilot import metrics
-from ai_autopilot.config import describe_users, matches_any_user
+from ai_autopilot.config import describe_users, is_bot_signed, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
@@ -750,6 +750,10 @@ class ReviewerTrackerService:
             )
             await c.ado.reply_to_pull_request_thread(repo_id, pr_id, tid, ack)
             await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "pending")
+            # What the bot has already said, so the closing note can be about what THIS
+            # run added. A review posts its findings as the agent's own comments, and
+            # whether it found anything is not knowable from the exit code.
+            before = await self._bot_comment_ids(repo_id, pr_id)
             guard = contextlib.nullcontext() if advisory else lock
             async with guard, self._sem:
                 result = await c.feedback.handle_feedback(
@@ -761,11 +765,22 @@ class ReviewerTrackerService:
             hint_html = self._config.comment_command_hint_html
             hint = f"<br/>{hint_html}" if hint_html else ""
             if result.success:
-                msg = (
-                    f"<div><b>🔍 Đã xem xong</b> — nhận xét chi tiết ở trên.{hint}</div>"
-                    if advisory
-                    else f"<div><b>✅ Đã xử lý xong</b> — branch đã được cập nhật.{hint}</div>"
-                )
+                if advisory:
+                    # "Chi tiết ở trên" was printed whether or not anything was written
+                    # above it — a claim the reader can check in one glance, and one that
+                    # was often false. Count what this run actually posted and say that.
+                    posted = len(await self._bot_comment_ids(repo_id, pr_id) - before)
+                    msg = (
+                        f"<div><b>🔍 Đã xem xong</b> — nhận xét chi tiết ở trên.{hint}</div>"
+                        if posted
+                        else "<div><b>🔍 Đã xem xong — không có nhận xét nào.</b> Tôi đọc "
+                             "thay đổi và không thấy vấn đề đáng nêu, nên không đăng nhận "
+                             f"xét nào ở trên.{hint}</div>"
+                    )
+                else:
+                    msg = (
+                        f"<div><b>✅ Đã xử lý xong</b> — branch đã được cập nhật.{hint}</div>"
+                    )
                 await c.ado.reply_to_pull_request_thread(repo_id, pr_id, tid, msg)
                 await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "fixed")
             else:
@@ -777,6 +792,22 @@ class ReviewerTrackerService:
                 await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "active")
         except Exception as exc:  # noqa: BLE001 — a background task must not die silently
             self._log.error("PR command failed", pr=pr_id, error=str(exc))
+
+    async def _bot_comment_ids(self, repo_id: str, pr_id: int) -> set[int]:
+        """Ids of every bot-signed comment on the PR right now.
+
+        Used as a before/after mark: a review posts its findings as ordinary PR
+        comments, so the only honest way to say "see the notes above" is to check that
+        some appeared.
+        """
+        out: set[int] = set()
+        with contextlib.suppress(Exception):
+            for thread in await self._c.ado.get_pull_request_threads(repo_id, pr_id):
+                for comment in thread.get("comments") or []:
+                    cid = comment.get("id")
+                    if cid is not None and is_bot_signed(comment.get("content") or ""):
+                        out.add(int(cid))
+        return out
 
     async def _reply(self, repo_id: str, pr_id: int, thread_id: int, text: str) -> None:
         with contextlib.suppress(Exception):

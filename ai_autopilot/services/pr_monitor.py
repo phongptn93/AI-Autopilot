@@ -11,7 +11,12 @@ import asyncio
 import contextlib
 import time
 
-from ai_autopilot.config import describe_users, match_command, matches_any_user
+from ai_autopilot.config import (
+    describe_users,
+    is_bot_signed,
+    match_command,
+    matches_any_user,
+)
 from ai_autopilot.container import Container
 from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
@@ -376,6 +381,22 @@ class PrMonitorService:
                 await c.ado.add_pull_request_comment(rid, pr_id2, note)
             await c.ado.add_comment(work_item_id, note)
 
+    async def _bot_comment_ids(self, repo_id: str, pr_id: int) -> set[int]:
+        """Ids of every bot-signed comment on the PR right now — a before/after mark.
+
+        A review posts its findings as ordinary PR comments, and the exit code says
+        nothing about whether it found any. Checking is the only honest way to say
+        "see the notes above".
+        """
+        out: set[int] = set()
+        with contextlib.suppress(Exception):
+            for thread in await self._c.ado.get_pull_request_threads(repo_id, pr_id):
+                for comment in thread.get("comments") or []:
+                    cid = comment.get("id")
+                    if cid is not None and is_bot_signed(comment.get("content") or ""):
+                        out.add(int(cid))
+        return out
+
     async def _work_item_for(
         self, repo_id: str, pr_id: int, source_ref: str
     ) -> int | None:
@@ -597,6 +618,9 @@ class PrMonitorService:
             # Advisory runs are read-only (no checkout) — they only need a concurrency
             # slot. Action commands serialise per branch so parallel /ai can't corrupt
             # one branch's run.
+            # What the bot has already said, so the closing note can be about what THIS
+            # run added (see _bot_comment_ids).
+            before = await self._bot_comment_ids(repo_id, pr_id)
             guard = contextlib.nullcontext() if advisory else lock
             async with guard, self._sem:
                 result = await c.feedback.handle_feedback(
@@ -613,12 +637,18 @@ class PrMonitorService:
             # trigger is off — then offer nothing rather than a dangling label.
             hint_html = self._config.comment_command_hint_html
             hint = f"<br/>{hint_html}" if hint_html else ""
-            if result.success:
+            if result.success and advisory:
+                # Only claim there are notes above when this run actually left some.
+                posted = len(await self._bot_comment_ids(repo_id, pr_id) - before)
                 msg = (
                     f"<div><b>🔍 Đã review xong</b> — nhận xét chi tiết ở trên.{hint}</div>"
-                    if advisory else
-                    f"<div><b>✅ Đã xử lý xong</b> — branch đã được cập nhật.{hint}</div>"
+                    if posted
+                    else "<div><b>🔍 Đã review xong — không có nhận xét nào.</b> Tôi đọc "
+                         "thay đổi và không thấy vấn đề đáng nêu, nên không đăng nhận xét "
+                         f"nào ở trên.{hint}</div>"
                 )
+            elif result.success:
+                msg = f"<div><b>✅ Đã xử lý xong</b> — branch đã được cập nhật.{hint}</div>"
             else:
                 verb = "review" if advisory else "xử lý"
                 msg = f"<div><b>⚠️ Chưa {verb} được:</b> {result.error}{hint}</div>"

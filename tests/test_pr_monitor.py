@@ -6,7 +6,7 @@ import asyncio
 from types import SimpleNamespace
 
 from ai_autopilot.config import BOT_COMMENT_PREFIX, Settings
-from ai_autopilot.models import ExecutionResult
+from ai_autopilot.models import ExecutionResult, WorkItemInfo
 from ai_autopilot.services.pr_monitor import PrMonitorService
 
 
@@ -398,3 +398,55 @@ async def test_a_pr_with_no_work_item_anywhere_is_skipped_with_a_reason():
         "pullRequestId": 78, "sourceRefName": "refs/heads/feature/no-id-at-all",
     })
     assert [m for m in said if "no work item behind this PR" in m]
+
+
+async def test_a_review_that_found_nothing_does_not_claim_notes_above():
+    """"Nhận xét chi tiết ở trên" was printed whether or not anything was written above
+    it — a claim the reader checks in one glance, and one that was often false."""
+    posted: list = []
+
+    class _Ado(_FakeAdo):
+        def __init__(self, threads):
+            super().__init__(threads)
+            self.bot_comments: list[dict] = []
+
+        async def get_pull_request_threads(self, *a, **k):
+            return [*self.threads, {"id": 99, "comments": self.bot_comments}]
+
+        async def reply_to_pull_request_thread(self, repo_id, pr_id, tid, text):
+            posted.append(text)
+
+        async def set_pull_request_thread_status(self, *a, **k):
+            return None
+
+        async def add_comment(self, *a, **k):
+            return None
+
+    class _Silent(_FakeFeedback):
+        async def handle_feedback(self, *a, **k):
+            return ExecutionResult(work_item_id=42, success=True, skill_used="review")
+
+    ado = _Ado([_thread(10, 1, "/review please")])
+    svc = _service(ado, _Silent())
+    await svc._handle_command("r", "Backend-Fresh", 5, 42, "feature/be/42-x",
+                              WorkItemInfo(id=42, title="t"),
+                              {"thread_id": 10, "instruction": "/review please",
+                               "comment_id": 1, "advisory": True}, 0)
+    assert any("không có nhận xét nào" in m for m in posted)
+    assert not any("chi tiết ở trên" in m for m in posted)
+
+    # The same run, but the review left a comment behind → the claim is true and made.
+    posted.clear()
+    ado2 = _Ado([_thread(11, 2, "/review please")])
+
+    class _Talks(_FakeFeedback):
+        async def handle_feedback(self, *a, **k):
+            ado2.bot_comments.append({"id": 777, "content": BOT_COMMENT_PREFIX + "a finding"})
+            return ExecutionResult(work_item_id=42, success=True, skill_used="review")
+
+    svc2 = _service(ado2, _Talks())
+    await svc2._handle_command("r", "Backend-Fresh", 5, 42, "feature/be/42-x",
+                               WorkItemInfo(id=42, title="t"),
+                               {"thread_id": 11, "instruction": "/review please",
+                                "comment_id": 2, "advisory": True}, 0)
+    assert any("chi tiết ở trên" in m for m in posted)

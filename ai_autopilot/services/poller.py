@@ -18,7 +18,11 @@ from ai_autopilot.container import Container
 from ai_autopilot.data import PipelineState, QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.execution.pr_scorer import RunScore, ScoreInput, score_badge_html, score_run
-from ai_autopilot.execution.sdlc_plan import handoff_state, resolve_profile_name
+from ai_autopilot.execution.sdlc_plan import (
+    handoff_state,
+    handoff_tag,
+    resolve_profile_name,
+)
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.outcomes import apply_outcome
@@ -920,22 +924,29 @@ class AdoPollerService:
         )
 
     async def _apply_sdlc_handoff(self, item: WorkItemInfo, result: ExecutionResult) -> None:
-        """On a successful SDLC run, set the profile's handoff ADO state (unless a
-        draft PR should await human review first)."""
+        """On a successful SDLC run, mark the hand-off for the next role: the
+        profile's ADO state and/or its tag (unless a draft PR awaits review first)."""
         cfg = self._config
         if cfg.dry_run or not result.success or result.needs_human:
             return
         name = resolve_profile_name(item.tags, item.work_item_type, cfg)
         state = handoff_state(name, cfg)
-        if not state:
+        tag = handoff_tag(name, cfg)
+        if not state and not tag:
             return
         # A draft PR shouldn't auto-advance to the next role before human review.
         draft_block = bool(result.pr_url) and cfg.pr_is_draft and not cfg.sdlc_advance_on_draft
         if draft_block:
-            self._log.info("sdlc handoff held (draft PR)", id=item.id, would_be=state)
+            self._log.info("sdlc handoff held (draft PR)", id=item.id,
+                           would_be=state or tag)
             return
-        await self._c.ado.update_state(item.id, state)
-        self._log.info("sdlc handoff", id=item.id, profile=name, state=state)
+        if tag:
+            # The tag is what a board lane claims, so the next role sees the item in
+            # its own queue rather than having to know which state means "mine".
+            await self._c.ado.add_tag(item.id, tag)
+        if state:
+            await self._c.ado.update_state(item.id, state)
+        self._log.info("sdlc handoff", id=item.id, profile=name, state=state, tag=tag)
 
     async def _dispatch_interactive(self, item: WorkItemInfo) -> None:
         """Launch a Remote-Control session for the item; finalise later from its result."""

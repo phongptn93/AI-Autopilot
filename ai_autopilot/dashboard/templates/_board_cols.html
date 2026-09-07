@@ -1,17 +1,30 @@
-{# Board columns only — rendered standalone for the auto-refresh fetch. #}
-<div class="board-cols" style="grid-template-columns: repeat({{ columns|length }}, minmax(0,1fr))">
-    {% for col in columns %}
-    <div class="board-col col-accent-{{ col|lower|replace(' ', '-') }}" data-column="{{ col }}">
-        <div class="board-col-head">
-            <span class="board-col-name">{{ col }}</span>
-            <span class="board-col-count">{{ board[col]|length }}</span>
-        </div>
+{# Board lanes only — rendered standalone for the auto-refresh fetch.
+   `lanes` is a list of LaneRender (lens-aware): each carries its lane, the total
+   it holds and the cards already split by source column, so a folded lane still
+   shows which pipeline column each card actually sits in. #}
+<div class="board-cols" data-lanes="{{ lanes|length }}">
+    {% for row in lanes %}
+    {% set lane = row.lane %}
+    {% set droppable = lane.drop and lane.drop|lower in (drop_targets or []) %}
+    <section class="board-col tone-{{ lane.tone }} {{ 'is-mine' if lane.mine else '' }}"
+             {% if droppable %}data-column="{{ lane.drop }}"{% endif %} data-lane="{{ lane.name }}">
+        <header class="board-col-head">
+            <span class="board-col-name" title="{{ lane.columns | join(' + ') }}">
+                {{ lane.name }}
+                {% if lane.mine and view.key != 'pipeline' %}<span class="lane-turn">your turn</span>{% endif %}
+            </span>
+            <span class="board-col-count">{{ row.total }}</span>
+            {% if lane.hint %}<span class="board-col-hint">{{ lane.hint }}</span>{% endif %}
+        </header>
         <div class="board-col-body">
-            {% set full = board[col] %}
-            {% set shown = full if not board_limit else full[:board_limit] %}
-            {% for card in shown %}
+            {% for sub, cards in row.groups %}
+            {% if sub %}
+            <div class="board-sub"><span>{{ sub }}</span><span class="board-sub-n">{{ cards|length }}</span></div>
+            {% endif %}
+            {% for card in cards %}
             {% set label, css = category_badge(card.category) %}
-            <div class="board-card {{ css }}" draggable="true" data-id="{{ card.id }}">
+            <article class="board-card {{ css }}" draggable="{{ 'true' if drop_targets else 'false' }}"
+                     data-id="{{ card.id }}">
                 <div class="board-card-head">
                     {% if card.category %}<span class="cat-badge {{ css }}">{{ label }}</span>{% endif %}
                     {% set card_url = card.url or (ado_item_base ~ '/' ~ card.id if ado_item_base else '') %}
@@ -23,10 +36,25 @@
                     {% if projects and projects | length > 1 and card.project %}
                     <span class="board-card-proj" title="Project">{{ card.project }}</span>
                     {% endif %}
-                    <span class="board-card-state">{{ card.ado_state }}</span>
+                    <span class="board-card-state" title="Azure DevOps state">{{ card.ado_state }}</span>
                 </div>
                 <div class="board-card-title">{{ card.title }}</div>
+                {% set roles = role_chips.get(card.id) if role_chips else [] %}
+                {% if roles %}
+                <div class="board-card-roles">
+                    {% for r in roles %}<span class="role-chip" title="Tagged for the {{ r }} process">{{ r }}</span>{% endfor %}
+                </div>
+                {% endif %}
                 <div class="board-card-foot">
+                    {# Hidden only while the agent is actually working: "Done" here means
+                       the PREVIOUS stage finished, which is precisely when the next role
+                       has to look and press Run. #}
+                    {% if can_run and lane.mine and card.column != 'In progress' %}
+                    <button type="button" class="board-run" data-run="{{ card.id }}"
+                            title="Hand this to the autopilot for {{ view.label }}{% if view.profile %} ({{ view.profile }} stages){% endif %}. Nothing runs until you press this.">
+                        ▶ Run
+                    </button>
+                    {% endif %}
                     <a class="board-card-act" href="/dashboard/task/{{ card.id }}">📋 task</a>
                     <a class="board-card-act" href="/dashboard/activity/{{ card.id }}">👁 activity</a>
                     {% if card.pr_urls %}
@@ -42,15 +70,21 @@
                 {% if interactive and card.column == 'In progress' %}
                 <div class="board-card-rc">🎮 <code>/rc autopilot-{{ card.id }}</code></div>
                 {% endif %}
-                {% if card.assigned_to %}<div class="board-card-who">👤 {{ card.assigned_to }}</div>{% endif %}
-            </div>
-            {% else %}
-            <div class="board-col-empty">No items</div>
+                {% if card.assigned_to %}
+                <div class="board-card-who" title="{{ card.assigned_to }}">
+                    <span class="who-avatar">{{ card.assigned_to.strip()[:1] | upper }}</span>{{ card.assigned_to }}
+                </div>
+                {% endif %}
+            </article>
             {% endfor %}
-            {% if board_limit and full|length > board_limit %}
-            <a class="board-more" href="{{ more_url }}">＋ Load more ({{ full|length - board_limit }} more of {{ full|length }})</a>
+            {% endfor %}
+            {% if not row.total %}
+            <div class="board-col-empty">No items</div>
+            {% endif %}
+            {% if row.hidden %}
+            <a class="board-more" href="{{ more_url }}">＋ Load more ({{ row.hidden }} of {{ row.total }})</a>
             {% endif %}
         </div>
-    </div>
+    </section>
     {% endfor %}
 </div>

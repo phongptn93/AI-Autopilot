@@ -26,6 +26,9 @@ from ai_autopilot import (
     flows as flows_mod,
 )
 from ai_autopilot import (
+    lenses as lenses_mod,
+)
+from ai_autopilot import (
     workspaces as workspaces_mod,
 )
 from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
@@ -33,6 +36,15 @@ from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
 from ai_autopilot.data.entities import PipelineState, QualityKind
+from ai_autopilot.execution import sdlc_plan
+from ai_autopilot.lenses import (
+    board_view,
+    board_views,
+    group_lanes,
+    lens_tag_matches,
+    my_turn_count,
+    render_lanes,
+)
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.pr_feedback import parse_work_item_id
@@ -99,6 +111,10 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                             "(không cần khởi động lại)."),
     "flow_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                             "vẫn được giữ."),
+    "lens_saved": ("green", "✅ Đã lưu quy trình bảng (BA / Dev / QC…) và áp dụng ngay."),
+    "lens_reset": ("green", "↩ Đã khôi phục bộ quy trình mặc định (BA / Dev / QC)."),
+    "lens_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
+                            "vẫn được giữ."),
     "ws_saved": ("green", "✅ Đã lưu workspace và áp dụng ngay (không cần khởi động lại)."),
     "ws_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                           "vẫn được giữ."),
@@ -158,6 +174,30 @@ def _flow_reject(errors: list[str], flows: list[dict]) -> RedirectResponse:
 def _take_flow_reject(request: Request) -> dict:
     """The pending rejection for this request (``{}`` if none). Consumes it."""
     return _FLOW_REJECTS.pop(request.cookies.get(_FLOW_ERROR_COOKIE) or "", {})
+
+
+# Same hand-off as the Flow editor, for the same reason: a rejected save must come back
+# with both the reasons and what the operator typed.
+_LENS_ERROR_COOKIE = "autopilot_lens_errors"
+_LENS_REJECTS: OrderedDict[str, dict] = OrderedDict()
+
+
+def _lens_reject(errors: list[str], lenses: list[dict]) -> RedirectResponse:
+    token = secrets.token_urlsafe(12)
+    _LENS_REJECTS[token] = {"errors": errors, "lenses": lenses}
+    while len(_LENS_REJECTS) > _FLOW_REJECTS_MAX:
+        _LENS_REJECTS.popitem(last=False)
+    response = _flash("/dashboard/board-views", "lens_invalid")
+    response.set_cookie(
+        _LENS_ERROR_COOKIE, token, max_age=120, httponly=True, samesite="lax",
+        path="/dashboard",
+    )
+    return response
+
+
+def _take_lens_reject(request: Request) -> dict:
+    """The pending rejection for this request (``{}`` if none). Consumes it."""
+    return _LENS_REJECTS.pop(request.cookies.get(_LENS_ERROR_COOKIE) or "", {})
 
 
 # Same hand-off as the Flow editor, for the same reason: a rejected save must come back
@@ -643,6 +683,24 @@ def create_dashboard_router() -> APIRouter:
         states = {s.work_item_id: s.state.value for s in await c.state_repo.all()}
         cols = build_board(items, latest_records(records), c.config, states)
 
+        # Eight columns is the pipeline's shape, not a person's question. The lens
+        # folds them into the few lanes one role reads; no card is dropped, so the
+        # totals match whichever lens is on.
+        view = board_view(c.config, qp.get("view"))
+        views = board_views(c.config)
+        parked = lenses_mod.parked_states(views)
+        parked_tags = lenses_mod.parked_tags(views)
+        lane_cards = group_lanes(cols, view, parked, parked_tags)
+        # "Only my turn": the relay's default question. Work passes BA → Dev → QC,
+        # so a role mostly wants the lanes where the ball is in ITS court; the rest
+        # stay one click away as upstream/downstream context.
+        # Ignored for a view that claims no lane (the raw pipeline, or a process
+        # still being configured) — filtering to nothing would render a blank board
+        # and read as "no work", which is the one answer it must never give.
+        only_mine = (qp.get("mine") or "").strip() in {"1", "true", "yes"} and any(
+            lane.mine for lane in view.lanes
+        )
+
         # Per-column display cap + "load more".
         cap = max(0, getattr(c.config, "board_max_per_column", 20))
         try:
@@ -652,6 +710,10 @@ def create_dashboard_router() -> APIRouter:
         limit = max(0, limit)
 
         base = {}
+        if view.key != "pipeline":
+            base["view"] = view.key
+        if only_mine:
+            base["mine"] = "1"
         if selected_tag != "all":
             base["tag"] = selected_tag
         if selected_project != "all":
@@ -683,8 +745,48 @@ def create_dashboard_router() -> APIRouter:
         return _ctx(
             request,
             "board",
-            board=cols,
-            columns=board_columns(c.config),
+            board=lane_cards,
+            columns=[lane.name for lane in view.lanes],
+            lanes=[
+                row for row in render_lanes(view, lane_cards, limit)
+                if row.lane.mine or not only_mine
+            ],
+            # Which lanes a card can actually be dropped on. Without a rule the drop
+            # endpoint returns 204 and nothing happens — a card that looks draggable
+            # and then silently snaps back is worse than one that is plainly not.
+            drop_targets=sorted(parse_drop_map(c.config.board_drop_map)),
+            # A Run button only makes sense where a person can actually start work:
+            # a process view (not the raw pipeline) on a machine that writes.
+            can_run=bool(view.key != "pipeline" and not c.config.dry_run),
+            only_mine=only_mine,
+            my_turn=my_turn_count(lane_cards, view),
+            # Each tab carries the count that decides whether it is worth opening:
+            # how many items are waiting on THAT role right now.
+            turn_counts={
+                v.key: my_turn_count(group_lanes(cols, v, parked, parked_tags), v)
+                for v in views
+            },
+            mine_url="/dashboard/board?" + urlencode(
+                {**base, "mine": "1"} if not only_mine
+                else {k: val for k, val in base.items() if k != "mine"}
+            ),
+            views=views,
+            view=view,
+            # A lens shows only the items its process owns, so the header has to say
+            # how many of the board's items that is — otherwise switching lens looks
+            # like work disappeared.
+            in_view=sum(len(v) for v in lane_cards.values()),
+            role_chips={
+                card.id: [v.label for v in lens_tag_matches(card.tags, views)]
+                for column_cards in cols.values()
+                for card in column_cards
+            },
+            lens_urls={
+                v.key: "/dashboard/board?"
+                + urlencode({**{k: val for k, val in base.items() if k != "view"},
+                             **({} if v.key == "pipeline" else {"view": v.key})})
+                for v in views
+            },
             total=len(items),
             error=error,
             project=c.config.ado_project,
@@ -703,6 +805,169 @@ def create_dashboard_router() -> APIRouter:
     @router.get("/board", response_class=HTMLResponse)
     async def board(request: Request):
         return _TEMPLATES.TemplateResponse(request, "board.html", await _board_ctx(request))
+
+    # ── Board processes (lens editor) ────────────────────────────────────────
+    # A lens is two decisions — which items a process owns (tags) and which lanes it
+    # reads (stages over pipeline columns). Both are edited here rather than in the
+    # Settings list, because a list of strings cannot show that a stage folds three
+    # columns, and getting that wrong makes items vanish from someone's board.
+
+    @router.get("/board-views", response_class=HTMLResponse)
+    async def board_views_page(request: Request):
+        c: Container = request.app.state.container
+        cols = board_columns(c.config)
+        flash = _take_flash(request)
+        rejected = _take_lens_reject(request)
+        lenses = rejected.get("lenses") or lenses_mod.lens_dicts(c.config)
+
+        # A process is only real if its tags exist on the board. Reading the live
+        # items lets the page answer the question an operator actually has — "will
+        # this show anything?" — instead of leaving them to guess and find an empty
+        # board. Fail-soft: ADO being down costs the counts, not the editor.
+        try:
+            items = await c.ado.get_all_tagged_work_items()
+        except Exception:  # noqa: BLE001
+            items = []
+        tag_counts: dict[str, int] = {}
+        for item in items:
+            for tag in item.tags or []:
+                name = (tag or "").strip()
+                if name:
+                    tag_counts[name] = tag_counts.get(name, 0) + 1
+        board_tags = sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:40]
+        # The states really in use, so a hand-off lane can be filled in by picking
+        # rather than by remembering exactly how ADO spells it.
+        board_states = sorted({(i.state or "").strip() for i in items if (i.state or "").strip()})
+
+        def _matches(lens: dict) -> int:
+            wanted = {str(t).strip().lower() for t in (lens.get("tags") or []) if str(t).strip()}
+            if not wanted:
+                return len(items)
+            return sum(
+                1 for i in items if wanted & {(t or "").strip().lower() for t in (i.tags or [])}
+            )
+
+        # "Waiting on this process" is the number that actually decides whether a
+        # process is configured usefully: how many items sit in a stage it marked as
+        # its turn. It needs the real board, so it is derived from the live view.
+        records = latest_records(await c.execution_repo.get_recent(200))
+        pipeline_states = {s.work_item_id: s.state.value for s in await c.state_repo.all()}
+        live = build_board(items, records, c.config, pipeline_states)
+
+        all_views = lenses_mod.board_views(c.config)
+        parked = lenses_mod.parked_states(all_views)
+        parked_tag_set = lenses_mod.parked_tags(all_views)
+
+        def _waiting_on(lens: dict) -> int:
+            view = lenses_mod.view_of(lens, cols)
+            if view is None:
+                return 0
+            return lenses_mod.my_turn_count(
+                lenses_mod.group_lanes(live, view, parked, parked_tag_set), view
+            )
+
+        # Two processes claiming the same column both think the ball is theirs. That
+        # is legal (an escalation needs BA and Dev) but it is worth saying out loud,
+        # because the usual cause is a missing hand-off state, not a deliberate choice.
+        owners: dict[str, list[str]] = {}
+        for raw_lens in lenses:
+            view = lenses_mod.view_of(raw_lens, cols)
+            if view is None:
+                continue
+            for claim in lenses_mod.my_turn_claims(view):
+                if claim not in lenses_mod.SHARED_COLUMNS:
+                    owners.setdefault(claim, []).append(view.label)
+        shared_turns = {col: names for col, names in owners.items() if len(names) > 1}
+        # A process with no turn of its own is a read-only board: it can watch, but the
+        # relay never stops at it. Almost always the missing piece is the hand-off state
+        # that would give it a column, so it is reported next to that fix.
+        no_turn = [
+            str(x.get("label") or x.get("key"))
+            for x in lenses
+            if isinstance(x, dict)
+            and (v := lenses_mod.view_of(x, cols)) is not None
+            and not lenses_mod.my_turn_claims(v)
+        ]
+
+        shown = [
+            {
+                "key": str(x.get("key") or ""),
+                "label": str(x.get("label") or ""),
+                "icon": str(x.get("icon") or ""),
+                "hint": str(x.get("hint") or ""),
+                "tags": [str(t) for t in (x.get("tags") or [])],
+                "stages": [
+                    {
+                        "name": str(st.get("name") or ""),
+                        "columns": [str(cc) for cc in (st.get("columns") or [])],
+                        "states": [str(x) for x in (st.get("states") or [])],
+                        "tone": str(st.get("tone") or "slate"),
+                        "hint": str(st.get("hint") or ""),
+                        "drop": str(st.get("drop") or ""),
+                    }
+                    for st in (x.get("stages") or [])
+                    if isinstance(st, dict)
+                ],
+                "gaps": lenses_mod.coverage_gaps(x, cols),
+                "matches": _matches(x),
+                "turn": _waiting_on(x),
+                "tag_hint": ", ".join(
+                    lenses_mod.suggested_role_tags(c.config, str(x.get("key") or ""))[:2]
+                ),
+            }
+            for x in lenses
+            if isinstance(x, dict)
+        ]
+        response = _TEMPLATES.TemplateResponse(
+            request, "board_views.html",
+            _ctx(request, "board-views", lenses=shown, columns=cols,
+                 tones=lenses_mod.TONES, flash=flash,
+                 board_tags=board_tags, board_states=board_states,
+                 board_total=len(items),
+                 profiles=sdlc_plan.profile_names(c.config),
+                 done_tag=c.config.processed_tag, review_tag_name=c.config.review_tag,
+                 hold_tag=c.config.escalation_tag,
+                 sdlc_on=c.config.sdlc_loop_enabled,
+                 shared_turns=shared_turns, no_turn=no_turn,
+                 review_state=c.config.board_review_state,
+                 deploy_state=c.config.board_deploy_state,
+                 errors=rejected.get("errors") or []),
+        )
+        if flash is not None:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        if rejected:
+            response.delete_cookie(_LENS_ERROR_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/board-views")
+    async def save_board_views(request: Request):
+        """Save the per-process lenses, or restore the built-in set."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        if form.get("reset"):
+            updates = {"board_lenses": []}   # empty = fall back to DEFAULT_LENSES
+            settings_form.save_to_yaml(config_file_path(), updates)
+            settings_form.apply_to_config(c.config, updates)
+            _log.info("board lenses reset to defaults via dashboard")
+            return _flash("/dashboard/board-views", "lens_reset")
+
+        cols = board_columns(c.config)
+        parsed = lenses_mod.parse_lens_form(form, cols)
+        errors = lenses_mod.validate_lenses(parsed, cols)
+        if errors:
+            _log.info("board lenses rejected", count=len(errors))
+            return _lens_reject(errors, parsed)
+
+        updates = {"board_lenses": parsed}
+        settings_form.save_to_yaml(config_file_path(), updates)
+        settings_form.apply_to_config(c.config, updates)
+        _log.info("board lenses updated via dashboard",
+                  lenses=[x.get("key") for x in parsed])
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.board_lenses_updated",
+            target=", ".join(str(x.get("label")) for x in parsed)[:300],
+        )
+        return _flash("/dashboard/board-views", "lens_saved")
 
     @router.get("/reviews", response_class=HTMLResponse)
     async def reviews(request: Request):
@@ -1040,6 +1305,65 @@ def create_dashboard_router() -> APIRouter:
     async def board_partial(request: Request):
         """Just the columns — fetched by the page's auto-refresh, no full reload."""
         return _TEMPLATES.TemplateResponse(request, "_board_cols.html", await _board_ctx(request))
+
+    @router.post("/board/run")
+    async def board_run(request: Request):
+        """Trigger the next role's stages on one item — the reviewed hand-off.
+
+        The relay deliberately stops between roles: the previous stage leaves the
+        item in an ADO state the poller ignores, so nothing runs until a person has
+        read the output. This is the act of pressing Go: it stamps the process's
+        SDLC profile on the item (so the machine runs THAT role's stages, not the
+        default), then hands it back to the poller the same way the Planning page
+        does — trigger tag on, state moved into a trigger state.
+        """
+        c: Container = request.app.state.container
+        form = await request.form()
+        try:
+            item_id = int(str(form.get("item_id", "")))
+        except ValueError:
+            return Response(status_code=204)
+        view = board_view(c.config, str(form.get("view", "")))
+        if not item_id or c.config.dry_run or view.key == "pipeline":
+            return Response(status_code=204)
+
+        # The profile tag is how the SDLC engine is told which role is running. Only
+        # one may stick: leaving the previous role's tag on would let the engine pick
+        # whichever it saw first, which is how an item silently re-runs BA forever.
+        # Releasing the brake IS the trigger. A lane that claims parking tags is
+        # saying "items with these tags wait here"; pressing Run means "it may go
+        # on", so the tag that stopped it comes off. The poller ignores anything
+        # carrying autopilot-done / -review / -hold / -live, which is why a stage
+        # that finished stays put until a person does this.
+        item = await c.ado.get_work_item(item_id)
+        held = {(t or "").strip().lower() for t in (item.tags if item else [])}
+        for lane in view.lanes:
+            claimed = {t.strip().lower(): t for t in lane.tags}
+            hit = held & set(claimed)
+            if hit:
+                for tag in (item.tags if item else []):
+                    if tag.strip().lower() in hit:
+                        with contextlib.suppress(Exception):  # best-effort release
+                            await c.ado.remove_tag(item_id, tag)
+                break
+
+        profile = (view.profile or "").strip()
+        if profile and c.config.sdlc_loop_enabled:
+            prefix = (c.config.sdlc_profile_tag_prefix or "sdlc:").strip()
+            wanted = f"{prefix}{profile}"
+            for tag in (item.tags if item else []):
+                low = tag.lower()
+                if low.startswith(prefix.lower()) and low != wanted.lower():
+                    await c.ado.remove_tag(item_id, tag)
+            await c.ado.add_tag(item_id, wanted)
+
+        started = await planning_analyzer.start_items(c, [item_id])
+        _log.info("board run", id=item_id, view=view.key, profile=profile, started=started)
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="board.run",
+            target=f"#{item_id} → {view.label}" + (f" ({profile})" if profile else ""),
+        )
+        return Response(status_code=204)
 
     @router.post("/board/move")
     async def board_move(request: Request):

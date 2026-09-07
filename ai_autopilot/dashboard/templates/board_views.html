@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+
+{# One stage row of one lens. A macro because it is rendered for existing stages and
+   cloned by JS for new ones — two copies of a row carrying index-bearing field names
+   is exactly how the two halves drift out of numbering. #}
+{% macro stage_row(i, j, st, columns) -%}
+<div class="lv-stage" data-stage>
+  <span class="lv-order">
+    <button type="button" data-move="up" title="Move left on the board">▲</button>
+    <button type="button" data-move="down" title="Move right on the board">▼</button>
+  </span>
+  <input type="text" name="lens{{ i }}_stage{{ j }}_name" value="{{ st.name }}"
+         placeholder="Stage name" class="lv-in lv-name" required>
+  <div class="lv-cols">
+    {% for col in columns %}
+    <label class="lv-col {{ 'on' if col in st.columns else '' }}">
+      <input type="checkbox" name="lens{{ i }}_stage{{ j }}_columns" value="{{ col }}"
+             {% if col in st.columns %}checked{% endif %}>{{ col }}
+    </label>
+    {% endfor %}
+  </div>
+  <select name="lens{{ i }}_stage{{ j }}_tone" class="lv-in lv-tone tone-{{ st.tone }}">
+    {% for t in tones %}<option value="{{ t }}" {% if st.tone == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+  </select>
+  <input type="text" name="lens{{ i }}_stage{{ j }}_hint" value="{{ st.hint }}"
+         placeholder="what this stage means" class="lv-in lv-hint">
+  <label class="lv-mine {{ 'on' if st.mine else '' }}"
+         title="The ball is in this role's court while a card sits in this stage">
+    <input type="checkbox" name="lens{{ i }}_stage{{ j }}_mine" {% if st.mine %}checked{% endif %}>your turn
+  </label>
+  <select name="lens{{ i }}_stage{{ j }}_drop" class="lv-in lv-drop" title="Column applied when a card is dropped here">
+    {% for col in columns %}<option value="{{ col }}" {% if st.drop == col %}selected{% endif %}>drop → {{ col }}</option>{% endfor %}
+  </select>
+  <button type="button" class="lv-x" data-del-stage title="Remove this stage">✕</button>
+  <div class="lv-claims">
+    <span>parks at</span>
+    <input type="text" name="lens{{ i }}_stage{{ j }}_states" value="{{ st.states | join(', ') }}"
+           placeholder="ADO state(s) — e.g. Ready for Dev" list="lv-board-states"
+           title="States this lane claims. A state match wins over a column.">
+    <input type="text" name="lens{{ i }}_stage{{ j }}_tags" value="{{ st.tags | join(', ') }}"
+           placeholder="tag(s) — e.g. autopilot-done" list="lv-board-tags"
+           title="Tags this lane claims. Pressing ▶ Run here REMOVES them — that is what releases the item. Use only tags that exist while parked.">
+  </div>
+</div>
+{%- endmacro %}
+
+{% block content %}
+<style>
+  /* ── Process editor (scoped) ──
+     Built from the dashboard's own vocabulary (.card, .btn-ghost, .savebar), like the
+     State flow page. One card per process; inside it, the two things that define a
+     process sit side by side: the TAGS that decide which items it owns, and the ordered
+     STAGES it reads. Everything else is a hint. */
+  .main { max-width:none; }
+  .lv-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; margin-bottom:5px; }
+  .lv-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+  .lv-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:104ch; margin:0 0 16px; }
+  .lv-lede code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input);
+    padding:1px 6px; border-radius:5px; }
+  .lv-lede a { color:var(--accent-hover); }
+
+  .lv-flash { display:flex; gap:10px; align-items:center; padding:11px 16px; margin-bottom:16px;
+    border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-card); font-size:12.5px; }
+  .lv-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); }
+  .lv-flash.bad { border-color:rgba(240,82,106,.4); color:var(--red); flex-direction:column; align-items:flex-start; gap:4px; }
+
+  .lv-card { margin-bottom:16px; background:var(--bg-card); border:1px solid var(--border);
+    border-radius:var(--radius); overflow:hidden; }
+  .lv-hd { display:flex; flex-wrap:wrap; gap:10px 12px; align-items:center;
+    padding:13px 18px; border-bottom:1px solid var(--border-soft); }
+  .lv-icon { width:44px; text-align:center; }
+  .lv-label { font-size:14px; font-weight:650; width:170px; }
+  .lv-key { width:110px; font-family:var(--mono); font-size:12px; }
+  .lv-hint-in { flex:1 1 200px; min-width:170px; }
+  .lv-profile { width:150px; }
+  .lv-del { margin-left:auto; display:inline-flex; align-items:center; gap:6px; font-size:11.5px;
+    color:var(--text-dim); background:none; border:none; cursor:pointer; font-family:inherit; }
+  .lv-del:hover { color:var(--red); }
+
+  .lv-sec { padding:14px 18px 4px; }
+  .lv-sec > h4 { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.07em;
+    color:var(--text-dim); margin:0 0 7px; display:flex; align-items:center; gap:8px; }
+  .lv-sec > h4 span { font-weight:500; text-transform:none; letter-spacing:0; color:var(--text-dim); opacity:.8; }
+  .lv-tags { width:100%; }
+
+  .lv-stage { display:grid; align-items:center; gap:6px 8px;
+    grid-template-columns:16px 148px minmax(200px,1.3fr) 88px minmax(140px,1fr) 96px 138px 24px;
+    padding:8px 0; border-bottom:1px solid var(--border-soft); }
+  /* second row: where this lane parks. Its own line because a hand-off is a
+     sentence ("parks at Ready for Dev / autopilot-done"), not another narrow box. */
+  .lv-claims { grid-column:2/-1; display:flex; align-items:center; gap:8px; }
+  .lv-claims > span { font-size:10px; font-weight:700; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--text-dim); white-space:nowrap; }
+  .lv-claims input { flex:1 1 0; min-width:0; background:var(--bg-input); color:var(--text);
+    border:1px dashed var(--border); border-radius:var(--radius-sm); padding:5px 9px;
+    font-size:11.5px; font-family:var(--mono); }
+  .lv-claims input:focus { outline:none; border-style:solid; border-color:var(--accent); }
+  .lv-mine { display:inline-flex; align-items:center; gap:6px; justify-content:center; white-space:nowrap;
+    font-size:11px; font-weight:600; color:var(--text-dim); border:1px solid var(--border);
+    background:var(--bg-input); border-radius:7px; padding:5px 8px; cursor:pointer; }
+  .lv-mine.on { color:var(--accent-hover); border-color:rgba(99,102,241,.45); background:var(--accent-bg); }
+  .lv-mine input { accent-color:var(--accent); margin:0; }
+  .lv-in { background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:7px 9px; font-size:12.5px; font-family:inherit; min-width:0; }
+  .lv-in:focus { outline:none; border-color:var(--accent); }
+  .lv-order { display:flex; flex-direction:column; gap:1px; }
+  .lv-order button { background:none; border:none; color:var(--text-dim); cursor:pointer;
+    font-size:8px; line-height:1; padding:1px 2px; font-family:inherit; }
+  .lv-order button:hover { color:var(--accent-hover); }
+  .lv-order-lens { flex-direction:row; gap:4px; margin-left:auto; }
+  .lv-order-lens button { font-size:10px; padding:2px 4px; }
+  .lv-order-lens + .lv-del { margin-left:10px; }
+  .lv-hint { color:var(--text-muted); }
+  .lv-x { background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:13px; padding:2px; }
+  .lv-x:hover { color:var(--red); }
+
+  /* column pickers: checkboxes that read as chips, so a stage's span is scannable */
+  .lv-cols { display:flex; flex-wrap:wrap; gap:5px; }
+  .lv-col { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:7px;
+    border:1px solid var(--border); background:var(--bg-input); font-size:11px; color:var(--text-muted);
+    cursor:pointer; white-space:nowrap; }
+  .lv-col:hover { border-color:var(--accent); color:var(--text); }
+  .lv-col.on { background:var(--accent-bg); border-color:rgba(99,102,241,.45); color:var(--accent-hover); font-weight:600; }
+  .lv-col input { accent-color:var(--accent); margin:0; }
+
+  .lv-tone { text-transform:capitalize; }
+  .tone-slate { border-left:3px solid #7c8091; } .tone-blue { border-left:3px solid var(--blue); }
+  .tone-violet { border-left:3px solid var(--violet); } .tone-purple { border-left:3px solid #c084fc; }
+  .tone-teal { border-left:3px solid #22c9b8; } .tone-amber { border-left:3px solid var(--amber); }
+  .tone-green { border-left:3px solid var(--green); } .tone-red { border-left:3px solid var(--red); }
+
+  .lv-match { font-size:11px; font-weight:700; color:var(--green); background:var(--green-bg);
+    border-radius:20px; padding:2px 10px; margin-left:auto; white-space:nowrap; }
+  .lv-match + .lv-order-lens { margin-left:12px; }
+  .lv-match.zero { color:var(--amber); background:var(--amber-bg); }
+  .lv-match + .lv-del { margin-left:12px; }
+
+  /* the tags actually on the board — click one to hand it to this process */
+  .lv-suggest { margin-top:8px; font-size:11px; color:var(--text-dim); }
+  .lv-suggest > summary { cursor:pointer; color:var(--text-muted); font-size:11.5px;
+    padding:3px 0; list-style:none; }
+  .lv-suggest > summary::before { content:"▸ "; color:var(--text-dim); }
+  .lv-suggest[open] > summary::before { content:"▾ "; }
+  .lv-suggest > summary:hover { color:var(--accent-hover); }
+  .lv-suggest-list { display:flex; flex-wrap:wrap; gap:6px; padding:6px 0 2px; }
+  .lv-tag-add { font-family:var(--mono); font-size:10.5px; color:var(--text-muted);
+    background:var(--bg-input); border:1px solid var(--border); border-radius:6px;
+    padding:2px 8px; cursor:pointer; }
+  .lv-tag-add:hover { border-color:var(--accent); color:var(--accent-hover); }
+  .lv-tag-add b { color:var(--text-dim); font-weight:700; margin-left:4px; }
+
+  .lv-gap { margin:10px 18px 0; padding:8px 12px; border-radius:var(--radius-sm);
+    background:var(--amber-bg); color:var(--amber); font-size:11.5px; }
+  .lv-foot { display:flex; gap:10px; padding:12px 18px 16px; }
+
+  .lv-add { width:100%; padding:13px; border:1px dashed var(--border); border-radius:var(--radius);
+    background:transparent; color:var(--text-muted); font-family:inherit; font-size:13px; font-weight:600;
+    cursor:pointer; margin-bottom:20px; }
+  .lv-add:hover { border-color:var(--accent); color:var(--accent-hover); background:var(--accent-bg); }
+
+  .savebar { position:sticky; bottom:0; display:flex; justify-content:space-between; align-items:center;
+    gap:14px; padding:12px 0 18px; background:var(--bg-sticky); backdrop-filter:blur(8px); }
+  .savebar .note { color:var(--text-dim); font-size:12px; }
+</style>
+
+<div class="lv-top"><h2>⚙️ Board processes</h2></div>
+<p class="lv-lede">
+  Work is a <b>relay</b> — BA hands to Dev, Dev hands to QC — so the same item passes through
+  every process. That is why a process is not defined by a label stuck on an item, but by
+  <b>where the item is right now</b>: each process lists the <b>stages</b> it reads, folding one or
+  more of the autopilot's pipeline columns ({% for col in columns %}<code>{{ col }}</code>{% if not loop.last %}, {% endif %}{% endfor %}),
+  and ticks <b>your turn</b> on the stages where the ball is in its court. An item moving from
+  <code>In progress</code> to <code>Ready for review</code> leaves Dev's turn and enters QC's — nobody
+  re-tags anything. Folding hides nothing: inside a lane cards stay grouped under the column
+  they are really in, and lanes that are <em>not</em> your turn still show as upstream / downstream
+  context.
+  <br>
+  <b>▶ Run</b> is the hand-off gate: pick the SDLC profile this process should start, and its
+  cards get a Run button in the lanes that are its turn. The relay stops between roles on
+  purpose, then Dev reads what BA produced and <em>then</em> presses Run — which also
+  <b>removes the parking tags</b> of the lane the card was in. Blank = no button.
+  <br>
+  The simplest brake needs no ADO change at all: the poller already ignores anything tagged
+  <code>{{ done_tag }}</code>, <code>{{ review_tag_name }}</code> or <code>{{ hold_tag }}</code>,
+  so a finished stage stops itself — park a lane on that tag and Run is exactly "take the tag
+  off and go".
+  <br>
+  <b>Tags</b> are the exception, not the rule: set them only when one process owns a whole
+  stream end to end (a QC-only backlog, say). Blank = this process sees every item on the board.
+  Saved to <code>config.yaml</code> → <code>board_lenses</code> and applied live;
+  the boards themselves are at <a href="/dashboard/board">Board</a>.
+</p>
+
+{% if flash %}
+<div class="lv-flash {{ 'ok' if flash[0] == 'green' else 'bad' }}">{{ flash[1]|safe }}</div>
+{% endif %}
+{% if errors %}
+<div class="lv-flash bad">
+  <b>Not saved — fix these first:</b>
+  {% for e in errors %}<div>• {{ e }}</div>{% endfor %}
+</div>
+{% endif %}
+
+{% if no_turn %}
+<div class="lv-flash" style="border-color:rgba(245,166,35,.4);color:var(--amber);align-items:flex-start;flex-direction:column;gap:5px">
+  <b>{{ no_turn | join(', ') }} — no stage of its own</b>
+  <div style="color:var(--text-muted)">Nothing on the board ever waits on {{ 'these' if no_turn | length > 1 else 'it' }}:
+    every stage is marked as context. Tick <b>your turn</b> on the stage where that role has to act
+    {% if not review_state or not deploy_state %}— or give
+    {% if not review_state %}<b>Ready for review</b>{% endif %}{% if not review_state and not deploy_state %} / {% endif %}{% if not deploy_state %}<b>Ready to deploy</b>{% endif %}
+    a real ADO state in <a href="/dashboard/settings" style="color:var(--accent-hover)">Settings → Board columns</a>,
+    which is what creates the hand-off column for it{% endif %}.</div>
+</div>
+{% endif %}
+
+{% if shared_turns %}
+<div class="lv-flash" style="border-color:rgba(245,166,35,.4);color:var(--amber);align-items:flex-start;flex-direction:column;gap:5px">
+  <b>Two processes claim the same hand-off</b>
+  {% for col, names in shared_turns.items() %}
+  <div>• <code>{{ col }}</code> — {{ names | join(' and ') }} both treat it as their turn,
+    so an item there is either done twice or by nobody.</div>
+  {% endfor %}
+  {% if not review_state or not deploy_state %}
+  <div style="color:var(--text-muted)">Usually this means a hand-off column is missing. Give
+    {% if not review_state %}<b>Ready for review</b>{% endif %}{% if not review_state and not deploy_state %} and {% endif %}{% if not deploy_state %}<b>Ready to deploy</b>{% endif %}
+    a real ADO state in <a href="/dashboard/settings" style="color:var(--accent-hover)">Settings → Board columns</a>
+    and the relay gets its own step for each role.</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<datalist id="lv-board-states">
+  {% for name in board_states %}<option value="{{ name }}"></option>{% endfor %}
+</datalist>
+<datalist id="lv-board-tags">
+  {% for name, _n in board_tags %}<option value="{{ name }}"></option>{% endfor %}
+</datalist>
+
+<form method="post" action="/dashboard/board-views" id="lv-form">
+  <div id="lv-list">
+    {% for lens in lenses %}
+    {% set i = loop.index0 %}
+    <section class="lv-card" data-lens>
+      <div class="lv-hd">
+        <input type="text" name="lens{{ i }}_icon" value="{{ lens.icon }}"
+               class="lv-in lv-icon" placeholder="🛠" title="Emoji shown on the lens tab" maxlength="4">
+        <input type="text" name="lens{{ i }}_label" value="{{ lens.label }}"
+               class="lv-in lv-label" placeholder="Dev" required title="Name on the board tab">
+        <input type="text" name="lens{{ i }}_key" value="{{ lens.key }}"
+               class="lv-in lv-key" placeholder="dev" title="URL key: /dashboard/board?view=…">
+        <input type="text" name="lens{{ i }}_hint" value="{{ lens.hint }}"
+               class="lv-in lv-hint-in" placeholder="The question this board answers">
+        <select name="lens{{ i }}_profile" class="lv-in lv-profile"
+                title="Stages the ▶ Run button starts for this process. Blank = no Run button.">
+          <option value="">▶ Run: — off —</option>
+          {% for name in profiles %}
+          <option value="{{ name }}" {% if lens.profile == name %}selected{% endif %}>▶ Run: {{ name }}</option>
+          {% endfor %}
+        </select>
+        <span class="lv-match {{ 'zero' if not lens.turn else '' }}"
+              title="Items waiting on this process right now (in a stage marked 'your turn'){% if lens.tags %}, out of {{ lens.matches }} it can see{% endif %}">
+          {{ lens.turn }} waiting · sees {{ lens.matches }}/{{ board_total }}
+        </span>
+        <span class="lv-order lv-order-lens">
+          <button type="button" data-move-lens="up" title="Move this tab left">▲</button>
+          <button type="button" data-move-lens="down" title="Move this tab right">▼</button>
+        </span>
+        <button type="button" class="lv-del" data-del-lens>🗑 Remove process</button>
+      </div>
+
+      <div class="lv-sec">
+        <h4>Tags <span>— optional. Blank (recommended for a relay) = this process sees every item.
+          Set them only to carve out a stream it owns end to end.</span></h4>
+        <input type="text" name="lens{{ i }}_tags" value="{{ lens.tags | join(', ') }}"
+               class="lv-in lv-tags" placeholder="blank = all items · e.g. {{ lens.tag_hint }}">
+        {% if board_tags %}
+        <details class="lv-suggest">
+          <summary>Tags on the board now ({{ board_tags | length }}) — click one to add it</summary>
+          <div class="lv-suggest-list">
+            {% for name, n in board_tags %}
+            <button type="button" class="lv-tag-add" data-tag="{{ name }}"
+                    title="Add {{ name }} to this process">{{ name }} <b>{{ n }}</b></button>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+      </div>
+
+      <div class="lv-sec">
+        <h4>Stages <span>— left to right; a lane is one or more pipeline columns and/or the ADO
+          states it parks in; tick <b>your turn</b> where this role has to act</span></h4>
+        <div data-stages>
+          {% for st in lens.stages %}{{ stage_row(i, loop.index0, st, columns) }}{% endfor %}
+        </div>
+      </div>
+      {% set gaps = lens.gaps %}
+      {% if gaps %}
+      <div class="lv-gap">⚠ No stage shows {{ gaps | join(', ') }} — items sitting there will not appear on this board.</div>
+      {% endif %}
+      <div class="lv-foot">
+        <button type="button" class="btn-ghost" data-add-stage>＋ Add stage</button>
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+
+  <button type="button" class="lv-add" id="lv-add-lens">＋ Add a process (e.g. Design, Release, Support)</button>
+
+  <div class="savebar">
+    <span class="note">Applied live — no restart. The board's lens tabs follow this order.</span>
+    <span style="display:flex;gap:10px">
+      <button type="submit" name="reset" value="1" class="btn-ghost"
+              onclick="return confirm('Discard these processes and restore the built-in BA / Dev / QC set?')">
+        ↩ Restore defaults
+      </button>
+      <button type="submit" class="btn-save">💾 Save processes</button>
+    </span>
+  </div>
+</form>
+
+{# Template for a brand-new process, cloned by JS. Indexes are renumbered on submit. #}
+<template id="lv-blank">
+  <section class="lv-card" data-lens>
+    <div class="lv-hd">
+      <input type="text" name="icon" value="" class="lv-in lv-icon" placeholder="🛠" maxlength="4">
+      <input type="text" name="label" value="" class="lv-in lv-label" placeholder="Design" required>
+      <input type="text" name="key" value="" class="lv-in lv-key" placeholder="design">
+      <input type="text" name="hint" value="" class="lv-in lv-hint-in" placeholder="The question this board answers">
+      <select name="profile" class="lv-in lv-profile">
+        <option value="">▶ Run: — off —</option>
+        {% for name in profiles %}<option value="{{ name }}">▶ Run: {{ name }}</option>{% endfor %}
+      </select>
+      <span class="lv-order lv-order-lens">
+        <button type="button" data-move-lens="up" title="Move this tab left">▲</button>
+        <button type="button" data-move-lens="down" title="Move this tab right">▼</button>
+      </span>
+      <button type="button" class="lv-del" data-del-lens>🗑 Remove process</button>
+    </div>
+    <div class="lv-sec">
+      <h4>Tags <span>— items carrying any of these belong to this process</span></h4>
+      <input type="text" name="tags" value="" class="lv-in lv-tags" placeholder="autopilot-design, design">
+    </div>
+    <div class="lv-sec">
+      <h4>Stages <span>— left to right, each over one or more pipeline columns</span></h4>
+      <div data-stages></div>
+    </div>
+    <div class="lv-foot"><button type="button" class="btn-ghost" data-add-stage>＋ Add stage</button></div>
+  </section>
+</template>
+
+<template id="lv-blank-stage">
+  <div class="lv-stage" data-stage>
+    <span class="lv-order">
+      <button type="button" data-move="up" title="Move left on the board">▲</button>
+      <button type="button" data-move="down" title="Move right on the board">▼</button>
+    </span>
+    <input type="text" name="name" value="" placeholder="Stage name" class="lv-in lv-name" required>
+    <div class="lv-cols">
+      {% for col in columns %}
+      <label class="lv-col"><input type="checkbox" name="columns" value="{{ col }}">{{ col }}</label>
+      {% endfor %}
+    </div>
+    <select name="tone" class="lv-in lv-tone">
+      {% for t in tones %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+    </select>
+    <input type="text" name="hint" value="" placeholder="what this stage means" class="lv-in lv-hint">
+    <label class="lv-mine"><input type="checkbox" name="mine">your turn</label>
+    <select name="drop" class="lv-in lv-drop">
+      {% for col in columns %}<option value="{{ col }}">drop → {{ col }}</option>{% endfor %}
+    </select>
+    <button type="button" class="lv-x" data-del-stage>✕</button>
+    <div class="lv-claims">
+      <span>parks at</span>
+      <input type="text" name="states" value="" placeholder="ADO state(s)" list="lv-board-states">
+      <input type="text" name="tags" value="" placeholder="tag(s)" list="lv-board-tags">
+    </div>
+  </div>
+</template>
+
+<script>
+(function () {
+  const form = document.getElementById('lv-form');
+  const list = document.getElementById('lv-list');
+
+  // Field names carry the lens/stage index, so anything that changes the shape of the
+  // page — add, remove, clone — has to renumber every field before the form is read.
+  // Doing it in one pass at the end is the only version that cannot drift.
+  function renumber() {
+    list.querySelectorAll('[data-lens]').forEach((lens, i) => {
+      lens.querySelectorAll('.lv-hd input, .lv-hd select, .lv-tags').forEach(el => {
+        const leaf = el.name.replace(/^lens\d+_/, '');
+        el.name = 'lens' + i + '_' + leaf;
+      });
+      lens.querySelectorAll('[data-stage]').forEach((stage, j) => {
+        stage.querySelectorAll('input, select').forEach(el => {
+          const leaf = el.name.replace(/^lens\d+_stage\d+_/, '');
+          el.name = 'lens' + i + '_stage' + j + '_' + leaf;
+        });
+      });
+    });
+  }
+
+  function paintChip(box) { box.closest('.lv-col').classList.toggle('on', box.checked); }
+  function paintTone(sel) {
+    sel.className = 'lv-in lv-tone tone-' + sel.value;
+  }
+
+  document.addEventListener('change', e => {
+    if (e.target.matches('.lv-col input')) paintChip(e.target);
+    if (e.target.matches('.lv-mine input')) e.target.closest('.lv-mine').classList.toggle('on', e.target.checked);
+    if (e.target.matches('.lv-tone')) paintTone(e.target);
+  });
+
+  // Order is meaning here: stages read left→right on the board, processes are the
+  // tab order. Both move by swapping the node with its sibling, then renumbering —
+  // the same single source of truth as add and delete.
+  function swap(node, dir) {
+    const sib = dir === 'up' ? node.previousElementSibling : node.nextElementSibling;
+    if (!sib) return;
+    dir === 'up' ? node.parentNode.insertBefore(node, sib)
+                 : node.parentNode.insertBefore(sib, node);
+    renumber();
+  }
+
+  document.addEventListener('click', e => {
+    const moveStage = e.target.closest('[data-move]');
+    if (moveStage) { swap(moveStage.closest('[data-stage]'), moveStage.dataset.move); return; }
+    const moveLens = e.target.closest('[data-move-lens]');
+    if (moveLens) { swap(moveLens.closest('[data-lens]'), moveLens.dataset.moveLens); return; }
+    const addStage = e.target.closest('[data-add-stage]');
+    if (addStage) {
+      const host = addStage.closest('[data-lens]').querySelector('[data-stages]');
+      host.appendChild(document.getElementById('lv-blank-stage').content.cloneNode(true));
+      renumber();
+      return;
+    }
+    if (e.target.closest('[data-del-stage]')) {
+      e.target.closest('[data-stage]').remove();
+      renumber();
+      return;
+    }
+    const tagBtn = e.target.closest('.lv-tag-add');
+    if (tagBtn) {
+      const field = tagBtn.closest('[data-lens]').querySelector('.lv-tags');
+      const have = field.value.split(',').map(t => t.trim()).filter(Boolean);
+      const tag = tagBtn.dataset.tag;
+      if (!have.some(t => t.toLowerCase() === tag.toLowerCase())) have.push(tag);
+      field.value = have.join(', ');
+      field.focus();
+      return;
+    }
+    if (e.target.closest('[data-del-lens]')) {
+      const card = e.target.closest('[data-lens]');
+      if (confirm('Remove this process from the board?')) { card.remove(); renumber(); }
+      return;
+    }
+    if (e.target.id === 'lv-add-lens') {
+      list.appendChild(document.getElementById('lv-blank').content.cloneNode(true));
+      const fresh = list.lastElementChild;
+      fresh.querySelector('[data-add-stage]').click();  // a process with no stage cannot be saved
+      renumber();
+      fresh.querySelector('.lv-label').focus();
+    }
+  });
+
+  form.addEventListener('submit', renumber);
+  renumber();
+})();
+</script>
+{% endblock %}

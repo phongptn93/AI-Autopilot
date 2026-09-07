@@ -22,6 +22,66 @@ poll_interval_seconds: 30
 # otherwise tagged items are never picked up. Check your board column names.
 trigger_states: ["New", "To Do", "Proposed", "Active"]
 
+# ── Board processes (BA → Dev → QC …) ──
+# One board per role. Work is a RELAY: the same item passes through every process,
+# so a process is defined by WHERE THE ITEM IS, not by a label stuck on it.
+#   stages  the lanes that process reads. A lane is one or more of the autopilot's
+#           pipeline columns (Queued, In progress, In review, Ready for review,
+#           Ready to deploy, Needs human, Done, Failed) and/or the ADO `states` it
+#           parks in, and/or the `tags` it parks under. These matter for a REVIEWED
+#           hand-off: an item left in "Ready for Dev" is `Queued` as far as the
+#           engine is concerned, so only a lane naming that state can say it is
+#           Dev's turn, not BA's. Claim order is tag → state → column (most
+#           specific first).
+#           The TAG brake needs no ADO change at all: the poller already ignores
+#           anything carrying processed_tag / review_tag / escalation_tag /
+#           live_tag, so a stage that finished stops itself. Park a lane on
+#           "autopilot-done" and ▶ Run is literally "take the tag off and go" —
+#           Run removes the parking tags of the lane the card was in. Only claim a
+#           tag that exists WHILE PARKED; a long-lived one would pin the item to
+#           that lane for its whole life.
+#           `mine: true` marks the stages where that role has to act — an item
+#           moving from "In progress" to "Ready for review" leaves Dev's turn and
+#           enters QC's, with nobody re-tagging anything. Lanes that are not
+#           `mine` still show, as upstream / downstream context.
+#   profile the SDLC profile the ▶ Run button starts for this process (ba / dev /
+#           qc / full / …). Run is the reviewed hand-off itself: the relay parks the
+#           item in a state `trigger_states` does not list, so nothing moves until a
+#           person reads the previous role's output and presses it. Blank = no button.
+#   tags    OPTIONAL, and empty in the shipped set. Use them only when one
+#           process owns a whole stream end to end (a QC-only backlog). Blank =
+#           the process sees every item on the board.
+# Folding hides nothing: inside a lane the cards stay grouped under the column
+# they are really in. Leave the whole list out for the built-in BA/Dev/QC relay.
+# Edited live at /dashboard/board-views, which shows how many items wait on each
+# process right now, flags a process with no turn of its own or two processes
+# claiming the same column, and lists the tags actually present on your board.
+# NOTE: the hand-off columns only exist if board_review_state / board_deploy_state
+# name a real ADO state — without them Dev and QC share "In review".
+# board_lenses:
+#   - key: qc
+#     label: QC
+#     icon: "🧪"
+#     profile: qc                     # what ▶ Run starts on this board
+#     hint: "What can I test, and what came back broken"
+#     tags: []                        # blank = sees every item (relay)
+#     stages:
+#       - name: "Not testable yet"
+#         columns: ["Queued", "In progress"]
+#         tone: slate                 # slate|blue|violet|purple|teal|amber|green|red
+#         hint: "still being built"   # context: shown, but not QC's turn
+#         drop: "Queued"              # column applied when a card is dropped here
+#       - name: "Ready to test"
+#         columns: ["Ready for review"]
+#         states: ["Ready for QC"]    # also claim this parked ADO state, if you use one
+#         tags: ["autopilot-done"]    # ...or brake with a tag and skip ADO states entirely
+#         tone: purple
+#         mine: true                  # ← the ball is in QC's court here
+#         drop: "Ready for review"
+#       - name: "Passed"
+#         columns: ["Done"]
+#         tone: green
+
 # ── Who may issue /commands and @mentions ──
 # By default only the machine's OWNER (assignee_trigger_user, falling back to
 # auto_transition_assignee) may reply "/ai …" — a colleague gets

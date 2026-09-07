@@ -1,12 +1,158 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
+<style>
+  /* ── Board (scoped) ───────────────────────────────────────────────────────
+     The board is wide — it opts out of the reading-width cap. Everything below
+     is built from one idea: the LENS chooses which question the board answers
+     (whole pipeline, or one process), and every lane is a lens stage over one or
+     more pipeline columns. Colour is carried by a single --tone variable per
+     lane so a lane's dot, hairline and count chip can never drift apart. */
+  .main { max-width: none; }
+
+  /* header */
+  .bd-top { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:14px 20px; }
+  .bd-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+  .bd-lede { color:var(--text-muted); font-size:13px; margin-top:3px; }
+  .bd-lede b { color:var(--text); font-weight:650; }
+
+  /* lens switcher — segmented, one tab per configured process */
+  .bd-bar { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; margin:16px 0 12px; }
+  .bd-lens { display:inline-flex; gap:2px; padding:3px; background:var(--bg-card);
+    border:1px solid var(--border); border-radius:11px; }
+  .bd-lens a { display:inline-flex; align-items:center; gap:7px; padding:6px 13px; border-radius:8px;
+    font-size:13px; font-weight:600; color:var(--text-muted); text-decoration:none; white-space:nowrap;
+    transition:background .12s, color .12s; }
+  .bd-lens a:hover { background:var(--bg-hover); color:var(--text); }
+  .bd-lens a.on { background:var(--accent-bg); color:var(--accent-hover); box-shadow:inset 0 0 0 1px rgba(99,102,241,.35); }
+  .bd-lens .ic { font-size:13px; line-height:1; filter:saturate(.9); }
+  .bd-why { color:var(--text-dim); font-size:12.5px; }
+  .bd-why b { color:var(--text-muted); font-weight:600; }
+  .bd-why code { font-family:var(--mono); font-size:11px; background:var(--bg-input);
+    border:1px solid var(--border-soft); padding:1px 6px; border-radius:5px; color:var(--text-muted); }
+  .bd-lens .tab-n { font-size:10.5px; font-weight:800; line-height:1; padding:2px 6px; border-radius:20px;
+    background:var(--bg-hover); color:var(--text-muted); }
+  .bd-lens a.on .tab-n { background:var(--accent); color:#fff; }
+  .bd-toggle { font-size:12px; font-weight:600; text-decoration:none; color:var(--text-muted);
+    border:1px solid var(--border); border-radius:20px; padding:4px 11px; white-space:nowrap; }
+  .bd-toggle:hover { border-color:var(--accent); color:var(--text); }
+  .bd-toggle.on { background:var(--accent-bg); border-color:rgba(99,102,241,.45); color:var(--accent-hover); }
+
+  /* whose turn it is: the owned lanes carry the page's weight, the rest are context */
+  .board-col.is-mine { border-color:rgba(99,102,241,.4); }
+  .board-col:not(.is-mine) .board-col-body { opacity:.72; }
+  .board-col:not(.is-mine):hover .board-col-body { opacity:1; }
+  .lane-turn { font-size:9.5px; font-weight:800; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--accent-hover); background:var(--accent-bg); border-radius:5px; padding:1px 6px; }
+
+  .bd-cfg { margin-left:auto; display:flex; align-items:center; gap:12px; }
+  .bd-cfg a { color:var(--text-dim); font-size:12px; text-decoration:none; }
+  .bd-cfg a:hover { color:var(--accent-hover); }
+  .board-live { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-muted); }
+  .board-live-dot { width:8px; height:8px; border-radius:50%; background:var(--green);
+    box-shadow:0 0 0 0 rgba(46,204,113,.5); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(46,204,113,.5)} 70%{box-shadow:0 0 0 6px rgba(46,204,113,0)} 100%{box-shadow:0 0 0 0 rgba(46,204,113,0)} }
+
+  /* filters */
+  .board-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0; }
+  .bf-input { background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:7px 10px; font-size:13px; font-family:inherit; }
+  .bf-input:focus { outline:none; border-color:var(--accent); }
+
+  /* lanes: fluid when few, horizontally scrollable when many, never squashed */
+  .board-cols { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(272px,1fr);
+    gap:12px; padding:2px 0 16px; align-items:stretch; overflow-x:auto; }
+  .board-col { min-width:0; display:flex; flex-direction:column; min-height:64vh;
+    background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+    overflow:hidden; position:relative; }
+  /* the tone hairline: the one place a lane's colour is stated */
+  .board-col::before { content:""; position:absolute; inset:0 0 auto 0; height:2px;
+    background:linear-gradient(90deg, var(--tone), transparent 85%); opacity:.85; }
+  .board-col-head { display:grid; grid-template-columns:1fr auto; align-items:center; gap:4px 10px;
+    padding:12px 14px 10px; border-bottom:1px solid var(--border-soft); flex:0 0 auto; }
+  .board-col-name { display:flex; align-items:center; gap:8px; font-weight:650; font-size:13px; }
+  .board-col-name::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--tone); flex:none; }
+  .board-col-count { font-weight:700; font-size:11.5px; color:var(--tone);
+    background:color-mix(in srgb, var(--tone) 14%, transparent); border-radius:20px; padding:1px 9px; }
+  .board-col-hint { grid-column:1/-1; color:var(--text-dim); font-size:11px; line-height:1.35; }
+  .board-col-body { padding:10px; display:flex; flex-direction:column; gap:9px; flex:1 1 auto; overflow-y:auto; }
+  .board-col.drop-hover { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+
+  /* tones */
+  .tone-slate { --tone:#7c8091; } .tone-blue { --tone:var(--blue); }
+  .tone-violet { --tone:var(--violet); } .tone-purple { --tone:#c084fc; }
+  .tone-teal { --tone:#22c9b8; } .tone-amber { --tone:var(--amber); }
+  .tone-green { --tone:var(--green); } .tone-red { --tone:var(--red); }
+
+  /* the source column inside a folded lane — keeps "failed" and "escalated" apart */
+  .board-sub { display:flex; align-items:center; gap:8px; margin:4px 2px 0;
+    font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text-dim); }
+  .board-sub::after { content:""; flex:1 1 auto; height:1px; background:var(--border-soft); }
+  .board-sub-n { order:3; color:var(--text-dim); }
+
+  /* cards */
+  .board-card { background:var(--bg); border:1px solid var(--border-soft);
+    border-left:3px solid var(--stripe,#3a3a44); border-radius:var(--radius-sm);
+    padding:10px 12px; transition:transform .08s ease, border-color .08s ease, box-shadow .08s ease; }
+  .board-card[draggable="true"] { cursor:grab; }
+  .board-card:active { cursor:grabbing; }
+  .board-card.dragging { opacity:.45; }
+  .board-card:hover { transform:translateY(-1px); border-color:var(--border);
+    border-left-color:var(--stripe,#3a3a44); box-shadow:var(--shadow-sm); }
+  .board-card-head { display:flex; align-items:center; gap:7px; margin-bottom:6px; }
+  .board-card-id { font-size:11px; color:var(--text-dim); font-family:var(--mono); }
+  a.board-card-id { text-decoration:none; }
+  a.board-card-id:hover { color:var(--accent-hover); }
+  .board-card-proj { font-size:10px; color:var(--text-muted); background:var(--bg-card);
+    border:1px solid var(--border-soft); border-radius:20px; padding:1px 7px; white-space:nowrap; }
+  .board-card-state { font-size:9.5px; color:var(--text-dim); margin-left:auto; text-transform:uppercase;
+    letter-spacing:.05em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:42%; }
+  .board-card-title { font-size:13px; line-height:1.42; display:-webkit-box; -webkit-line-clamp:3;
+    -webkit-box-orient:vertical; overflow:hidden; }
+  .board-card-roles { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; }
+  .role-chip { font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--text-muted); background:var(--bg-hover); border-radius:5px; padding:1px 6px; }
+  .board-card-foot { display:flex; align-items:center; gap:10px; margin-top:8px; font-size:11px; color:var(--text-muted); }
+  .board-run { font-family:inherit; font-size:11px; font-weight:700; cursor:pointer;
+    color:var(--accent-hover); background:var(--accent-bg); border:1px solid rgba(99,102,241,.4);
+    border-radius:6px; padding:2px 8px; }
+  .board-run:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .board-run[disabled] { opacity:.5; cursor:default; }
+  .board-card-act { color:var(--text-muted); text-decoration:none; font-weight:600; }
+  .board-card-act:hover { color:var(--accent-hover); }
+  .board-card-pr { margin-left:auto; color:var(--accent-hover); font-weight:600; white-space:nowrap; }
+  .board-card-pr a { color:inherit; text-decoration:none; }
+  .board-card-pr a:hover { text-decoration:underline; }
+  .board-card-rc { margin-top:7px; font-size:11px; color:var(--blue); }
+  .board-card-rc code { background:var(--blue-bg); padding:1px 6px; border-radius:5px; font-family:var(--mono); }
+  .board-card-who { display:flex; align-items:center; gap:6px; margin-top:8px; font-size:11px;
+    color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .who-avatar { width:17px; height:17px; border-radius:50%; flex:none; display:grid; place-items:center;
+    font-size:9.5px; font-weight:700; color:var(--text); background:var(--bg-hover); border:1px solid var(--border); }
+  .board-col-empty { color:var(--text-dim); font-size:12px; text-align:center; padding:16px 0; opacity:.55; }
+  .board-more { display:block; text-align:center; margin-top:2px; padding:8px; font-size:12px; font-weight:600;
+    color:var(--accent-hover); text-decoration:none; border:1px dashed var(--border); border-radius:var(--radius-sm); }
+  .board-more:hover { border-color:var(--accent); background:var(--accent-bg); }
+
+  .board-card.cat-be { --stripe:var(--blue); } .board-card.cat-fe { --stripe:var(--violet); }
+  .board-card.cat-db { --stripe:var(--amber); } .board-card.cat-qc { --stripe:var(--green); }
+  .board-card.cat-bug { --stripe:var(--red); } .board-card.cat-req { --stripe:var(--accent); }
+</style>
+
+<div class="page-header bd-top">
     <div>
         <h2>Board</h2>
-        <p>Live view of every work item tagged for the autopilot in
-           <span class="mono">{{ projects | join(', ') if projects else project }}</span> — {{ total }} item(s)</p>
+        <p class="bd-lede">
+            {% if view.key == 'pipeline' %}
+            Every work item tagged for the autopilot in
+            <span class="mono">{{ projects | join(', ') if projects else project }}</span> — <b>{{ total }}</b> item(s)
+            {% else %}
+            <b>{{ view.label }}</b> process — <b>{{ in_view }}</b> of {{ total }} item(s)
+            {% if view.tags %}tagged <span class="mono">{{ view.tags | join(', ') }}</span>{% else %}(no tag filter){% endif %}
+            {% endif %}
+        </p>
     </div>
     <form method="get" action="/dashboard/board" class="board-filters">
+        {% if view.key != 'pipeline' %}<input type="hidden" name="view" value="{{ view.key }}"/>{% endif %}
         <input type="text" name="q" value="{{ q }}" placeholder="🔍 id or title" class="bf-input" style="width:160px"/>
         <select name="cat" class="bf-input">
             {% for v, lbl in [('all','All types'),('BE','BE'),('FE','FE'),('DB','DB'),('QC','QC')] %}
@@ -28,75 +174,60 @@
         {% endif %}
         <button type="submit" class="btn-ghost">Apply</button>
         {% if q or (cat and cat != 'all') or date_from or date_to or selected_tag != 'all' or selected_project != 'all' %}
-        <a href="/dashboard/board" class="btn-ghost" style="text-decoration:none">Reset</a>{% endif %}
-        <div class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto 15s</span></div>
+        <a href="/dashboard/board{% if view.key != 'pipeline' %}?view={{ view.key }}{% endif %}" class="btn-ghost" style="text-decoration:none">Reset</a>{% endif %}
     </form>
 </div>
 
+<div class="bd-bar">
+    <nav class="bd-lens" aria-label="Board view">
+        {% for v in views %}
+        <a href="{{ lens_urls[v.key] }}" class="{{ 'on' if v.key == view.key else '' }}"
+           title="{{ v.hint }}{% if turn_counts.get(v.key) %} · {{ turn_counts[v.key] }} waiting on {{ v.label }}{% endif %}">
+            {% if v.icon %}<span class="ic">{{ v.icon }}</span>{% endif %}{{ v.label }}
+            {% if turn_counts.get(v.key) %}<span class="tab-n">{{ turn_counts[v.key] }}</span>{% endif %}
+        </a>
+        {% endfor %}
+    </nav>
+    <span class="bd-why">
+        {{ view.hint }}
+        {% if view.key != 'pipeline' %}
+        · <b>{{ my_turn }}</b> waiting on {{ view.label }}
+        {% if view.tags %}· only {% for t in view.tags %}<code>{{ t }}</code>{% if not loop.last %} {% endif %}{% endfor %}{% endif %}
+        {% endif %}
+    </span>
+    {% if view.key != 'pipeline' %}
+    <a class="bd-toggle {{ 'on' if only_mine else '' }}" href="{{ mine_url }}"
+       title="Show only the lanes where the ball is in {{ view.label }}'s court">
+        {{ '✓ ' if only_mine else '' }}Only my turn
+    </a>
+    {% endif %}
+    <span class="bd-cfg">
+        {% if not drop_targets %}
+        <a href="/dashboard/settings#board-columns" title="No column has a drag rule, so cards are not draggable. Set 'Drag &amp; drop (column => tag/state)' in Settings → Board columns.">🔒 drag &amp; drop off</a>
+        {% endif %}
+        <a href="/dashboard/board-views">⚙ Configure processes</a>
+        <span class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto 15s</span></span>
+    </span>
+</div>
+
 {% if error %}
-<div class="card" style="border-color: var(--red,#e5484d);">
-    <div class="card-body" style="padding:14px 22px;color:var(--red,#e5484d)">
+<div class="card" style="border-color: var(--red);">
+    <div class="card-body" style="padding:14px 22px;color:var(--red)">
         ⚠️ Could not reach Azure DevOps: {{ error }}
     </div>
 </div>
 {% endif %}
 
-<style>
-  /* The board is wide — let it use the full width (override the reading-width cap). */
-  .main { max-width: none; }
-  .board-live { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-muted); }
-  .board-live-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; box-shadow:0 0 0 0 rgba(34,197,94,.5); animation:pulse 2s infinite; }
-  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)} 70%{box-shadow:0 0 0 6px rgba(34,197,94,0)} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0)} }
-
-  .board-cols { display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:12px; padding:4px 0 14px; align-items:stretch; }
-  .board-col { min-width:0; background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; min-height:64vh; }
-  .board-col-head { display:flex; justify-content:space-between; align-items:center; padding:11px 14px; font-weight:600; font-size:13px; border-bottom:1px solid var(--border,#23232b); flex:0 0 auto; }
-  .board-col-name { display:flex; align-items:center; gap:8px; }
-  .board-col-name::before { content:""; width:9px; height:9px; border-radius:50%; background:var(--dot,#6b7280); }
-  .board-col-count { color:var(--text-muted); font-weight:700; background:var(--bg,#0d0d12); border-radius:20px; padding:1px 9px; font-size:12px; }
-  .board-col-body { padding:10px; display:flex; flex-direction:column; gap:9px; flex:1 1 auto; overflow-y:auto; }
-
-  .board-card { background:var(--bg,#0d0d12); border:1px solid var(--border,#23232b); border-left:3px solid var(--stripe,#3a3a44); border-radius:9px; padding:11px 12px; transition:transform .08s ease, border-color .08s ease; cursor:grab; }
-  .board-card:active { cursor:grabbing; }
-  .board-card.dragging { opacity:.5; }
-  .board-col.drop-hover { outline:2px dashed var(--accent,#6366f1); outline-offset:-2px; }
-  .board-card:hover { transform:translateY(-1px); border-color:var(--accent,#6366f1); }
-  .board-card-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-  .board-card-id { font-size:11px; color:var(--text-dim); font-family:var(--mono,monospace); }
-  a.board-card-id { text-decoration:none; }
-  a.board-card-id:hover { color:var(--accent,#818cf8); }
-  .board-card-proj { font-size:10px; color:var(--text-muted); background:var(--bg-card,#16161c); border:1px solid var(--border,#23232b); border-radius:20px; padding:1px 7px; white-space:nowrap; }
-  .board-card-state { font-size:10px; color:var(--text-muted); margin-left:auto; text-transform:uppercase; letter-spacing:.04em; }
-  .board-card-title { font-size:13px; line-height:1.4; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-  .board-card-foot { display:flex; align-items:center; gap:10px; margin-top:8px; font-size:11px; color:var(--text-muted); }
-  .board-card-act { color:var(--text-muted); text-decoration:none; font-weight:600; }
-  .board-card-act:hover { color:var(--accent-hover,#818cf8); }
-  .board-card-rc { margin-top:7px; font-size:11px; color:var(--blue,#4d9fff); }
-  .board-card-rc code { background:var(--blue-bg,rgba(77,159,255,.13)); padding:1px 6px; border-radius:5px; }
-  .board-card-who { margin-top:7px; font-size:11px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .board-card-pr { margin-left:auto; color:var(--accent,#818cf8); font-weight:600; text-decoration:none; white-space:nowrap; }
-  .board-col-empty { color:var(--text-dim); font-size:12px; text-align:center; padding:14px 0; opacity:.5; }
-  .board-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0; }
-  .bf-input { background:var(--bg-card); color:var(--text); border:1px solid var(--border,#23232b);
-    border-radius:8px; padding:6px 10px; font-size:13px; font-family:inherit; }
-  .bf-input:focus { outline:none; border-color:var(--accent,#6366f1); }
-  .board-more { display:block; text-align:center; margin-top:2px; padding:8px; font-size:12px; font-weight:600;
-    color:var(--accent-hover,#818cf8); text-decoration:none; border:1px dashed var(--border,#23232b); border-radius:8px; }
-  .board-more:hover { border-color:var(--accent,#6366f1); background:var(--accent-bg,rgba(99,102,241,.13)); }
-
-  /* column accent dots + card stripe colours */
-  .col-accent-queued .board-col-name::before { background:#6b7280; }
-  .col-accent-in-progress .board-col-name::before { background:#3b82f6; }
-  .col-accent-in-review .board-col-name::before { background:#a855f7; }
-  .col-accent-ready-for-review .board-col-name::before { background:#c084fc; }
-  .col-accent-ready-to-deploy .board-col-name::before { background:#14b8a6; }
-  .col-accent-needs-human .board-col-name::before { background:#f59e0b; }
-  .col-accent-done .board-col-name::before { background:#22c55e; }
-  .col-accent-failed .board-col-name::before { background:#e5484d; }
-  .board-card.cat-be { --stripe:#3b82f6; } .board-card.cat-fe { --stripe:#a855f7; }
-  .board-card.cat-db { --stripe:#f59e0b; } .board-card.cat-qc { --stripe:#22c55e; }
-  .board-card.cat-bug { --stripe:#e5484d; } .board-card.cat-req { --stripe:#6366f1; }
-</style>
+{% if view.key != 'pipeline' and view.tags and not in_view and total %}
+<div class="card" style="margin-bottom:12px">
+    <div class="card-body" style="padding:13px 20px;font-size:13px;color:var(--text-muted)">
+        None of the {{ total }} item(s) on this board carry a <b>{{ view.label }}</b> tag
+        ({% for t in view.tags %}<code class="mono">{{ t }}</code>{% if not loop.last %}, {% endif %}{% endfor %}).
+        Tag the work items in Azure DevOps, or
+        <a href="/dashboard/board-views" style="color:var(--accent-hover)">change which tags this process owns</a>.
+    </div>
+</div>
+{% endif %}
 
 <div id="board-mount">{% include "_board_cols.html" %}</div>
 
@@ -120,7 +251,29 @@
     setInterval(refresh, 15000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
-    // ── Drag & drop: move a card to a column → apply that column's tag/state ──
+    // ── Run: the human trigger between roles ──
+    // The relay stops on purpose between stages; this button is the "I have read the
+    // previous role's output, go" signal. Delegated on the mount so it survives the
+    // 15s refresh, and disabled on click so a double-press cannot start two runs.
+    mount.addEventListener('click', async e => {
+      const btn = e.target.closest('[data-run]');
+      if (!btn) return;
+      const id = btn.dataset.run;
+      if (!confirm('Start the ' + {{ view.label|tojson }} + ' stage(s) on #' + id + '?')) return;
+      btn.disabled = true; btn.textContent = '… starting';
+      try {
+        await fetch('/dashboard/board/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ item_id: id, view: {{ view.key|tojson }} }),
+        });
+      } catch (err) { /* the refresh below shows the truth either way */ }
+      refresh();
+    });
+
+    // ── Drag & drop: move a card to a lane → apply that lane's tag/state ──
+    // A lane can fold several pipeline columns, so the drop applies the lane's
+    // configured target column (data-column), not the lane's label.
     // Delegated on the stable mount so it survives the 15s partial refresh.
     let dragId = null, dragEl = null;
     mount.addEventListener('dragstart', e => {

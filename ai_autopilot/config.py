@@ -786,6 +786,17 @@ class Settings(BaseSettings):
     # with @, e.g. "In review => autopilot-review", "Done => @Closed". Columns not
     # listed are not drop targets.
     board_drop_map: list[str] = Field(default_factory=list)
+    # Per-process board lenses (BA / Dev / QC / ...). Each entry is
+    # {key, label, icon, hint, tags: [...], stages: [{name, columns, tone, hint, drop}]}:
+    # `tags` says which work items that process owns, `stages` are the lanes it reads,
+    # each folding one or more pipeline columns. Empty = ship the built-in defaults
+    # (ai_autopilot.lenses.DEFAULT_LENSES). Edited at /dashboard/board-views.
+    #
+    # `list[Any]`, like work_item_flows and for the same reason: a typed model would
+    # make pydantic reject a hand-edit typo at load and stop the autopilot from
+    # starting at all, over a board view. Malformed entries are skipped and reported
+    # in the editor instead.
+    board_lenses: list[Any] = Field(default_factory=list)
     # When a human drags a handled item back to a trigger state (one the autopilot
     # never sets), clear its skip tags so it gets reprocessed. Guarded against loops:
     # only reopens on trigger states that are NOT the autopilot's own output states.
@@ -1245,6 +1256,14 @@ class Settings(BaseSettings):
     # Handoff: profile name → ADO state to set when its stages complete (the next
     # machine's trigger_states pick it up). Blank/absent → reuse resolved_state.
     sdlc_profile_states: dict[str, str] = Field(default_factory=dict)
+    # Handoff, the tag twin of sdlc_profile_states: profile name -> tag added when its
+    # stages complete. A tag needs no ADO process change (states belong to a work-item
+    # type and an admin has to define them), and the poller ALREADY ignores an item
+    # carrying processed/review/hold/live tags, so the item simply stops there until a
+    # person releases it. Pair it with a Board process lane that claims the same tag:
+    # pressing the board's Run removes it, which is the reviewed hand-off in one act.
+    # E.g. {"ba": "handoff-dev", "dev": "handoff-qc"}.
+    sdlc_profile_tags: dict[str, str] = Field(default_factory=dict)
     # Whether to apply the handoff state even when the PR is a draft (default: no —
     # a draft awaits human review before advancing to the next role's machine).
     sdlc_advance_on_draft: bool = False

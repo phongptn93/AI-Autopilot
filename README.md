@@ -88,7 +88,7 @@ The service listens on **`:5080`** by default:
 
 | Endpoint | Purpose |
 |----------|---------|
-| `/dashboard` | Overview · Board · Planning · History · Learning · Settings · Config · Capabilities |
+| `/dashboard` | Overview · Board · Board processes · Planning · History · Learning · Settings · Config · Capabilities |
 | `/health` | Readiness checks (ado / claude / disk) as JSON |
 | `/metrics` | Prometheus metrics |
 | `/api/webhook/ado` | ADO Service Hook → instant pickup (work items **and** PR comments) |
@@ -112,7 +112,8 @@ The webhook endpoint filters bot-signed comments and plain chatter — only real
 | Page | What it does |
 |------|--------------|
 | **Overview** | Run metrics (success / failed / tokens) and recent activity. |
-| **Board** | Live Kanban of every autopilot item; drag‑and‑drop, search / type / date filters, per‑column cap + *Load more*, 15s auto‑refresh. |
+| **Board** | Live Kanban of every autopilot item; drag‑and‑drop, search / type / date filters, per‑column cap + *Load more*, 15s auto‑refresh. A **lens per process** (BA → Dev → QC · your own) folds the pipeline columns — and the ADO states or tags a hand‑off parks in — into the few lanes that role reads, marking the ones where the ball is in its court: each tab carries the count waiting on that role, with an **Only my turn** toggle and a **▶ Run** button that releases the parking tag and starts that role's SDLC stages once a human has read the previous role's output. |
+| **Board processes** | Define those lenses: the ordered **stages** each process reads and which of them are **its turn**. Work is a relay — the item moves, the turn moves with it, nobody re‑tags anything. The editor shows how many items wait on each process right now, flags a process with no turn of its own or two claiming the same column, and lists the tags really on your board. Tags stay optional, for a stream one process owns end to end. Saved to `board_lenses` and applied live. |
 | **Planning** | Load your assigned work, run AI grouping & conflict analysis, then **Start now** or **Schedule**. Live scheduling view with history. |
 | **Reviews** | Every active PR grouped by target branch — status badge, reviewer votes, conflicts, age, linked work item. Command‑palette reference for the role commands. |
 | **History** | Paginated, filterable log of every execution (skill, PR, duration). Each row shows **which model** served the run and what it **cost** — hover the token count for the input / output / cache split. A run whose usage was never reported shows `—`, never `0`. |

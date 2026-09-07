@@ -122,7 +122,10 @@ FIELDS: tuple[Field, ...] = (
           "Show at most this many cards per column, then a 'Load more'. 0 = show all."),
     Field("board_drop_map", "Drag & drop (column => tag/state)", "list", "Board columns",
           "Enable dragging cards: one 'Column => value' per line. Value is a tag, or an ADO state "
-          "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready to deploy => @Ready to Deploy'."),
+          "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready to deploy => @Ready to Deploy'. "
+          "Empty = cards are not draggable (the board says so rather than pretending). "
+          "Who reads which columns, and whose turn each one is, is configured separately at "
+          "/dashboard/board-views (Board processes)."),
     # ── 🚚 Delivery (PM view) ──
     Field("delivery_history_enabled", "Record state history", "bool", "🚚 Delivery (PM view)",
           "Log every work-item state change so the Delivery page can measure lead time, "
@@ -369,6 +372,12 @@ FIELDS: tuple[Field, ...] = (
           "Closed-loop SDLC (v2)",
           "One 'profile => ADO state' per line — set when that profile completes, so the next "
           "machine's trigger_states picks it up. E.g. 'ba => Ready for Dev'."),
+    Field("sdlc_profile_tags", "Handoff (profile => tag)", "map",
+          "Closed-loop SDLC (v2)",
+          "One 'profile => tag' per line — added when that profile completes. Needs no ADO "
+          "state change: the poller already ignores a tagged item, so it waits there until "
+          "someone presses ▶ Run on the Board process that claims the tag. "
+          "E.g. 'ba => handoff-dev', 'dev => handoff-qc'."),
     Field("sdlc_type_profiles", "Type → profile", "map",
           "Closed-loop SDLC (v2)",
           "Optional: map a work-item type to a profile, e.g. 'Bug => dev', 'User Story => full'."),

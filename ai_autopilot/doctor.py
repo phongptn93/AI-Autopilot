@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ai_autopilot import flows as flows_mod
+from ai_autopilot import lenses as lenses_mod
+from ai_autopilot.board import board_columns
 from ai_autopilot.config import Settings, describe_users, is_ambiguous_user, parse_hhmm
 from ai_autopilot.scheduling import resolve_tz
 
@@ -772,12 +774,76 @@ def check_state_flows(config: Settings) -> list[Finding]:
     return out
 
 
+def check_board_processes(config: Settings) -> list[Finding]:
+    """Board processes that read as configured but can never show anyone anything.
+
+    Offline, like every check here. The board is where people learn whose turn it
+    is, so a process with no queue, or two claiming the same hand-off, is a silent
+    way to drop work — the same class of bug as a state flow naming a state that
+    does not exist.
+    """
+    out: list[Finding] = []
+    cols = board_columns(config)
+    lenses = lenses_mod.lens_dicts(config)
+
+    out.extend(
+        Finding(ERROR, "Board process config is malformed", reason,
+                "Fix it at /dashboard/board-views.")
+        for reason in lenses_mod.validate_lenses(lenses, cols)
+    )
+
+    views = [v for v in lenses_mod.board_views(config) if v.key != lenses_mod.PIPELINE_KEY]
+    owners: dict[str, list[str]] = {}
+    for view in views:
+        if not lenses_mod.my_turn_claims(view):
+            out.append(Finding(
+                WARN, f"Board process '{view.label}' never becomes anyone's turn",
+                "No stage is marked 'your turn', so the board can only be watched.",
+                "Tick 'your turn' on the stage where that role acts, at "
+                "/dashboard/board-views.",
+            ))
+        for claim in lenses_mod.my_turn_claims(view):
+            if claim not in lenses_mod.SHARED_COLUMNS:
+                owners.setdefault(claim, []).append(view.label)
+
+    for claim, names in sorted(owners.items()):
+        if len(names) > 1:
+            out.append(Finding(
+                WARN, f"Two board processes claim '{claim}'",
+                f"{' and '.join(names)} both treat it as their turn, so an item there "
+                "is done twice or by nobody.",
+                "Give one of them its own hand-off (a state, or a tag via "
+                "sdlc_profile_tags) at /dashboard/board-views.",
+            ))
+
+    # A hand-off tag nobody's board claims parks the item where no one is looking.
+    claimed = {t.lower() for v in views for lane in v.lanes for t in lane.tags}
+    for profile, tag in (config.sdlc_profile_tags or {}).items():
+        if tag.strip() and tag.strip().lower() not in claimed:
+            out.append(Finding(
+                WARN, f"Hand-off tag '{tag}' is not on any board",
+                f"Profile '{profile}' adds it when it finishes, but no process lane "
+                "claims it — the item stops and appears on nobody's queue.",
+                "Add a stage claiming that tag (and tick 'your turn') at "
+                "/dashboard/board-views.",
+            ))
+
+    if not out:
+        out.append(Finding(
+            OK, f"Board processes: {len(views)} — "
+            + ", ".join(f"{v.label} ({len(lenses_mod.my_turn_claims(v))} turn spot(s))"
+                        for v in views),
+        ))
+    return out
+
+
 CHECKS = (
     check_ado, check_trigger, check_projects, check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,
     check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
+    check_board_processes,
     check_assignee_scoping,
 )
 

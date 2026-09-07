@@ -99,6 +99,11 @@ def _catalog(cfg: Settings) -> dict[str, SdlcStage]:
     return cat
 
 
+def profile_names(cfg: Settings) -> list[str]:
+    """Every profile this machine can run, built-ins plus config overrides."""
+    return sorted(_profile_map(cfg))
+
+
 def profile_stages(name: str, cfg: Settings) -> list[SdlcStage]:
     """Concrete ordered stages for a profile name. Unknown stage names are skipped
     with a warning (never crash); an unknown profile yields ``[]`` (caller falls back)."""
@@ -192,6 +197,16 @@ def handoff_state(profile_name: str, cfg: Settings) -> str:
     """ADO state to set when ``profile_name`` completes — what the next machine's
     ``trigger_states`` picks up. Falls back to ``resolved_state`` then blank."""
     return (cfg.sdlc_profile_states or {}).get(profile_name) or cfg.resolved_state or ""
+
+
+def handoff_tag(profile_name: str, cfg: Settings) -> str:
+    """Tag to add when ``profile_name`` completes — the no-ADO-change hand-off.
+
+    The poller skips anything carrying the processed / review / hold / live tags, so
+    a completed profile already stops there; this tag is what says WHO it stopped
+    for, which a board lane then claims. Blank = no tag hand-off for that profile.
+    """
+    return (cfg.sdlc_profile_tags or {}).get(profile_name, "").strip()
 
 
 def handoff_collides(cfg: Settings) -> bool:

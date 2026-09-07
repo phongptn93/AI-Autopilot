@@ -52,6 +52,7 @@ class BoardCard:
     assigned_to: str | None = None
     pr_url: str | None = None
     pr_urls: list[str] = field(default_factory=list)  # every PR the task opened
+    tags: list[str] = field(default_factory=list)  # the item's ADO tags (lens routing)
 
 
 def parse_drop_map(entries: list[str]) -> dict[str, tuple[str, str]]:
@@ -176,6 +177,9 @@ def build_board(
                 assigned_to=item.assigned_to,
                 pr_url=record.pr_url if record else None,
                 pr_urls=_record_pr_urls(record),
+                tags=list(item.tags or []),
             )
         )
     return board
+
+

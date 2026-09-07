@@ -55,10 +55,11 @@ def _ensure_dashboard_password() -> None:
     print("  Giving up after 3 attempts — starting WITHOUT a dashboard password.", file=sys.stderr)
 
 
-_USAGE = """usage: ai-autopilot [doctor]
+_USAGE = """usage: ai-autopilot [doctor | pr-doctor <pull request url>]
 
   (no argument)  start the autopilot (poller, PR babysitter, dashboard, webhooks)
   doctor         audit the configuration for coherence and exit
+  pr-doctor URL  say why a comment on that pull request did not reach the autopilot
 """
 
 
@@ -72,6 +73,12 @@ def main() -> None:
             from ai_autopilot import doctor
 
             sys.exit(doctor.run())
+        if argv[0] in ("pr-doctor", "--pr-doctor"):
+            # Same spirit as `doctor`: you run it when the bot is NOT responding, so it
+            # must not need a running autopilot — just the config and the PAT.
+            from ai_autopilot import pr_doctor
+
+            sys.exit(pr_doctor.run(argv[1] if len(argv) > 1 else ""))
         if argv[0] in ("-h", "--help", "help"):
             print(_USAGE)
             sys.exit(0)

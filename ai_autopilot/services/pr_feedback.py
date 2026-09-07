@@ -58,7 +58,9 @@ def unowned_reason(source_ref: str, prefixes: tuple[str, ...]) -> str:
     if not is_bot_branch(source_ref, prefixes):
         return "branch prefix is not one of " + ", ".join(prefixes)
     if parse_work_item_id(source_ref) is None:
-        return "branch does not end in '<work item id>-slug'"
+        # Recoverable: the caller asks ADO for the PR's linked work items before
+        # giving up. Only the prefix is a hard no.
+        return "branch does not end in '<work item id>-slug' and the PR links no work item"
     return ""
 
 

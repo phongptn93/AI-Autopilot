@@ -392,6 +392,19 @@ class PrMonitorService:
         # there. Say so ONCE per PR: silence here cost an afternoon of "why does the
         # bot ignore my @mention", because nothing in the log mentioned the PR at all.
         why = unowned_reason(source_ref, tuple(cfg.bot_branch_prefixes))
+        # Two rules decide ownership, and only one of them is load-bearing. The PREFIX
+        # says "this branch is ours to push to" — /ai revises code and pushes, so acting
+        # on a hand-made branch would rewrite someone else's work from a comment. The id
+        # in the branch name is merely a cheap way to find the work item; ADO already
+        # links PRs to work items, so a branch we DID create but named without an id was
+        # being dropped for no reason at all. Ask ADO in that one case.
+        linked_id: int | None = None
+        if why and is_bot_branch(source_ref, tuple(cfg.bot_branch_prefixes)):
+            with contextlib.suppress(Exception):
+                linked = await c.ado.get_pull_request_work_items(repo_id, pr_id)
+                linked_id = linked[0] if linked else None
+            if linked_id is not None:
+                why = ""
         if why:
             if pr_id is not None and pr_id not in self._unowned:
                 self._unowned.add(pr_id)
@@ -406,7 +419,7 @@ class PrMonitorService:
                          "hand-made PRs",
                 )
             return
-        work_item_id = parse_work_item_id(source_ref)
+        work_item_id = parse_work_item_id(source_ref) or linked_id
         if pr_id is None or work_item_id is None:
             return
 

@@ -331,3 +331,30 @@ async def test_unowned_pr_is_explained_once():
     await svc._inspect_pr("repo-id", "Micro-Frontend", pr)   # a rescan stays quiet
     assert svc._unowned == {3861}
     assert len(said) == 1 and "prefix" in said[0]
+
+
+async def test_a_bot_branch_without_an_id_falls_back_to_the_prs_linked_work_item():
+    """Two rules decide ownership and only one is load-bearing. The prefix says "ours
+    to push to"; the id in the name is just a cheap lookup — ADO already links PRs to
+    work items, so dropping our own PR over its NAME was arbitrary."""
+    asked: list = []
+
+    class _Ado(_FakeAdo):
+        async def get_pull_request_work_items(self, repo_id, pr_id):
+            asked.append((repo_id, pr_id))
+            return [8953]
+
+    ado = _Ado([_thread(10, 1, "/ai fix it")])
+    svc = _service(ado, _FakeFeedback())
+    await svc._inspect_pr("repo-id", "Backend-Fresh", {
+        "pullRequestId": 77, "sourceRefName": "refs/heads/feature/bom-usage-statistic",
+    })
+    assert asked == [("repo-id", 77)]          # asked ADO instead of giving up
+    assert svc._unowned == set()               # ...and did not write it off
+
+    # A branch nobody of ours created is still refused without an ADO round trip.
+    asked.clear()
+    await svc._inspect_pr("repo-id", "Micro-Frontend", {
+        "pullRequestId": 3861, "sourceRefName": "refs/heads/dxmpm/material-usage",
+    })
+    assert asked == [] and svc._unowned == {3861}

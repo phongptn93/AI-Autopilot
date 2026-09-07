@@ -32,6 +32,9 @@ class DeliveryTrackerService:
         self._log = get_logger("services.delivery_tracker")
         self._task: asyncio.Task | None = None
         self._last_prune: datetime | None = None
+        # Newest change already seen — the yardstick for "did the cap cut into the
+        # window we still needed?" (see record_once). In ADO's clock, not ours.
+        self._seen_through: datetime | None = None
 
     def start(self) -> None:
         if not self._config.delivery_history_enabled:
@@ -72,9 +75,36 @@ class DeliveryTrackerService:
     async def record_once(self) -> int:
         """One recording cycle. Returns how many transitions were written."""
         c = self._c
-        items = await c.ado.get_all_active_work_items(top=self._config.delivery_max_items)
+        cap = self._config.delivery_max_items
+        items = await c.ado.get_all_active_work_items(top=cap)
         if not items:
             return 0
+        # Truncation only matters HERE, where it can silently lose a transition: the
+        # batch is newest-changed first, so if even the OLDEST item in it changed after
+        # the previous cycle, items beyond the cap changed too and their moves are gone
+        # from the timeline for good. That — not the project's total item count — is
+        # what deserves a warning.
+        stamps = [i.changed_date for i in items if i.changed_date is not None]
+        oldest = min(stamps, default=None)
+        if (
+            len(items) >= cap
+            and oldest is not None
+            and self._seen_through is not None
+            and oldest > self._seen_through
+        ):
+            self._log.warning(
+                "delivery history may have missed transitions — raise delivery_max_items",
+                cap=cap, oldest_in_batch=oldest.isoformat(),
+                seen_through=self._seen_through.isoformat(),
+            )
+        # The yardstick is the newest change we have SEEN, never the wall clock: ADO
+        # stamps changes in UTC and this process runs in local time, so comparing the
+        # two would be off by the timezone — always warning, or never.
+        if stamps:
+            newest = max(stamps)
+            self._seen_through = (
+                newest if self._seen_through is None else max(self._seen_through, newest)
+            )
         # Best-effort: an unreachable type/state map costs the category on THIS cycle's
         # rows, not the rows themselves — a missing transition would leave a permanent
         # hole in the timeline, a missing category only weakens one chart.

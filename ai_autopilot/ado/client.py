@@ -379,11 +379,23 @@ class AdoClient:
             self._log.warning("get_all_active_work_items failed", status=resp.status_code)
             return []
         all_ids = [r["id"] for r in (resp.json().get("workItems") or [])]
+        items = await self.get_work_items_by_ids(all_ids[:top])
         if len(all_ids) > top:
-            self._log.info(
-                "get_all_active_work_items truncated", matched=len(all_ids), returned=top,
+            # The query is ordered newest-changed first, so the cap only LOSES data when
+            # more than `top` items changed inside the window the caller cares about.
+            # Reporting the raw match count every cycle ("matched=3263 returned=500")
+            # reads as a permanent error on a project that simply has 3263 items, and a
+            # number that always looks alarming is a number nobody checks. Say how far
+            # back the batch actually reaches instead, at debug — and let the caller
+            # decide whether that is far enough (see DeliveryTracker.record_once).
+            oldest = min(
+                (i.changed_date for i in items if i.changed_date is not None), default=None
             )
-        return await self.get_work_items_by_ids(all_ids[:top])
+            self._log.debug(
+                "active work items capped", total=len(all_ids), returned=len(items),
+                oldest_change=oldest.isoformat() if oldest else None,
+            )
+        return items
 
     async def get_state_categories(self) -> dict[str, str]:
         """State name → ADO state category (``Proposed``/``InProgress``/``Resolved``/

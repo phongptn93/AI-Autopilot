@@ -303,7 +303,7 @@ async def test_sweep_is_off_under_other_close_policies():
     assert svc._c.executor.closed == []
 
 
-async def test_unowned_pr_is_explained_once(caplog):
+async def test_unowned_pr_is_explained_once():
     """A hand-made PR is not this loop's business — but silence there reads as a broken
     bot, so it now says why, once, instead of ignoring the PR without a trace."""
     from ai_autopilot.services.pr_feedback import unowned_reason
@@ -320,7 +320,14 @@ async def test_unowned_pr_is_explained_once(caplog):
 
     c = SimpleNamespace(config=Settings(feedback_loop_enabled=True), ado=_Ado())
     svc = PrMonitorService(c)
+    said: list = []
+    # structlog does not go through caplog — watch the service's own logger.
+    svc._log = SimpleNamespace(
+        info=lambda msg, **kw: said.append(kw.get("reason", msg)),
+        warning=lambda *a, **k: None, error=lambda *a, **k: None, debug=lambda *a, **k: None,
+    )
     pr = {"pullRequestId": 3861, "sourceRefName": "refs/heads/dxmpm/material-usage"}
     await svc._inspect_pr("repo-id", "Micro-Frontend", pr)
     await svc._inspect_pr("repo-id", "Micro-Frontend", pr)   # a rescan stays quiet
     assert svc._unowned == {3861}
+    assert len(said) == 1 and "prefix" in said[0]

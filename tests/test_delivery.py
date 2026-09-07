@@ -350,3 +350,59 @@ def test_flow_is_partial_when_nothing_was_ever_recorded():
 def test_age_label_reads_in_the_right_unit():
     report = _report(prs=[_pr(approved=1, approved_at=NOW - timedelta(days=3))])
     assert report.actions[0].age_label.endswith("ngày")
+
+
+async def test_cap_warns_only_when_it_can_have_lost_a_transition():
+    """"matched=3263 returned=500" every cycle is not a problem report — it is the
+    project's item count, and a number that always looks alarming is one nobody reads.
+    The cap only loses data when more items changed than fit since the last cycle."""
+    from datetime import datetime as dt
+
+    from ai_autopilot.config import Settings
+    from ai_autopilot.models import WorkItemInfo as WI
+    from ai_autopilot.services.delivery_tracker import DeliveryTrackerService
+
+    now = dt(2026, 9, 7, 15, 0)
+    batch: list = []
+    warned: list = []
+
+    class _Ado:
+        async def get_all_active_work_items(self, top=0):
+            return batch
+
+        async def get_state_categories(self):
+            return {}
+
+    class _History:
+        async def record(self, items, categories):
+            return 0
+
+    c = SimpleNamespace(
+        config=Settings(delivery_max_items=2), ado=_Ado(), state_history=_History(),
+    )
+    svc = DeliveryTrackerService(c)
+    # structlog does not go through caplog — watch the service's own logger.
+    svc._log = SimpleNamespace(
+        warning=lambda msg, **kw: warned.append(msg),
+        info=lambda *a, **k: None, error=lambda *a, **k: None, debug=lambda *a, **k: None,
+    )
+
+    def _item(i, changed):
+        return WI(id=i, title=f"t{i}", state="Active", changed_date=changed)
+
+    # First cycle: nothing seen before, so nothing can be claimed lost.
+    batch = [_item(1, now), _item(2, now - timedelta(minutes=30))]
+    await svc.record_once()
+    assert warned == []
+
+    # A full batch whose OLDEST item changed after everything seen so far: items beyond
+    # the cap changed too, and their moves never reach the timeline. Say so.
+    batch = [_item(3, now + timedelta(minutes=9)), _item(4, now + timedelta(minutes=8))]
+    await svc.record_once()
+    assert [m for m in warned if "missed transitions" in m]
+
+    # A batch reaching back before what we had seen: the cap cut nothing that matters.
+    warned.clear()
+    batch = [_item(5, now + timedelta(minutes=20)), _item(6, now - timedelta(days=2))]
+    await svc.record_once()
+    assert warned == []

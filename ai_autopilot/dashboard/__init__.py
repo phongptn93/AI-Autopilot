@@ -835,9 +835,29 @@ def create_dashboard_router() -> APIRouter:
                 if name:
                     tag_counts[name] = tag_counts.get(name, 0) + 1
         board_tags = sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:40]
-        # The states really in use, so a hand-off lane can be filled in by picking
-        # rather than by remembering exactly how ADO spells it.
-        board_states = sorted({(i.state or "").strip() for i in items if (i.state or "").strip()})
+        # Every state a lane could claim — from ADO, PER WORK-ITEM TYPE, not from the
+        # items that happen to be on the board. A Requirement's states ("Ready for
+        # UAT") exist whether or not a requirement is in flight right now, and a
+        # picker built from live items alone silently offers only Task/Bug states —
+        # so the one hand-off a BA needs most is the one that cannot be picked.
+        try:
+            states_by_type = await c.ado.get_states_by_type()
+        except Exception:  # noqa: BLE001 — ADO down costs the picker, not the editor
+            states_by_type = {}
+        types_of: dict[str, list[str]] = {}
+        for type_name, names in sorted(states_by_type.items()):
+            for name in names:
+                clean = (name or "").strip()
+                if clean:
+                    types_of.setdefault(clean, []).append(type_name)
+        in_use = {(i.state or "").strip() for i in items if (i.state or "").strip()}
+        for name in in_use:  # a state on the board that ADO no longer lists is still real
+            types_of.setdefault(name, [])
+        board_states = [
+            {"name": name, "types": ", ".join(types_of[name]) or "not in the type list",
+             "used": name in in_use}
+            for name in sorted(types_of)
+        ]
 
         def _matches(lens: dict) -> int:
             wanted = {str(t).strip().lower() for t in (lens.get("tags") or []) if str(t).strip()}

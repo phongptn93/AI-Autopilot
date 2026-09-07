@@ -33,13 +33,34 @@
   </select>
   <button type="button" class="lv-x" data-del-stage title="Remove this stage">✕</button>
   <div class="lv-claims">
-    <span>parks at</span>
-    <input type="text" name="lens{{ i }}_stage{{ j }}_states" value="{{ st.states | join(', ') }}"
-           placeholder="ADO state(s) — e.g. Ready for Dev" list="lv-board-states"
-           title="States this lane claims. A state match wins over a column.">
-    <input type="text" name="lens{{ i }}_stage{{ j }}_tags" value="{{ st.tags | join(', ') }}"
-           placeholder="tag(s) — e.g. autopilot-done" list="lv-board-tags"
-           title="Tags this lane claims. Pressing ▶ Run here REMOVES them — that is what releases the item. Use only tags that exist while parked.">
+    <span title="Where items wait for this stage. Tick as many as this lane should claim.">parks at</span>
+    <div class="lv-pick">
+      {% for opt in board_states %}
+      <label class="lv-chip {{ 'on' if opt.name in st.states else '' }} {{ 'live' if opt.used else '' }}"
+             title="{{ opt.types }}{{ ' · on the board now' if opt.used else '' }}">
+        <input type="checkbox" name="lens{{ i }}_stage{{ j }}_states" value="{{ opt.name }}"
+               {% if opt.name in st.states %}checked{% endif %}>{{ opt.name }}
+      </label>
+      {% endfor %}
+      {% set known_states = board_states | map(attribute='name') | list %}
+      {% set extra_states = st.states | reject('in', known_states) | list %}
+      <input type="text" class="lv-extra" name="lens{{ i }}_stage{{ j }}_states"
+             value="{{ extra_states | join(', ') }}" placeholder="+ other state(s)"
+             title="A state that is not on the board yet. Comma-separated.">
+    </div>
+    <div class="lv-pick lv-pick-tags">
+      {% for name, _n in board_tags %}
+      <label class="lv-chip tagish {{ 'on' if name in st.tags else '' }}">
+        <input type="checkbox" name="lens{{ i }}_stage{{ j }}_tags" value="{{ name }}"
+               {% if name in st.tags %}checked{% endif %}>{{ name }}
+      </label>
+      {% endfor %}
+      {% set known_tags = board_tags | map(attribute=0) | list %}
+      {% set extra_tags = st.tags | reject('in', known_tags) | list %}
+      <input type="text" class="lv-extra" name="lens{{ i }}_stage{{ j }}_tags"
+             value="{{ extra_tags | join(', ') }}" placeholder="+ other tag(s)"
+             title="Tags this lane claims — ▶ Run removes them, which is what releases the item.">
+    </div>
   </div>
 </div>
 {%- endmacro %}
@@ -54,7 +75,29 @@
   .main { max-width:none; }
   .lv-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; margin-bottom:5px; }
   .lv-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
-  .lv-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:104ch; margin:0 0 16px; }
+  /* The intro used to be four dense paragraphs in a 104ch column, which left half the
+     page empty beside a wall of text. One sentence, then three cards across the full
+     width — the three decisions a process actually has — and the rest folded away. */
+  .lv-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:110ch; margin:0 0 14px; }
+  .lv-how { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px;
+    margin-bottom:12px; }
+  .lv-how-card { background:var(--bg-card); border:1px solid var(--border-soft);
+    border-radius:var(--radius); padding:13px 16px; }
+  .lv-how-card h5 { display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:700;
+    margin-bottom:6px; }
+  .lv-how-card h5 .n { display:grid; place-items:center; width:18px; height:18px; border-radius:50%;
+    background:var(--accent-bg); color:var(--accent-hover); font-size:10.5px; font-weight:800; }
+  .lv-how-card p { color:var(--text-muted); font-size:12px; line-height:1.55; }
+  .lv-how-card code, .lv-more code { font-family:var(--mono); font-size:10.5px;
+    background:var(--bg-input); padding:1px 5px; border-radius:4px; }
+  .lv-more { margin-bottom:18px; }
+  .lv-more > summary { cursor:pointer; color:var(--text-muted); font-size:12.5px; font-weight:600;
+    list-style:none; padding:4px 0; }
+  .lv-more > summary::before { content:"▸ "; color:var(--text-dim); }
+  .lv-more[open] > summary::before { content:"▾ "; }
+  .lv-more > summary:hover { color:var(--accent-hover); }
+  .lv-more p { color:var(--text-muted); font-size:12px; line-height:1.6; max-width:110ch;
+    margin-top:7px; }
   .lv-lede code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input);
     padding:1px 6px; border-radius:5px; }
   .lv-lede a { color:var(--accent-hover); }
@@ -88,13 +131,28 @@
     padding:8px 0; border-bottom:1px solid var(--border-soft); }
   /* second row: where this lane parks. Its own line because a hand-off is a
      sentence ("parks at Ready for Dev / autopilot-done"), not another narrow box. */
-  .lv-claims { grid-column:2/-1; display:flex; align-items:center; gap:8px; }
-  .lv-claims > span { font-size:10px; font-weight:700; letter-spacing:.06em;
+  .lv-claims { grid-column:2/-1; display:flex; align-items:flex-start; gap:10px; }
+  .lv-claims > span { font-size:10px; font-weight:700; letter-spacing:.06em; padding-top:5px;
     text-transform:uppercase; color:var(--text-dim); white-space:nowrap; }
-  .lv-claims input { flex:1 1 0; min-width:0; background:var(--bg-input); color:var(--text);
-    border:1px dashed var(--border); border-radius:var(--radius-sm); padding:5px 9px;
-    font-size:11.5px; font-family:var(--mono); }
-  .lv-claims input:focus { outline:none; border-style:solid; border-color:var(--accent); }
+  /* Tick boxes, not a text field with autocomplete: a lane usually claims SEVERAL
+     spots ("Ready for Testing" and "In Testing"), and a datalist matches the whole
+     field value, so the second choice could never be suggested. */
+  .lv-pick { flex:1 1 0; min-width:0; display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  .lv-chip { display:inline-flex; align-items:center; gap:5px; padding:2px 7px; border-radius:6px;
+    border:1px dashed var(--border); background:var(--bg-input); font-size:10.5px;
+    font-family:var(--mono); color:var(--text-muted); cursor:pointer; white-space:nowrap; }
+  .lv-chip:hover { border-color:var(--accent); color:var(--text); }
+  .lv-chip.on { border-style:solid; border-color:rgba(99,102,241,.5); background:var(--accent-bg);
+    color:var(--accent-hover); font-weight:600; }
+  .lv-chip.tagish.on { border-color:rgba(46,204,113,.45); background:var(--green-bg); color:var(--green); }
+  /* a state something is sitting in right now reads first */
+  .lv-chip.live { color:var(--text); border-color:var(--border); }
+  .lv-chip.live::after { content:"•"; color:var(--green); font-size:13px; line-height:0; }
+  .lv-chip input { accent-color:var(--accent); margin:0; }
+  .lv-extra { flex:1 1 90px; min-width:80px; background:transparent; color:var(--text);
+    border:1px dashed var(--border); border-radius:6px; padding:3px 8px;
+    font-size:10.5px; font-family:var(--mono); }
+  .lv-extra:focus { outline:none; border-style:solid; border-color:var(--accent); }
   .lv-mine { display:inline-flex; align-items:center; gap:6px; justify-content:center; white-space:nowrap;
     font-size:11px; font-weight:600; color:var(--text-dim); border:1px solid var(--border);
     background:var(--bg-input); border-radius:7px; padding:5px 8px; cursor:pointer; }
@@ -165,31 +223,43 @@
 
 <div class="lv-top"><h2>⚙️ Board processes</h2></div>
 <p class="lv-lede">
-  Work is a <b>relay</b> — BA hands to Dev, Dev hands to QC — so the same item passes through
-  every process. That is why a process is not defined by a label stuck on an item, but by
-  <b>where the item is right now</b>: each process lists the <b>stages</b> it reads, folding one or
-  more of the autopilot's pipeline columns ({% for col in columns %}<code>{{ col }}</code>{% if not loop.last %}, {% endif %}{% endfor %}),
-  and ticks <b>your turn</b> on the stages where the ball is in its court. An item moving from
-  <code>In progress</code> to <code>Ready for review</code> leaves Dev's turn and enters QC's — nobody
-  re-tags anything. Folding hides nothing: inside a lane cards stay grouped under the column
-  they are really in, and lanes that are <em>not</em> your turn still show as upstream / downstream
-  context.
-  <br>
-  <b>▶ Run</b> is the hand-off gate: pick the SDLC profile this process should start, and its
-  cards get a Run button in the lanes that are its turn. The relay stops between roles on
-  purpose, then Dev reads what BA produced and <em>then</em> presses Run — which also
-  <b>removes the parking tags</b> of the lane the card was in. Blank = no button.
-  <br>
-  The simplest brake needs no ADO change at all: the poller already ignores anything tagged
-  <code>{{ done_tag }}</code>, <code>{{ review_tag_name }}</code> or <code>{{ hold_tag }}</code>,
-  so a finished stage stops itself — park a lane on that tag and Run is exactly "take the tag
-  off and go".
-  <br>
-  <b>Tags</b> are the exception, not the rule: set them only when one process owns a whole
-  stream end to end (a QC-only backlog, say). Blank = this process sees every item on the board.
-  Saved to <code>config.yaml</code> → <code>board_lenses</code> and applied live;
-  the boards themselves are at <a href="/dashboard/board">Board</a>.
+  Work is a <b>relay</b> — the same item passes through every process — so a process is not a label
+  stuck on an item, but <b>where the item is right now</b>. Saved to <code>config.yaml</code> →
+  <code>board_lenses</code>, applied live; the boards are at <a href="/dashboard/board">Board</a>.
 </p>
+
+<div class="lv-how">
+  <div class="lv-how-card">
+    <h5><span class="n">1</span> Stages</h5>
+    <p>Each lane claims one or more pipeline columns
+      ({% for col in columns %}<code>{{ col }}</code>{% if not loop.last %} {% endif %}{% endfor %}),
+      and/or the ADO <b>states</b> and <b>tags</b> an item parks in. Claim order: tag → state → column.
+      Folding hides nothing — inside a lane, cards stay grouped under the column they are really in.</p>
+  </div>
+  <div class="lv-how-card">
+    <h5><span class="n">2</span> Your turn</h5>
+    <p>Tick it on the stages where this role has to act. An item moving from <code>In progress</code>
+      to <code>Ready for review</code> leaves Dev's turn and enters QC's — nobody re-tags anything.
+      Lanes that are <em>not</em> your turn still show, as upstream / downstream context.</p>
+  </div>
+  <div class="lv-how-card">
+    <h5><span class="n">3</span> ▶ Run</h5>
+    <p>The hand-off gate. Pick the SDLC profile this process starts; its cards get a Run button in the
+      lanes that are its turn, and pressing it <b>removes that lane's parking tags</b>. Blank = no button.</p>
+  </div>
+</div>
+
+<details class="lv-more">
+  <summary>The brake, and when to use tags</summary>
+  <p>The simplest brake needs no ADO change at all: the poller already ignores anything tagged
+    <code>{{ done_tag }}</code>, <code>{{ review_tag_name }}</code> or <code>{{ hold_tag }}</code>, so a
+    finished stage stops itself — park a lane on that tag and Run is exactly "take the tag off and go".
+    Pair it with <code>sdlc_profile_tags</code> (Settings → Closed-loop SDLC) to say <em>who</em> it
+    stopped for.</p>
+  <p><b>Process tags</b> (the field under each process name) are the exception, not the rule: set them
+    only when one process owns a whole stream end to end — a QC-only backlog, say. Blank means this
+    process sees every item on the board, which is what a relay wants.</p>
+</details>
 
 {% if flash %}
 <div class="lv-flash {{ 'ok' if flash[0] == 'green' else 'bad' }}">{{ flash[1]|safe }}</div>
@@ -228,13 +298,6 @@
   {% endif %}
 </div>
 {% endif %}
-
-<datalist id="lv-board-states">
-  {% for name in board_states %}<option value="{{ name }}"></option>{% endfor %}
-</datalist>
-<datalist id="lv-board-tags">
-  {% for name, _n in board_tags %}<option value="{{ name }}"></option>{% endfor %}
-</datalist>
 
 <form method="post" action="/dashboard/board-views" id="lv-form">
   <div id="lv-list">
@@ -371,8 +434,19 @@
     <button type="button" class="lv-x" data-del-stage>✕</button>
     <div class="lv-claims">
       <span>parks at</span>
-      <input type="text" name="states" value="" placeholder="ADO state(s)" list="lv-board-states">
-      <input type="text" name="tags" value="" placeholder="tag(s)" list="lv-board-tags">
+      <div class="lv-pick">
+        {% for opt in board_states %}
+        <label class="lv-chip" title="{{ opt.types }}">
+          <input type="checkbox" name="states" value="{{ opt.name }}">{{ opt.name }}</label>
+        {% endfor %}
+        <input type="text" class="lv-extra" name="states" value="" placeholder="+ other state(s)">
+      </div>
+      <div class="lv-pick lv-pick-tags">
+        {% for name, _n in board_tags %}
+        <label class="lv-chip tagish"><input type="checkbox" name="tags" value="{{ name }}">{{ name }}</label>
+        {% endfor %}
+        <input type="text" class="lv-extra" name="tags" value="" placeholder="+ other tag(s)">
+      </div>
     </div>
   </div>
 </template>
@@ -407,6 +481,7 @@
 
   document.addEventListener('change', e => {
     if (e.target.matches('.lv-col input')) paintChip(e.target);
+    if (e.target.matches('.lv-chip input')) e.target.closest('.lv-chip').classList.toggle('on', e.target.checked);
     if (e.target.matches('.lv-mine input')) e.target.closest('.lv-mine').classList.toggle('on', e.target.checked);
     if (e.target.matches('.lv-tone')) paintTone(e.target);
   });

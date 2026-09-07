@@ -547,6 +547,24 @@ def _split_list(raw: str) -> list[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
+def _field_list(form, name: str) -> list[str]:
+    """Every value posted under ``name``, flattened and de-duplicated.
+
+    The editor offers the same field twice — tick-boxes for the states/tags already
+    on the board, and a free-text box for one that isn't there yet — so a browser
+    posts the name several times. Reading only the first (``form.get``) silently
+    dropped every choice but one, which is exactly how a multi-claim lane came back
+    from a save holding a single value.
+    """
+    raw = form.getlist(name) if hasattr(form, "getlist") else [form.get(name)]
+    out: list[str] = []
+    for chunk in raw:
+        for part in _split_list(str(chunk or "")):
+            if part not in out:
+                out.append(part)
+    return out
+
+
 def parse_lens_form(form, active_columns: list[str]) -> list[dict]:
     """Parse the /dashboard/board-views editor form into ``board_lenses`` entries.
 
@@ -587,8 +605,8 @@ def parse_lens_form(form, active_columns: list[str]) -> list[dict]:
             name = str(form.get(f"{base}_name") or "").strip()
             cols = [str(c).strip() for c in form.getlist(f"{base}_columns") if str(c).strip()]
             cols = [c for c in active if c in cols]  # keep pipeline order
-            states = _split_list(str(form.get(f"{base}_states") or ""))
-            lane_tags = _split_list(str(form.get(f"{base}_tags") or ""))
+            states = _field_list(form, f"{base}_states")
+            lane_tags = _field_list(form, f"{base}_tags")
             if not name or (not cols and not states and not lane_tags):
                 continue
             drop = str(form.get(f"{base}_drop") or "").strip()

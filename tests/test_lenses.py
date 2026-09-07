@@ -727,3 +727,47 @@ def test_handoff_tag_is_added_when_a_profile_completes():
     assert handoff_tag("ba", cfg) == "handoff-dev"
     assert handoff_tag("dev", cfg) == ""      # blank = no tag hand-off
     assert handoff_tag("qc", cfg) == ""       # absent = no tag hand-off
+
+
+def test_state_picker_offers_every_type_not_just_what_is_on_the_board(tmp_path):
+    """Requirement states exist whether or not a requirement is in flight. A picker
+    built from live items alone offers Task/Bug states only — and the hand-off a BA
+    needs most is then the one that cannot be picked."""
+
+    class _FakeAdo:
+        async def get_all_tagged_work_items(self):
+            return [_item(1, ["autopilot"], state="Active")]
+
+        async def get_states_by_type(self):
+            return {
+                "Task": ["Active", "Closed"],
+                "Requirement": ["New", "Ready for Dev", "Ready for UAT"],
+            }
+
+    import re
+
+    with _client(tmp_path) as client:
+        client.app.state.container.ado = _FakeAdo()
+        page = client.get("/dashboard/board-views").text
+        chips = re.findall(r'name="lens0_stage0_states" value="([^"]+)"', page)
+        assert {"Ready for Dev", "Ready for UAT", "New"} <= set(chips)   # Requirement's
+        assert "Active" in chips                                         # Task's
+        # Tick boxes, so a lane can claim SEVERAL spots, plus free text for one ADO
+        # does not list. A single text input with a datalist could not do either.
+        assert page.count('type="checkbox" name="lens0_stage0_states"') == len(chips)
+        assert 'class="lv-extra" name="lens0_stage0_states"' in page
+
+
+def test_a_lane_can_claim_several_states_at_once():
+    """Ticking three boxes posts the field three times; reading only the first would
+    quietly reduce the lane to one claim on every save."""
+    form = _Form({
+        "lens0_label": "QC", "lens0_key": "qc",
+        "lens0_stage0_name": "Waiting for me",
+        "lens0_stage0_states": ["Ready for Testing", "In Testing", "Ready for UAT, In UAT"],
+        "lens0_stage0_tags": ["autopilot-done", ""],
+        "lens0_stage0_mine": "on",
+    })
+    stage = parse_lens_form(form, COLS)[0]["stages"][0]
+    assert stage["states"] == ["Ready for Testing", "In Testing", "Ready for UAT", "In UAT"]
+    assert stage["tags"] == ["autopilot-done"]

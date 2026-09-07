@@ -2,9 +2,9 @@
 reach the autopilot.
 
 A mention that goes unanswered gives you nothing to work with: the bot simply never
-speaks. Six independent gates have to pass before a comment becomes work, they live
+speaks. Seven independent gates have to pass before a comment becomes work, they live
 in three different services, and most of them fail by returning early — so the log
-is silent about five of the six. This walks the same gates in the same order, on the
+is silent about six of the seven. This walks the same gates in the same order, on the
 real PR, and stops at the first one that would have dropped the comment.
 
 It is deliberately read-only and offline-safe: no comment is posted, no state is
@@ -108,10 +108,13 @@ def check_branch(source_ref: str, cfg: Settings) -> tuple[bool, list[Check]]:
         else "the last segment does not start with a work item id"
     )
     return False, [Check(
-        WARN, f"Branch '{branch}' is not autopilot-shaped",
-        f"The PR feedback loop only handles branches it created ({why}), so this PR "
-        "belongs to the reviewer tracker instead.",
-        "Nothing to fix on the branch — make sure PR reviewer tracking is on.",
+        WARN, f"Branch '{branch}' was not created by the autopilot",
+        f"({why}) The two loops divide the work by that test, so commands here are the "
+        "reviewer tracker's job. It revises and pushes on hand-made branches just like "
+        "the babysitter does on its own — what it waits for is not a branch name but "
+        "your consent: THE BOT MUST BE A REVIEWER ON THE PR.",
+        "Nothing to fix on the branch. Turn on PR reviewer tracking and add the bot as "
+        "a reviewer on this PR.",
     )]
 
 
@@ -135,6 +138,34 @@ def check_scope(target_ref: str, repo: str, cfg: Settings) -> list[Check]:
             "Add the repo, or clear allowed_repos to cover them all.",
         ))
     return out
+
+
+def check_reviewer_seat(pr: dict, bot: BotIdentity | None, owned: bool) -> list[Check]:
+    """On a hand-made PR, being a reviewer is what licenses the bot to act.
+
+    The reviewer tracker answers /commands only on PRs it was ADDED to — which is the
+    real consent signal, and the one gate a reader could never infer from the config.
+    Nothing in the PR or the log hints at it: an uninvited bot is simply silent.
+    """
+    if owned:
+        return []
+    reviewers = [r for r in (pr.get("reviewers") or []) if not r.get("isContainer")]
+    names = [r.get("displayName") or r.get("uniqueName") or "?" for r in reviewers]
+    if bot is not None and bot.identity_id:
+        seated = any(str(r.get("id") or "").lower() == bot.identity_id.lower()
+                     for r in reviewers)
+    else:  # no GUID to compare — fall back to the display name, like the bot itself does
+        want = (bot.display_name if bot else "").strip().lower()
+        seated = bool(want) and any(want in n.lower() for n in names)
+    if seated:
+        return [Check(OK, "The bot is a reviewer on this PR")]
+    return [Check(
+        BAD, "The bot is NOT a reviewer on this PR",
+        "On a PR the autopilot did not open, the reviewer tracker only answers commands "
+        "where it was added as a reviewer — that invitation IS the permission. "
+        + (f"Current reviewers: {', '.join(names)}." if names else "No reviewers yet."),
+        "Add the bot account as a reviewer on the PR, then comment again.",
+    )]
 
 
 def check_comments(threads: list[dict], cfg: Settings, bot: BotIdentity | None) -> list[Check]:
@@ -236,6 +267,7 @@ async def diagnose(url: str, cfg: Settings) -> list[Check]:
                 claimed=cfg.command_user,
             )
         out.append(identity_note(bot, cfg))
+        out += check_reviewer_seat(pr, bot, owned)
 
         # Threads are addressed by repo id, and the URL only carries the name.
         repos = await client.get_repositories()

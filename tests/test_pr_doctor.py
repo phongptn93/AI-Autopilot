@@ -1,7 +1,7 @@
 """Tests for `ai-autopilot pr-doctor` — the answer to "I @mentioned it and nothing
 happened".
 
-Six gates decide whether a comment becomes work, and five of them fail by returning
+Seven gates decide whether a comment becomes work, and six of them fail by returning
 early, so the log says nothing. These pin what the report says for each one: a wrong
 answer here sends someone to change the wrong setting.
 """
@@ -34,7 +34,7 @@ def test_a_hand_made_pr_is_the_reviewer_tracker_not_the_babysitter():
     cfg = Settings()  # both loops off, as shipped
     owned, checks = pr_doctor.check_branch("refs/heads/dxmpm/material-usage", cfg)
     assert owned is False
-    assert "not autopilot-shaped" in checks[0].title
+    assert "not created by the autopilot" in checks[0].title
 
     report = checks + pr_doctor.check_switches(cfg, owned)
     assert "pr_reviewer_tracking_enabled" in _titles(report)
@@ -132,3 +132,36 @@ def test_render_counts_the_blockers_and_says_when_there_are_none():
 
 def test_cli_refuses_without_a_url():
     assert pr_doctor.run("") == 2
+
+
+def _pr(reviewers):
+    return {"reviewers": [{"id": i, "displayName": n} for i, n in reviewers]}
+
+
+def test_the_reviewer_seat_is_the_gate_nobody_can_infer():
+    """On a hand-made PR the tracker acts only where it was ADDED as a reviewer —
+    that invitation is the permission. Nothing in the PR or the log hints at it: an
+    uninvited bot is simply silent, which is indistinguishable from a broken one."""
+    bot = BotIdentity(identity_id="guid-1", display_name="AI Autopilot", claimed="")
+
+    missing = pr_doctor.check_reviewer_seat(_pr([("u1", "Phong Pham")]), bot, owned=False)
+    assert _levels(missing) == ["bad"]
+    assert "Phong Pham" in missing[0].detail          # says who IS on it
+    assert "add the bot" in missing[0].fix.lower()
+
+    seated = pr_doctor.check_reviewer_seat(
+        _pr([("u1", "Phong Pham"), ("guid-1", "AI Autopilot")]), bot, owned=False
+    )
+    assert _levels(seated) == ["ok"]
+
+    # Matching by GUID, so a colleague with a similar display name is not the bot.
+    lookalike = pr_doctor.check_reviewer_seat(_pr([("u9", "AI Autopilot")]), bot, owned=False)
+    assert _levels(lookalike) == ["bad"]
+
+    # Without a GUID the bot itself falls back to the name — so this does too.
+    no_guid = BotIdentity(identity_id="", display_name="AI Autopilot", claimed="")
+    assert _levels(pr_doctor.check_reviewer_seat(_pr([("u9", "AI Autopilot")]),
+                                                 no_guid, owned=False)) == ["ok"]
+
+    # On the autopilot's own PR the seat is irrelevant — the babysitter owns it.
+    assert pr_doctor.check_reviewer_seat(_pr([]), bot, owned=True) == []

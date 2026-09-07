@@ -342,3 +342,49 @@ async def test_closed_pr_releases_its_review_budget():
     ado.prs = []                                        # PR completed / abandoned
     await svc._scan()
     assert await cmd_repo.review_budget(7) == ("", 0, 0)
+
+
+async def test_commands_need_an_invitation_unless_a_mention_counts_as_one():
+    """On someone else's PR the bot acts where it was ADDED AS A REVIEWER — that is the
+    consent. `pr_commands_on_any_pr` accepts being named in a comment instead, for teams
+    who would rather ask than invite."""
+    from ai_autopilot.config import Settings
+    from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
+
+    handled: list = []
+
+    def _svc(**over):
+        c = SimpleNamespace(config=Settings(**over), ado=None)
+        svc = ReviewerTrackerService.__new__(ReviewerTrackerService)
+        svc._c = c
+        svc._config = c.config
+        svc._is_bot = lambda r, bot: bool(r.get("is_bot"))
+
+        async def _handle(repo_id, repo_name, pr):
+            handled.append(pr["pullRequestId"])
+
+        svc._handle_commands = _handle
+        return svc
+
+    hand_made = {"pullRequestId": 3861, "sourceRefName": "refs/heads/dxmpm/material-usage"}
+
+    async def _run(svc, reviewers):
+        # The decision the scan makes, inlined: bot seated OR the switch, and never on
+        # a branch the babysitter already owns.
+        from ai_autopilot.services.pr_feedback import is_bot_branch
+
+        seated = any(svc._is_bot(r, None) for r in reviewers)
+        if (seated or svc._config.pr_commands_on_any_pr) and not is_bot_branch(
+            hand_made["sourceRefName"], tuple(svc._config.bot_branch_prefixes)
+        ):
+            await svc._handle_commands("r", "Micro-Frontend", hand_made)
+
+    await _run(_svc(), [{"is_bot": False}])
+    assert handled == []                                   # uninvited: silent
+
+    await _run(_svc(), [{"is_bot": True}])
+    assert handled == [3861]                               # invited as a reviewer
+
+    handled.clear()
+    await _run(_svc(pr_commands_on_any_pr=True), [{"is_bot": False}])
+    assert handled == [3861]                               # the mention is the consent

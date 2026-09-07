@@ -96,17 +96,18 @@ def check_switches(cfg: Settings, owned: bool) -> list[Check]:
 
 
 def check_branch(source_ref: str, cfg: Settings) -> tuple[bool, list[Check]]:
-    """Whether the babysitter owns this PR, plus what that means for the reader."""
+    """Which loop owns this PR — decided by the branch PREFIX alone.
+
+    The work-item id in the branch name is not part of ownership: it is resolved from
+    ADO's PR link when a command needs it, so a branch we created but named without an
+    id is still ours.
+    """
     branch = (source_ref or "").removeprefix("refs/heads/")
-    prefixed = is_bot_branch(source_ref, tuple(cfg.bot_branch_prefixes))
-    item_id = parse_work_item_id(source_ref)
-    if prefixed and item_id is not None:
-        return True, [Check(OK, f"Branch is autopilot-shaped ({branch} → item #{item_id})")]
-    why = (
-        "prefix is not one of " + ", ".join(cfg.bot_branch_prefixes)
-        if not prefixed
-        else "the last segment does not start with a work item id"
-    )
+    if is_bot_branch(source_ref, tuple(cfg.bot_branch_prefixes)):
+        item_id = parse_work_item_id(source_ref)
+        where = f"item #{item_id} from the name" if item_id else "work item from the PR link"
+        return True, [Check(OK, f"Branch was created by the autopilot ({branch} → {where})")]
+    why = "prefix is not one of " + ", ".join(cfg.bot_branch_prefixes)
     return False, [Check(
         WARN, f"Branch '{branch}' was not created by the autopilot",
         f"({why}) The two loops divide the work by that test, so commands here are the "
@@ -140,7 +141,9 @@ def check_scope(target_ref: str, repo: str, cfg: Settings) -> list[Check]:
     return out
 
 
-def check_reviewer_seat(pr: dict, bot: BotIdentity | None, owned: bool) -> list[Check]:
+def check_reviewer_seat(
+    pr: dict, bot: BotIdentity | None, owned: bool, cfg: Settings | None = None
+) -> list[Check]:
     """On a hand-made PR, being a reviewer is what licenses the bot to act.
 
     The reviewer tracker answers /commands only on PRs it was ADDED to — which is the
@@ -150,6 +153,12 @@ def check_reviewer_seat(pr: dict, bot: BotIdentity | None, owned: bool) -> list[
     if owned:
         return []
     reviewers = [r for r in (pr.get("reviewers") or []) if not r.get("isContainer")]
+    if cfg is not None and cfg.pr_commands_on_any_pr:
+        return [Check(
+            OK, "Reviewer seat not required (pr_commands_on_any_pr is on)",
+            "Being named in a comment by someone on the command roster is accepted as "
+            "the consent instead.",
+        )]
     names = [r.get("displayName") or r.get("uniqueName") or "?" for r in reviewers]
     if bot is not None and bot.identity_id:
         seated = any(str(r.get("id") or "").lower() == bot.identity_id.lower()
@@ -164,7 +173,9 @@ def check_reviewer_seat(pr: dict, bot: BotIdentity | None, owned: bool) -> list[
         "On a PR the autopilot did not open, the reviewer tracker only answers commands "
         "where it was added as a reviewer — that invitation IS the permission. "
         + (f"Current reviewers: {', '.join(names)}." if names else "No reviewers yet."),
-        "Add the bot account as a reviewer on the PR, then comment again.",
+        "Add the bot account as a reviewer on the PR — or turn on "
+        "pr_commands_on_any_pr to let a comment from the command roster be the consent "
+        "instead — then comment again.",
     )]
 
 
@@ -267,7 +278,7 @@ async def diagnose(url: str, cfg: Settings) -> list[Check]:
                 claimed=cfg.command_user,
             )
         out.append(identity_note(bot, cfg))
-        out += check_reviewer_seat(pr, bot, owned)
+        out += check_reviewer_seat(pr, bot, owned, cfg)
 
         # Threads are addressed by repo id, and the URL only carries the name.
         repos = await client.get_repositories()

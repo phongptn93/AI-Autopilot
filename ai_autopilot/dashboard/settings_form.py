@@ -326,6 +326,13 @@ FIELDS: tuple[Field, ...] = (
           "with your comment as top-priority guidance — no restart tag needed."),
     Field("max_comment_rounds", "↳ Max comment rounds / item", "int", "🔁 PR review & feedback",
           "Cap human↔bot comment rounds per item so a back-and-forth can't run away. Default 5."),
+    Field("pr_commands_on_any_pr", "↳ …even where the bot is not a reviewer", "bool",
+          "🔁 PR review & feedback",
+          "On a PR the autopilot did not open, it normally answers only where it was ADDED "
+          "AS A REVIEWER — that invitation is the consent. Turn this on to accept being "
+          "named in a comment as the consent instead, so nobody has to add the bot first. "
+          "Only the people on the command roster can still command it. Costs API calls: "
+          "every active PR in scope is read each cycle, not just the ones the bot sits on."),
     Field("comment_mention_enabled", "↳ Answer an @mention on a PR", "bool", "🔁 PR review & feedback",
           "Treat an @mention of the bot on a pull request as addressing it, with no /command "
           "needed — how a human naturally asks a teammate. The intent is inferred into one of "

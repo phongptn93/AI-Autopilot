@@ -49,18 +49,21 @@ def is_bot_branch(source_ref: str, prefixes: tuple[str, ...]) -> bool:
 def unowned_reason(source_ref: str, prefixes: tuple[str, ...]) -> str:
     """Why the feedback loop does not own this PR, or "" when it does.
 
-    The loop answers commands on PRs the AUTOPILOT opened, recognised purely by the
-    branch: a known prefix, and a last segment starting with the work item id. Both
-    tests used to fail in silence, so a hand-made PR that @mentioned the bot left no
-    trace anywhere — the log never mentioned the PR at all. Naming the reason is what
-    turns "the bot is broken" into "that PR belongs to the reviewer tracker".
+    Ownership is the branch PREFIX and nothing else: it routes a PR to the loop that
+    handles it — this one for branches the autopilot created, the reviewer tracker for
+    everyone else's — and the two conditions are exact opposites, so no PR is picked up
+    twice. The test used to fail in silence, so a hand-made PR that @mentioned the bot
+    left no trace anywhere; naming the reason is what turns "the bot is broken" into
+    "that PR belongs to the reviewer tracker".
+
+    The branch's work-item id is deliberately NOT part of this. It never described
+    ownership, only where to look up the item, and it was wrong both ways: it disowned
+    our own PR when the branch was named without an id, and it read
+    "fix/500-error-handling" as work item 500. The item is resolved from ADO's link
+    instead, once a command actually needs it.
     """
     if not is_bot_branch(source_ref, prefixes):
         return "branch prefix is not one of " + ", ".join(prefixes)
-    if parse_work_item_id(source_ref) is None:
-        # Recoverable: the caller asks ADO for the PR's linked work items before
-        # giving up. Only the prefix is a hard no.
-        return "branch does not end in '<work item id>-slug' and the PR links no work item"
     return ""
 
 

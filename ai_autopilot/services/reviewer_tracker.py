@@ -571,12 +571,19 @@ class ReviewerTrackerService:
         # Reviewers removed from the PR by a human → forget them.
         await self._repo.remove_absent(pr_id, {str(r["id"]) for r in reviewers})
 
-        # Interactive commands: when the bot is a reviewer here, honour /review and /ai
-        # replies just like the babysitter — but ONLY on non-bot branches (the babysitter
-        # already owns bot-created PRs, so this fills the "someone else's PR" gap without
-        # double-handling; the shared handled-comment store guards the overlap anyway).
+        # Interactive commands: honour /review and /ai replies just like the babysitter,
+        # but ONLY on non-bot branches (the babysitter already owns bot-created PRs, so
+        # this fills the "someone else's PR" gap without double-handling; the shared
+        # handled-comment store guards the overlap anyway).
+        #
+        # Consent to touch someone else's PR normally comes from being ADDED AS A
+        # REVIEWER. `pr_commands_on_any_pr` accepts a second signal instead — an allowed
+        # person naming the bot in a comment — for teams who would rather ask than
+        # invite. Everything else still gates it: only command_allowlist may command,
+        # and the target/repo scope is unchanged.
         bot_is_reviewer = any(self._is_bot(r, bot) for r in reviewers)
-        if bot_is_reviewer and not is_bot_branch(
+        invited = bot_is_reviewer or self._config.pr_commands_on_any_pr
+        if invited and not is_bot_branch(
             pr.get("sourceRefName", ""), tuple(self._config.bot_branch_prefixes)
         ):
             await self._handle_commands(repo_id, repo_name, pr)

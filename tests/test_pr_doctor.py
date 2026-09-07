@@ -53,11 +53,13 @@ def test_an_autopilot_pr_points_at_the_feedback_loop():
     assert _levels(on) == ["ok"]
 
 
-def test_a_prefixed_branch_without_a_work_item_id_says_which_half_failed():
+def test_a_prefixed_branch_without_an_id_is_still_ours():
+    """The id in the name was never ownership — it was a lookup, and ADO's PR link is
+    the better one. A branch we created keeps its loop whatever it is called."""
     cfg = Settings()
     owned, checks = pr_doctor.check_branch("refs/heads/feature/no-id-here", cfg)
-    assert owned is False
-    assert "work item id" in checks[0].detail
+    assert owned is True
+    assert "from the PR link" in checks[0].title
 
 
 def test_scope_gates_name_the_list_that_excluded_the_pr():
@@ -165,3 +167,20 @@ def test_the_reviewer_seat_is_the_gate_nobody_can_infer():
 
     # On the autopilot's own PR the seat is irrelevant — the babysitter owns it.
     assert pr_doctor.check_reviewer_seat(_pr([]), bot, owned=True) == []
+
+
+def test_the_seat_is_waived_when_a_mention_is_accepted_as_consent():
+    """Being added as a reviewer is one consent signal; an allowed person naming the
+    bot is another. With the switch on, the report must not send anyone hunting for a
+    reviewer seat that is no longer required."""
+    bot = BotIdentity(identity_id="guid-1", display_name="AI Autopilot", claimed="")
+    empty = _pr([("u1", "Phong Pham")])
+
+    strict = pr_doctor.check_reviewer_seat(empty, bot, owned=False, cfg=Settings())
+    assert _levels(strict) == ["bad"]
+    assert "pr_commands_on_any_pr" in strict[0].fix
+
+    waived = pr_doctor.check_reviewer_seat(
+        empty, bot, owned=False, cfg=Settings(pr_commands_on_any_pr=True)
+    )
+    assert _levels(waived) == ["ok"]

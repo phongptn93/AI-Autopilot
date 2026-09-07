@@ -309,9 +309,10 @@ async def test_unowned_pr_is_explained_once():
     from ai_autopilot.services.pr_feedback import unowned_reason
 
     prefixes = tuple(Settings().bot_branch_prefixes)
-    # The two ways a PR falls outside the loop, each named.
+    # Ownership is the prefix and nothing else — a branch we created but named without
+    # a work-item id is still ours, and its item comes from ADO's link.
     assert "prefix" in unowned_reason("refs/heads/dxmpm/material-usage", prefixes)
-    assert "work item id" in unowned_reason("refs/heads/feature/no-id-here", prefixes)
+    assert unowned_reason("refs/heads/feature/no-id-here", prefixes) == ""
     assert unowned_reason("refs/heads/feature/be/42-thing", prefixes) == ""
 
     class _Ado:
@@ -358,3 +359,42 @@ async def test_a_bot_branch_without_an_id_falls_back_to_the_prs_linked_work_item
         "pullRequestId": 3861, "sourceRefName": "refs/heads/dxmpm/material-usage",
     })
     assert asked == [] and svc._unowned == {3861}
+
+
+async def test_the_link_wins_over_a_number_that_only_looks_like_an_id():
+    """"fix/500-error-handling" is not work item 500. Trusting the name would load the
+    wrong item's context and spend ITS revision budget."""
+
+    class _Ado(_FakeAdo):
+        async def get_pull_request_work_items(self, repo_id, pr_id):
+            return [8953]
+
+    svc = _service(_Ado([]), _FakeFeedback())
+    assert await svc._work_item_for("r", 1, "refs/heads/fix/500-error-handling") == 8953
+
+    class _NoLinks(_FakeAdo):
+        async def get_pull_request_work_items(self, repo_id, pr_id):
+            return []
+
+    # No link at all: the branch name is the fallback, not the first answer.
+    svc2 = _service(_NoLinks([]), _FakeFeedback())
+    assert await svc2._work_item_for("r", 1, "refs/heads/feature/be/42-thing") == 42
+    assert await svc2._work_item_for("r", 1, "refs/heads/feature/no-id") is None
+
+
+async def test_a_pr_with_no_work_item_anywhere_is_skipped_with_a_reason():
+    class _Ado(_FakeAdo):
+        async def get_pull_request_work_items(self, repo_id, pr_id):
+            return []
+
+    ado = _Ado([_thread(10, 1, "/ai fix it")])
+    svc = _service(ado, _FakeFeedback())
+    said: list = []
+    svc._log = SimpleNamespace(
+        info=lambda msg, **kw: said.append(msg), warning=lambda *a, **k: None,
+        error=lambda *a, **k: None, debug=lambda *a, **k: None,
+    )
+    await svc._inspect_pr("repo-id", "Backend-Fresh", {
+        "pullRequestId": 78, "sourceRefName": "refs/heads/feature/no-id-at-all",
+    })
+    assert [m for m in said if "no work item behind this PR" in m]

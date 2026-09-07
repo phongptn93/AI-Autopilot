@@ -376,6 +376,21 @@ class PrMonitorService:
                 await c.ado.add_pull_request_comment(rid, pr_id2, note)
             await c.ado.add_comment(work_item_id, note)
 
+    async def _work_item_for(
+        self, repo_id: str, pr_id: int, source_ref: str
+    ) -> int | None:
+        """The work item this PR is about — ADO's link first, the branch name second.
+
+        The link is the fact (someone attached it, ADO keeps it); the branch name is a
+        convention, and one that silently mis-reads any branch whose last segment opens
+        with a number: "fix/500-error-handling" is not work item 500.
+        """
+        with contextlib.suppress(Exception):
+            linked = await self._c.ado.get_pull_request_work_items(repo_id, pr_id)
+            if linked:
+                return linked[0]
+        return parse_work_item_id(source_ref)
+
     async def _inspect_pr(self, repo_id: str, repo_name: str, pr: dict) -> None:
         """Pick the new ``/command`` threads on a bot PR and dispatch each as a background
         task, so a slow revise never blocks the scan loop (other PRs keep flowing).
@@ -386,27 +401,22 @@ class PrMonitorService:
         c, cfg = self._c, self._config
         source_ref = pr.get("sourceRefName", "")
         pr_id = pr.get("pullRequestId")
-        # This loop only owns PRs the autopilot opened: the branch carries a known
-        # prefix and ends in "<work item id>-slug". A PR that fails either test is
-        # somebody's hand-made branch — the reviewer tracker is what answers commands
-        # there. Say so ONCE per PR: silence here cost an afternoon of "why does the
-        # bot ignore my @mention", because nothing in the log mentioned the PR at all.
+        if pr_id is None:
+            return
+        # ONE rule decides ownership: the branch prefix. It routes a PR to the loop that
+        # handles it — this one for branches the autopilot created, the reviewer tracker
+        # for everyone else's — and the two conditions are exact opposites, so a PR is
+        # never picked up twice.
+        #
+        # There used to be a second rule ("...and the branch must end in <id>-slug"). It
+        # was never about ownership, only a cheap way to find the work item, and it was
+        # wrong in both directions: it dropped our own PR when the branch was named
+        # without an id, and it read "fix/500-error-handling" as work item #500 — then
+        # revised against that item's context and spent ITS budget. The work item is
+        # resolved below instead, from the link ADO already holds.
         why = unowned_reason(source_ref, tuple(cfg.bot_branch_prefixes))
-        # Two rules decide ownership, and only one of them is load-bearing. The PREFIX
-        # says "this branch is ours to push to" — /ai revises code and pushes, so acting
-        # on a hand-made branch would rewrite someone else's work from a comment. The id
-        # in the branch name is merely a cheap way to find the work item; ADO already
-        # links PRs to work items, so a branch we DID create but named without an id was
-        # being dropped for no reason at all. Ask ADO in that one case.
-        linked_id: int | None = None
-        if why and is_bot_branch(source_ref, tuple(cfg.bot_branch_prefixes)):
-            with contextlib.suppress(Exception):
-                linked = await c.ado.get_pull_request_work_items(repo_id, pr_id)
-                linked_id = linked[0] if linked else None
-            if linked_id is not None:
-                why = ""
         if why:
-            if pr_id is not None and pr_id not in self._unowned:
+            if pr_id not in self._unowned:
                 self._unowned.add(pr_id)
                 if len(self._unowned) > 500:  # a marker set, not storage
                     self._unowned.clear()
@@ -419,15 +429,24 @@ class PrMonitorService:
                          "hand-made PRs",
                 )
             return
-        work_item_id = parse_work_item_id(source_ref) or linked_id
-        if pr_id is None or work_item_id is None:
-            return
 
         threads = await c.ado.get_pull_request_threads(repo_id, pr_id)
         commands = command_threads(
             threads, cfg.comment_commands, bot=await c.mention_identity()
         )
         if not commands:
+            return
+
+        # Only now is the work item worth resolving — a scan of PRs nobody commented on
+        # costs no extra call. ADO's own link wins over the branch name: the link is what
+        # a person actually attached, the name is a convention anyone can mistype.
+        work_item_id = await self._work_item_for(repo_id, pr_id, source_ref)
+        if work_item_id is None:
+            self._log.info(
+                "PR command ignored — no work item behind this PR",
+                pr=pr_id, repo=repo_name, branch=source_ref.removeprefix("refs/heads/"),
+                hint="link a work item to the PR, or name the branch <id>-slug",
+            )
             return
 
         claimed = cfg.command_allowlist

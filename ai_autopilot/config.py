@@ -1224,6 +1224,17 @@ class Settings(BaseSettings):
     # ("@bot sao chỗ này chậm vậy?") must never turn into a code change + push. Only
     # wording that clearly asks for a change routes to an action command.
     comment_mention_enabled: bool = True
+    # On a PR the autopilot did not open, the reviewer tracker acts only where the bot
+    # was ADDED AS A REVIEWER — that invitation is the consent, and it is why an
+    # uninvited bot stays silent. Turn this on to accept a different consent signal: an
+    # allowed person naming the bot in a comment. The command gate still applies (only
+    # command_allowlist may command), and so does target/repo scope — what changes is
+    # that nobody has to add the bot to the PR first.
+    #
+    # Costs API calls: the tracker must read the comment threads of every active PR in
+    # scope each cycle, not just the ones it sits on. Fine for tens of PRs, worth
+    # thinking about for hundreds.
+    pr_commands_on_any_pr: bool = False
     # Cap on human↔bot comment rounds per item, so a back-and-forth can't run away.
     max_comment_rounds: int = 5
     # Seconds between comment scans — the /command loop runs on its OWN cadence, decoupled

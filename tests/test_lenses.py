@@ -798,3 +798,40 @@ def test_profile_resolution_order_is_stated_where_it_is_chosen():
     assert order.index("sdlc_type_profiles") < order.index("sdlc_default_profile")
     # The hand-offs sit last, together, under the draft switch that delays them.
     assert order[-3:] == ["sdlc_advance_on_draft", "sdlc_profile_states", "sdlc_profile_tags"]
+
+
+# ── Reviews page filters ─────────────────────────────────────────────────────
+
+
+def _pr(pid, *, repo="Backend-Fresh", author="MSDN", target="dxfac/development",
+        status="awaiting", draft=False, reviewers=()):
+    return {"id": pid, "title": f"pr {pid}", "repo": repo, "author": author, "target": target,
+            "source": f"feature/{pid}-x", "work_item": pid, "is_draft": draft,
+            "status": status, "reviewers": [{"name": n, "vote": v} for n, v in reviewers]}
+
+
+def test_review_filters_answer_one_question_each(tmp_path):
+    from ai_autopilot import dashboard as dash
+
+    prs = [
+        _pr(1, reviewers=[("Phong Pham", 0), ("Lam Huynh", 0)]),
+        _pr(2, author="Dat Pham", status="approved", reviewers=[("Phong Pham", 10)]),
+        _pr(3, repo="Micro-Frontend", target="main", draft=True, status="draft"),
+        _pr(4, status="blocked", reviewers=[("Lam Huynh", -10)]),
+    ]
+    filt = dash._filter_reviews
+    me = ["Phong Pham"]
+
+    assert [p["id"] for p in filt(prs, {"status": "approved"}, me)] == [2]
+    assert [p["id"] for p in filt(prs, {"status": "blocked"}, me)] == [4]
+    assert [p["id"] for p in filt(prs, {"repo": "Micro-Frontend"}, me)] == [3]
+    assert [p["id"] for p in filt(prs, {"author": "Dat Pham"}, me)] == [2]
+    assert [p["id"] for p in filt(prs, {"target": "main"}, me)] == [3]
+    assert [p["id"] for p in filt(prs, {"q": "3"}, me)] == [3]          # id / title / branch
+    # "Waiting on me" = I am a reviewer AND have not voted. #2 is mine but already voted.
+    assert [p["id"] for p in filt(prs, {"mine": "1"}, me)] == [1]
+    # Draft is a flag, not a status: asking for drafts must not depend on which one.
+    assert [p["id"] for p in filt(prs, {"status": "draft"}, me)] == [3]
+    # No filter, or one nobody set, leaves the list alone.
+    assert len(filt(prs, {}, me)) == 4
+    assert len(filt(prs, {"status": "all", "repo": "all"}, me)) == 4

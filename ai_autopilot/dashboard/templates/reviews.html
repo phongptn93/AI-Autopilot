@@ -3,7 +3,8 @@
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
     <div>
         <h2>PR Reviews</h2>
-        <p>Reviewer status of every active PR — grouped by the branch it merges into.</p>
+        <p>Reviewer status of every active PR — grouped by the branch it merges into.
+           {% if scanned and summary.total != scanned %}<b>{{ summary.total }}</b> of {{ scanned }} shown.{% endif %}</p>
     </div>
     <div style="font-size:12px;color:var(--text-muted);text-align:right">
         {% if tracking_enabled %}
@@ -28,6 +29,19 @@
   .cmd-table td:first-child { width:170px; font-family:var(--mono); }
   .cmd-table td:nth-child(2) { width:70px; color:var(--text-muted); }
   .cmd-table code { background:var(--bg-hover); padding:1px 6px; border-radius:6px; }
+  /* Filters: twenty-two PRs in one list is a list nobody reads. The options come
+     from every scanned PR, so picking one never empties the other dropdowns, and the
+     filtering happens over the cached scan — changing a dropdown costs no ADO call. */
+  .rev-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:14px; }
+  .rf-in { background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:7px 10px; font-size:13px; font-family:inherit; max-width:230px; }
+  .rf-in:focus { outline:none; border-color:var(--accent); }
+  .rf-toggle { font-size:12.5px; font-weight:600; text-decoration:none; color:var(--text-muted);
+    border:1px solid var(--border); border-radius:20px; padding:5px 12px; white-space:nowrap; }
+  .rf-toggle:hover { border-color:var(--accent); color:var(--text); }
+  .rf-toggle.on { background:var(--accent-bg); border-color:rgba(99,102,241,.45); color:var(--accent-hover); }
+  .rf-toggle b { font-weight:800; }
+  .rf-count { color:var(--text-dim); font-size:12px; }
   .rev-stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
   .stat { flex:1; min-width:110px; background:var(--bg-card,#101218); border:1px solid var(--border);
     border-radius:12px; padding:12px 16px; }
@@ -76,6 +90,37 @@
     </table>
 </details>
 
+<form method="get" action="/dashboard/reviews" class="rev-filters">
+    <input type="text" name="q" value="{{ f.q }}" class="rf-in" style="width:190px"
+           placeholder="🔍 PR id, title, branch or work item"/>
+    <select name="status" class="rf-in">
+        {% for v, lbl in [('all','All status'),('awaiting','⏳ Awaiting review'),
+                          ('partial','◑ Partly voted'),('approved','✅ Approved'),
+                          ('blocked','⛔ Blocked'),('conflicts','⚠️ Conflicts'),('draft','📝 Draft')] %}
+        <option value="{{ v }}" {% if f.status == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
+    </select>
+    {% for key, label in [('repo','All repos'), ('author','All authors'), ('target','All targets')] %}
+    {% if facets[key] | length > 1 %}
+    <select name="{{ key }}" class="rf-in" onchange="this.form.submit()">
+        <option value="all" {% if f[key] == 'all' %}selected{% endif %}>{{ label }}</option>
+        {% for v in facets[key] %}<option value="{{ v }}" {% if f[key] == v %}selected{% endif %}>{{ v }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    {% endfor %}
+    <button type="submit" class="btn-ghost">Apply</button>
+    {% if me %}
+    <a class="rf-toggle {{ 'on' if f.mine else '' }}"
+       href="/dashboard/reviews{{ '' if f.mine else '?mine=1' }}"
+       title="Active PRs where {{ me }} is a reviewer and has not voted yet">
+        {{ '✓ ' if f.mine else '' }}🙋 Waiting on me{% if mine_count %} <b>{{ mine_count }}</b>{% endif %}
+    </a>
+    {% endif %}
+    {% if f.q or f.status != 'all' or f.repo != 'all' or f.author != 'all' or f.target != 'all' or f.mine %}
+    <a href="/dashboard/reviews" class="btn-ghost" style="text-decoration:none">Reset</a>
+    <span class="rf-count">{{ summary.total }} of {{ scanned }} PR(s)</span>
+    {% endif %}
+</form>
+
 <div class="rev-stats">
     <div class="stat"><div class="n">{{ summary.total }}</div><div class="l">Active PRs</div></div>
     <div class="stat"><div class="n" style="color:#4ade80">{{ summary.approved }}</div><div class="l">✅ Approved</div></div>
@@ -85,7 +130,14 @@
 </div>
 
 {% if not grouped %}
-<div class="rev-card rev-meta">No active pull requests in scope.</div>
+<div class="rev-card rev-meta">
+    {% if scanned %}
+    No PR matches this filter — {{ scanned }} active PR(s) in scope.
+    <a href="/dashboard/reviews" style="color:var(--accent-hover)">Clear the filter</a>.
+    {% else %}
+    No active pull requests in scope.
+    {% endif %}
+</div>
 {% endif %}
 
 {% set status_label = {"approved":"✅ Approved","partial":"✅ Partial","awaiting":"⏳ Awaiting review","blocked":"⛔ Blocked","conflicts":"⛔ Conflicts","draft":"📝 Draft"} %}

@@ -58,3 +58,26 @@ def test_a_run_with_no_usage_renders_dashes_not_zeroes(client: TestClient):
     assert "<th>Model</th>" in html
     assert "$0.0000" not in html
     assert "0 out" not in html
+
+
+async def _seed_interactive(app) -> None:
+    """A Remote-Control run: it finishes and reports a result, but no usage — the
+    session belongs to Claude Code, not to us."""
+    repo = app.state.container.execution_repo
+    item = WorkItemInfo(id=8953, title="VPM Phiếu thống kê NVL")
+    record_id = await repo.start_execution(item, "interactive:autopilot-8953")
+    await repo.complete_execution(record_id, ExecutionResult(
+        work_item_id=8953, success=True, skill_used="interactive:autopilot-8953",
+    ))
+
+
+def test_interactive_runs_say_why_they_have_no_usage(client: TestClient):
+    """Three dashes in a row read as a broken page. An interactive run has nothing to
+    report — the session is not the autopilot's to meter — so the row says so."""
+    client.portal.call(_seed_interactive, client.app)
+    html = client.get("/dashboard/history").text
+
+    assert "interactive:autopilot-8953" in html
+    assert "does not meter" in html                  # the tooltip explains the blank
+    assert "headless" in html                        # ...and what to change for numbers
+    assert html.count("no-usage") >= 3               # model, tokens and cost, all marked

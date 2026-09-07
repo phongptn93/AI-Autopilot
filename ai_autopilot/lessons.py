@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 _LESSONS_SUBDIR = Path(".autopilot") / "lessons"
@@ -200,14 +200,31 @@ def clear(workspace: str, repo: str) -> bool:
     return True
 
 
-def per_day(workspace: str) -> list[tuple[str, int]]:
-    """(date, new-lessons-recorded) across all repos, oldest → newest.
+def per_day(workspace: str, *, today: str = "") -> list[tuple[str, int]]:
+    """(date, new-lessons-recorded) across all repos, oldest → newest, NO GAPS.
 
     A falling tail is the loop working: fewer NEW findings per day means the agent
-    stopped re-earning the same flags.
+    stopped re-earning the same flags. That reading only holds if quiet days are IN
+    the series — skipping them drew two busy days side by side and called it a trend,
+    when the truth was "busy on the 12th, nothing since the 21st". Every day from the
+    first lesson to today is present, zeros included.
     """
     counts: dict[str, int] = {}
     for lesson in all_entries(workspace):
         if lesson.date:
             counts[lesson.date] = counts.get(lesson.date, 0) + 1
-    return sorted(counts.items())
+    if not counts:
+        return []
+    try:
+        start = date.fromisoformat(min(counts))
+        end = date.fromisoformat(today) if today else date.today()  # noqa: DTZ011 — local day
+    except ValueError:  # a hand-edited date we cannot parse: fall back to what we have
+        return sorted(counts.items())
+    end = max(end, date.fromisoformat(max(counts)))
+    out: list[tuple[str, int]] = []
+    day = start
+    while day <= end:
+        key = day.isoformat()
+        out.append((key, counts.get(key, 0)))
+        day += timedelta(days=1)
+    return out

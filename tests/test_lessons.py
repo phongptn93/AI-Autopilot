@@ -105,7 +105,22 @@ def test_per_day_counts_new_lessons(tmp_path):
     ws = str(tmp_path)
     lessons.record_lessons(ws, "BE", ["a", "b"], now=datetime(2026, 7, 28))
     lessons.record_lessons(ws, "FE", ["c"], now=datetime(2026, 7, 29))
-    assert lessons.per_day(ws) == [("2026-07-28", 2), ("2026-07-29", 1)]
+    assert lessons.per_day(ws, today="2026-07-29") == [("2026-07-28", 2), ("2026-07-29", 1)]
+
+
+def test_per_day_keeps_the_quiet_days(tmp_path):
+    """"A falling tail means the loop is working" is only readable if the quiet days
+    are drawn. Skipping them puts two busy days side by side and calls it a trend."""
+    ws = str(tmp_path)
+    lessons.record_lessons(ws, "BE", ["a"], now=datetime(2026, 8, 12))
+    lessons.record_lessons(ws, "BE", ["b"], now=datetime(2026, 8, 15))
+    series = lessons.per_day(ws, today="2026-08-17")
+    assert [n for _, n in series] == [1, 0, 0, 1, 0, 0]
+    assert series[0][0] == "2026-08-12" and series[-1][0] == "2026-08-17"
+
+
+def test_per_day_is_empty_without_lessons(tmp_path):
+    assert lessons.per_day(str(tmp_path)) == []
 
 
 def test_repo_name_cannot_escape_the_lessons_dir(tmp_path):

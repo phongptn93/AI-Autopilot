@@ -32,7 +32,7 @@ from ai_autopilot import (
     workspaces as workspaces_mod,
 )
 from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
-from ai_autopilot.config import config_file_path
+from ai_autopilot.config import config_file_path, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
 from ai_autopilot.data.entities import PipelineState, QualityKind
@@ -458,6 +458,41 @@ async def _pr_outcomes(c: Container) -> dict:
     if counts["ok"]:
         _PR_OUTCOME_CACHE.update(at=now, data=counts)
     return counts
+
+
+_REVIEW_STATUSES = ("awaiting", "approved", "blocked", "conflicts", "partial", "draft")
+
+def _filter_reviews(prs: list[dict], qp, me: list[str]) -> list[dict]:
+    """Apply the Reviews page filters to the scanned PR list.
+
+    Twenty-two PRs in one list is a list nobody reads: the question is never
+    "show me every PR", it is "which of these is waiting on ME", "what is blocked",
+    "what is in this repo". Pure, so the answers can be tested without ADO.
+    """
+    out = prs
+    q = (qp.get("q") or "").strip().lower()
+    if q:
+        out = [
+            p for p in out
+            if q in str(p["id"]) or q in p["title"].lower()
+            or q in p["source"].lower() or q in (str(p["work_item"] or ""))
+        ]
+    status = (qp.get("status") or "all").strip().lower()
+    if status in _REVIEW_STATUSES:
+        # "draft" is a flag, not a status — a draft still has a review status of
+        # its own, so asking for drafts must not depend on which one it is.
+        out = [p for p in out if (p["is_draft"] if status == "draft" else p["status"] == status)]
+    for key, field in (("repo", "repo"), ("author", "author"), ("target", "target")):
+        want = (qp.get(key) or "all").strip()
+        if want and want != "all":
+            out = [p for p in out if p[field] == want]
+    if (qp.get("mine") or "").strip() in {"1", "true", "yes"} and me:
+        out = [
+            p for p in out
+            if any(matches_any_user(None, r["name"], me) and r["vote"] == 0
+                   for r in p["reviewers"])
+        ]
+    return out
 
 
 def create_dashboard_router() -> APIRouter:
@@ -998,22 +1033,16 @@ def create_dashboard_router() -> APIRouter:
         c: Container = request.app.state.container
         cfg = c.config
         now = time.monotonic()
-        if (
-            _REVIEWS_CACHE["data"] is not None
-            and now - _REVIEWS_CACHE["at"] < _REVIEWS_TTL
-        ):
-            grouped, summary = _REVIEWS_CACHE["data"]
-            return _TEMPLATES.TemplateResponse(
-                request,
-                "reviews.html",
-                _ctx(
-                    request, "reviews", grouped=grouped, summary=summary,
-                    targets=cfg.reviewer_target_branches,
-                    tracking_enabled=cfg.pr_reviewer_tracking_enabled,
-                    auto_review=cfg.pr_auto_review_on_added,
-                    reminder_hours=cfg.pr_reviewer_reminder_hours,
-                ),
-            )
+        cached = (
+            _REVIEWS_CACHE["data"]
+            if _REVIEWS_CACHE["data"] is not None and now - _REVIEWS_CACHE["at"] < _REVIEWS_TTL
+            else None
+        )
+        if cached is not None:
+            # The cache holds the SCAN (every active PR), not the rendered page: the
+            # filters are a question about that data, and re-scanning ADO to answer a
+            # dropdown change would make the page unusable.
+            return _render_reviews(request, cached, cfg)
         org = cfg.ado_organization.rstrip("/")
         project = quote(cfg.code_project or cfg.ado_project, safe="")
         tracked: dict = {}
@@ -1082,24 +1111,49 @@ def create_dashboard_router() -> APIRouter:
                     })
         except Exception as exc:  # noqa: BLE001
             _log.warning("reviews page PR scan failed", error=str(exc))
-        # Group by target (merge-into) branch — most PRs first, target name A→Z.
+        _REVIEWS_CACHE.update(at=now, data=prs)
+        return _render_reviews(request, prs, cfg)
+
+    def _render_reviews(request: Request, prs: list[dict], cfg) -> HTMLResponse:
+        """Filter the scanned PRs for this request, then group and summarise them."""
+        qp = request.query_params
+        me = cfg.effective_command_users
+        shown = _filter_reviews(prs, qp, me)
+
         groups: dict[str, list[dict]] = {}
-        for pr in prs:
+        for pr in shown:
             groups.setdefault(pr["target"] or "(unknown)", []).append(pr)
+        # Group by target (merge-into) branch — most PRs first, target name A→Z.
         grouped = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
         summary = {
-            "total": len(prs),
-            "approved": sum(1 for p in prs if p["status"] == "approved"),
-            "awaiting": sum(1 for p in prs if p["status"] == "awaiting"),
-            "blocked": sum(1 for p in prs if p["status"] in ("blocked", "conflicts")),
-            "drafts": sum(1 for p in prs if p["is_draft"]),
+            "total": len(shown),
+            "approved": sum(1 for p in shown if p["status"] == "approved"),
+            "awaiting": sum(1 for p in shown if p["status"] == "awaiting"),
+            "blocked": sum(1 for p in shown if p["status"] in ("blocked", "conflicts")),
+            "drafts": sum(1 for p in shown if p["is_draft"]),
         }
-        _REVIEWS_CACHE.update(at=now, data=(grouped, summary))
+        # Options come from EVERY scanned PR, not the filtered set: a dropdown that
+        # loses its other choices the moment you pick one is a dead end.
+        facets = {
+            key: sorted({p[key] for p in prs if p[key]})
+            for key in ("repo", "author", "target")
+        }
+        mine_n = len(_filter_reviews(prs, {**dict(qp), "mine": "1"}, me)) if me else 0
         return _TEMPLATES.TemplateResponse(
             request,
             "reviews.html",
             _ctx(
                 request, "reviews", grouped=grouped, summary=summary,
+                scanned=len(prs), facets=facets, mine_count=mine_n,
+                me=", ".join(me),
+                f={
+                    "q": (qp.get("q") or "").strip(),
+                    "status": (qp.get("status") or "all").strip(),
+                    "repo": (qp.get("repo") or "all").strip(),
+                    "author": (qp.get("author") or "all").strip(),
+                    "target": (qp.get("target") or "all").strip(),
+                    "mine": (qp.get("mine") or "").strip() in {"1", "true", "yes"},
+                },
                 targets=cfg.reviewer_target_branches,
                 tracking_enabled=cfg.pr_reviewer_tracking_enabled,
                 auto_review=cfg.pr_auto_review_on_added,

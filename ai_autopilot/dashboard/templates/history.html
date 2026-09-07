@@ -29,6 +29,10 @@
     font-size:11px; font-weight:700; white-space:nowrap; cursor:help;
     border:1px solid var(--accent,#6366f1); color:var(--accent-hover,#818cf8);
     background:var(--accent-bg,rgba(99,102,241,.13)); }
+  /* "—" in three columns at once reads as a bug in the page. An interactive run has
+     no usage to show — the session is not ours to meter — so it is marked, and the
+     tooltip says what to change to get numbers. */
+  .no-usage { color:var(--text-dim); cursor:help; }
 </style>
 
 <div class="page-header">
@@ -86,7 +90,9 @@
                     <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank" class="table-link">View PR</a>{% else %}<span style="color:var(--text-dim)">—</span>{% endif %}</td>
                     <td class="mono">{{ mmss(e.duration_seconds) }}</td>
                     <td style="text-align:center">{{ e.retry_count }}</td>
-                    <td>{% if e.model_used %}<span class="model-badge" title="{{ e.model_used }}">{{ model_label(e.model_used) }}</span>{% else %}<span style="color:var(--text-dim)">—</span>{% endif %}</td>
+                    {% set live = (e.skill_used or '').startswith('interactive') %}
+                    {% set no_usage = 'Interactive run — the work happened in a Remote-Control session, which the autopilot does not meter. Switch execution_mode to headless to record model, tokens and cost.' if live else 'This run reported no usage.' %}
+                    <td>{% if e.model_used %}<span class="model-badge" title="{{ e.model_used }}">{{ model_label(e.model_used) }}</span>{% else %}<span class="no-usage" title="{{ no_usage }}">{{ '🎮' if live else '—' }}</span>{% endif %}</td>
                     {# The breakdown rides in the title attribute: it answers "why is this
                        run expensive" without a column nobody scans in the normal case. #}
                     <td class="mono tok-cell"{% if tokens_detail(e) %} title="{{ tokens_detail(e) }}"{% endif %}>
@@ -94,10 +100,10 @@
                             {{ '{:,}'.format(e.cost_tokens) }}
                             {%- if e.output_tokens %}<span class="tok-split">{{ '{:,}'.format(e.output_tokens) }} out</span>{% endif -%}
                         {%- else -%}
-                            <span style="color:var(--text-dim)">—</span>
+                            <span class="no-usage" title="{{ no_usage }}">{{ '🎮' if live else '—' }}</span>
                         {%- endif -%}
                     </td>
-                    <td class="mono" style="text-align:right">{% if e.cost_usd is not none %}${{ '%.4f'|format(e.cost_usd) }}{% else %}<span style="color:var(--text-dim)">—</span>{% endif %}</td>
+                    <td class="mono" style="text-align:right">{% if e.cost_usd is not none %}${{ '%.4f'|format(e.cost_usd) }}{% else %}<span class="no-usage" title="{{ no_usage }}">{{ '🎮' if live else '—' }}</span>{% endif %}</td>
                     <td>{{ e.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td>
                         <form method="post" action="/dashboard/history/{{ e.id }}/delete"

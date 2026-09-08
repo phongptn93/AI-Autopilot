@@ -28,10 +28,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ai_autopilot.board import COL_READY_DEPLOY, COL_READY_REVIEW, BoardCard, board_columns
+from ai_autopilot.board import (
+    COL_READY_DEPLOY,
+    COL_READY_REVIEW,
+    COL_READY_TESTING,
+    BoardCard,
+    board_columns,
+    canon_column,
+)
 from ai_autopilot.config import Settings
 
-TONES: tuple[str, ...] = ("slate", "blue", "violet", "purple", "teal", "amber", "green", "red")
+TONES: tuple[str, ...] = (
+    "slate", "blue", "violet", "purple", "cyan", "teal", "amber", "green", "red",
+)
 
 PIPELINE_KEY = "pipeline"
 
@@ -92,6 +101,7 @@ _TONES: dict[str, str] = {
     "In review": "violet",
     COL_READY_REVIEW: "purple",
     COL_READY_DEPLOY: "teal",
+    COL_READY_TESTING: "cyan",
     "Needs human": "amber",
     "Done": "green",
     "Failed": "red",
@@ -102,7 +112,8 @@ _HINTS: dict[str, str] = {
     "In progress": "agent working",
     "In review": "self-review / PR checks",
     COL_READY_REVIEW: "waiting on a reviewer",
-    COL_READY_DEPLOY: "signed off, not shipped",
+    COL_READY_DEPLOY: "waiting for the test deploy",
+    COL_READY_TESTING: "on test — QC verifying",
     "Needs human": "escalated",
     "Done": "closed",
     "Failed": "run errored",
@@ -121,12 +132,13 @@ DEFAULT_LENSES: list[dict] = [
         "stages": [
             {"name": "Intake", "columns": ["Queued"], "tone": "slate", "mine": True,
              "hint": "spec not started — your turn", "drop": "Queued"},
-            {"name": "In flight", "columns": ["In progress", "In review", COL_READY_REVIEW],
-             "tone": "blue", "hint": "being delivered", "drop": "In progress"},
+            {"name": "In flight",
+             "columns": ["In progress", "In review", COL_READY_REVIEW, COL_READY_DEPLOY],
+             "tone": "blue", "hint": "being built and deployed", "drop": "In progress"},
             {"name": "Decision needed", "columns": ["Needs human", "Failed"], "tone": "amber",
              "mine": True, "hint": "escalated — needs a call", "drop": "Needs human"},
-            {"name": "Ready to deploy", "columns": [COL_READY_DEPLOY], "tone": "teal",
-             "hint": "done, awaiting release", "drop": COL_READY_DEPLOY},
+            {"name": "In testing", "columns": [COL_READY_TESTING], "tone": "cyan",
+             "hint": "on the test environment — being verified", "drop": COL_READY_TESTING},
             {"name": "Delivered", "columns": ["Done"], "tone": "green",
              "hint": "closed", "drop": "Done"},
         ],
@@ -147,9 +159,12 @@ DEFAULT_LENSES: list[dict] = [
              "hint": "PR open — self-review", "drop": "In review"},
             {"name": "Blocked", "columns": ["Needs human", "Failed"], "tone": "red", "mine": True,
              "hint": "escalated or errored", "drop": "Needs human"},
-            {"name": "Handed to QC", "columns": [COL_READY_REVIEW], "tone": "purple",
-             "hint": "waiting on QC", "drop": COL_READY_REVIEW},
-            {"name": "Shipped", "columns": [COL_READY_DEPLOY, "Done"], "tone": "green",
+            {"name": "Deploy to test", "columns": [COL_READY_DEPLOY], "tone": "teal",
+             "mine": True, "hint": "approved — put it on the test env", "drop": COL_READY_DEPLOY},
+            {"name": "Handed to QC", "columns": [COL_READY_REVIEW, COL_READY_TESTING],
+             "tone": "purple", "hint": "waiting on QC", "drop": COL_READY_REVIEW,
+             "qc_handoff": True},
+            {"name": "Shipped", "columns": ["Done"], "tone": "green",
              "hint": "merged / closed", "drop": "Done"},
         ],
     },
@@ -165,10 +180,11 @@ DEFAULT_LENSES: list[dict] = [
              "hint": "still being built", "drop": "Queued"},
             {"name": "In dev review", "columns": ["In review"], "tone": "violet",
              "hint": "dev's own PR checks — not yours yet", "drop": "In review"},
-            {"name": "Ready to test", "columns": [COL_READY_REVIEW], "tone": "purple",
-             "mine": True, "hint": "handed over — your turn to verify", "drop": COL_READY_REVIEW},
-            {"name": "Ready to deploy", "columns": [COL_READY_DEPLOY], "tone": "teal", "mine": True,
-             "hint": "verified — sign off to release", "drop": COL_READY_DEPLOY},
+            {"name": "Waiting on deploy", "columns": [COL_READY_DEPLOY], "tone": "teal",
+             "hint": "not on the test env yet — not yours", "drop": COL_READY_DEPLOY},
+            {"name": "Ready for testing", "columns": [COL_READY_REVIEW, COL_READY_TESTING],
+             "tone": "cyan", "mine": True, "hint": "deployed — your turn to verify",
+             "drop": COL_READY_TESTING, "qc_handoff": True},
             {"name": "Needs attention", "columns": ["Failed", "Needs human"], "tone": "red",
              "hint": "failed run or escalation", "drop": "Needs human"},
             {"name": "Passed", "columns": ["Done"], "tone": "green",
@@ -232,8 +248,10 @@ def default_lenses(cfg: Settings) -> list[dict]:
         stages = []
         for st in lens["stages"]:
             st = dict(st)
-            if review and st["name"] in ("Ready to test", "Handed to QC"):
+            if review and st.pop("qc_handoff", False):
                 st["tags"] = [review]
+            else:
+                st.pop("qc_handoff", None)
             stages.append(st)
         out.append({**lens, "stages": stages})
     return out
@@ -285,14 +303,15 @@ def _view_from_dict(raw: dict, active: set[str]) -> BoardView | None:
             continue
         name = str(stage.get("name") or "").strip()
         cols = tuple(
-            str(c).strip() for c in (stage.get("columns") or []) if str(c).strip() in active
+            col for col in (canon_column(str(c)) for c in (stage.get("columns") or []))
+            if col in active
         )
         states = tuple(str(x).strip() for x in (stage.get("states") or []) if str(x).strip())
         lane_tags = tuple(str(x).strip() for x in (stage.get("tags") or []) if str(x).strip())
         if not name or (not cols and not states and not lane_tags):
             continue
         tone = str(stage.get("tone") or "slate").strip().lower()
-        drop = str(stage.get("drop") or "").strip()
+        drop = canon_column(str(stage.get("drop") or ""))
         lanes.append(
             BoardLane(
                 name=name,
@@ -328,9 +347,29 @@ def view_of(raw: dict, active_columns) -> BoardView | None:
 
 
 def lens_dicts(cfg: Settings) -> list[dict]:
-    """The configured lenses as plain dicts — config first, defaults when unset."""
+    """The configured lenses as plain dicts — config first, defaults when unset.
+
+    Column names are canonicalised on the way out, so a config saved before a column
+    was renamed still edits (and renders) as the column it means. Rewriting here and
+    not on disk keeps the migration a read concern: the file is only rewritten when
+    the operator next saves, and an older build reading it still finds what it wrote.
+    """
     raw = [e for e in (getattr(cfg, "board_lenses", None) or []) if isinstance(e, dict)]
-    return raw or default_lenses(cfg)
+    if not raw:
+        return default_lenses(cfg)
+    out: list[dict] = []
+    for lens in raw:
+        stages = []
+        for stage in lens.get("stages") or []:
+            if not isinstance(stage, dict):
+                continue
+            stage = dict(stage)
+            stage["columns"] = [canon_column(str(c)) for c in (stage.get("columns") or [])]
+            if stage.get("drop"):
+                stage["drop"] = canon_column(str(stage["drop"]))
+            stages.append(stage)
+        out.append({**lens, "stages": stages})
+    return out
 
 
 def board_views(cfg: Settings) -> list[BoardView]:
@@ -642,7 +681,7 @@ def parse_lens_form(form, active_columns: list[str]) -> list[dict]:
 # would flag a healthy default install.
 KNOWN_COLUMNS: frozenset[str] = frozenset(
     ["Queued", "In progress", "In review", COL_READY_REVIEW, COL_READY_DEPLOY,
-     "Needs human", "Done", "Failed"]
+     COL_READY_TESTING, "Needs human", "Done", "Failed"]
 )
 
 

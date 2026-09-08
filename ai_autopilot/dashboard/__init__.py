@@ -31,7 +31,16 @@ from ai_autopilot import (
 from ai_autopilot import (
     workspaces as workspaces_mod,
 )
-from ai_autopilot.board import board_columns, build_board, latest_records, parse_drop_map
+from ai_autopilot.board import (
+    COL_READY_DEPLOY,
+    COL_READY_REVIEW,
+    COL_READY_TESTING,
+    board_columns,
+    build_board,
+    handoff_states,
+    latest_records,
+    parse_drop_map,
+)
 from ai_autopilot.config import config_file_path, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
@@ -885,13 +894,21 @@ def create_dashboard_router() -> APIRouter:
                 clean = (name or "").strip()
                 if clean:
                     types_of.setdefault(clean, []).append(type_name)
-        in_use = {(i.state or "").strip() for i in items if (i.state or "").strip()}
+        state_counts: dict[str, int] = {}
+        for item in items:
+            name = (item.state or "").strip()
+            if name:
+                state_counts[name] = state_counts.get(name, 0) + 1
+        in_use = set(state_counts)
         for name in in_use:  # a state on the board that ADO no longer lists is still real
             types_of.setdefault(name, [])
+        # States something is actually sitting in read FIRST. A process is configured by
+        # looking for the spot work really parks at; alphabetical order buries those five
+        # names among thirty dead ones and makes the picker a memory test.
         board_states = [
             {"name": name, "types": ", ".join(types_of[name]) or "not in the type list",
-             "used": name in in_use}
-            for name in sorted(types_of)
+             "used": name in in_use, "n": state_counts.get(name, 0)}
+            for name in sorted(types_of, key=lambda s: (s not in in_use, s.lower()))
         ]
 
         def _matches(lens: dict) -> int:
@@ -986,6 +1003,16 @@ def create_dashboard_router() -> APIRouter:
                  shared_turns=shared_turns, no_turn=no_turn,
                  review_state=c.config.board_review_state,
                  deploy_state=c.config.board_deploy_state,
+                 # Hand-off columns this config has NOT switched on. The page offers
+                 # them as the usual cure for "no stage of its own" / "two processes
+                 # claim the same hand-off", so it needs the names, not three flags.
+                 missing_handoffs=[
+                     name for name, states in (
+                         (COL_READY_REVIEW, c.config.board_review_state),
+                         (COL_READY_DEPLOY, c.config.board_deploy_state),
+                         (COL_READY_TESTING, c.config.board_testing_state),
+                     ) if not handoff_states(states)
+                 ],
                  errors=rejected.get("errors") or []),
         )
         if flash is not None:

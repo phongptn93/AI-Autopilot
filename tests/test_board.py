@@ -127,19 +127,88 @@ def test_extra_columns_hidden_by_default():
 
 
 def test_extra_columns_appear_and_map_by_ado_state():
-    cfg = Settings(board_review_state="Ready to Review", board_deploy_state="Ready to Deploy")
+    cfg = Settings(board_review_state="Ready to Review",
+                   board_testing_state="Ready for Testing",
+                   board_deploy_state="Ready for Deploy")
     cols = board_columns(cfg)
-    # inserted right after "In review", grouped together
+    # inserted right after "In review", grouped together, in relay order
     assert cols == [
-        "Queued", "In progress", "In review", "Ready for review", "Ready to deploy",
+        "Queued", "In progress", "In review",
+        "Ready for review", "Ready for deploy", "Ready for testing",
         "Needs human", "Done", "Failed",
     ]
     items = [
         _item(1, ["autopilot"], state="Ready to Review"),
-        _item(2, ["autopilot", "autopilot-done"], state="Ready to Deploy"),  # ADO state wins over tag
+        # ADO state wins over the tag
+        _item(2, ["autopilot", "autopilot-done"], state="Ready for Deploy"),
         _item(3, ["autopilot"], state="Active"),
+        _item(4, ["autopilot"], state="Ready for Testing"),
     ]
     board = build_board(items, {}, cfg)
     assert board["Ready for review"][0].id == 1
-    assert board["Ready to deploy"][0].id == 2   # beats the Done tag
+    assert board["Ready for deploy"][0].id == 2   # beats the Done tag
     assert board["Queued"][0].id == 3
+    assert board["Ready for testing"][0].id == 4
+
+
+def test_testing_column_is_independent_of_the_other_hand_offs():
+    # Each hand-off column is switched on by its own state, so a team that only
+    # uses one does not get the other two as empty furniture.
+    cfg = Settings(board_testing_state="Ready for Testing")
+    assert board_columns(cfg) == [
+        "Queued", "In progress", "In review", "Ready for testing",
+        "Needs human", "Done", "Failed",
+    ]
+
+
+def test_a_retired_column_name_still_resolves():
+    # "Ready to deploy" shipped before the rename; a saved lens or drop-map line
+    # still names it, and silently dropping it would just make cards disappear.
+    from ai_autopilot.board import canon_column
+
+    assert canon_column("Ready to deploy") == "Ready for deploy"
+    assert canon_column("  ready TO deploy ") == "Ready for deploy"
+    assert canon_column("In review") == "In review"
+    assert parse_drop_map(["Ready to deploy => @Ready for Deploy"]) == {
+        "ready for deploy": ("state", "Ready for Deploy")
+    }
+
+
+def test_one_column_holds_a_whole_leg_of_the_ado_ladder():
+    """QC's leg is four ADO states; the board shows one column, not four.
+
+    The board answers "whose turn is it". Ready for Testing, In Testing, Ready for
+    UAT and In UAT all answer it the same way — QC has the ball — so they fold into
+    one column. Giving each its own would grow the board a column per ADO state.
+    """
+    cfg = Settings(
+        board_deploy_state=["Ready for Deploy"],
+        board_testing_state=["Ready for Testing", "In Testing", "Ready for UAT", "In UAT"],
+    )
+    assert board_columns(cfg) == [
+        "Queued", "In progress", "In review", "Ready for deploy", "Ready for testing",
+        "Needs human", "Done", "Failed",
+    ]
+    items = [
+        _item(1, ["autopilot"], state="In Testing"),
+        _item(2, ["autopilot"], state="Ready for UAT"),
+        _item(3, ["autopilot"], state="Ready for Deploy"),
+    ]
+    board = build_board(items, {}, cfg)
+    assert {c.id for c in board["Ready for testing"]} == {1, 2}
+    assert {c.id for c in board["Ready for deploy"]} == {3}
+
+
+def test_a_single_state_string_still_configures_a_column():
+    """Every config.yaml in the field writes one plain string. Widening the setting
+    to a list must not turn that into a migration."""
+    cfg = Settings(board_deploy_state="Ready for Deploy")
+    assert cfg.board_deploy_state == ["Ready for Deploy"]
+    assert "Ready for deploy" in board_columns(cfg)
+    board = build_board([_item(1, ["autopilot"], state="Ready for Deploy")], {}, cfg)
+    assert board["Ready for deploy"][0].id == 1
+    # and the settings box takes a typed list
+    assert Settings(board_testing_state="Ready for Testing, In Testing").board_testing_state == [
+        "Ready for Testing", "In Testing",
+    ]
+    assert Settings().board_testing_state == []

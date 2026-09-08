@@ -27,7 +27,7 @@ trigger_states: ["New", "To Do", "Proposed", "Active"]
 # so a process is defined by WHERE THE ITEM IS, not by a label stuck on it.
 #   stages  the lanes that process reads. A lane is one or more of the autopilot's
 #           pipeline columns (Queued, In progress, In review, Ready for review,
-#           Ready to deploy, Needs human, Done, Failed) and/or the ADO `states` it
+#           Ready for deploy, Ready for testing, Needs human, Done, Failed) and/or the ADO `states` it
 #           parks in, and/or the `tags` it parks under. These matter for a REVIEWED
 #           hand-off: an item left in "Ready for Dev" is `Queued` as far as the
 #           engine is concerned, so only a lane naming that state can say it is
@@ -56,7 +56,8 @@ trigger_states: ["New", "To Do", "Proposed", "Active"]
 # Edited live at /dashboard/board-views, which shows how many items wait on each
 # process right now, flags a process with no turn of its own or two processes
 # claiming the same column, and lists the tags actually present on your board.
-# NOTE: the hand-off columns only exist if board_review_state / board_deploy_state
+# NOTE: the hand-off columns only exist if board_review_state / board_testing_state
+#       / board_deploy_state
 # name a real ADO state — without them Dev and QC share "In review".
 # board_lenses:
 #   - key: qc

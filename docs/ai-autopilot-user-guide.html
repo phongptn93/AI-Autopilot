@@ -277,7 +277,7 @@ tắt nó autopilot vẫn chạy bình thường. Nên khóa bằng mật khẩu
 <!-- 5 -->
 <section id="board">
 <h2>6. Board</h2>
-<p>Cột được sinh từ cấu hình: <code>Queued · In progress · In review · [Ready for review] · [Ready to deploy] · Needs human · Done · Failed</code> (2 cột trong ngoặc chỉ hiện khi cấu hình <code>board_review_state</code> / <code>board_deploy_state</code>).</p>
+<p>Cột được sinh từ cấu hình: <code>Queued · In progress · In review · [Ready for review] · [Ready for deploy] · [Ready for testing] · Needs human · Done · Failed</code> (3 cột trong ngoặc chỉ hiện khi cấu hình <code>board_review_state</code> / <code>board_testing_state</code> / <code>board_deploy_state</code>).</p>
 <ul>
 <li><b>Cột item nằm ở đâu</b>: ưu tiên ADO state (done_states → Done; board_*_state) → pipeline state đã lưu → tag (hold/review/done) → record cuối.</li>
 <li><b>Kéo-thả</b>: bật bằng <code>board_drop_map</code> (mỗi dòng <code>Cột =&gt; tag</code> hoặc <code>Cột =&gt; @State</code>).</li>
@@ -743,8 +743,9 @@ push</b>. Hiểu sai theo hướng advisory thì chỉ tốn một comment.</p>
 <h2>20. Cấu hình — Board columns</h2>
 <table>
 <tr><th>Field</th><th>Mặc định</th><th>Ý nghĩa</th></tr>
-<tr><td><code>board_review_state</code></td><td class="def">""</td><td>Item ở state này → cột "Ready for review" (read-only, người tự kéo). Trống = không có cột.</td></tr>
-<tr><td><code>board_deploy_state</code></td><td class="def">""</td><td>Tương tự cho cột "Ready to deploy".</td></tr>
+<tr><td><code>board_review_state</code></td><td class="def">[]</td><td>Các ADO state → cột "Ready for review" (read-only, người tự kéo). Nhận <b>nhiều state</b>; ghi 1 chuỗi vẫn đọc được. Trống = không có cột.</td></tr>
+<tr><td><code>board_deploy_state</code></td><td class="def">[]</td><td>Các ADO state → cột "Ready for deploy" — đã duyệt, chờ đưa lên môi trường test. Trống = không có cột.</td></tr>
+<tr><td><code>board_testing_state</code></td><td class="def">[]</td><td>Các ADO state → cột "Ready for testing" (ngay sau Ready for deploy). Khai <b>cả thang QC</b> ở đây (Ready for Testing, In Testing, Ready for UAT, In UAT) để chúng gập vào một cột thay vì mỗi state mọc một cột. Trống = không có cột.</td></tr>
 <tr><td><code>done_states</code></td><td class="def">[]</td><td>Các state tính là <b>Done</b> trên board (vd Closed, Resolved, Ready to Testing).</td></tr>
 <tr><td><code>board_drop_map</code></td><td class="def">[]</td><td>Bật kéo-thả: mỗi dòng <code>Cột =&gt; tag</code> hoặc <code>Cột =&gt; @State</code>.</td></tr>
 <tr><td><code>board_max_per_column</code></td><td class="def">20</td><td>Số card tối đa/cột trước khi hiện <b>Load more</b>. 0 = hiện hết.</td></tr>

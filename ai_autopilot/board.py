@@ -21,18 +21,47 @@ COLUMNS: list[str] = ["Queued", "In progress", "In review", "Needs human", "Done
 # Optional hand-off columns driven purely by the item's ADO state (a human moves
 # the item there; the autopilot doesn't). Shown only when configured, grouped
 # right after "In review".
+# Named for the ADO states they mirror, which a team writes as "Ready for X"
+# ("Ready for Review", "Ready for Testing", "Ready for Deploy"). A board column that
+# reads "Ready to deploy" beside an item whose state says "Ready for Deploy" makes a
+# reader stop and check whether they are the same thing — they are.
 COL_READY_REVIEW = "Ready for review"
-COL_READY_DEPLOY = "Ready to deploy"
+COL_READY_DEPLOY = "Ready for deploy"
+COL_READY_TESTING = "Ready for testing"
+
+# Columns that shipped under a different spelling. A saved lens, a drop-map line or a
+# test still names the old one, and a rename that silently prunes an unknown column is
+# indistinguishable from a bug: the lane keeps its label and the cards stop arriving.
+RENAMED_COLUMNS: dict[str, str] = {"ready to deploy": COL_READY_DEPLOY}
+
+
+def handoff_states(raw: object) -> set[str]:
+    """The ADO states that land in one hand-off column, lower-cased for matching.
+
+    Takes a list or the single string the setting used to be, so a caller holding an
+    older Settings-shaped object (or a test) is not a special case.
+    """
+    if isinstance(raw, str):
+        raw = [raw]
+    return {str(s).strip().lower() for s in (raw or []) if str(s).strip()}
+
+
+def canon_column(name: str) -> str:
+    """A column name as it is spelled today; retired spellings map forward."""
+    clean = (name or "").strip()
+    return RENAMED_COLUMNS.get(clean.lower(), clean)
 
 
 def board_columns(cfg: Settings) -> list[str]:
     """The active board columns for this config: the base pipeline plus any
     configured ADO-state hand-off columns, inserted right after 'In review'."""
     cols = ["Queued", "In progress", "In review"]
-    if (cfg.board_review_state or "").strip():
+    if handoff_states(cfg.board_review_state):
         cols.append(COL_READY_REVIEW)
-    if (cfg.board_deploy_state or "").strip():
+    if handoff_states(cfg.board_deploy_state):
         cols.append(COL_READY_DEPLOY)
+    if handoff_states(getattr(cfg, "board_testing_state", None)):
+        cols.append(COL_READY_TESTING)
     cols += ["Needs human", "Done", "Failed"]
     return cols
 
@@ -71,6 +100,7 @@ def parse_drop_map(entries: list[str]) -> dict[str, tuple[str, str]]:
         col, val = col.strip(), val.strip()
         if not col or not val:
             continue
+        col = canon_column(col)
         if val.startswith("@"):
             out[col.lower()] = ("state", val[1:].strip())
         else:
@@ -114,10 +144,12 @@ def _column_for(
     state = (item.state or "").strip().lower()
     if state and state in {s.strip().lower() for s in cfg.done_states if s.strip()}:
         return "Done"
-    if (cfg.board_review_state or "").strip() and state == cfg.board_review_state.strip().lower():
+    if state and state in handoff_states(cfg.board_review_state):
         return COL_READY_REVIEW
-    if (cfg.board_deploy_state or "").strip() and state == cfg.board_deploy_state.strip().lower():
+    if state and state in handoff_states(cfg.board_deploy_state):
         return COL_READY_DEPLOY
+    if state and state in handoff_states(getattr(cfg, "board_testing_state", None)):
+        return COL_READY_TESTING
     # The autopilot's own persisted pipeline state wins next.
     if persisted in COLUMNS:
         return persisted

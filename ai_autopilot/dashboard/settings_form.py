@@ -113,12 +113,21 @@ FIELDS: tuple[Field, ...] = (
     Field("state_failed", "⛔ Failed — ADO state", "stateone", "Outcomes → tag + state",
           "State when the autopilot gives up after exhausting retries."),
     # ── Board columns ──
-    Field("board_review_state", "Column: Ready for review", "stateone", "Board columns",
-          "Items in this ADO state show in a 'Ready for review' board column. Blank = no column. "
-          "Use a state the autopilot doesn't set."),
-    Field("board_deploy_state", "Column: Ready to deploy", "stateone", "Board columns",
-          "Items in this ADO state show in a 'Ready to deploy' board column. Blank = no column. "
-          "Use a state the autopilot doesn't set."),
+    Field("board_review_state", "Column: Ready for review", "stateset", "Board columns",
+          "ADO states that show in a 'Ready for review' board column. Blank = no column. "
+          "Use states the autopilot doesn't set. Several are allowed — a column holds a "
+          "whole leg of the ladder, not one state."),
+    # Listed in board order (review → deploy → testing): the build goes onto the test
+    # environment before QC can verify it, and a settings page that lists them in a
+    # different order than the board teaches the wrong sequence.
+    Field("board_deploy_state", "Column: Ready for deploy", "stateset", "Board columns",
+          "ADO states that show in a 'Ready for deploy' board column — approved, waiting to "
+          "go onto the test environment. Blank = no column. E.g. Ready for Deploy."),
+    Field("board_testing_state", "Column: Ready for testing", "stateset", "Board columns",
+          "ADO states that show in a 'Ready for testing' board column, right after Ready for "
+          "deploy — it is on the test environment and QC can verify it. List every state of "
+          "QC's leg here (e.g. Ready for Testing, In Testing, Ready for UAT, In UAT) so they "
+          "fold into one column instead of each earning its own. Blank = no column."),
     Field("done_states", "Done states (→ Done column)", "stateset", "Board columns",
           "ADO states that count as Done on the board (e.g. Ready to Testing, Closed). "
           "Items a human moved to any of these show in the Done column."),
@@ -126,7 +135,7 @@ FIELDS: tuple[Field, ...] = (
           "Show at most this many cards per column, then a 'Load more'. 0 = show all."),
     Field("board_drop_map", "Drag & drop (column => tag/state)", "list", "Board columns",
           "Enable dragging cards: one 'Column => value' per line. Value is a tag, or an ADO state "
-          "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready to deploy => @Ready to Deploy'. "
+          "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready for deploy => @Ready for Deploy'. "
           "Empty = cards are not draggable (the board says so rather than pretending). "
           "Who reads which columns, and whose turn each one is, is configured separately at "
           "/dashboard/board-views (Board processes)."),

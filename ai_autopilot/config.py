@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -784,9 +784,34 @@ class Settings(BaseSettings):
     resolved_state: str = "Resolved"
     # Extra Board columns driven purely by the item's ADO state (read-only — the
     # autopilot does not set these; a human moves the item there). Blank = no
-    # column. Use states the autopilot itself doesn't set (e.g. "Ready to Deploy").
-    board_review_state: str = ""   # → "Ready for review" column
-    board_deploy_state: str = ""   # → "Ready to deploy" column
+    # column. Use states the autopilot itself doesn't set (e.g. "Ready for Deploy").
+    #
+    # Each takes ONE state or SEVERAL. A role's leg of the ADO ladder is usually more
+    # than one state — QC's is "Ready for Testing", "In Testing", "Ready for UAT",
+    # "In UAT" — and all of them say the same thing to a board whose job is whose turn
+    # it is: QC has the ball. Folding them into one column is what stops the board
+    # growing a column per ADO state, which is how it ends up too wide to read.
+    board_review_state: list[str] = Field(default_factory=list)   # → "Ready for review"
+    board_deploy_state: list[str] = Field(default_factory=list)   # → "Ready for deploy"
+    board_testing_state: list[str] = Field(default_factory=list)  # → "Ready for testing"
+
+    @field_validator(
+        "board_review_state", "board_deploy_state", "board_testing_state", mode="before"
+    )
+    @classmethod
+    def _handoff_states(cls, raw: Any) -> list[str]:
+        """Accept the single string these held before they took several.
+
+        Every config.yaml in the field writes ``board_deploy_state: Ready for Deploy``.
+        Rejecting that shape would turn a widening into a migration, so the plain
+        string (and a comma/newline list typed into the box) is read as one entry.
+        """
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            raw = [part for line in raw.splitlines() for part in line.split(",")]
+        return [str(s).strip() for s in raw if str(s).strip()]
+
     # ADO states that count as Done on the board (e.g. a human moved the item to
     # "Ready to Testing" / "Closed"). Items in any of these states show in the Done
     # column regardless of tags. Read-only: does not change the item.

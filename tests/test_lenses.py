@@ -60,15 +60,17 @@ def test_unknown_view_key_falls_back_to_pipeline():
 
 
 def test_lens_prunes_columns_this_config_does_not_have():
-    # No board_deploy_state → no "Ready to deploy" column, so the QC stage over it goes.
+    # No board_deploy_state → no "Ready for deploy" column, so the QC stage over it goes.
     qc = board_view(CFG, "qc")
-    assert "Ready to deploy" not in [lane.name for lane in qc.lanes]
+    assert "Ready for deploy" not in [lane.name for lane in qc.lanes]
     for lane in qc.lanes:
         assert set(lane.columns) <= set(COLS)
 
 
 def test_lens_keeps_every_column_when_configured():
-    cfg = Settings(board_review_state="Ready for Review", board_deploy_state="Ready to Deploy")
+    cfg = Settings(board_review_state="Ready for Review",
+                   board_testing_state="Ready for Testing",
+                   board_deploy_state="Ready for Deploy")
     dev = board_view(cfg, "dev")
     covered = {c for lane in dev.lanes for c in lane.columns}
     assert covered == set(board_columns(cfg))
@@ -309,14 +311,34 @@ def test_board_views_editor_round_trips(tmp_path, monkeypatch):
 def test_shipped_processes_are_a_relay_not_a_set_of_labels():
     from ai_autopilot.lenses import default_lenses, my_turn_columns
 
-    cfg = Settings(board_review_state="Ready for Review", board_deploy_state="Ready to Deploy")
+    cfg = Settings(board_review_state="Ready for Review",
+                   board_testing_state="Ready for Testing",
+                   board_deploy_state="Ready for Deploy")
     assert all(not lens["tags"] for lens in default_lenses(cfg))   # nothing to re-tag
     turns = {v.key: my_turn_columns(v) for v in board_views(cfg) if v.key != "pipeline"}
     # The ball moves along the pipeline: BA holds intake, Dev the build, QC the checks.
     assert "Queued" in turns["ba"] and "In progress" not in turns["ba"]
-    assert "In progress" in turns["dev"] and "Ready to deploy" not in turns["dev"]
-    assert {"Ready for review", "Ready to deploy"} <= turns["qc"]
+    assert {"In progress", "Ready for deploy"} <= turns["dev"]
+    assert {"Ready for review", "Ready for testing"} <= turns["qc"]
+    # Deploying to the test env is Dev's move; QC only gets the ball once it is there.
+    assert "Ready for deploy" not in turns["qc"]
+    assert "Ready for testing" not in turns["dev"]
     assert "Queued" not in turns["qc"]
+
+
+def test_a_lens_saved_under_the_old_column_name_still_renders():
+    # A config written before the rename must keep working: the lane is what the
+    # operator drew, and pruning an unknown column would empty it without a word.
+    from ai_autopilot.lenses import lens_dicts, view_of
+
+    cfg = Settings(board_deploy_state="Ready for Deploy", board_lenses=[{
+        "key": "rel", "label": "Release",
+        "stages": [{"name": "Shipping", "columns": ["Ready to deploy"],
+                    "drop": "Ready to deploy", "mine": True}],
+    }])
+    assert lens_dicts(cfg)[0]["stages"][0]["columns"] == ["Ready for deploy"]
+    lane = view_of(lens_dicts(cfg)[0], board_columns(cfg)).lanes[0]
+    assert lane.columns == ("Ready for deploy",) and lane.drop == "Ready for deploy"
 
 
 def test_suggested_role_tags_follow_this_instance_vocabulary():
@@ -347,7 +369,7 @@ def test_relay_hands_the_item_along_without_re_tagging(tmp_path):
 
     with _client(tmp_path, trigger_tag="vm-autopilot",
                  board_review_state="Ready for Review",
-                 board_deploy_state="Ready to Deploy") as client:
+                 board_deploy_state="Ready for Deploy") as client:
         client.app.state.container.ado = _FakeAdo()
 
         def waiting(view: str) -> int:
@@ -366,7 +388,7 @@ def test_relay_hands_the_item_along_without_re_tagging(tmp_path):
         state["tags"] = ["vm-autopilot", "autopilot-review"]
         assert (waiting("ba"), waiting("dev"), waiting("qc")) == (0, 0, 1)
         qc = client.get("/dashboard/board?view=qc&mine=1").text
-        assert 'data-id="7"' in qc and "Ready to test" in qc
+        assert 'data-id="7"' in qc and "Ready for testing" in qc
         # Dev still SEES it (it is what Dev handed over) but is not asked to act.
         dev = client.get("/dashboard/board?view=dev").text
         assert 'data-id="7"' in dev and "Handed to QC" in dev
@@ -448,7 +470,7 @@ def test_only_ambiguous_handoffs_are_flagged(tmp_path):
 
     # Fully configured relay: BA and Dev share only the escalation columns → silent.
     with _client(tmp_path, board_review_state="Ready for Review",
-                 board_deploy_state="Ready to Deploy") as client:
+                 board_deploy_state="Ready for Deploy") as client:
         client.app.state.container.ado = _FakeAdo()
         page = client.get("/dashboard/board-views").text
         assert "claim the same hand-off" not in page

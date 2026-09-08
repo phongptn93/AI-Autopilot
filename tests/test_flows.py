@@ -37,7 +37,7 @@ DEV = {
     "name": "Dev items", "types": ["Bug", "Task"],
     "states": {"in_progress": "Active", "review": "Ready to Review", "done": "Closed",
                "report": "", "needs_human": "Review Fails", "failed": "Review Fails",
-               "on_merge": "Ready to Deploy", "on_deploy": "Ready to Testing"},
+               "on_publish": "Ready to Review", "on_merge": "Ready to Deploy", "on_deploy": "Ready to Testing"},
 }
 REQ = {
     "name": "Requirement", "types": ["Requirement"],
@@ -122,7 +122,7 @@ def test_parse_rollup_entry():
 
 def test_a_complete_valid_configuration_passes():
     assert validate_flows([DEV, REQ], STATES_BY_TYPE) == []
-    assert set(DEV["states"]) == set(STAGE_KEYS)   # the editor writes all eight
+    assert set(DEV["states"]) == set(STAGE_KEYS)   # the editor writes every stage
 
 
 def test_rejects_the_live_bug_state_not_on_this_type():

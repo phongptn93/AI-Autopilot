@@ -70,6 +70,10 @@ class PrMonitorService:
         # into dozens of near-identical entries — the same hint repeated verbatim,
         # burying everything the log was actually for.
         self._unowned_new: list[tuple[str, str]] = []
+        # PR ids last seen as a DRAFT. A draft is not ready for review — the author
+        # has not asked anyone to look — so the moment it is published is a real
+        # transition, and the only way to see it is to remember the previous answer.
+        self._drafts: set[int] = set()
 
     def start(self) -> None:
         if not self._config.feedback_loop_enabled:
@@ -331,6 +335,20 @@ class PrMonitorService:
             if k in active_branches or v.locked()
         }
 
+    async def _on_pr_published(self, repo_id: str, pr_id: int, source_ref: str) -> None:
+        """The author took a draft out of draft: NOW it is ready for review."""
+        c, cfg = self._c, self._config
+        if cfg.dry_run or not (cfg.on_publish_state or "").strip():
+            return
+        work_item_id = await self._work_item_for(repo_id, pr_id, source_ref)
+        if work_item_id is None:
+            return
+        item = await c.ado.get_work_item(work_item_id)
+        if item is None:
+            return
+        await self._apply_outcome(item, "on_publish")
+        self._log.info("PR published — item advanced", id=work_item_id, pr=pr_id)
+
     async def _apply_outcome(self, item: object, outcome: str) -> None:
         """Apply a pipeline outcome's tag + state to the work item (clearing stale outcome
         tags) so the board reflects it's working (``in_progress``) then back in ``review``.
@@ -474,6 +492,15 @@ class PrMonitorService:
                     self._unowned.clear()
                 self._unowned_new.append((source_ref.removeprefix("refs/heads/"), why))
             return
+
+        # Draft → published. Fires once: the id leaves the set with the transition,
+        # and a PR already published the first time it is seen was never in it, so a
+        # restart does not replay every open PR as freshly published.
+        if pr.get("isDraft"):
+            self._drafts.add(pr_id)
+        elif pr_id in self._drafts:
+            self._drafts.discard(pr_id)
+            await self._on_pr_published(repo_id, pr_id, source_ref)
 
         threads = await c.ado.get_pull_request_threads(repo_id, pr_id)
         commands = command_threads(

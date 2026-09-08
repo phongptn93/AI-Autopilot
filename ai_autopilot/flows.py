@@ -51,15 +51,19 @@ STAGES: tuple[tuple[str, str, str], ...] = (
     ("report", "📝 Report", "state_report"),
     ("needs_human", "🙋 Needs human", "state_needs_human"),
     ("failed", "⛔ Failed", "state_failed"),
+    # A DRAFT pull request is not ready for review — nobody is being asked to look
+    # yet. The review stage fires when the draft opens, so without this there was no
+    # moment to represent "the author published it and now it IS ready".
+    ("on_publish", "📢 PR published", "on_publish_state"),
     ("on_merge", "🔀 PR merged", "on_merge_state"),
     ("on_deploy", "🚀 Deployed", "on_deploy_state"),
 )
 
-# Presentation grouping for the editor. Eight equal rows read as a wall of identical
-# controls; the same eight split by WHEN they fire give the page a spine you can scan.
+# Presentation grouping for the editor. A flat list of identical rows reads as a wall
+# of controls; split by WHEN they fire, the page gets a spine you can scan.
 # Keys must stay in sync with STAGES — asserted in tests.
 STAGE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("While working", ("in_progress", "review")),
+    ("While working", ("in_progress", "review", "on_publish")),
     ("Outcome", ("done", "report", "needs_human", "failed")),
     ("After the PR lands", ("on_merge", "on_deploy")),
 )

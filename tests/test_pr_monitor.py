@@ -459,3 +459,73 @@ async def test_a_review_that_found_nothing_does_not_claim_notes_above():
                                {"thread_id": 11, "instruction": "/review please",
                                 "comment_id": 2, "advisory": True}, 0)
     assert any("chi tiết ở trên" in m for m in posted)
+
+
+async def test_publishing_a_draft_advances_the_item():
+    """A draft PR is not ready for review — nobody has been asked to look yet.
+
+    The review stage fires when the draft OPENS, so until now there was no moment
+    representing "the author published it and now it IS ready". Blank on_publish_state
+    keeps the old behaviour: the transition is watched, nothing is applied.
+    """
+    from types import SimpleNamespace
+
+    applied: list[tuple[int, str]] = []
+
+    class _Ado:
+        async def get_pull_request_threads(self, *a, **k):
+            return []
+        async def get_pull_request_work_items(self, repo_id, pr_id):
+            return [4242]
+        async def get_work_item(self, wid):
+            return SimpleNamespace(id=wid, title="t", work_item_type="Bug", state="Active",
+                                   tags=[], project="P")
+
+    cfg = Settings(feedback_loop_enabled=True, on_publish_state="Ready for Review",
+                   bot_branch_prefixes=["bugfix/"])
+    svc = PrMonitorService(SimpleNamespace(config=cfg, ado=_Ado(),
+                                           mention_identity=_no_bot))
+    svc._log = SimpleNamespace(info=lambda *a, **k: None, debug=lambda *a, **k: None,
+                               warning=lambda *a, **k: None, error=lambda *a, **k: None)
+    svc._apply_outcome = lambda item, outcome: _record(applied, (item.id, outcome))
+
+    pr = {"pullRequestId": 77, "sourceRefName": "refs/heads/bugfix/4242-x", "isDraft": True}
+    await svc._inspect_pr("repo", "R", pr)
+    assert applied == []                       # still a draft: nobody is asked to look
+
+    pr["isDraft"] = False
+    await svc._inspect_pr("repo", "R", pr)
+    assert applied == [(4242, "on_publish")]
+
+    await svc._inspect_pr("repo", "R", pr)     # fires once, not every scan
+    assert applied == [(4242, "on_publish")]
+
+
+async def test_a_pr_already_published_when_first_seen_is_not_replayed():
+    """A restart must not treat every open PR as freshly published."""
+    from types import SimpleNamespace
+
+    applied: list = []
+    cfg = Settings(feedback_loop_enabled=True, on_publish_state="Ready for Review",
+                   bot_branch_prefixes=["bugfix/"])
+    svc = PrMonitorService(SimpleNamespace(
+        config=cfg, mention_identity=_no_bot,
+        ado=SimpleNamespace(get_pull_request_threads=_empty_threads)))
+    svc._log = SimpleNamespace(info=lambda *a, **k: None, debug=lambda *a, **k: None,
+                               warning=lambda *a, **k: None, error=lambda *a, **k: None)
+    svc._apply_outcome = lambda item, outcome: _record(applied, outcome)
+    await svc._inspect_pr("repo", "R", {"pullRequestId": 9, "isDraft": False,
+                                        "sourceRefName": "refs/heads/bugfix/1-x"})
+    assert applied == []
+
+
+async def _empty_threads(*a, **k):
+    return []
+
+
+async def _record(sink, value):
+    sink.append(value)
+
+
+async def _no_bot():
+    return ""

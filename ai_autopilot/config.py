@@ -924,6 +924,10 @@ class Settings(BaseSettings):
     # place to learn about it than a boot loop.
     work_item_flows: list[Any] = Field(default_factory=list)
     # Flat fallbacks, used for any type no flow claims.
+    # State when a DRAFT pull request is published (draft -> ready). Blank = no
+    # change, which is the behaviour every install had before this existed: the
+    # review state fired when the draft opened and nothing marked the publish.
+    on_publish_state: str = ""
     on_merge_state: str = ""
     # Parent roll-up: an ordered "child state = parent state" map, e.g.
     # ["Active = Active", "Ready for Testing = Impl Done"]. Child and parent are

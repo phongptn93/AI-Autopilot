@@ -3,9 +3,13 @@
 Opt-in (``auto_transition_enabled``). All three are best-effort and idempotent:
 
 - **Merge → state**: when a PR the autopilot opened is completed (merged), move
-  its work item to the merge state and mark it done.
+  its work item to the merge state and mark it done. The item is the one ADO has
+  LINKED to the PR, falling back to an id in the branch name — reading the name alone
+  dropped every branch not shaped ``<id>-slug`` without a word in the log.
 - **Deploy → state**: a fresh successful deploy build advances the items sitting in
-  their merge state.
+  their merge state. The "last build seen" watermark is PERSISTED — held in memory it
+  was re-baselined on every restart, so a deploy that succeeded while the autopilot
+  was down was swallowed and the items it shipped stayed in their merge state.
 - **Parent roll-up**: the parent follows its least-advanced child, per the
   ``"Child = Parent"`` map.
 
@@ -16,7 +20,10 @@ stops the rest of its outcome — tagging an item done and commenting "marked it
 when the state never moved left the board lying and the poller skipping the item
 forever.
 
-Only touches work items carrying a trigger tag, and never writes in ``dry_run``.
+Only touches work items carrying a trigger tag, and never writes in ``dry_run``. A
+merged PR that advances nothing says so once per PR, aggregated into one line per
+scan: the gates all fail by returning early, and their silence is what makes "it was
+merged and the card never moved" impossible to answer from the log.
 """
 
 from __future__ import annotations
@@ -39,6 +46,9 @@ from ai_autopilot.models import WorkItemInfo
 from ai_autopilot.services.pr_feedback import is_bot_branch, parse_work_item_id
 
 _POLL_INTERVAL_SECONDS = 90
+
+# Watermark name in ``sync_markers``. Persisted rather than in-memory: see _check_deploys.
+_DEPLOY_MARKER = "last_deploy_build"
 
 
 def items_awaiting_deploy(tagged: list[WorkItemInfo], cfg: object, scope=None) -> list[int]:
@@ -137,8 +147,19 @@ class StateSyncService:
         self._log = get_logger("services.state_sync")
         self._merged: set[int] = set()   # PR ids already transitioned
         self._parent_targets: dict[int, str] = {}  # parent id → last state we rolled it to
-        self._last_deploy_build: int | None = None  # newest deploy build id seen
+        # Newest deploy build seen. None = "not known yet" and is NOT the same as 0:
+        # it is what makes the first sighting a baseline instead of a transition.
+        # Restored from disk in _run — see _DEPLOY_MARKER.
+        self._last_deploy_build: int | None = None
         self._task: asyncio.Task | None = None
+        # Merged PRs this loop walked past, already explained once. Every gate below
+        # used to return in silence, so "it was merged and the card never moved" left
+        # nothing in the log to read — the question could only be answered by reading
+        # the source. A marker set keeps the steady state quiet (a shared repo is full
+        # of completed PRs that are none of our business) while still answering it.
+        self._skipped: set[int] = set()
+        self._skipped_new: list[tuple[str, str]] = []
+        self._warned_no_builds = False   # deploy stage: complain once, not every 90s
         # Persisted dedup (survives restarts). Optional so tests can omit it.
         self._sync_repo = getattr(c, "sync_repo", None)
 
@@ -156,11 +177,7 @@ class StateSyncService:
 
     async def _run(self) -> None:
         self._log.info("state-sync started — merged PRs → state, parent roll-up")
-        # Restore the dedup from disk so a restart doesn't re-transition merged PRs.
-        if self._sync_repo is not None:
-            with contextlib.suppress(Exception):
-                self._merged = await self._sync_repo.seen_merged_prs()
-                self._log.info("state-sync: restored merged-PR memory", count=len(self._merged))
+        await self._restore()
         while True:
             try:
                 await asyncio.sleep(_POLL_INTERVAL_SECONDS)
@@ -170,6 +187,25 @@ class StateSyncService:
             except Exception as exc:  # noqa: BLE001
                 self._log.error("state-sync cycle failed", error=str(exc))
 
+    async def _restore(self) -> None:
+        """Reload from disk everything this loop must not forget across a restart.
+
+        Both memories exist for the same reason and fail in opposite directions: without
+        the merged-PR set a restart re-applies the merge state to items that have since
+        moved ON; without the deploy watermark it re-baselines and swallows the deploy
+        that shipped while it was down.
+        """
+        if self._sync_repo is None:
+            return
+        with contextlib.suppress(Exception):
+            self._merged = await self._sync_repo.seen_merged_prs()
+            self._log.info("state-sync: restored merged-PR memory", count=len(self._merged))
+        with contextlib.suppress(Exception):
+            self._last_deploy_build = await self._sync_repo.get_marker(_DEPLOY_MARKER)
+            if self._last_deploy_build is not None:
+                self._log.info("state-sync: restored deploy watermark",
+                               build=self._last_deploy_build)
+
     async def _scan(self) -> None:
         c, cfg = self._c, self._config
         # A. merged PRs → transition the work item.
@@ -178,7 +214,8 @@ class StateSyncService:
             if not repo_id:
                 continue
             for pr in await c.ado.get_completed_pull_requests(repo_id):
-                await self._handle_merged_pr(pr)
+                await self._handle_merged_pr(repo_id, pr)
+        self._flush_skipped()
         # B. parent roll-up: sweep the parents of every tagged item.
         # Gated on the flat map OR any flow's own lines — an installation that configured
         # roll-up only per type must not find the whole sweep switched off.
@@ -212,16 +249,35 @@ class StateSyncService:
         builds = await c.ado.get_successful_builds(cfg.deploy_pipeline_id, branch)
         ids = [b.get("id") for b in builds if isinstance(b.get("id"), int)]
         if not ids:
+            # Once, then quiet. A deploy stage configured against the wrong branch or a
+            # pipeline that has never gone green looks identical to "nothing shipped
+            # today", and the items simply queue up in their merge state.
+            if not self._warned_no_builds:
+                self._warned_no_builds = True
+                self._log.info(
+                    "deploy stage found no successful build", branch=branch,
+                    pipeline=cfg.deploy_pipeline_id or "any",
+                    hint="check the deploy branch and pipeline id under Auto transitions",
+                )
             return
+        self._warned_no_builds = False
         newest = max(ids)
         if self._last_deploy_build is None:
-            self._last_deploy_build = newest  # baseline on first scan — don't transition old builds
+            # Baseline: a fresh install must not replay every old build. Persisted, so
+            # this happens ONCE in the life of the instance and not once per restart.
+            await self._remember_deploy(newest)
+            self._log.info("deploy watermark baselined", build=newest)
             return
         if newest <= self._last_deploy_build:
             return  # no new successful build since last check
-        self._last_deploy_build = newest
+        await self._remember_deploy(newest)
         tagged = await c.ado.get_all_tagged_work_items()
         awaiting = set(items_awaiting_deploy(tagged, cfg, self._cfg_for))
+        if not awaiting:
+            self._log.info(
+                "deploy succeeded, no item was awaiting it", build=newest,
+                hint="an item advances on deploy only while it sits in its merge state",
+            )
         for item in tagged:
             if item.id not in awaiting or not self._assignee_ok(item):
                 continue
@@ -243,6 +299,17 @@ class StateSyncService:
                     item.id, "<div><b>🚀 Deployed</b> — deploy pipeline succeeded.</div>"
                 )
             self._log.info("marked deployed", id=item.id, state=target, build=newest)
+
+    async def _remember_deploy(self, build_id: int) -> None:
+        """Move the deploy watermark, in memory and on disk.
+
+        Both writes matter: the in-memory one stops this process transitioning twice,
+        the persisted one stops the NEXT process baselining over a deploy it never saw.
+        """
+        self._last_deploy_build = build_id
+        if self._sync_repo is not None:
+            with contextlib.suppress(Exception):  # best-effort — never block the loop
+                await self._sync_repo.set_marker(_DEPLOY_MARKER, build_id)
 
     def _cfg_for(self, item: WorkItemInfo):
         """Config as the item's OWN project sees it.
@@ -269,19 +336,80 @@ class StateSyncService:
             item.assigned_to_email, item.assigned_to, self._config.auto_transition_assignee
         )
 
-    async def _handle_merged_pr(self, pr: dict) -> None:
+    def _skip(self, pr_id: int, source: str, why: str) -> None:
+        """Note that a merged PR was walked past, and why — once per PR.
+
+        A skip here is the whole failure mode: the PR is merged, the branch is gone,
+        and the card sits where it was. Every one of these returns used to be silent,
+        which is why "it merged and nothing moved" could be asked twice about two
+        different items and answered neither time.
+        """
+        if pr_id in self._skipped:
+            return
+        if len(self._skipped) > 500:  # a marker set, not storage
+            self._skipped.clear()
+        self._skipped.add(pr_id)
+        self._skipped_new.append((source.removeprefix("refs/heads/") or "?", why))
+
+    def _flush_skipped(self) -> None:
+        """One line per scan for the merged PRs that moved no card, not one per PR."""
+        if not self._skipped_new:
+            return
+        branches = [b for b, _ in self._skipped_new]
+        self._log.info(
+            "merged PRs that advanced no work item",
+            count=len(branches),
+            branches=branches[:6] + (["…"] if len(branches) > 6 else []),
+            reasons=sorted({why for _, why in self._skipped_new}),
+            hint="a merged PR only moves a card when its branch prefix is ours, a work "
+                 "item is linked to it, and that item carries a trigger tag",
+        )
+        self._skipped_new.clear()
+
+    async def _work_item_for(self, repo_id: str, pr_id: int, source: str) -> int | None:
+        """The work item this merged PR is about — ADO's link first, branch name second.
+
+        The link is the fact: someone attached it and ADO keeps it. The branch name is
+        only a convention, and one the autopilot cannot rely on here — the agent names
+        its own branches, a person may rename before merging, and a stacked or squashed
+        branch need not carry an id at all. Reading the name alone dropped every such
+        PR in silence, which is the state flow never firing on work that shipped.
+
+        Same order as the PR babysitter's ``_work_item_for``: the two must agree, or a
+        PR the bot talks on is a PR whose card it then refuses to move.
+        """
+        with contextlib.suppress(Exception):
+            linked = await self._c.ado.get_pull_request_work_items(repo_id, pr_id)
+            if linked:
+                return linked[0]
+        return parse_work_item_id(source)
+
+    async def _handle_merged_pr(self, repo_id: str, pr: dict) -> None:
         c, cfg = self._c, self._config
         pr_id = pr.get("pullRequestId")
         source = pr.get("sourceRefName", "")
         if pr_id is None or pr_id in self._merged:
             return
         if not is_bot_branch(source, tuple(cfg.bot_branch_prefixes)):
+            self._skip(pr_id, source, "branch prefix is not one of "
+                       + ", ".join(cfg.bot_branch_prefixes))
             return
-        work_item_id = parse_work_item_id(source)
+        work_item_id = await self._work_item_for(repo_id, pr_id, source)
         if work_item_id is None:
+            self._skip(pr_id, source, "no work item linked to the PR, and none in the "
+                       "branch name")
             return
         item = await c.ado.get_work_item(work_item_id)
-        if item is None or not self._has_trigger_tag(item) or not self._assignee_ok(item):
+        if item is None:
+            self._skip(pr_id, source, f"work item #{work_item_id} could not be read")
+            return
+        if not self._has_trigger_tag(item):
+            self._skip(pr_id, source, f"#{work_item_id} carries no trigger tag ("
+                       + ", ".join(cfg.effective_trigger_tags) + ")")
+            return
+        if not self._assignee_ok(item):
+            self._skip(pr_id, source,
+                       f"#{work_item_id} is not assigned to {cfg.auto_transition_assignee}")
             return
         # Never pull an item BACKWARD: if it's already at/after the merge state
         # (merged / deployed / done), just remember the PR and leave it alone. This
@@ -291,6 +419,16 @@ class StateSyncService:
             await self._remember(pr_id, work_item_id, item.state or "")
             return
         target = resolve_state(item_cfg, "on_merge", item.work_item_type)
+        if not target:
+            # Tag-only is a legitimate flow, but it looks identical from the board to a
+            # flow that is simply unconfigured — the item is marked done and never moves.
+            # Name the type, because the stage is set per type and the one that is blank
+            # is rarely the one being looked at.
+            self._log.info(
+                "merge sets no state for this type — tagging only", id=work_item_id,
+                pr=pr_id, type=item.work_item_type,
+                hint="set '🔀 PR merged' for this work-item type at /dashboard/flow",
+            )
         if cfg.dry_run:
             self._merged.add(pr_id)
             self._log.info("[DRY-RUN] would transition on merge", id=work_item_id, pr=pr_id,

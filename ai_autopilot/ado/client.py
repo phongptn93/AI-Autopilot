@@ -231,7 +231,9 @@ class AdoClient:
 
     async def get_pending_work_items(self) -> list[WorkItemInfo]:
         """Query work items tagged with any trigger tag in pending states."""
-        states = ", ".join(f"'{_wiql_lit(s)}'" for s in self._config.trigger_states) or "'New'"
+        states = ", ".join(
+            f"'{_wiql_lit(s)}'" for s in self._config.effective_trigger_states
+        ) or "'New'"
         wiql = (
             "SELECT [System.Id] FROM WorkItems "
             f"WHERE {self._candidate_clause()} "
@@ -264,7 +266,7 @@ class AdoClient:
         self._log.info(
             "ADO poll",
             tags=self._config.effective_trigger_tags,
-            states=self._config.trigger_states,
+            states=self._config.effective_trigger_states,
             projects=self._config.effective_ado_projects,
             matched=len(ids),
         )

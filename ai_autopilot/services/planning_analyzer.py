@@ -94,8 +94,9 @@ async def start_items(container, ids: list[int]) -> int:
     if cfg.dry_run or not ids:
         return 0
     trigger = cfg.trigger_tag
-    start_state = cfg.planning_start_state or (cfg.trigger_states[0] if cfg.trigger_states else "")
-    trigger_states = {s.strip().lower() for s in cfg.trigger_states}
+    active_states = cfg.effective_trigger_states
+    start_state = cfg.planning_start_state or (active_states[0] if active_states else "")
+    trigger_states = {s.strip().lower() for s in active_states}
     started = 0
     for iid in ids:
         item = await c.ado.get_work_item(iid)

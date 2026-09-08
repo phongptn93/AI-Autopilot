@@ -22,7 +22,10 @@ from ai_autopilot.execution.pr_scorer import RunScore, ScoreInput, score_badge_h
 from ai_autopilot.execution.sdlc_plan import (
     handoff_state,
     handoff_tag,
+    profile_for_state,
+    profile_stages,
     resolve_profile_name,
+    working_state_for,
 )
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
@@ -99,6 +102,11 @@ class AdoPollerService:
         # Interactive mode: live Remote-Control sessions awaiting their result.json.
         self._live: dict[int, int] = {}  # work_item_id → execution record id
         self._live_dirs: dict[int, str] = {}  # work_item_id → run dir (worktree scratch)
+        # work_item_id → the role this session was briefed for. Remembered rather than
+        # re-derived: dispatch moves the item to the stage's WORKING state, so by the
+        # time the session finishes its queue state is gone and the state can no
+        # longer say which role just ran.
+        self._live_profiles: dict[int, str] = {}
         # Dependency scheduling: ids we've already told the human are deferred, so we
         # comment "waiting for #X" once per episode rather than every poll cycle.
         self._deferred_notified: set[int] = set()
@@ -457,7 +465,7 @@ class AdoPollerService:
                 return tag
         return None
 
-    async def _apply_outcome(self, item: WorkItemInfo, outcome: str) -> None:
+    async def _apply_outcome(self, item: WorkItemInfo, outcome: str) -> bool:
         """Apply the configured ADO tag + state for a pipeline outcome — clearing any other
         outcome tag first so the board never shows a stale one (see ``apply_outcome``).
         Applies in every execution mode; blank tag/state or ``dry_run`` → skipped.
@@ -469,11 +477,14 @@ class AdoPollerService:
         Resolved against the item's OWN project: state names come from that project's
         process, so on an instance serving two projects the root vocabulary would be
         wrong for one of them (see ``Settings.scoped_for_project``).
+
+        Returns False when ADO refused the state — the item is still tagged (that tag is
+        what stops a second run) but it has NOT moved, so the board shows it where it was.
         """
-        await apply_outcome(
+        return await apply_outcome(
             self._c.ado,
             self._config.scoped_for_project(item.project),
-            item.id, outcome, item.work_item_type,
+            item.id, outcome, item.work_item_type, log=self._log,
         )
 
     async def _reconcile_reopened(self) -> None:
@@ -504,7 +515,7 @@ class AdoPollerService:
         for handoff in (cfg.board_review_state, cfg.board_deploy_state,
                         getattr(cfg, "board_testing_state", None)):
             output |= handoff_states(handoff)
-        reopen_states = {s.lower() for s in cfg.trigger_states} - output
+        reopen_states = {s.lower() for s in cfg.effective_trigger_states} - output
         skip_tags = {t.lower() for t in (
             cfg.processed_tag, cfg.review_tag, cfg.escalation_tag, cfg.failed_tag,
         ) if t}
@@ -938,13 +949,21 @@ class AdoPollerService:
             "sdlc finished", id=item.id, status=status, duration=round(result.duration_seconds, 1)
         )
 
-    async def _apply_sdlc_handoff(self, item: WorkItemInfo, result: ExecutionResult) -> None:
-        """On a successful SDLC run, mark the hand-off for the next role: the
-        profile's ADO state and/or its tag (unless a draft PR awaits review first)."""
+    async def _apply_sdlc_handoff(
+        self, item: WorkItemInfo, result: ExecutionResult, profile: str = ""
+    ) -> None:
+        """On a successful run, mark the hand-off for the next role: the profile's ADO
+        state and/or its tag (unless a draft PR awaits review first).
+
+        ``profile`` is passed when the caller already knows which role ran; only fall
+        back to resolving it when it does not.
+        """
         cfg = self._config
         if cfg.dry_run or not result.success or result.needs_human:
             return
-        name = resolve_profile_name(item.tags, item.work_item_type, cfg)
+        name = profile or resolve_profile_name(
+            item.tags, item.work_item_type, cfg, state=item.state or ""
+        )
         state = handoff_state(name, cfg)
         tag = handoff_tag(name, cfg)
         if not state and not tag:
@@ -955,19 +974,37 @@ class AdoPollerService:
             self._log.info("sdlc handoff held (draft PR)", id=item.id,
                            would_be=state or tag)
             return
+        # State FIRST, and its result is read: a hand-off state that does not exist on
+        # this work-item type is refused by ADO, and tagging the next role's lane over a
+        # state that never moved hands the item on in name only — the lane claims it,
+        # the board still shows it where it was, and the role it was handed to is looking
+        # at a column it is not in.
+        if state and not await self._c.ado.update_state(item.id, state):
+            self._log.error(
+                "sdlc handoff state refused — item not handed on", id=item.id,
+                profile=name, state=state, type=item.work_item_type,
+                hint=f"'{state}' must exist on work-item type '{item.work_item_type}'",
+            )
+            return
         if tag:
             # The tag is what a board lane claims, so the next role sees the item in
             # its own queue rather than having to know which state means "mine".
             await self._c.ado.add_tag(item.id, tag)
-        if state:
-            await self._c.ado.update_state(item.id, state)
         self._log.info("sdlc handoff", id=item.id, profile=name, state=state, tag=tag)
 
     async def _dispatch_interactive(self, item: WorkItemInfo) -> None:
         """Launch a Remote-Control session for the item; finalise later from its result."""
         c, cfg = self._c, self._config
+        # Which role is this? On a central machine every role runs in one process, so
+        # it cannot be a property of the machine, and it is not a property of the
+        # work-item type either (a Bug is a Bug at every step). Where the item STANDS
+        # is the only thing that records it — so the ADO state picks the profile, and
+        # the session is briefed on that role's steps alone.
+        # Unwired install → no profile → the whole-item brief it has always had.
+        profile = profile_for_state(item.state or "", cfg)
+        stages = profile_stages(profile, cfg) if profile else None
         launched, session, run_dir = await c.executor.dispatch_interactive(
-            item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft
+            item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft, stages=stages
         )
         if not launched:
             await self._handle_agent_result(
@@ -982,10 +1019,18 @@ class AdoPollerService:
             item.id, PipelineState.IN_PROGRESS, title=item.title, detail=f"live session: {session}"
         )
         await self._apply_outcome(item, "in_progress")
+        # Two roles working at once on one machine both reading "Active" is a board
+        # that cannot say who is holding the item. A wired stage names its own
+        # working state ("In Testing"), which is applied over the global one.
+        working = working_state_for(profile, cfg) if profile else ""
+        if working and not cfg.dry_run:
+            await c.ado.update_state(item.id, working)
         record_id = await c.execution_repo.start_execution(
             item, f"interactive:{session}", trigger_tag=self._matched_tag(item)
         )
         self._live[item.id] = record_id
+        if profile:
+            self._live_profiles[item.id] = profile
         await c.ado.add_comment(
             item.id,
             "<div><b>🎮 Live session started</b><br/>Remote Control enabled — open claude.ai "
@@ -996,7 +1041,11 @@ class AdoPollerService:
         # "completed" card arrived with no "started" card before it. `post_comment=False`
         # because the comment right above already says it, with the session id.
         await c.notifier.notify_started(item, f"interactive:{session}", post_comment=False)
-        self._log.info("interactive session dispatched", id=item.id, session=session)
+        self._log.info(
+            "interactive session dispatched", id=item.id, session=session,
+            profile=profile or "(whole item)",
+            stages=[st.name for st in stages] if stages else [],
+        )
 
     async def _finalize_live_sessions(self) -> None:
         """Finalise interactive sessions whose result.json has appeared."""
@@ -1006,6 +1055,7 @@ class AdoPollerService:
             item = await c.ado.get_work_item(item_id)
             if item is None:
                 self._live.pop(item_id, None)
+                self._live_profiles.pop(item_id, None)
                 # The work item is gone — nothing can reuse this session any more.
                 await c.executor.close_interactive(run_dir, item_id)
                 await c.executor.release_scratch(self._live_dirs.pop(item_id, None))
@@ -1019,6 +1069,11 @@ class AdoPollerService:
                 metrics.record_cost(result.cost_tokens)
             await self._remove_live_tag(item_id)
             await self._handle_agent_result(item, result)
+            # Hand on to the next role. _process_sdlc did this for the headless engine
+            # only, so once a role's stages could run in a STEERED session the relay
+            # stopped one step short: the work was done and the item sat in this
+            # role's state, where the next role's board never looks.
+            await self._apply_sdlc_handoff(item, result, self._live_profiles.pop(item_id, ""))
             self._processed[item_id] = datetime.now(UTC)
             self._live.pop(item_id, None)
             closed = await self._close_live_session(item_id, run_dir)

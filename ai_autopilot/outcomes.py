@@ -57,8 +57,9 @@ def all_outcome_tags(cfg: object) -> set[str]:
 
 
 async def apply_outcome(
-    ado: object, cfg: object, work_item_id: int, outcome: str, work_item_type: str = ""
-) -> None:
+    ado: object, cfg: object, work_item_id: int, outcome: str, work_item_type: str = "",
+    log: object = None,
+) -> bool:
     """Apply an outcome's tag + ADO state to a work item. Shared by the poller and the PR
     babysitter. Blank tag/state or ``dry_run`` → skipped for that part.
 
@@ -69,13 +70,34 @@ async def apply_outcome(
     shows a stale one (e.g. ``autopilot-done`` left on after moving back to review). A
     TAGLESS outcome (e.g. ``in_progress``) does NOT clear tags — otherwise it would strip
     the item's skip tag and the main poll would re-grab and reprocess it, opening duplicate
-    PRs."""
+    PRs.
+
+    **The state is written FIRST, and its result is returned.** ADO rejects a state that
+    does not exist on the item's TYPE — the failure ``flows.py`` exists to prevent — and
+    that rejection used to be discarded here: the item was tagged done while its state
+    never moved, so the card sat in its old column wearing a done tag and nobody could
+    tell the difference between "the flow is wrong for Bug" and "the autopilot is stuck".
+
+    The tag is applied even when the state was refused, deliberately. It is the skip
+    tag: dropping it would send the item back through the poller and open a second PR
+    for work that is already finished, which is a far more expensive way to be wrong
+    than a stale tag. The caller gets ``False`` and the log names the state and type.
+    """
     if cfg.dry_run:
-        return
+        return True
     tag, state = outcome_policy(cfg, outcome, work_item_type)
+    moved = True
+    if state:
+        moved = bool(await ado.update_state(work_item_id, state))
+        if not moved and log is not None:
+            log.error(
+                "outcome state refused — item keeps its old state",
+                id=work_item_id, outcome=outcome, state=state, type=work_item_type,
+                hint=f"'{state}' must exist on work-item type '{work_item_type}' — set "
+                     "this stage per type at /dashboard/flow",
+            )
     if tag:
         for other in all_outcome_tags(cfg) - {tag}:
             await ado.remove_tag(work_item_id, other)
         await ado.add_tag(work_item_id, tag)
-    if state:
-        await ado.update_state(work_item_id, state)
+    return moved

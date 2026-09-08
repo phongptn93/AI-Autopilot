@@ -73,7 +73,7 @@ def check_ado(config: Settings) -> list[Finding]:
 
 
 def check_trigger(config: Settings) -> list[Finding]:
-    if not config.effective_trigger_tags and not config.trigger_states:
+    if not config.effective_trigger_tags and not config.effective_trigger_states:
         return [Finding(
             ERROR, "Nothing can ever be picked up",
             "Both the trigger tag(s) and trigger states are empty, so no work item "
@@ -95,7 +95,9 @@ def check_trigger_state_roles(config: Settings) -> list[Finding]:
     Offline and cheap, because the damage is silent: the board looks configured and
     the rework shows up as the bot arguing with QC.
     """
-    triggers = {s.strip().lower(): s.strip() for s in config.trigger_states if s.strip()}
+    triggers = {
+        s.strip().lower(): s.strip() for s in config.effective_trigger_states if s.strip()
+    }
     if not triggers:
         return []
     roles: dict[str, list[str]] = {}
@@ -121,6 +123,50 @@ def check_trigger_state_roles(config: Settings) -> list[Finding]:
         )
         for name, also in sorted(roles.items())
     ]
+
+
+def check_deploy_stage(config: Settings) -> list[Finding]:
+    """The 🚀 Deployed stage only fires under conditions nothing on the page states.
+
+    Three of them, each of which leaves the same symptom — "it merged and deployed and
+    the card never moved" — and none of which shows up as an error anywhere:
+
+    * it advances only items sitting in their OWN merge state, so a flow with a deploy
+      state but no merge state can never have a candidate;
+    * with no pipeline id, ANY green build on the branch counts, PR validation included,
+      so items are marked deployed by a build that shipped nothing;
+    * the branch it watches is ``deploy_branch``, falling back to ``base_branch`` — a
+      release branch that is not where merges land means it watches an empty stream.
+    """
+    if not config.auto_transition_enabled or not flows_mod.stage_configured(
+        config, "on_deploy"
+    ):
+        return []
+    out: list[Finding] = []
+    if not flows_mod.stage_configured(config, "on_merge"):
+        out.append(Finding(
+            WARN, "Deploy stage is set but the merge stage is not",
+            "An item is advanced by a deploy only while it sits in its merge state, so "
+            "with no merge state configured nothing is ever a candidate — the deploy "
+            "runs, succeeds, and moves no card.",
+            "Set '🔀 PR merged' as well, at /dashboard/flow.",
+        ))
+    if not config.deploy_pipeline_id:
+        out.append(Finding(
+            WARN, "Deploy stage watches every pipeline on the branch",
+            "deploy_pipeline_id is unset, so any successful build counts — a PR "
+            "validation or nightly build marks items deployed that nothing shipped.",
+            "Set the deploy pipeline's id under Auto transitions.",
+        ))
+    branch = (config.deploy_branch or config.base_branch or "").strip()
+    if not branch:
+        out.append(Finding(
+            WARN, "Deploy stage has no branch to watch",
+            "Both deploy_branch and base_branch are blank, so the build query matches "
+            "nothing and the stage is silently inert.",
+            "Set the branch your deploy pipeline builds.",
+        ))
+    return out or [Finding(OK, "Deploy stage is configured")]
 
 
 def check_workspace(config: Settings) -> list[Finding]:
@@ -879,7 +925,7 @@ def check_board_processes(config: Settings) -> list[Finding]:
 
 CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_projects,
-    check_workspace, check_workspaces,
+    check_deploy_stage, check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,
     check_teams_bot,

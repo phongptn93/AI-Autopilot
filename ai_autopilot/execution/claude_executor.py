@@ -930,7 +930,8 @@ class ClaudeExecutor:
 
     @_scoped
     async def dispatch_interactive(
-        self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool
+        self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool,
+        stages: list | None = None,
     ) -> tuple[bool, str, str]:
         """Launch a real, Remote-Control-enabled Claude Code session for this item.
 
@@ -960,7 +961,9 @@ class ClaudeExecutor:
 
         # Write the full brief to a file and seed the session with a short prompt
         # (avoids passing a long, multi-line prompt through the shell).
-        brief = self._build_brief(item, repos, autonomy=autonomy, draft_pr=draft_pr)
+        brief = self._build_brief(
+            item, repos, autonomy=autonomy, draft_pr=draft_pr, stages=stages
+        )
         brief_rel = f".autopilot/runs/{item.id}.brief.md"
         brief_path = Path(run_dir) / brief_rel
         brief_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1283,10 +1286,19 @@ class ClaudeExecutor:
         return ExecutionResult.fail(item.id, "agent", f"Agent did not complete: {reason}")
 
     def _build_brief(
-        self, item: WorkItemInfo, repos: list[str], *, autonomy: str, draft_pr: bool
+        self, item: WorkItemInfo, repos: list[str], *, autonomy: str, draft_pr: bool,
+        stages: list | None = None,
     ) -> str:
         """High-level brief: let Claude reason, pick repo(s) + skill(s), implement,
-        open the PR(s), and report back via the structured result file."""
+        open the PR(s), and report back via the structured result file.
+
+        ``stages`` scopes the run to one role's steps. The closed-loop SDLC engine is
+        headless-only and takes precedence over interactive mode, so turning it on to
+        get per-role runs costs the Remote-Control session a human steers — the
+        opposite trade for a team that works BY steering. Naming the stages in the
+        brief keeps the session AND runs only that role's work: the person watching
+        is the gate, so the engine's automatic one is not what they are missing.
+        """
         result_rel = f".autopilot/runs/{item.id}.json"
         descs = parse_repo_descriptions(self._config.repo_descriptions)
         if repos:
@@ -1374,6 +1386,20 @@ class ClaudeExecutor:
             )
             if past:
                 lines.append(past)
+        if stages:
+            steps = "\n".join(
+                f"{i}. **{st.name}**" + (f" ({st.role})" if st.role else "") + f" - {st.goal}"
+                for i, st in enumerate(stages, 1)
+            )
+            names = ", ".join(st.name for st in stages)
+            lines.append(
+                "\n## Scope of THIS run - one role's steps\n"
+                "The relay hands this item from role to role, and right now it is at "
+                f"yours. Do exactly these steps, in order:\n\n{steps}\n\n"
+                f"Do NOT run ahead into work outside [{names}] - a later role owns that "
+                "and will pick the item up from its own board. If a step is already "
+                "done, say so and move to the next rather than redoing it."
+            )
         lines += [
             "",
             "# Repositories you may edit (subfolders of this workspace)",

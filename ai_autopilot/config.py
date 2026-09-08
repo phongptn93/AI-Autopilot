@@ -659,6 +659,47 @@ class SdlcStage(BaseModel):
     gate: str = "hard"             # soft|hard
     produces_pr: bool = False      # this stage opens the PR
 
+    # ── Where this stage lives on the ADO board (see SdlcStageWiring) ──
+    # Inline here for a stage a machine defines itself; for a BUILT-IN stage, wire it
+    # through ``sdlc_stage_wiring`` instead of restating goal/gate just to add a state.
+    queue_state: str = ""
+    working_state: str = ""
+    entry_tag: str = ""
+    auto: bool = False
+
+
+class SdlcStageWiring(BaseModel):
+    """Where one SDLC stage lives on the ADO board.
+
+    The stage catalog says what a stage DOES; this says where it sits. They were one
+    concept short of each other: every ADO-facing setting was keyed by *profile* and
+    only described the way OUT (``sdlc_profile_states``), so there was nowhere to
+    write the two things an operator most wants to say —
+
+        "the test stage waits in Ready for Testing, and shows In Testing while it runs"
+
+    — and a central machine running several roles had no per-item way to tell which
+    role it was even doing. Hence the wiring hangs off the stage, which is the unit
+    of work, rather than off the profile, which is just an ordered list of them.
+
+    ``auto`` is the autonomy dial, and it sits HERE on purpose: a hand-off state that
+    starts work by itself is the exact mistake that reworked finished items (#8526),
+    and it happened because that decision lived on a different settings page from the
+    state it applied to. Written next to the queue state, it cannot be made blind.
+    """
+
+    queue_state: str = ""      # ADO state an item waits in FOR this stage
+    working_state: str = ""    # state while it runs (blank → global state_in_progress)
+    entry_tag: str = ""        # transient "run this stage now" tag; consumed and removed
+    auto: bool = False         # may the poller start it with nobody pressing Run?
+
+    # NOTE: there is deliberately no ``done_state`` here. Where a profile hands off is
+    # a property of the PROFILE, not of a stage: ``dev`` and ``full`` both end at the
+    # ``pr`` stage but hand to different roles, so a state written on the shared stage
+    # would have to mean two things. ``sdlc_profile_states`` keys it correctly.
+    # The entry side has no such problem — only a profile's FIRST stage is consulted,
+    # and each profile has its own.
+
 
 class ScheduledLoop(BaseModel):
     """A recurring autonomous loop (loop-engineering pattern).
@@ -1297,6 +1338,11 @@ class Settings(BaseSettings):
     sdlc_profile_tag_prefix: str = "sdlc:"
     # Map work-item type → profile, e.g. {"Bug": "dev", "User Story": "full"}.
     sdlc_type_profiles: dict[str, str] = Field(default_factory=dict)
+    # Board wiring per stage name, overlaid on the built-in catalog so adding a queue
+    # state to "test" does not mean restating its goal and gate. See SdlcStageWiring.
+    # E.g. {"implement": {"queue_state": "Ready for Development", "auto": true},
+    #       "test": {"queue_state": "Ready for Testing", "working_state": "In Testing"}}
+    sdlc_stage_wiring: dict[str, SdlcStageWiring] = Field(default_factory=dict)
     # Extra / overriding profiles merged over the built-ins (name → ordered stage names).
     sdlc_profiles: dict[str, list[str]] = Field(default_factory=dict)
     # Handoff: profile name → ADO state to set when its stages complete (the next
@@ -1656,6 +1702,45 @@ class Settings(BaseSettings):
         if not updates:
             return self
         return self.model_copy(update=updates)
+
+    def _stage_wiring(self) -> list[tuple[str, bool]]:
+        """``(queue_state, auto)`` from every wired stage — inline and overlay."""
+        out: list[tuple[str, bool]] = []
+        for stage in self.sdlc_stages or []:
+            qs = (getattr(stage, "queue_state", "") or "").strip()
+            if qs:
+                out.append((qs, bool(getattr(stage, "auto", False))))
+        for wiring in (self.sdlc_stage_wiring or {}).values():
+            qs = (wiring.queue_state or "").strip()
+            if qs:
+                out.append((qs, bool(wiring.auto)))
+        return out
+
+    @property
+    def effective_trigger_states(self) -> list[str]:
+        """States the poller may pick up from — ``trigger_states`` as amended by the
+        stage wiring.
+
+        A wired stage states its own autonomy, and that statement wins: ``auto`` adds
+        its queue state, and a stage explicitly NOT auto removes it. That is the whole
+        point of moving the dial next to the state it governs — the alternative is two
+        settings pages describing one state and neither showing the other, which is
+        how a QC hand-off became a trigger and reworked finished items (#8526).
+
+        Nothing wired → this is exactly ``trigger_states``, so an untouched install
+        behaves as before.
+        """
+        wiring = self._stage_wiring()
+        if not wiring:
+            return list(self.trigger_states)
+        waits = {qs.lower() for qs, auto in wiring if not auto}
+        out = [s for s in self.trigger_states if (s or "").strip().lower() not in waits]
+        seen = {(s or "").strip().lower() for s in out}
+        for qs, auto in wiring:
+            if auto and qs.lower() not in seen:
+                out.append(qs)
+                seen.add(qs.lower())
+        return out
 
     @property
     def effective_trigger_tags(self) -> list[str]:

@@ -91,11 +91,24 @@ def _profile_map(cfg: Settings) -> dict[str, list[str]]:
 
 
 def _catalog(cfg: Settings) -> dict[str, SdlcStage]:
-    """Built-in catalog plus any custom stages the machine defines in sdlc_stages
-    (so a profile may reference a machine-specific stage by name)."""
+    """Built-in catalog, custom stages, then the board wiring overlaid on both.
+
+    The overlay exists so that saying "test waits in Ready for Testing" does not
+    require restating the stage's goal and gate just to reach the one field you
+    wanted. Wiring is the operator's half of a stage; the rest ships with the tool.
+    """
     cat = dict(CATALOG)
     for stage in cfg.sdlc_stages or []:
         cat[stage.name] = stage
+    for name, wiring in (cfg.sdlc_stage_wiring or {}).items():
+        base = cat.get(name)
+        if base is None:
+            _log.warning("sdlc: wiring for an unknown stage — ignored", stage=name)
+            continue
+        cat[name] = base.model_copy(update={
+            f: getattr(wiring, f)
+            for f in ("queue_state", "working_state", "entry_tag", "auto")
+        })
     return cat
 
 
@@ -121,12 +134,78 @@ def profile_stages(name: str, cfg: Settings) -> list[SdlcStage]:
     return stages
 
 
-def resolve_profile_name(tags: list[str], work_item_type: str, cfg: Settings) -> str:
+def entry_stage(profile_name: str, cfg: Settings) -> SdlcStage | None:
+    """The stage a profile STARTS at — the one whose queue state is its front door."""
+    stages = profile_stages(profile_name, cfg)
+    return stages[0] if stages else None
+
+
+def profile_for_state(state: str, cfg: Settings) -> str:
+    """The profile an item in this ADO state should run, or "" if none claims it.
+
+    Matches a profile's ENTRY stage, not any stage it contains: "Ready for Testing"
+    is where QC's work begins, and `full` merely passes through `test` on its way —
+    so only `qc` may claim that door. Without this a state would name several
+    profiles and the choice would come down to iteration order.
+
+    This is the piece a central machine cannot work without. Role is not a property
+    of the machine (one box runs them all) nor of the work-item type (a Bug is a Bug
+    at every step); it is where the item stands right now, which only the ADO state
+    records.
+    """
+    wanted = (state or "").strip().lower()
+    if not wanted:
+        return ""
+    for name in sorted(_profile_map(cfg)):
+        stage = entry_stage(name, cfg)
+        if stage is not None and (stage.queue_state or "").strip().lower() == wanted:
+            return name
+    return ""
+
+
+def auto_states(cfg: Settings) -> list[str]:
+    """Queue states whose stage is marked ``auto`` — the hand-offs that self-start."""
+    out: list[str] = []
+    for stage in _catalog(cfg).values():
+        qs = (stage.queue_state or "").strip()
+        if qs and stage.auto and qs not in out:
+            out.append(qs)
+    return out
+
+
+def waiting_states(cfg: Settings) -> list[str]:
+    """Queue states explicitly marked NOT auto — they wait for a person to press Run."""
+    out: list[str] = []
+    for stage in _catalog(cfg).values():
+        qs = (stage.queue_state or "").strip()
+        if qs and not stage.auto and qs not in out:
+            out.append(qs)
+    return out
+
+
+def working_state_for(profile_name: str, cfg: Settings) -> str:
+    """ADO state to show while this profile runs. Blank → the global one.
+
+    Two roles running at once on one machine both reading "Active" is a board that
+    cannot say who is holding the work — which is the whole reason a QC run should
+    read "In Testing".
+    """
+    stage = entry_stage(profile_name, cfg)
+    return (stage.working_state or "").strip() if stage else ""
+
+
+def resolve_profile_name(tags: list[str], work_item_type: str, cfg: Settings,
+                         state: str = "") -> str:
     """The profile NAME chosen for an item (used for handoff-state lookup).
 
     Precedence: per-item ``sdlc:<name>`` tag override > per-machine explicit
-    ``sdlc_stages`` (→ ``"custom"``) > per-machine ``sdlc_profile`` > work-item-type
-    map > ``sdlc_default_profile``.
+    ``sdlc_stages`` (→ ``"custom"``) > per-machine ``sdlc_profile`` > the item's ADO
+    ``state`` > work-item-type map > ``sdlc_default_profile``.
+
+    State sits above the type map because it is the more specific fact: a Bug is a
+    Bug at every step of the relay, but the state says which step it is ON. It sits
+    below the machine pin and the explicit tag because those are somebody stating an
+    intention, and an intention outranks an inference.
     """
     prefix = (cfg.sdlc_profile_tag_prefix or "sdlc:").lower()
     profiles = _profile_map(cfg)
@@ -140,6 +219,9 @@ def resolve_profile_name(tags: list[str], work_item_type: str, cfg: Settings) ->
         return "custom"
     if cfg.sdlc_profile:
         return cfg.sdlc_profile
+    by_state = profile_for_state(state, cfg)
+    if by_state:
+        return by_state
     mapped = (cfg.sdlc_type_profiles or {}).get(work_item_type)
     if mapped:
         return mapped
@@ -194,8 +276,12 @@ def decide(stage: SdlcStage, blocking: bool, iterations: int, budget: int) -> st
 
 
 def handoff_state(profile_name: str, cfg: Settings) -> str:
-    """ADO state to set when ``profile_name`` completes — what the next machine's
-    ``trigger_states`` picks up. Falls back to ``resolved_state`` then blank."""
+    """ADO state to set when ``profile_name`` completes — the next role's front door.
+
+    Keyed by profile, not by stage: ``dev`` and ``full`` both finish at the ``pr``
+    stage yet hand to different roles, so this cannot live on the stage the way the
+    entry wiring does. Falls back to ``resolved_state`` then blank.
+    """
     return (cfg.sdlc_profile_states or {}).get(profile_name) or cfg.resolved_state or ""
 
 
@@ -209,15 +295,33 @@ def handoff_tag(profile_name: str, cfg: Settings) -> str:
     return (cfg.sdlc_profile_tags or {}).get(profile_name, "").strip()
 
 
+def handoff_collisions(cfg: Settings) -> list[tuple[str, str]]:
+    """``(profile, state)`` pairs whose hand-off lands back in a trigger state.
+
+    Every profile the machine could run, not just one. The old check read only the
+    pinned/default profile, which was right when a machine ran a single role and
+    handed off to the NEXT machine. A central machine runs them all, so checking one
+    profile leaves the other hand-offs unguarded — the same blind spot that let a
+    hand-off state be used as a trigger and rework finished work.
+    """
+    if cfg.sdlc_profile:
+        names = [cfg.sdlc_profile]
+    else:
+        names = sorted(set(_profile_map(cfg)) | {cfg.sdlc_default_profile or "full"})
+    triggers = {s.strip().lower() for s in (cfg.trigger_states or []) if s.strip()}
+    out: list[tuple[str, str]] = []
+    for name in names:
+        hs = handoff_state(name, cfg).strip()
+        if hs and hs.lower() in triggers:
+            out.append((name, hs))
+    return out
+
+
 def handoff_collides(cfg: Settings) -> bool:
-    """True if THIS machine's own handoff state is also one of its ``trigger_states``
-    — which would make it re-pick items it just finished (an infinite loop). The
-    container asserts this is False at startup."""
-    name = cfg.sdlc_profile or cfg.sdlc_default_profile or "full"
-    hs = handoff_state(name, cfg)
-    if not hs:
-        return False
-    return hs in set(cfg.trigger_states or [])
+    """True if any profile's hand-off state is also one of this machine's
+    ``trigger_states`` — it would re-pick items it just finished (an infinite loop).
+    The container asserts this is False at startup."""
+    return bool(handoff_collisions(cfg))
 
 
 @dataclass

@@ -34,6 +34,10 @@ class _FakeAdo:
         self.children: dict[int, list[WorkItemInfo]] = {}
         self.tagged: list[WorkItemInfo] = []
         self.builds: list[dict] = []
+        # PR id → linked work item ids, as ADO holds them. The merge transition asks
+        # ADO first and only falls back to the branch name, so a branch with no id in
+        # it still finds its item.
+        self.pr_links: dict[int, list[int]] = {}
         # States ADO should refuse (None = accept everything), so a test can reproduce
         # "this state doesn't exist on that work-item type" without a live project.
         self.reject_state: set[str] | None = None
@@ -46,6 +50,9 @@ class _FakeAdo:
 
     async def get_completed_pull_requests(self, repo_id):
         return self.completed
+
+    async def get_pull_request_work_items(self, repo_id, pr_id):
+        return self.pr_links.get(pr_id, [])
 
     async def get_work_item(self, wid):
         return self.items.get(wid)
@@ -405,3 +412,125 @@ async def test_rollup_uses_the_parent_flow_map():
 
     assert (100, "Implement Done") in c.ado.states
     assert not any(state == "Wrong" for _, state in c.ado.states)
+
+
+async def test_merge_finds_the_item_through_the_pr_link_when_the_branch_has_no_id():
+    """The defect: a merged PR moved a card only when its branch happened to be named
+    ``<id>-slug``. Everything else — a renamed branch, a squashed or stacked one, a
+    branch the agent named itself — was dropped in silence, so work that shipped sat
+    on the board in its old column with nothing in the log to explain it."""
+    svc, c = _svc_shared(on_merge_state="Ready to Deploy")
+    c.ado.completed = [
+        {"pullRequestId": 7, "sourceRefName": "refs/heads/feature/be/allotment-rework"}
+    ]
+    c.ado.pr_links[7] = [8962]
+    c.ado.items[8962] = _wi(8962, state="Active", tags=["autopilot"])
+    await svc._scan()
+    assert (8962, "Ready to Deploy") in c.ado.states
+
+
+async def test_the_pr_link_wins_over_a_number_in_the_branch_name():
+    """"fix/500-error-handling" is not work item 500. The link is the fact."""
+    svc, c = _svc_shared(on_merge_state="Ready to Deploy")
+    c.ado.completed = [{"pullRequestId": 7, "sourceRefName": "refs/heads/fix/500-error-handling"}]
+    c.ado.pr_links[7] = [8962]
+    c.ado.items[8962] = _wi(8962, state="Active", tags=["autopilot"])
+    c.ado.items[500] = _wi(500, state="Active", tags=["autopilot"])
+    await svc._scan()
+    assert (8962, "Ready to Deploy") in c.ado.states
+    assert not any(wid == 500 for wid, _ in c.ado.states)
+
+
+async def test_a_merged_pr_that_moves_nothing_says_why_once():
+    """Each skip used to return in silence, so the question this answers — "it merged,
+    why did the card not move?" — could only be settled by reading the source."""
+    svc, c = _svc_shared(on_merge_state="Ready to Deploy")
+    c.ado.completed = [
+        {"pullRequestId": 7, "sourceRefName": "refs/heads/release/hand-made"},
+        {"pullRequestId": 8, "sourceRefName": "refs/heads/feature/be/42-thing"},
+    ]
+    c.ado.items[42] = _wi(42, state="Active", tags=["not-ours"])
+    await svc._scan()
+    # The scan reports them as ONE line and clears the buffer, so the marker set is
+    # what proves both were explained — and a second scan stays quiet.
+    assert svc._skipped == {7, 8}
+    assert svc._skipped_new == []
+    await svc._scan()
+    assert svc._skipped_new == []
+
+
+async def test_a_tag_only_merge_flow_still_tags_but_moves_nothing():
+    """A flow with no merge state tags the item and leaves it where it is. That is
+    legitimate, and indistinguishable on the board from a stage nobody configured."""
+    svc, c = _svc_shared(on_merge_state="")
+    c.ado.completed = [{"pullRequestId": 5, "sourceRefName": "refs/heads/feature/be/42-thing"}]
+    c.ado.items[42] = _wi(42, state="Active", tags=["autopilot"])
+    await svc._scan()
+    assert c.ado.states == []
+    assert (42, c.config.processed_tag) in c.ado.tags
+
+
+class _Marker:
+    """A sync_repo that persists, so a restart can be simulated by building a second
+    service over the same store."""
+
+    def __init__(self):
+        self.markers: dict[str, int] = {}
+
+    async def seen_merged_prs(self):
+        return set()
+
+    async def mark_merged_pr(self, pr_id, work_item_id, state):
+        pass
+
+    async def prune_merged_prs(self, keep=5000):
+        return 0
+
+    async def get_marker(self, name):
+        return self.markers.get(name)
+
+    async def set_marker(self, name, value):
+        self.markers[name] = value
+
+
+def _svc_persisted(store, **cfg_over):
+    cfg = Settings(auto_transition_enabled=True, trigger_tag="autopilot", **cfg_over)
+    c = SimpleNamespace(config=cfg, ado=_FakeAdo(), sync_repo=store)
+    return StateSyncService(c), c
+
+
+async def test_a_restart_does_not_swallow_the_deploy_it_missed():
+    """The defect: the deploy watermark lived only in memory, so the first successful
+    build after every restart was read as the baseline and transitioned nothing. Deploy
+    the app, restart the autopilot, and the items that shipped stay in their merge
+    state — which is "đã deploy hết rồi nhưng vẫn không tự động kéo"."""
+    store = _Marker()
+    svc, c = _svc_persisted(store, on_merge_state="Ready to Deploy",
+                            on_deploy_state="Deployed", base_branch="main")
+    c.ado.builds = [{"id": 100}]
+    await svc._restore()
+    await svc._scan()          # first run ever → baseline, correctly quiet
+    assert store.markers["last_deploy_build"] == 100
+
+    # Restart: a NEW service over the same store, and a newer build landed meanwhile.
+    svc2, c2 = _svc_persisted(store, on_merge_state="Ready to Deploy",
+                              on_deploy_state="Deployed", base_branch="main")
+    c2.ado.builds = [{"id": 101}]
+    c2.ado.tagged = [_wi(8962, state="Ready to Deploy", tags=["autopilot"])]
+    await svc2._restore()
+    await svc2._scan()
+    assert (8962, "Deployed") in c2.ado.states
+    assert store.markers["last_deploy_build"] == 101
+
+
+async def test_the_baseline_is_still_taken_once_on_a_fresh_install():
+    """Persisting the watermark must not turn a first run into a replay of every old
+    build — the baseline is what stops that, it just happens once instead of per boot."""
+    store = _Marker()
+    svc, c = _svc_persisted(store, on_merge_state="Ready to Deploy",
+                            on_deploy_state="Deployed", base_branch="main")
+    c.ado.builds = [{"id": 500}]
+    c.ado.tagged = [_wi(1, state="Ready to Deploy", tags=["autopilot"])]
+    await svc._restore()
+    await svc._scan()
+    assert c.ado.states == []               # an old green build ships nothing

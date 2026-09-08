@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from ai_autopilot.config import Settings
 from ai_autopilot.data import PipelineState
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
-from ai_autopilot.outcomes import outcome_policy
+from ai_autopilot.outcomes import apply_outcome, outcome_policy
 from ai_autopilot.services.poller import AdoPollerService
 
 
@@ -21,6 +21,9 @@ class _FakeAdo:
         self.tagged_items: list = []
         self.comments_by_item: dict[int, list[dict]] = {}
         self.reviewers: list[tuple[str, int, str, bool]] = []
+        # States ADO should refuse (None = accept everything), to reproduce "this state
+        # doesn't exist on that work-item type" without a live project.
+        self.reject_state: set[str] | None = None
 
     async def add_tag(self, work_item_id, tag):
         self.tags.append((work_item_id, tag))
@@ -33,6 +36,10 @@ class _FakeAdo:
 
     async def update_state(self, work_item_id, new_state):
         self.states.append((work_item_id, new_state))
+        # Mirrors the real client's bool. apply_outcome now reads it: a state ADO
+        # refuses (one that does not exist on the item's type) must not be reported as
+        # a move, so a fake returning None would make every transition look refused.
+        return self.reject_state is None or new_state not in self.reject_state
 
     async def get_all_tagged_work_items(self):
         return self.tagged_items
@@ -54,8 +61,9 @@ class _FakeExec:
         self.released: list[str | None] = []
         self.closed: list[tuple[int, str | None]] = []
 
-    async def dispatch_interactive(self, item, *, autonomy, draft_pr):
+    async def dispatch_interactive(self, item, *, autonomy, draft_pr, stages=None):
         launched, session = self._dispatch
+        self.briefed_stages = [st.name for st in stages] if stages else None
         return launched, session, "/ws/scratch"
 
     def finalize_interactive(self, item, run_dir):
@@ -897,3 +905,83 @@ async def test_someone_not_on_the_roster_is_still_ignored():
     ]}
     await p._reconcile_human_replies()
     assert item.pending_comment is None
+
+
+class _Recorder:
+    """Captures a structlog-shaped error call, which is the whole point of the change:
+    a refused state used to leave nothing behind at all."""
+
+    def __init__(self):
+        self.errors: list[tuple[str, dict]] = []
+
+    def error(self, event, **kw):
+        self.errors.append((event, kw))
+
+
+async def test_a_refused_outcome_state_is_reported_and_the_item_keeps_its_state():
+    """The defect: apply_outcome discarded update_state's result. ADO refuses a state
+    that does not exist on the item's TYPE — exactly what flows.py exists to prevent —
+    and the item was then tagged done while its card never left its old column."""
+    cfg = Settings(dry_run=False, processed_tag="done", resolved_state="Resolved")
+    ado, log = _FakeAdo(), _Recorder()
+    ado.reject_state = {"Resolved"}
+    moved = await apply_outcome(ado, cfg, 8962, "done", "Requirement", log=log)
+    assert moved is False
+    assert log.errors and log.errors[0][1]["state"] == "Resolved"
+    assert log.errors[0][1]["type"] == "Requirement"
+    # Still tagged: the tag is the skip tag, and dropping it would re-run finished work
+    # and open a second PR — a far more expensive way to be wrong than a stale tag.
+    assert (8962, "done") in ado.tags
+
+
+async def test_an_accepted_outcome_state_reports_the_move():
+    cfg = Settings(dry_run=False, processed_tag="done", resolved_state="Resolved")
+    ado, log = _FakeAdo(), _Recorder()
+    assert await apply_outcome(ado, cfg, 7, "done", "Bug", log=log) is True
+    assert (7, "Resolved") in ado.states
+    assert log.errors == []
+
+
+async def test_the_outcome_state_is_written_before_the_tag():
+    """Order is the fix: the tag is what a board lane claims, so it must never be
+    applied on the strength of a state write that has not happened yet."""
+    cfg = Settings(dry_run=False, processed_tag="done", resolved_state="Resolved")
+    ado, seen = _FakeAdo(), []
+    orig_state, orig_tag = ado.update_state, ado.add_tag
+
+    async def state(wid, s):
+        seen.append("state")
+        return await orig_state(wid, s)
+
+    async def tag(wid, t):
+        seen.append("tag")
+        return await orig_tag(wid, t)
+
+    ado.update_state, ado.add_tag = state, tag
+    await apply_outcome(ado, cfg, 7, "done", "Bug")
+    assert seen == ["state", "tag"]
+
+
+async def test_an_interactive_session_is_briefed_on_one_role_only():
+    """SDLC mode is headless and pre-empts interactive, so getting per-role runs used
+    to cost the Remote-Control session a human steers. The role's stages go in the
+    brief instead: the session survives, and it still runs only that role's work."""
+    p, c = _poller()
+    from ai_autopilot.config import SdlcStageWiring
+    c.config.sdlc_stage_wiring = {
+        "test": SdlcStageWiring(queue_state="Ready for Testing", working_state="In Testing"),
+    }
+    item = WorkItemInfo(id=7, title="t", work_item_type="Bug",
+                        state="Ready for Testing", tags=["autopilot"])
+    await p._dispatch_interactive(item)
+    assert c.executor.briefed_stages == ["test"]
+    # …and the board can say WHO is holding it, not just that something is running.
+    assert (7, "In Testing") in c.ado.states
+
+
+async def test_an_unwired_machine_still_gets_the_whole_item_brief():
+    p, c = _poller()
+    item = WorkItemInfo(id=7, title="t", work_item_type="Bug",
+                        state="Ready for Testing", tags=["autopilot"])
+    await p._dispatch_interactive(item)
+    assert c.executor.briefed_stages is None

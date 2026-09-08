@@ -39,7 +39,7 @@ from ai_autopilot.execution import (
     RetryPolicy,
     SdlcLoopEngine,
 )
-from ai_autopilot.execution.sdlc_plan import handoff_collides
+from ai_autopilot.execution.sdlc_plan import handoff_collisions
 from ai_autopilot.learning import QualityLog
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.multitenant import TenantManager
@@ -191,12 +191,17 @@ class Container:
             )
         # Fail-fast guard: a machine that hands off to one of its OWN trigger states
         # would re-pick items it just finished (an infinite loop).
-        if self.config.sdlc_loop_enabled and handoff_collides(self.config):
+        # Only meaningful once this machine actually runs a relay: an install with
+        # neither the loop nor any stage wiring has no hand-off to collide with.
+        uses_relay = bool(self.config.sdlc_loop_enabled or self.config.sdlc_stage_wiring)
+        collisions = handoff_collisions(self.config) if uses_relay else []
+        if collisions:
             self.log.error(
-                "SDLC handoff state collides with this machine's trigger_states — "
-                "items will be re-processed forever. Fix sdlc_profile_states / trigger_states.",
-                profile=self.config.sdlc_profile,
-                trigger_states=self.config.trigger_states,
+                "SDLC handoff state collides with this machine's trigger states — "
+                "items will be re-processed forever. Fix sdlc_profile_states / "
+                "trigger_states, or mark the stage auto=false.",
+                collisions=[f"{name} -> {state}" for name, state in collisions],
+                trigger_states=self.config.effective_trigger_states,
             )
 
     async def shutdown(self) -> None:

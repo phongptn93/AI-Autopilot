@@ -177,6 +177,23 @@ class MergedPr(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class SyncMarker(Base):
+    """A single named watermark the state-sync must not forget across a restart.
+
+    ``last_deploy_build`` is the one that matters: the deploy stage advances items only
+    on a build NEWER than the last it saw, and it baselines itself on first sight so a
+    fresh install does not transition a month of old builds. Held only in memory, that
+    baseline was re-taken on every restart — so a deploy that succeeded while the
+    autopilot was down (or that triggered the restart) was swallowed, and the items it
+    shipped sat in their merge state until some later deploy happened to pass by."""
+
+    __tablename__ = "sync_markers"
+
+    name: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[int] = mapped_column(Integer, default=0)
+    at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class HeldNotification(Base):
     """A notice raised outside the notification window, waiting for it to open.
 

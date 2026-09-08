@@ -210,3 +210,95 @@ async def test_human_guidance_reaches_the_stage_run_prompt():
     res = await engine.run(item)
     assert res.success
     assert any("focus on input validation only" in pr for pr in ex.run_prompts())
+
+
+# ── Board wiring: the state says which role, and whether it self-starts ──────────
+
+
+def _wired() -> "Settings":
+    """A central machine: one box, every role, roles told apart by ADO state."""
+    from ai_autopilot.config import Settings
+
+    return Settings(
+        trigger_states=["New", "Active", "Ready for Development", "Ready for Testing"],
+        sdlc_stage_wiring={
+            "analyze": {"queue_state": "Ready for Analysis", "auto": True},
+            "implement": {"queue_state": "Ready for Development", "auto": True},
+            "test": {"queue_state": "Ready for Testing", "working_state": "In Testing",
+                     "auto": False},
+        },
+    )
+
+
+def test_the_state_an_item_stands_in_picks_the_role():
+    """A central machine runs every role, so the role cannot come from the machine —
+    and a Bug is a Bug at every step, so it cannot come from the type either."""
+    from ai_autopilot.execution.sdlc_plan import profile_for_state, resolve_profile_name
+
+    cfg = _wired()
+    assert profile_for_state("Ready for Testing", cfg) == "qc"
+    assert profile_for_state("ready for development", cfg) == "dev"   # case-insensitive
+    assert profile_for_state("Closed", cfg) == ""                     # nobody claims it
+    assert resolve_profile_name([], "Bug", cfg, state="Ready for Testing") == "qc"
+    # An explicit per-item tag is somebody stating an intention — it outranks the state.
+    assert resolve_profile_name(["sdlc:ba"], "Bug", cfg, state="Ready for Testing") == "ba"
+    # Nothing wired → unchanged behaviour.
+    from ai_autopilot.config import Settings
+    assert resolve_profile_name([], "Bug", Settings(), state="Ready for Testing") == "full"
+
+
+def test_only_the_entry_stage_claims_a_state():
+    """`full` passes through `test` on its way, but QC's door is not full's door."""
+    from ai_autopilot.execution.sdlc_plan import profile_for_state, profile_stages
+
+    cfg = _wired()
+    assert "test" in [s.name for s in profile_stages("full", cfg)]
+    assert profile_for_state("Ready for Testing", cfg) == "qc"
+
+
+def test_auto_decides_which_hand_offs_self_start():
+    """The autonomy dial sits next to the state it governs — which is the whole fix
+    for a QC hand-off silently becoming a trigger and reworking finished items."""
+    cfg = _wired()
+    active = cfg.effective_trigger_states
+    assert "Ready for Development" in active     # wired auto:true
+    assert "Ready for Testing" not in active     # wired auto:false — waits for ▶ Run
+    assert "New" in active and "Active" in active  # untouched entries survive
+
+
+def test_a_wired_stage_names_its_own_working_state():
+    """Two roles at once on one machine both reading 'Active' is a board that cannot
+    say who is holding the item."""
+    from ai_autopilot.execution.sdlc_plan import working_state_for
+
+    cfg = _wired()
+    assert working_state_for("qc", cfg) == "In Testing"
+    assert working_state_for("dev", cfg) == ""      # falls back to the global one
+
+
+def test_hand_off_is_keyed_by_profile_not_by_stage():
+    """`dev` and `full` both end at the `pr` stage but hand to different roles, so
+    where a profile hands off cannot be written on the stage they share."""
+    from ai_autopilot.config import Settings
+    from ai_autopilot.execution.sdlc_plan import handoff_state, profile_stages
+
+    cfg = Settings(sdlc_profile_states={"dev": "Ready for Testing"}, resolved_state="Resolved")
+    assert profile_stages("dev", cfg)[-1].name == profile_stages("full", cfg)[-1].name == "pr"
+    assert handoff_state("dev", cfg) == "Ready for Testing"
+    assert handoff_state("full", cfg) == "Resolved"
+
+
+def test_collision_check_covers_every_profile_not_just_one():
+    """The old check read the pinned/default profile only — right for one machine per
+    role, blind on a central machine that runs them all."""
+    from ai_autopilot.config import Settings
+    from ai_autopilot.execution.sdlc_plan import handoff_collides, handoff_collisions
+
+    cfg = Settings(
+        trigger_states=["New", "Ready for Testing"],
+        sdlc_default_profile="ba",                      # NOT the profile that collides
+        sdlc_profile_states={"dev": "Ready for Testing"},
+    )
+    assert ("dev", "Ready for Testing") in handoff_collisions(cfg)
+    assert handoff_collides(cfg)
+    assert not handoff_collides(Settings(trigger_states=["New"]))

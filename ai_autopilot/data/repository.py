@@ -30,6 +30,7 @@ from ai_autopilot.data.entities import (
     SchedulerDecision,
     SdlcLoopState,
     SpecDrift,
+    SyncMarker,
     WorkItemState,
     WorkItemStateHistory,
 )
@@ -1597,6 +1598,25 @@ class SyncStateRepository:
             row.work_item_id = work_item_id
             row.state = state
             row.created_at = datetime.now(UTC)
+            await session.commit()
+
+    async def get_marker(self, name: str) -> int | None:
+        """A named watermark, or ``None`` if this instance has never set it.
+
+        ``None`` is meaningful and distinct from ``0``: it is what tells the deploy
+        stage this is a first run and it should baseline rather than transition."""
+        async with self._db.session() as session:
+            row = await session.get(SyncMarker, name)
+            return None if row is None else row.value
+
+    async def set_marker(self, name: str, value: int) -> None:
+        async with self._db.session() as session:
+            row = await session.get(SyncMarker, name)
+            if row is None:
+                row = SyncMarker(name=name)
+                session.add(row)
+            row.value = value
+            row.at = datetime.now(UTC)
             await session.commit()
 
     async def prune_merged_prs(self, keep: int = 5000) -> int:

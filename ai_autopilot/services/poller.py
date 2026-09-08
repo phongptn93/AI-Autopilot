@@ -35,7 +35,7 @@ from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.routing import plan_schedule, sort_by_priority
 from ai_autopilot.routing.planning_groups import group_by_links
 from ai_autopilot.services.planning_analyzer import run_due_plans
-from ai_autopilot.services.pr_feedback import parse_pr_url
+from ai_autopilot.services.pr_feedback import is_bot_branch, parse_pr_url
 from ai_autopilot.services.spec_guard import SpecGuard
 
 # An ADO pull-request URL, e.g.
@@ -993,6 +993,26 @@ class AdoPollerService:
             "sdlc finished", id=item.id, status=status, duration=round(result.duration_seconds, 1)
         )
 
+    def _warn_unowned_branch(self, item: WorkItemInfo, result: ExecutionResult) -> None:
+        """Say NOW when a run named a branch the control plane will not own.
+
+        Ownership is the branch prefix and nothing else, so a branch outside it means
+        the merged PR never advances the item and /commands on that PR are ignored —
+        both of which only show up later, as "it merged and nothing moved". Cheap to
+        say here, and here is where someone can still rename the branch.
+        """
+        branch = (getattr(result, "branch_name", "") or "").strip()
+        prefixes = tuple(
+            str(x).strip() for x in (self._config.bot_branch_prefixes or []) if str(x).strip()
+        )
+        if not branch or not prefixes or is_bot_branch(branch, prefixes):
+            return
+        self._log.warning(
+            "branch is outside the autopilot's prefixes — its PR will not advance the item",
+            id=item.id, branch=branch, prefixes=list(prefixes),
+            hint=f"rename it to {prefixes[0]}{item.id}-<slug> before the PR merges",
+        )
+
     async def _apply_sdlc_handoff(
         self, item: WorkItemInfo, result: ExecutionResult, profile: str = ""
     ) -> None:
@@ -1267,6 +1287,7 @@ class AdoPollerService:
 
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config
+        self._warn_unowned_branch(item, result)
         if result.needs_human:
             c.retry_policy.record_success(item.id)  # escalated — not a retryable failure
             await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=result.error or "")

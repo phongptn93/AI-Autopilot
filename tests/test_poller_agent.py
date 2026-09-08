@@ -1030,3 +1030,28 @@ async def test_headless_mode_still_runs_the_engine():
 
 async def _noop(sink, value):
     sink.append(value)
+
+
+async def test_a_branch_outside_the_prefixes_is_called_out_at_once():
+    """Ownership is the branch prefix and nothing else, so a branch outside it means
+    the merged PR never advances the item and /commands on it are ignored — both of
+    which surface much later, as "it merged and nothing moved". 23 of the last 60 runs
+    on a live machine did this because the brief never stated the rule."""
+    p, c = _poller()
+    warned: list = []
+    p._log = SimpleNamespace(info=lambda *a, **k: None, debug=lambda *a, **k: None,
+                             error=lambda *a, **k: None,
+                             warning=lambda msg, **kw: warned.append(kw))
+    item = WorkItemInfo(id=8107, title="t", work_item_type="Bug", state="New", tags=[])
+
+    ok = ExecutionResult.ok(item.id, "agent", "done")
+    ok.branch_name = "bugfix/8107-select-search"
+    p._warn_unowned_branch(item, ok)
+    assert warned == []
+
+    bad = ExecutionResult.ok(item.id, "agent", "done")
+    bad.branch_name = "8107-select-search-stale-request-race"
+    p._warn_unowned_branch(item, bad)
+    assert len(warned) == 1
+    assert warned[0]["branch"] == "8107-select-search-stale-request-race"
+    assert "bugfix/" in warned[0]["prefixes"] or "feature/" in warned[0]["prefixes"]

@@ -604,6 +604,9 @@ class ClaudeExecutor:
             "- ONE branch and ONE pull request PER WORK ITEM. Never put two work items in one "
             "PR, and never open a PR that leaves an item half-done.",
             branching,
+            "- Each branch name MUST start with one of: "
+            + ", ".join(f"`{x}`" for x in (self._config.bot_branch_prefixes or ["feature/"]))
+            + " — the control plane decides a PR is its own by that prefix and nothing else.",
             "- Name each branch after its own item (e.g. `feature/be/<id>-<slug>`), and put the "
             "item id in the PR title so a reviewer can tell them apart.",
             "- Commit each item's work separately, even while they share this one worktree: "
@@ -1308,6 +1311,25 @@ class ClaudeExecutor:
         else:
             repo_list = "(none discovered)"
 
+        # Ownership of a PR is decided by the branch PREFIX and nothing else. The brief
+        # never said so, so a session named the branch the way a person would —
+        # "8107-select-search-stale-request-race" — and the autopilot then disowned its
+        # own work: state_sync walks past the merged PR without advancing the item, and
+        # the feedback loop ignores /commands on it. 23 of the last 60 runs did this.
+        prefixes = [
+            str(x).strip() for x in (self._config.bot_branch_prefixes or []) if str(x).strip()
+        ]
+        branch_rule: list[str] = []
+        if prefixes:
+            branch_rule = [
+                "- The branch name MUST start with one of: "
+                + ", ".join(f"`{x}`" for x in prefixes)
+                + f". Name it `{prefixes[0]}{item.id}-<short-slug>`. This is not a "
+                "convention: the control plane decides a PR is its own by this prefix "
+                "and nothing else, so a branch outside it means the merged PR will NOT "
+                "advance the work item and /commands on that PR are ignored.",
+            ]
+
         if autonomy == "report":
             action = (
                 "Do NOT change code or open a PR. Analyse the item and post a short plan as a "
@@ -1419,6 +1441,7 @@ class ClaudeExecutor:
             "(no `head`/`grep`/`find`/`printenv`), so don't retry the same command across shells.",
             "- For EACH repo you change: start from a clean base branch, create a feature branch, "
             "commit, push, and open a pull request with the pr-create skill.",
+            *branch_rule,
             f"- The PR MUST be linked to work item #{item.id} (the pr-create skill does this; "
             "branch names starting with the item id let ADO do it too). The control plane "
             "verifies the link afterwards and attaches it if it is missing.",

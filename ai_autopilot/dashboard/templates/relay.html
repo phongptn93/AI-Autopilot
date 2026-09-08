@@ -30,8 +30,8 @@
   .rl-hd span { color:var(--text-dim); font-size:12px; }
 
   .rl-grid { display:grid; gap:6px 10px; align-items:center;
-    grid-template-columns:minmax(150px,1fr) minmax(170px,1.1fr) minmax(150px,1fr)
-                          minmax(130px,.9fr) 92px;
+    grid-template-columns:minmax(240px,1.25fr) minmax(170px,1fr) minmax(150px,1fr)
+                          minmax(140px,.9fr) 92px;
     padding:6px 18px 14px; }
   .rl-head { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
     color:var(--text-dim); padding-bottom:5px; border-bottom:1px solid var(--border); }
@@ -41,8 +41,10 @@
   .rl-stage .role { font-size:10.5px; color:var(--text-dim); margin-left:6px; }
   .rl-stage .goal { display:block; color:var(--text-dim); font-size:11px; line-height:1.45;
     margin-top:2px; }
-  .rl-opens { display:inline-flex; align-items:center; gap:4px; margin-top:4px; font-size:10px; }
+  .rl-opens { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:5px;
+    font-size:10px; }
   .rl-pill { font-family:var(--mono); font-size:10px; padding:1px 7px; border-radius:5px;
+    white-space:nowrap;
     background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.4); }
   .rl-pill.mute { background:var(--bg-input); color:var(--text-dim); border-color:var(--border); }
   .rl-pill.added { background:var(--green-bg); color:var(--green); border-color:rgba(46,204,113,.45); }
@@ -51,7 +53,8 @@
   /* `analyze` starts BOTH `ba` and `full`. Picking between them by iteration order
      would have wired "Ready for Analysis" to the one-stage `ba` and quietly never
      run the pipeline — so the choice is asked for, right where it is created. */
-  .rl-pick { width:auto; padding:2px 6px; font-size:10.5px; margin-top:3px; }
+  .rl-opens .rl-pill.mute { white-space:normal; line-height:1.5; }
+  .rl-pick { width:100%; max-width:158px; padding:3px 6px; font-size:10.5px; margin:0; }
   .rl-row.ambig .rl-pick { border-color:rgba(245,166,35,.55); }
 
   .rl-in { width:100%; background:var(--bg-input); color:var(--text); border:1px solid var(--border);

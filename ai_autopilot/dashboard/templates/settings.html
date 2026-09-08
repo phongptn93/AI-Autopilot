@@ -18,6 +18,17 @@
   .set-tab{white-space:nowrap;font-size:12.5px;font-weight:600;color:var(--text-muted);text-decoration:none;
     padding:6px 12px;border-radius:20px;border:1px solid var(--border);transition:.12s}
   .set-tab:hover{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
+  /* Which section am I in? Twenty identical pills answered "somewhere". */
+  .set-tab.on{color:var(--accent-hover);border-color:rgba(99,102,241,.5);background:var(--accent-bg)}
+  /* ~100 settings across 20 sections: scrolling for one is the slowest way to find it. */
+  .set-find{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .set-find input{background:var(--bg-input);color:var(--text);border:1px solid var(--border);
+    border-radius:20px;padding:6px 13px;font-size:12.5px;font-family:inherit;width:210px}
+  .set-find input:focus{outline:none;border-color:var(--accent);width:260px}
+  .set-find .n{font-size:11.5px;color:var(--text-dim);white-space:nowrap;min-width:64px}
+  .set-nav.searching .set-tab{display:none}
+  .field.hide,.card.hide{display:none}
+  .set-empty{padding:26px 20px;text-align:center;color:var(--text-muted);font-size:13px}
 
   /* tags overview */
   .tagbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;
@@ -221,7 +232,13 @@
   <div class="set-nav">
     <a class="set-tab" href="#sec-repos">Repos</a>
     {% for section, fields in sections %}<a class="set-tab" href="#sec-{{ loop.index }}">{{ section }}</a>{% endfor %}
+    <label class="set-find">
+      <input type="search" id="set-find" placeholder="🔍 Find a setting…"
+             aria-label="Filter settings" autocomplete="off">
+      <span class="n" id="set-find-n"></span>
+    </label>
   </div>
+  <div class="card set-empty hide" id="set-none">No setting matches that.</div>
 
   <!-- Allowed repositories -->
   <div class="card" id="sec-repos">
@@ -302,7 +319,8 @@
     <div class="field-grid">
       {% for f in fields %}
       {% set wide = f.kind in ('list','map','stateset') %}
-      <div class="field {{ 'wide' if wide else '' }} {{ 'bool' if f.kind=='bool' else '' }}">
+      <div class="field {{ 'wide' if wide else '' }} {{ 'bool' if f.kind=='bool' else '' }}"
+           data-k="{{ f.key }}">
         <label for="{{ f.key }}">{{ f.label }}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}</label>
         <div class="form-input">
           {% if f.kind == 'bool' %}
@@ -369,6 +387,75 @@
 </form>
 
 <script>
+  // ── Find a setting ──────────────────────────────────────────────────────────
+  // Filtering, not jumping: a name recalled only half right ("pat", "poll") still
+  // narrows 100 fields to a handful, and the surviving cards keep their section
+  // headings so a match is never shown without saying what it belongs to.
+  (function () {
+    var box = document.getElementById('set-find');
+    if (!box) return;
+    var nav = document.querySelector('.set-nav');
+    var count = document.getElementById('set-find-n');
+    var empty = document.getElementById('set-none');
+    var cards = Array.prototype.slice.call(document.querySelectorAll('form .card[id^="sec-"]'));
+    var fields = Array.prototype.slice.call(document.querySelectorAll('.field[data-k]'));
+    // Read the searchable text once — textContent on every keystroke is what makes
+    // a filter feel laggy on a page this size.
+    fields.forEach(function (el) {
+      el.__hay = ((el.dataset.k || '') + ' ' + el.textContent).toLowerCase().replace(/\s+/g, ' ');
+    });
+
+    function apply() {
+      var q = box.value.trim().toLowerCase();
+      nav.classList.toggle('searching', !!q);
+      if (!q) {
+        fields.forEach(function (el) { el.classList.remove('hide'); });
+        cards.forEach(function (c) { c.classList.remove('hide'); });
+        empty.classList.add('hide');
+        count.textContent = '';
+        return;
+      }
+      var hits = 0;
+      fields.forEach(function (el) {
+        var on = el.__hay.indexOf(q) !== -1;
+        el.classList.toggle('hide', !on);
+        if (on) hits++;
+      });
+      cards.forEach(function (c) {
+        c.classList.toggle('hide', !c.querySelector('.field[data-k]:not(.hide)'));
+      });
+      empty.classList.toggle('hide', hits > 0);
+      count.textContent = hits + (hits === 1 ? ' match' : ' matches');
+    }
+
+    box.addEventListener('input', apply);
+    // Esc clears rather than blurring — the filter is the thing in the way.
+    box.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { box.value = ''; apply(); }
+    });
+    apply();
+
+    // ── Which section am I looking at? ──
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.set-tab'));
+    var byId = {};
+    tabs.forEach(function (t) { byId[t.getAttribute('href').slice(1)] = t; });
+    var watched = cards.concat(
+      document.getElementById('sec-repos') ? [document.getElementById('sec-repos')] : []
+    );
+    if (!('IntersectionObserver' in window) || !watched.length) return;
+    var seen = {};
+    var spy = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { seen[e.target.id] = e.isIntersecting; });
+      var active = null;
+      for (var i = 0; i < watched.length; i++) {
+        if (seen[watched[i].id]) { active = watched[i].id; break; }
+      }
+      tabs.forEach(function (t) { t.classList.remove('on'); });
+      if (active && byId[active]) byId[active].classList.add('on');
+    }, { rootMargin: '-64px 0px -70% 0px' });
+    watched.forEach(function (c) { spy.observe(c); });
+  })();
+
   // Progressive enhancement: the panel starts hidden, so if this never runs the toggle
   // simply reveals nothing — hence `hidden` is removed here rather than assumed.
   (function () {

@@ -34,6 +34,39 @@
   .btn-primary:hover { background:var(--accent-hover,#818cf8); }
   .note { font-size:12px; color:var(--text-muted); background:var(--bg,#0d0d12);
           border:1px solid var(--border,#23232b); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
+
+  /* A field you must fill and one you may leave blank looked identical, so the only
+     way to learn which was which was to save and read the errors. */
+  .ws-field label .req { color:var(--red,#e5484d); font-weight:700; margin-left:2px; }
+  .ws-field label .opt { color:var(--text-dim); font-weight:500; font-size:10.5px;
+     text-transform:uppercase; letter-spacing:.05em; margin-left:5px; }
+
+  /* Delete was a bare checkbox beside "Đang bật": same size, same weight, one row
+     apart. Ticking it now restyles the whole card, so the consequence is visible
+     before Save rather than after. */
+  .ws-danger { margin-left:auto; display:inline-flex; align-items:center; gap:6px;
+     font-size:11.5px; color:var(--text-dim); border:1px solid transparent;
+     border-radius:7px; padding:3px 9px; cursor:pointer; }
+  .ws-danger:hover { color:var(--red,#e5484d); border-color:rgba(229,72,77,.35);
+     background:rgba(229,72,77,.07); }
+  .ws-card.is-deleting { border-color:var(--red,#e5484d);
+     background:linear-gradient(180deg,rgba(229,72,77,.08),transparent 55%); }
+  .ws-card.is-deleting .ws-body { opacity:.4; }
+  .ws-card.is-deleting .ws-danger { color:var(--red,#e5484d);
+     border-color:rgba(229,72,77,.45); background:rgba(229,72,77,.1); }
+  .ws-doom { display:none; align-items:center; gap:8px; padding:8px 16px; font-size:12px;
+     color:var(--red,#e5484d); background:rgba(229,72,77,.1);
+     border-top:1px solid rgba(229,72,77,.3); }
+  .ws-card.is-deleting .ws-doom { display:flex; }
+  .ws-off { opacity:.62; }
+  .ws-state { font-size:11px; font-weight:600; padding:2px 9px; border-radius:20px;
+     background:var(--bg-input,#0c0d12); color:var(--text-dim); white-space:nowrap; }
+  .ws-card.is-off .ws-state { color:var(--amber,#f5a623); background:rgba(245,166,35,.12); }
+
+  /* The button used to sit past seven fields per workspace — off-screen exactly
+     when you had finished editing. */
+  .actions { position:sticky; bottom:0; z-index:5; padding:12px 0 16px;
+     background:var(--bg-sticky,rgba(10,11,15,.85)); backdrop-filter:blur(8px); }
 </style>
 
 <div class="page-header">
@@ -70,13 +103,14 @@
         <input class="ws-input" name="ws{{ loop.index0 }}_name" value="{{ ws.name }}"
                placeholder="Tên workspace, ví dụ: Nhà máy Khatoco"/>
       </div>
-      {% if ws.is_default %}<span class="ws-badge">Mặc định</span>{% endif %}
+      {% if ws.is_default %}<span class="ws-badge">Mặc định</span>
+      {% else %}<span class="ws-state">{{ 'Đang bật' if ws.enabled else 'Đang tắt' }}</span>{% endif %}
       <input type="hidden" name="ws{{ loop.index0 }}_is_default" value="{{ '1' if ws.is_default else '0' }}"/>
     </div>
 
     <div class="ws-body">
       <div class="ws-field">
-        <label>ADO project (work items)</label>
+        <label>ADO project (work items) <span class="req" title="Bắt buộc">*</span></label>
         <textarea class="ws-area" name="ws{{ loop.index0 }}_projects"
                   placeholder="Mỗi dòng một project">{{ ws.projects | join('\n') }}</textarea>
         <span class="hint">Work item của các project này sẽ build trong workspace này.
@@ -84,7 +118,7 @@
       </div>
 
       <div class="ws-field">
-        <label>Thư mục workspace</label>
+        <label>Thư mục workspace <span class="req" title="Bắt buộc">*</span></label>
         <input class="ws-input" name="ws{{ loop.index0 }}_directory" value="{{ ws.directory }}"
                placeholder="C:\ws\dxfactory"/>
         <span class="hint">Thư mục chứa <code>.claude</code> và các repo con. Claude chạy tại đây.
@@ -92,28 +126,28 @@
       </div>
 
       <div class="ws-field">
-        <label>Base branch</label>
+        <label>Base branch <span class="opt">tuỳ chọn</span></label>
         <input class="ws-input" name="ws{{ loop.index0 }}_base_branch" value="{{ ws.base_branch }}"
                placeholder="{{ 'development' if ws.is_default else 'để trống = kế thừa mặc định' }}"/>
         <span class="hint">Nhánh mà branch tính năng được cắt ra.</span>
       </div>
 
       <div class="ws-field">
-        <label>Code project (repo/PR)</label>
+        <label>Code project (repo/PR) <span class="opt">tuỳ chọn</span></label>
         <input class="ws-input" name="ws{{ loop.index0 }}_code_project" value="{{ ws.code_project }}"
                placeholder="để trống = cùng project work item"/>
         <span class="hint">Chỉ điền khi repo và PR nằm ở project khác với work item.</span>
       </div>
 
       <div class="ws-field">
-        <label>Repo được phép sửa</label>
+        <label>Repo được phép sửa <span class="opt">tuỳ chọn</span></label>
         <textarea class="ws-area" name="ws{{ loop.index0 }}_repos"
                   placeholder="để trống = mọi repo tìm thấy">{{ ws.allowed_repos | join('\n') }}</textarea>
         <span class="hint">Danh sách trắng, mỗi dòng một repo.</span>
       </div>
 
       <div class="ws-field">
-        <label>Trigger tag riêng</label>
+        <label>Trigger tag riêng <span class="opt">tuỳ chọn</span></label>
         <input class="ws-input" name="ws{{ loop.index0 }}_trigger_tag" value="{{ ws.trigger_tag }}"
                placeholder="để trống = dùng tag chung"/>
         <span class="hint">Tag này được gộp vào truy vấn poll chung, không thay thế tag gốc.</span>
@@ -130,11 +164,18 @@
       {% if ws.is_default %}
         <span>🔒 Workspace mặc định không xoá được — nó là nơi chạy của mọi project chưa gán workspace riêng.</span>
       {% else %}
-        <label><input type="checkbox" name="ws{{ loop.index0 }}_enabled" {{ 'checked' if ws.enabled }}/> Đang bật</label>
-        <label class="ws-del"><input type="checkbox" name="ws{{ loop.index0 }}_delete"/> Xoá workspace này</label>
-        <span style="margin-left:auto">id: <code>{{ ws.id }}</code></span>
+        <label><input type="checkbox" name="ws{{ loop.index0 }}_enabled" data-enable
+                      {{ 'checked' if ws.enabled }}/> Đang bật</label>
+        <span>id: <code>{{ ws.id }}</code></span>
+        <label class="ws-danger"><input type="checkbox" name="ws{{ loop.index0 }}_delete"
+                                        data-doom/> 🗑 Xoá workspace này</label>
       {% endif %}
     </div>
+    {% if not ws.is_default %}
+    <div class="ws-doom">
+      ⚠️ Workspace này <b>sẽ bị xoá</b> khi bạn bấm Lưu. Bỏ tick để giữ lại.
+    </div>
+    {% endif %}
   </div>
   {% endfor %}
   </div>
@@ -174,11 +215,54 @@
   </div>
 
   <div class="actions">
-    <button type="submit" class="btn-primary">💾 Lưu workspaces</button>
+    <button type="submit" class="btn-primary" id="ws-save">💾 Lưu workspaces</button>
     <span style="font-size:12px;color:var(--text-dim)">
       Áp dụng ngay, không cần khởi động lại. Project đang được poll:
       <b>{{ projects | join(', ') if projects else '(chưa có)' }}</b>
     </span>
   </div>
 </form>
+
+<script>
+(function () {
+  var form = document.querySelector('form[action="/dashboard/workspaces"]');
+  if (!form) return;
+
+  function paint(card) {
+    var doom = card.querySelector('[data-doom]');
+    var on = card.querySelector('[data-enable]');
+    card.classList.toggle('is-deleting', !!(doom && doom.checked));
+    card.classList.toggle('is-off', !!(on && !on.checked));
+    var badge = card.querySelector('.ws-state');
+    if (badge) badge.textContent = (on && !on.checked) ? 'Đang tắt' : 'Đang bật';
+  }
+
+  form.addEventListener('change', function (e) {
+    if (e.target.matches('[data-doom], [data-enable]')) paint(e.target.closest('.ws-card'));
+  });
+
+  // One confirm at submit naming every workspace that goes, rather than a dialog per
+  // tick: the tick is reversible and visibly marked, the save is what is not.
+  form.addEventListener('submit', function (e) {
+    var doomed = [];
+    form.querySelectorAll('.ws-card').forEach(function (card) {
+      var box = card.querySelector('[data-doom]');
+      if (!box || !box.checked) return;
+      var name = card.querySelector('.ws-name input');
+      doomed.push((name && name.value.trim()) || '(chưa đặt tên)');
+    });
+    if (doomed.length && !confirm(
+      'Xoá ' + doomed.length + ' workspace?
+
+• ' + doomed.join('
+• ') +
+      '
+
+Cấu hình của chúng sẽ bị gỡ khỏi config. Thư mục và repo trên đĩa KHÔNG bị đụng tới.'
+    )) { e.preventDefault(); }
+  });
+
+  form.querySelectorAll('.ws-card').forEach(paint);
+})();
+</script>
 {% endblock %}

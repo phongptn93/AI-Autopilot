@@ -1,5 +1,68 @@
 {% extends "base.html" %}
 
+{# Where a lane parks: the ADO states and tags it claims on top of its columns.
+   Collapsed by default and summarised in the summary line — expanded, one stage costs
+   five rows of chips, and a board with three processes of five stages became a page
+   you had to hunt through. A macro for the same reason stage_row is one. #}
+{% macro parks_at(p, states, tags) -%}
+<details class="lv-parks">
+  <summary title="ADO states and tags this lane claims on top of its columns">
+    <span class="lv-parks-k">parks at</span>
+    <span class="lv-parks-sum" data-parks-sum>
+      {%- if states or tags -%}
+        {%- for s in states %}<span class="lv-mini st">{{ s }}</span>{% endfor -%}
+        {%- for t in tags %}<span class="lv-mini tg">{{ t }}</span>{% endfor -%}
+      {%- else -%}
+        <span class="lv-parks-none">columns only — nothing parks here</span>
+      {%- endif -%}
+    </span>
+  </summary>
+  <div class="lv-grp st">
+    <div class="lv-grp-hd">
+      <b>ADO state</b>
+      <input type="text" class="lv-filter" placeholder="filter" aria-label="Filter states">
+    </div>
+    <div class="lv-pick">
+      {% for opt in board_states %}
+      <label class="lv-chip {{ 'on' if opt.name in states else '' }} {{ 'live' if opt.used else '' }}"
+             title="{{ opt.types }}{% if opt.used %} · {{ opt.n }} on the board now{% endif %}">
+        <input type="checkbox" name="{{ p }}states" value="{{ opt.name }}"
+               {% if opt.name in states %}checked{% endif %}>{{ opt.name }}
+      </label>
+      {% endfor %}
+      {% set known_states = board_states | map(attribute='name') | list %}
+      <input type="text" class="lv-extra" name="{{ p }}states"
+             value="{{ states | reject('in', known_states) | join(', ') }}" placeholder="+ not listed"
+             title="A state ADO has not reported yet. Comma-separated.">
+    </div>
+  </div>
+  <div class="lv-grp tg">
+    <div class="lv-grp-hd">
+      <b>ADO tag</b>
+      <input type="text" class="lv-filter" placeholder="filter" aria-label="Filter tags">
+    </div>
+    <div class="lv-pick">
+      {% for name, n in board_tags %}
+      <label class="lv-chip tagish {{ 'on' if name in tags else '' }}"
+             title="{{ n }} item(s) carry this tag right now">
+        <input type="checkbox" name="{{ p }}tags" value="{{ name }}"
+               {% if name in tags %}checked{% endif %}>{{ name }}
+      </label>
+      {% endfor %}
+      {% set known_tags = board_tags | map(attribute=0) | list %}
+      <input type="text" class="lv-extra x-tag" name="{{ p }}tags"
+             value="{{ tags | reject('in', known_tags) | join(', ') }}" placeholder="+ not listed"
+             title="Tags this lane claims. ▶ Run removes them, which is what releases the item.">
+    </div>
+  </div>
+  <p class="lv-parks-tip">
+    <b class="k-live">●</b> someone is in that state right now ·
+    <b class="k-on">✓</b> this lane claims it ·
+    a <b>tag</b> here is taken off by ▶ Run, so only claim one that exists <em>while parked</em>.
+  </p>
+</details>
+{%- endmacro %}
+
 {# One stage row of one lens. A macro because it is rendered for existing stages and
    cloned by JS for new ones — two copies of a row carrying index-bearing field names
    is exactly how the two halves drift out of numbering. #}
@@ -32,36 +95,7 @@
     {% for col in columns %}<option value="{{ col }}" {% if st.drop == col %}selected{% endif %}>drop → {{ col }}</option>{% endfor %}
   </select>
   <button type="button" class="lv-x" data-del-stage title="Remove this stage">✕</button>
-  <div class="lv-claims">
-    <span title="Where items wait for this stage. Tick as many as this lane should claim.">parks at</span>
-    <div class="lv-pick">
-      {% for opt in board_states %}
-      <label class="lv-chip {{ 'on' if opt.name in st.states else '' }} {{ 'live' if opt.used else '' }}"
-             title="{{ opt.types }}{{ ' · on the board now' if opt.used else '' }}">
-        <input type="checkbox" name="lens{{ i }}_stage{{ j }}_states" value="{{ opt.name }}"
-               {% if opt.name in st.states %}checked{% endif %}>{{ opt.name }}
-      </label>
-      {% endfor %}
-      {% set known_states = board_states | map(attribute='name') | list %}
-      {% set extra_states = st.states | reject('in', known_states) | list %}
-      <input type="text" class="lv-extra" name="lens{{ i }}_stage{{ j }}_states"
-             value="{{ extra_states | join(', ') }}" placeholder="+ other state(s)"
-             title="A state that is not on the board yet. Comma-separated.">
-    </div>
-    <div class="lv-pick lv-pick-tags">
-      {% for name, _n in board_tags %}
-      <label class="lv-chip tagish {{ 'on' if name in st.tags else '' }}">
-        <input type="checkbox" name="lens{{ i }}_stage{{ j }}_tags" value="{{ name }}"
-               {% if name in st.tags %}checked{% endif %}>{{ name }}
-      </label>
-      {% endfor %}
-      {% set known_tags = board_tags | map(attribute=0) | list %}
-      {% set extra_tags = st.tags | reject('in', known_tags) | list %}
-      <input type="text" class="lv-extra" name="lens{{ i }}_stage{{ j }}_tags"
-             value="{{ extra_tags | join(', ') }}" placeholder="+ other tag(s)"
-             title="Tags this lane claims — ▶ Run removes them, which is what releases the item.">
-    </div>
-  </div>
+  {{ parks_at('lens' ~ i ~ '_stage' ~ j ~ '_', st.states, st.tags) }}
 </div>
 {%- endmacro %}
 
@@ -126,14 +160,44 @@
   .lv-sec > h4 span { font-weight:500; text-transform:none; letter-spacing:0; color:var(--text-dim); opacity:.8; }
   .lv-tags { width:100%; }
 
-  .lv-stage { display:grid; align-items:center; gap:6px 8px;
-    grid-template-columns:16px 148px minmax(200px,1.3fr) 88px minmax(140px,1fr) 96px 138px 24px;
-    padding:8px 0; border-bottom:1px solid var(--border-soft); }
+  .lv-stage, .lv-shd { display:grid; gap:6px 8px;
+    grid-template-columns:16px 148px minmax(200px,1.3fr) 88px minmax(140px,1fr) 96px 138px 24px; }
+  .lv-stage { align-items:center; padding:8px 0; border-bottom:1px solid var(--border-soft); }
+  .lv-stage:hover { background:rgba(255,255,255,.012); }
+  /* Every control in a stage row used to be identifiable only by hovering it for a
+     tooltip. One header row costs 16px and answers all seven at once. */
+  .lv-shd { align-items:end; padding:0 0 6px; font-size:9.5px; font-weight:700;
+    letter-spacing:.05em; text-transform:uppercase; color:var(--text-dim);
+    border-bottom:1px solid var(--border); }
   /* second row: where this lane parks. Its own line because a hand-off is a
      sentence ("parks at Ready for Dev / autopilot-done"), not another narrow box. */
-  .lv-claims { grid-column:2/-1; display:flex; align-items:flex-start; gap:10px; }
-  .lv-claims > span { font-size:10px; font-weight:700; letter-spacing:.06em; padding-top:5px;
-    text-transform:uppercase; color:var(--text-dim); white-space:nowrap; }
+  .lv-parks { grid-column:2/-1; }
+  .lv-parks > summary { list-style:none; cursor:pointer; display:flex; flex-wrap:wrap;
+    align-items:center; gap:5px; padding:3px 0 4px; }
+  .lv-parks > summary::-webkit-details-marker { display:none; }
+  .lv-parks > summary::before { content:"b8"; color:var(--text-dim); font-size:9px; width:9px; }
+  .lv-parks[open] > summary::before { content:"be"; }
+  .lv-parks > summary:hover .lv-parks-k { color:var(--accent-hover); }
+  .lv-parks-k { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--text-dim); }
+  /* Collapsed, the summary still has to answer "what does this lane claim?" — a
+     disclosure that hides the answer as well as the controls is just a smaller wall. */
+  .lv-parks-sum { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  .lv-parks-none { font-size:11px; color:var(--text-dim); font-style:italic; }
+  .lv-mini { font-family:var(--mono); font-size:10px; line-height:1.6; padding:0 7px; border-radius:5px; }
+  .lv-mini.st { background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.4); }
+  .lv-mini.tg { background:var(--green-bg); color:var(--green); border:1px solid rgba(46,204,113,.4); }
+  .lv-grp { display:flex; align-items:flex-start; gap:9px; padding:4px 0 5px 14px; }
+  .lv-grp-hd { width:78px; flex:none; display:flex; flex-direction:column; gap:4px; padding-top:2px; }
+  .lv-grp-hd b { font-size:9.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
+  .lv-grp.st .lv-grp-hd b { color:var(--accent-hover); }
+  .lv-grp.tg .lv-grp-hd b { color:var(--green); }
+  .lv-filter { width:100%; background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+    border-radius:5px; padding:2px 6px; font-size:10px; font-family:inherit; }
+  .lv-filter:focus { outline:none; border-color:var(--accent); }
+  .lv-parks-tip { padding:2px 0 6px 14px; font-size:10.5px; color:var(--text-dim); line-height:1.6; }
+  .lv-parks-tip .k-live { color:var(--green); }
+  .lv-parks-tip .k-on { color:var(--accent-hover); }
   /* Tick boxes, not a text field with autocomplete: a lane usually claims SEVERAL
      spots ("Ready for Testing" and "In Testing"), and a datalist matches the whole
      field value, so the second choice could never be suggested. */
@@ -148,6 +212,10 @@
   /* a state something is sitting in right now reads first */
   .lv-chip.live { color:var(--text); border-color:var(--border); }
   .lv-chip.live::after { content:"•"; color:var(--green); font-size:13px; line-height:0; }
+  /* Selected and in-use are different facts about a chip and were both "brighter".
+     A tick says claimed; the green dot says occupied; a chip can be both. */
+  .lv-chip.on::before { content:"✓"; font-size:9px; font-weight:800; }
+  .lv-chip.hide { display:none; }
   .lv-chip input { accent-color:var(--accent); margin:0; }
   .lv-extra { flex:1 1 90px; min-width:80px; background:transparent; color:var(--text);
     border:1px dashed var(--border); border-radius:6px; padding:3px 8px;
@@ -184,6 +252,7 @@
   .lv-tone { text-transform:capitalize; }
   .tone-slate { border-left:3px solid #7c8091; } .tone-blue { border-left:3px solid var(--blue); }
   .tone-violet { border-left:3px solid var(--violet); } .tone-purple { border-left:3px solid #c084fc; }
+  .tone-cyan { border-left:3px solid #38bdf8; }
   .tone-teal { border-left:3px solid #22c9b8; } .tone-amber { border-left:3px solid var(--amber); }
   .tone-green { border-left:3px solid var(--green); } .tone-red { border-left:3px solid var(--red); }
 
@@ -352,6 +421,10 @@
       <div class="lv-sec">
         <h4>Stages <span>— left to right; a lane is one or more pipeline columns and/or the ADO
           states it parks in; tick <b>your turn</b> where this role has to act</span></h4>
+        <div class="lv-shd" aria-hidden="true">
+          <span></span><span>Stage</span><span>Pipeline columns</span><span>Colour</span>
+          <span>Meaning</span><span>Turn</span><span>On drop</span><span></span>
+        </div>
         <div data-stages>
           {% for st in lens.stages %}{{ stage_row(i, loop.index0, st, columns) }}{% endfor %}
         </div>
@@ -405,6 +478,10 @@
     </div>
     <div class="lv-sec">
       <h4>Stages <span>— left to right, each over one or more pipeline columns</span></h4>
+      <div class="lv-shd" aria-hidden="true">
+        <span></span><span>Stage</span><span>Pipeline columns</span><span>Colour</span>
+        <span>Meaning</span><span>Turn</span><span>On drop</span><span></span>
+      </div>
       <div data-stages></div>
     </div>
     <div class="lv-foot"><button type="button" class="btn-ghost" data-add-stage>＋ Add stage</button></div>
@@ -432,22 +509,7 @@
       {% for col in columns %}<option value="{{ col }}">drop → {{ col }}</option>{% endfor %}
     </select>
     <button type="button" class="lv-x" data-del-stage>✕</button>
-    <div class="lv-claims">
-      <span>parks at</span>
-      <div class="lv-pick">
-        {% for opt in board_states %}
-        <label class="lv-chip" title="{{ opt.types }}">
-          <input type="checkbox" name="states" value="{{ opt.name }}">{{ opt.name }}</label>
-        {% endfor %}
-        <input type="text" class="lv-extra" name="states" value="" placeholder="+ other state(s)">
-      </div>
-      <div class="lv-pick lv-pick-tags">
-        {% for name, _n in board_tags %}
-        <label class="lv-chip tagish"><input type="checkbox" name="tags" value="{{ name }}">{{ name }}</label>
-        {% endfor %}
-        <input type="text" class="lv-extra" name="tags" value="" placeholder="+ other tag(s)">
-      </div>
-    </div>
+    {{ parks_at('', [], []) }}
   </div>
 </template>
 
@@ -462,11 +524,13 @@
   function renumber() {
     list.querySelectorAll('[data-lens]').forEach((lens, i) => {
       lens.querySelectorAll('.lv-hd input, .lv-hd select, .lv-tags').forEach(el => {
+        if (!el.name) return;
         const leaf = el.name.replace(/^lens\d+_/, '');
         el.name = 'lens' + i + '_' + leaf;
       });
       lens.querySelectorAll('[data-stage]').forEach((stage, j) => {
         stage.querySelectorAll('input, select').forEach(el => {
+          if (!el.name) return;   // UI-only controls (the chip filters) must stay nameless
           const leaf = el.name.replace(/^lens\d+_stage\d+_/, '');
           el.name = 'lens' + i + '_stage' + j + '_' + leaf;
         });
@@ -475,13 +539,57 @@
   }
 
   function paintChip(box) { box.closest('.lv-col').classList.toggle('on', box.checked); }
+
+  // The summary is the only thing visible when parks-at is closed, so it has to
+  // follow every tick — a stale summary is worse than no summary.
+  function paintParks(det) {
+    const sum = det.querySelector('[data-parks-sum]');
+    if (!sum) return;
+    const bits = [];
+    det.querySelectorAll('.lv-chip input:checked').forEach(box => {
+      bits.push([box.closest('.lv-chip').classList.contains('tagish') ? 'tg' : 'st', box.value]);
+    });
+    det.querySelectorAll('.lv-extra').forEach(field => {
+      const kind = field.classList.contains('x-tag') ? 'tg' : 'st';
+      field.value.split(',').map(v => v.trim()).filter(Boolean).forEach(v => bits.push([kind, v]));
+    });
+    sum.textContent = '';
+    if (!bits.length) {
+      const none = document.createElement('span');
+      none.className = 'lv-parks-none';
+      none.textContent = 'columns only — nothing parks here';
+      sum.appendChild(none);
+      return;
+    }
+    bits.forEach(([kind, text]) => {
+      const chip = document.createElement('span');
+      chip.className = 'lv-mini ' + kind;
+      chip.textContent = text;
+      sum.appendChild(chip);
+    });
+  }
+
+  // 30 states and 40 tags is a wall to read but a second to type through.
+  document.addEventListener('input', e => {
+    if (e.target.matches('.lv-filter')) {
+      const q = e.target.value.trim().toLowerCase();
+      e.target.closest('.lv-grp').querySelectorAll('.lv-chip').forEach(chip => {
+        chip.classList.toggle('hide', !!q && !chip.textContent.toLowerCase().includes(q));
+      });
+      return;
+    }
+    if (e.target.matches('.lv-extra')) paintParks(e.target.closest('.lv-parks'));
+  });
   function paintTone(sel) {
     sel.className = 'lv-in lv-tone tone-' + sel.value;
   }
 
   document.addEventListener('change', e => {
     if (e.target.matches('.lv-col input')) paintChip(e.target);
-    if (e.target.matches('.lv-chip input')) e.target.closest('.lv-chip').classList.toggle('on', e.target.checked);
+    if (e.target.matches('.lv-chip input')) {
+      e.target.closest('.lv-chip').classList.toggle('on', e.target.checked);
+      paintParks(e.target.closest('.lv-parks'));
+    }
     if (e.target.matches('.lv-mine input')) e.target.closest('.lv-mine').classList.toggle('on', e.target.checked);
     if (e.target.matches('.lv-tone')) paintTone(e.target);
   });

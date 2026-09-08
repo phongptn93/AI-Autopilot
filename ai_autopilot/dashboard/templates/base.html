@@ -38,7 +38,18 @@
 
         .layout { display: flex; min-height: 100vh; }
         .sidebar { width: 248px; background: var(--bg-sidebar); border-right: 1px solid var(--border-soft);
-            padding: 20px 14px; position: fixed; inset: 0 auto 0 0; display: flex; flex-direction: column; }
+            padding: 20px 14px; position: fixed; inset: 0 auto 0 0; display: flex; flex-direction: column;
+            overflow: hidden; }
+        /* Brand and footer stay put; only the link list scrolls. min-height:0 is what
+           lets a flex child shrink below its content and actually scroll. */
+        .nav-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+            margin: 0 -14px; padding: 0 14px; scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent; }
+        .nav-scroll::-webkit-scrollbar { width: 8px; }
+        .nav-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px;
+            border: 2px solid var(--bg-sidebar); }
+        .nav-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+        .nav-scroll::-webkit-scrollbar-track { background: transparent; }
         .brand { font-size: 15px; font-weight: 700; letter-spacing: -.01em; padding: 4px 10px 6px;
             display: flex; align-items: center; gap: 10px; }
         .brand-badge { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
@@ -222,6 +233,7 @@
             <noscript><button type="submit">Xem</button></noscript>
         </form>
         {% endif %}
+        <div class="nav-scroll">
         <div class="nav-section">Operate</div>
         <nav>
             <a class="nav-link {{ 'active' if active == 'overview' else '' }}" href="/dashboard"><span class="ico">📊</span> Overview</a>
@@ -246,6 +258,7 @@
             <a class="nav-link {{ 'active' if active == 'board-views' else '' }}" href="/dashboard/board-views"><span class="ico">🧩</span> Board processes</a>
             <a class="nav-link {{ 'active' if active == 'capabilities' else '' }}" href="/dashboard/capabilities"><span class="ico">✨</span> Capabilities</a>
         </nav>
+        </div>
         <div class="sidebar-foot">
             <span class="live-dot"></span> autopilot online · v{{ version }}
             {% if dashboard_locked %}

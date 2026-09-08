@@ -319,7 +319,8 @@ def test_shipped_processes_are_a_relay_not_a_set_of_labels():
     # The ball moves along the pipeline: BA holds intake, Dev the build, QC the checks.
     assert "Queued" in turns["ba"] and "In progress" not in turns["ba"]
     assert {"In progress", "Ready for deploy"} <= turns["dev"]
-    assert {"Ready for review", "Ready for testing"} <= turns["qc"]
+    assert turns["qc"] == {"Ready for testing"}   # review is Dev's once QC has a queue
+    assert "Ready for review" in turns["dev"]
     # Deploying to the test env is Dev's move; QC only gets the ball once it is there.
     assert "Ready for deploy" not in turns["qc"]
     assert "Ready for testing" not in turns["dev"]
@@ -391,7 +392,7 @@ def test_relay_hands_the_item_along_without_re_tagging(tmp_path):
         assert 'data-id="7"' in qc and "Ready for testing" in qc
         # Dev still SEES it (it is what Dev handed over) but is not asked to act.
         dev = client.get("/dashboard/board?view=dev").text
-        assert 'data-id="7"' in dev and "Handed to QC" in dev
+        assert 'data-id="7"' in dev and "With QC" in dev
         assert 'data-id="7"' not in client.get("/dashboard/board?view=dev&mine=1").text
 
         # While the agent is actually running, the column wins over any leftover tag:
@@ -887,3 +888,53 @@ def test_the_editor_renders_every_field_the_form_can_submit(tmp_path, monkeypatc
         # drops them the same way.
         assert 'value="handoff-ba"' in page and "checked" in page
         assert "Ready for Analysis" in page
+
+
+def test_review_belongs_to_dev_once_qc_has_a_queue_of_its_own():
+    """"Ready for review" means waiting on a REVIEWER, and a reviewer is a developer.
+
+    QC held that column only because, before the testing column existed, it was all
+    QC would ever have — a workaround that outlived its reason. Dev owns it now, but
+    only where QC has a queue of its own: without a testing state that column is
+    still QC's only one, and a role with no turn is a board that can only be watched.
+    Whichever way it falls, exactly one role may claim it.
+    """
+    from ai_autopilot.board import board_columns
+    from ai_autopilot.lenses import (
+        SHARED_COLUMNS, coverage_gaps, default_lenses, my_turn_claims, my_turn_columns,
+        view_of,
+    )
+
+    shapes = {
+        "bare": Settings(),
+        "review only": Settings(board_review_state=["Ready for Review"]),
+        "review+deploy": Settings(board_review_state=["Ready for Review"],
+                                  board_deploy_state=["Ready for Deploy"]),
+        "all three": Settings(board_review_state=["Ready for Review"],
+                              board_deploy_state=["Ready for Deploy"],
+                              board_testing_state=["Ready for Testing"]),
+    }
+    for label, cfg in shapes.items():
+        cols = board_columns(cfg)
+        owners: dict[str, list[str]] = {}
+        turns = {}
+        for lens in default_lenses(cfg):
+            view = view_of(lens, cols)
+            # No column may be left without a lane, or its cards vanish from that board.
+            assert coverage_gaps(lens, cols) == [], f"{label}/{lens['key']} drops a column"
+            turns[lens["key"]] = my_turn_columns(view)
+            for claim in my_turn_claims(view):
+                if claim not in SHARED_COLUMNS:
+                    owners.setdefault(claim, []).append(lens["key"])
+        clashes = {c: who for c, who in owners.items() if len(who) > 1}
+        assert not clashes, f"{label}: two roles claim {clashes}"
+
+    # With a testing queue, review is Dev's and QC waits on the test environment.
+    assert "Ready for review" in turns["dev"] and "Ready for review" not in turns["qc"]
+    assert turns["qc"] == {"Ready for testing"}
+
+    # Without one, it falls back to QC rather than leaving QC nothing to do.
+    cols = board_columns(shapes["review only"])
+    by_key = {x["key"]: view_of(x, cols) for x in default_lenses(shapes["review only"])}
+    assert my_turn_columns(by_key["qc"]) == {"Ready for review"}
+    assert "Ready for review" not in my_turn_columns(by_key["dev"])

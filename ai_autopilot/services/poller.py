@@ -109,6 +109,11 @@ class AdoPollerService:
         # time the session finishes its queue state is gone and the state can no
         # longer say which role just ran.
         self._live_profiles: dict[int, str] = {}
+        # Items wearing the live tag that this process cannot account for. Announced
+        # once each: a session whose console outlived a restart is normal and will
+        # finish, but one whose process died never writes a result — and the poller
+        # skips the live tag, so the item goes quiet for good with nothing said.
+        self._stranded: set[int] = set()
         # Dependency scheduling: ids we've already told the human are deferred, so we
         # comment "waiting for #X" once per episode rather than every poll cycle.
         self._deferred_notified: set[int] = set()
@@ -1203,8 +1208,21 @@ class AdoPollerService:
             run_dir = c.executor.interactive_scratch_dir(item.id)
             result = c.executor.finalize_interactive(item, run_dir)
             if result is None:
-                continue  # session still running / no result yet
+                # Either the console is still working, or it died with the process
+                # that launched it and will never write a result. This side cannot
+                # tell the two apart — but silence is the wrong answer to both,
+                # because the live tag makes the poller skip the item forever and
+                # pressing ▶ Run on it does nothing visible.
+                if item.id not in self._stranded:
+                    self._stranded.add(item.id)
+                    self._log.warning(
+                        "item is tagged live but this process has no session for it",
+                        id=item.id, tag=cfg.live_tag,
+                        hint=f"if its console is gone, tag {cfg.restart_tag} to release it",
+                    )
+                continue
             await self._remove_live_tag(item.id)
+            self._stranded.discard(item.id)
             await self._handle_agent_result(item, result)
             self._processed[item.id] = datetime.now(UTC)
             if await self._close_live_session(item.id, run_dir):

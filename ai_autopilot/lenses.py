@@ -35,6 +35,7 @@ from ai_autopilot.board import (
     BoardCard,
     board_columns,
     canon_column,
+    handoff_states,
 )
 from ai_autopilot.config import Settings
 
@@ -155,15 +156,16 @@ DEFAULT_LENSES: list[dict] = [
              "hint": "waiting to start", "drop": "Queued"},
             {"name": "Building", "columns": ["In progress"], "tone": "blue", "mine": True,
              "hint": "agent working — your turn", "drop": "In progress"},
-            {"name": "In review", "columns": ["In review"], "tone": "violet", "mine": True,
-             "hint": "PR open — self-review", "drop": "In review"},
+            {"name": "In review", "columns": ["In review", COL_READY_REVIEW],
+             "tone": "violet", "mine": True, "hint": "PR open — review it",
+             "drop": "In review", "review_owner": True},
             {"name": "Blocked", "columns": ["Needs human", "Failed"], "tone": "red", "mine": True,
              "hint": "escalated or errored", "drop": "Needs human"},
             {"name": "Deploy to test", "columns": [COL_READY_DEPLOY], "tone": "teal",
              "mine": True, "hint": "approved — put it on the test env", "drop": COL_READY_DEPLOY},
-            {"name": "Handed to QC", "columns": [COL_READY_REVIEW, COL_READY_TESTING],
-             "tone": "purple", "hint": "waiting on QC", "drop": COL_READY_REVIEW,
-             "qc_handoff": True},
+            {"name": "With QC", "columns": [COL_READY_TESTING], "tone": "purple",
+             "hint": "QC verifying — not yours", "drop": COL_READY_TESTING,
+             "qc_handoff": True, "review_context": True},
             {"name": "Shipped", "columns": ["Done"], "tone": "green",
              "hint": "merged / closed", "drop": "Done"},
         ],
@@ -178,13 +180,14 @@ DEFAULT_LENSES: list[dict] = [
         "stages": [
             {"name": "Not testable yet", "columns": ["Queued", "In progress"], "tone": "slate",
              "hint": "still being built", "drop": "Queued"},
-            {"name": "In dev review", "columns": ["In review"], "tone": "violet",
-             "hint": "dev's own PR checks — not yours yet", "drop": "In review"},
+            {"name": "In dev review", "columns": ["In review", COL_READY_REVIEW],
+             "tone": "violet", "hint": "dev's own checks — not yours yet",
+             "drop": "In review"},
             {"name": "Waiting on deploy", "columns": [COL_READY_DEPLOY], "tone": "teal",
              "hint": "not on the test env yet — not yours", "drop": COL_READY_DEPLOY},
-            {"name": "Ready for testing", "columns": [COL_READY_REVIEW, COL_READY_TESTING],
-             "tone": "cyan", "mine": True, "hint": "deployed — your turn to verify",
-             "drop": COL_READY_TESTING, "qc_handoff": True},
+            {"name": "Ready for testing", "columns": [COL_READY_TESTING], "tone": "cyan",
+             "mine": True, "hint": "deployed — your turn to verify",
+             "drop": COL_READY_TESTING, "qc_handoff": True, "review_fallback": True},
             {"name": "Needs attention", "columns": ["Failed", "Needs human"], "tone": "red",
              "hint": "failed run or escalation", "drop": "Needs human"},
             {"name": "Passed", "columns": ["Done"], "tone": "green",
@@ -243,6 +246,13 @@ def default_lenses(cfg: Settings) -> list[dict]:
     is real out of the box instead of empty until someone configures a state.
     """
     review = (cfg.review_tag or "").strip()
+    # "Ready for review" means waiting on a REVIEWER, and a reviewer is a developer,
+    # so Dev owns it — but only once QC has a queue of its own. Without a testing
+    # state configured that column is all QC would ever have, and a role with no turn
+    # is a board that can only be watched. So the fallback hands it back to QC and
+    # takes it off Dev, because two roles claiming one hand-off means the item is
+    # done twice or by nobody.
+    has_testing = bool(handoff_states(getattr(cfg, "board_testing_state", None)))
     out: list[dict] = []
     for lens in DEFAULT_LENSES:
         stages = []
@@ -252,6 +262,16 @@ def default_lenses(cfg: Settings) -> list[dict]:
                 st["tags"] = [review]
             else:
                 st.pop("qc_handoff", None)
+            if st.pop("review_owner", False) and not has_testing:
+                st["columns"] = [c for c in st["columns"] if c != COL_READY_REVIEW]
+            if st.pop("review_fallback", False) and not has_testing:
+                st["columns"] = [COL_READY_REVIEW, *st["columns"]]
+                st["drop"] = COL_READY_REVIEW
+            # Dev stops owning the column, so Dev's context lane has to pick it up —
+            # a column no lane shows is a card that vanishes from that board.
+            if st.pop("review_context", False) and not has_testing:
+                st["columns"] = [COL_READY_REVIEW, *st["columns"]]
+                st["drop"] = COL_READY_REVIEW
             stages.append(st)
         out.append({**lens, "stages": stages})
     return out

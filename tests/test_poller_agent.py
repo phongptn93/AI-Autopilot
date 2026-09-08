@@ -1055,3 +1055,29 @@ async def test_a_branch_outside_the_prefixes_is_called_out_at_once():
     assert len(warned) == 1
     assert warned[0]["branch"] == "8107-select-search-stale-request-race"
     assert "bugfix/" in warned[0]["prefixes"] or "feature/" in warned[0]["prefixes"]
+
+
+async def test_an_item_stranded_by_the_live_tag_is_reported_once():
+    """A run killed with its process never writes a result, so the live tag stays on
+    the item — and the poller skips that tag. The item then goes quiet for good:
+    the board still shows it, ▶ Run reports started=1, and nothing ever happens.
+
+    This side cannot tell a dead console from a slow one, so it says so instead of
+    choosing silence, and says it once rather than every scan.
+    """
+    p, c = _poller()
+    c.config.live_tag = "autopilot-live"
+    c.config.restart_tag = "autopilot-restart"
+    warned: list = []
+    p._log = SimpleNamespace(info=lambda *a, **k: None, debug=lambda *a, **k: None,
+                             error=lambda *a, **k: None,
+                             warning=lambda msg, **kw: warned.append(kw))
+    c.ado.tagged_items = [_tagged(8626, "Active", ["vm-autopilot", "autopilot-live"])]
+    c.executor._final = None                     # the console died: no result, ever
+
+    await p._finalize_orphan_sessions()
+    await p._finalize_orphan_sessions()           # a second scan must stay quiet
+
+    assert len(warned) == 1
+    assert warned[0]["id"] == 8626
+    assert "autopilot-restart" in warned[0]["hint"]

@@ -41,7 +41,7 @@ from ai_autopilot.board import (
     latest_records,
     parse_drop_map,
 )
-from ai_autopilot.config import config_file_path, matches_any_user
+from ai_autopilot.config import SdlcStageWiring, config_file_path, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
 from ai_autopilot.data.entities import PipelineState, QualityKind
@@ -124,6 +124,8 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "lens_reset": ("green", "↩ Đã khôi phục bộ quy trình mặc định (BA / Dev / QC)."),
     "lens_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                             "vẫn được giữ."),
+    "relay_saved": ("green", "✅ Đã lưu dây chuyền (stage → state) và áp dụng ngay."),
+    "relay_cleared": ("green", "↩ Đã gỡ toàn bộ wiring — máy quay về dùng Trigger states."),
     "ws_saved": ("green", "✅ Đã lưu workspace và áp dụng ngay (không cần khởi động lại)."),
     "ws_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                           "vẫn được giữ."),
@@ -1050,6 +1052,98 @@ def create_dashboard_router() -> APIRouter:
             target=", ".join(str(x.get("label")) for x in parsed)[:300],
         )
         return _flash("/dashboard/board-views", "lens_saved")
+
+    @router.get("/relay", response_class=HTMLResponse)
+    async def relay_page(request: Request):
+        """The relay in one table: which ADO state each stage waits in, what it shows
+        while running, and whether it starts by itself.
+
+        These three facts used to live in three different places keyed by three
+        different things — trigger_states, state_in_progress, sdlc_profile_states —
+        so nothing on screen showed that they described the same step. That is how a
+        QC hand-off became a trigger and reworked finished work.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        try:
+            states_by_type = await c.ado.get_states_by_type()
+        except Exception:  # noqa: BLE001 — ADO down costs the picker, not the page
+            states_by_type = {}
+        known = sorted({(n or "").strip() for names in states_by_type.values() for n in names if n})
+        catalog = sdlc_plan.stage_catalog(cfg)
+        profiles = sdlc_plan.profile_map(cfg)
+        # Which profiles start at each stage — the door it owns, if any.
+        entry_of: dict[str, list[str]] = {}
+        for name, stage_names in profiles.items():
+            if stage_names:
+                entry_of.setdefault(stage_names[0], []).append(name)
+        rows = [
+            {
+                "name": st.name, "role": st.role, "goal": st.goal,
+                "queue_state": st.queue_state, "working_state": st.working_state,
+                "entry_tag": st.entry_tag, "auto": st.auto,
+                "opens": sorted(entry_of.get(st.name, [])),
+                "in_profiles": sorted(p for p, ss in profiles.items() if st.name in ss),
+            }
+            for st in catalog.values()
+        ]
+        flash = _take_flash(request)
+        response = _TEMPLATES.TemplateResponse(
+            request, "relay.html",
+            _ctx(request, "relay", rows=rows, known_states=known, flash=flash,
+                 profiles={k: list(v) for k, v in sorted(profiles.items())},
+                 trigger_states=cfg.trigger_states,
+                 effective_states=cfg.effective_trigger_states,
+                 entry_tag=cfg.stage_entry_tag,
+                 collisions=sdlc_plan.handoff_collisions(cfg),
+                 in_progress=cfg.state_in_progress),
+        )
+        if flash is not None:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/relay")
+    async def save_relay(request: Request):
+        """Save the stage wiring. A row with no queue state is simply not wired."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        if form.get("reset"):
+            updates = {"sdlc_stage_wiring": {}}
+            settings_form.save_to_yaml(config_file_path(), updates)
+            settings_form.apply_to_config(c.config, updates)
+            _log.info("relay wiring cleared via dashboard")
+            return _flash("/dashboard/relay", "relay_cleared")
+
+        wiring: dict[str, dict] = {}
+        for key in form:
+            if not key.startswith("stage_") or not key.endswith("_queue"):
+                continue
+            name = key[len("stage_"):-len("_queue")]
+            queue = str(form.get(f"stage_{name}_queue", "")).strip()
+            working = str(form.get(f"stage_{name}_working", "")).strip()
+            tag = str(form.get(f"stage_{name}_tag", "")).strip()
+            auto = bool(form.get(f"stage_{name}_auto"))
+            # No queue state = not wired. Keeping a half-row would leave a working
+            # state or an auto flag with no door to apply to, which reads as
+            # configured and does nothing.
+            if not queue:
+                continue
+            wiring[name] = {
+                "queue_state": queue, "working_state": working,
+                "entry_tag": tag, "auto": auto,
+            }
+        settings_form.save_to_yaml(config_file_path(), {"sdlc_stage_wiring": wiring})
+        # YAML takes plain dicts; the live config must get validated objects, or the
+        # very next poll reads a raw dict where a model is expected.
+        settings_form.apply_to_config(c.config, {
+            "sdlc_stage_wiring": {k: SdlcStageWiring(**v) for k, v in wiring.items()}
+        })
+        _log.info("relay wiring updated via dashboard", stages=sorted(wiring))
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.relay_updated",
+            target=", ".join(f"{k}->{v['queue_state']}" for k, v in sorted(wiring.items()))[:300],
+        )
+        return _flash("/dashboard/relay", "relay_saved")
 
     @router.get("/reviews", response_class=HTMLResponse)
     async def reviews(request: Request):

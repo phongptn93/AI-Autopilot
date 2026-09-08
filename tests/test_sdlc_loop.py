@@ -215,7 +215,7 @@ async def test_human_guidance_reaches_the_stage_run_prompt():
 # ── Board wiring: the state says which role, and whether it self-starts ──────────
 
 
-def _wired() -> "Settings":
+def _wired():
     """A central machine: one box, every role, roles told apart by ADO state."""
     from ai_autopilot.config import Settings
 
@@ -302,3 +302,49 @@ def test_collision_check_covers_every_profile_not_just_one():
     assert ("dev", "Ready for Testing") in handoff_collisions(cfg)
     assert handoff_collides(cfg)
     assert not handoff_collides(Settings(trigger_states=["New"]))
+
+
+async def test_pressing_run_on_a_waiting_stage_keeps_the_role():
+    """A queue state marked auto=false is absent from the poll query on purpose, so a
+    manual start cannot go through the state: moving the item into a trigger state to
+    make it pollable erases the very thing that says which role is due, and QC
+    pressing Run would get the whole pipeline instead of the test stage."""
+    from types import SimpleNamespace
+
+    from ai_autopilot.config import Settings
+    from ai_autopilot.services.planning_analyzer import start_items
+
+    cfg = _wired()
+    assert "Ready for Testing" not in cfg.effective_trigger_states   # waits for a person
+
+    tags: list[tuple[int, str]] = []
+    states: list[tuple[int, str]] = []
+    ado = SimpleNamespace(
+        get_work_item=lambda iid: _awaited(SimpleNamespace(
+            id=iid, state="Ready for Testing", tags=["vm-autopilot"])),
+        add_tag=lambda iid, t: _record(tags, (iid, t)),
+        update_state=lambda iid, st: _record(states, (iid, st)),
+    )
+    assert await start_items(SimpleNamespace(config=cfg, ado=ado), [7]) == 1
+    assert states == []                                   # the role state is untouched
+    assert (7, cfg.stage_entry_tag) in tags               # released by the one-shot tag
+
+    # An ordinary item (no wired state) still gets moved into a trigger state.
+    plain = Settings(trigger_states=["New"])
+    tags2: list[tuple[int, str]] = []
+    states2: list[tuple[int, str]] = []
+    ado2 = SimpleNamespace(
+        get_work_item=lambda iid: _awaited(SimpleNamespace(id=iid, state="Closed", tags=[])),
+        add_tag=lambda iid, t: _record(tags2, (iid, t)),
+        update_state=lambda iid, st: _record(states2, (iid, st)),
+    )
+    await start_items(SimpleNamespace(config=plain, ado=ado2), [8])
+    assert states2 == [(8, "New")]
+
+
+async def _awaited(value):
+    return value
+
+
+async def _record(sink, entry):
+    sink.append(entry)

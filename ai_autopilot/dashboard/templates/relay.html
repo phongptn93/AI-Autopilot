@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  /* ── Relay editor (scoped) ──
+     One table, read top to bottom, IS the dây chuyền. The three facts about a step
+     — where it waits, what it shows while running, whether it starts by itself —
+     used to live on three settings pages keyed by three different things, so
+     nothing on screen showed they described the same step. That is how a QC
+     hand-off became a trigger and reworked finished work. */
+  .main { max-width:none; }
+  .rl-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; margin-bottom:5px; }
+  .rl-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+  .rl-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:112ch; margin:0 0 14px; }
+  .rl-lede code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input);
+    padding:1px 6px; border-radius:5px; }
+  .rl-lede a { color:var(--accent-hover); }
+
+  .rl-flash { display:flex; gap:10px; align-items:center; padding:11px 16px; margin-bottom:14px;
+    border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-card);
+    font-size:12.5px; }
+  .rl-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); }
+  .rl-flash.bad { border-color:rgba(240,82,106,.45); color:var(--red);
+    flex-direction:column; align-items:flex-start; gap:5px; }
+
+  .rl-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+    overflow:hidden; margin-bottom:16px; }
+  .rl-hd { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:baseline;
+    padding:13px 18px; border-bottom:1px solid var(--border-soft); }
+  .rl-hd h3 { font-size:14px; font-weight:650; }
+  .rl-hd span { color:var(--text-dim); font-size:12px; }
+
+  .rl-grid { display:grid; gap:6px 10px; align-items:center;
+    grid-template-columns:minmax(150px,1fr) minmax(170px,1.1fr) minmax(150px,1fr)
+                          minmax(130px,.9fr) 92px;
+    padding:6px 18px 14px; }
+  .rl-head { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--text-dim); padding-bottom:5px; border-bottom:1px solid var(--border); }
+  .rl-row-sep { grid-column:1/-1; height:1px; background:var(--border-soft); }
+
+  .rl-stage b { font-size:13px; font-weight:650; font-family:var(--mono); }
+  .rl-stage .role { font-size:10.5px; color:var(--text-dim); margin-left:6px; }
+  .rl-stage .goal { display:block; color:var(--text-dim); font-size:11px; line-height:1.45;
+    margin-top:2px; }
+  .rl-opens { display:inline-flex; align-items:center; gap:4px; margin-top:4px; font-size:10px; }
+  .rl-pill { font-family:var(--mono); font-size:10px; padding:1px 7px; border-radius:5px;
+    background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.4); }
+  .rl-pill.mute { background:var(--bg-input); color:var(--text-dim); border-color:var(--border); }
+
+  .rl-in { width:100%; background:var(--bg-input); color:var(--text); border:1px solid var(--border);
+    border-radius:var(--radius-sm); padding:7px 9px; font-size:12.5px; font-family:inherit;
+    min-width:0; }
+  .rl-in:focus { outline:none; border-color:var(--accent); }
+  .rl-in.mono { font-family:var(--mono); font-size:11.5px; }
+  .rl-auto { display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    white-space:nowrap; font-size:11px; font-weight:600; color:var(--text-dim);
+    border:1px solid var(--border); background:var(--bg-input); border-radius:7px;
+    padding:6px 8px; cursor:pointer; }
+  .rl-auto.on { color:var(--green); border-color:rgba(46,204,113,.45); background:var(--green-bg); }
+  .rl-auto input { accent-color:var(--green); margin:0; }
+
+  /* A wired row reads as part of the chain; an unwired one stays quiet. */
+  .rl-row { display:contents; }
+  .rl-row.off .rl-stage b { color:var(--text-muted); }
+  .rl-row.off .rl-stage .goal { opacity:.65; }
+
+  .rl-chain { display:flex; flex-wrap:wrap; align-items:center; gap:7px; padding:12px 18px 16px; }
+  .rl-step { display:flex; flex-direction:column; gap:2px; padding:7px 12px; border-radius:9px;
+    border:1px solid var(--border); background:var(--bg-input); min-width:120px; }
+  .rl-step b { font-size:11.5px; font-family:var(--mono); }
+  .rl-step span { font-size:10px; color:var(--text-dim); }
+  .rl-step.auto { border-color:rgba(46,204,113,.4); }
+  .rl-step.wait { border-color:rgba(245,166,35,.4); }
+  .rl-arrow { color:var(--text-dim); font-size:13px; }
+  .rl-none { color:var(--text-dim); font-size:12px; font-style:italic; }
+
+  .rl-eff { display:flex; flex-wrap:wrap; gap:6px; padding:0 18px 16px; align-items:center; }
+  .rl-eff .k { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--text-dim); margin-right:4px; }
+
+  .rl-prof { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+    gap:10px; padding:6px 18px 16px; }
+  .rl-prof-card { border:1px solid var(--border-soft); border-radius:var(--radius-sm);
+    padding:10px 12px; background:var(--bg-input); }
+  .rl-prof-card b { font-family:var(--mono); font-size:12px; }
+  .rl-prof-card div { margin-top:5px; font-size:11px; color:var(--text-dim); line-height:1.5; }
+
+  .savebar { position:sticky; bottom:0; display:flex; justify-content:space-between;
+    align-items:center; gap:14px; padding:12px 0 18px; background:var(--bg-sticky);
+    backdrop-filter:blur(8px); }
+  .savebar .note { color:var(--text-dim); font-size:12px; }
+</style>
+
+<div class="rl-top"><h2>🔗 Relay</h2></div>
+<p class="rl-lede">
+  A work item moves <b>role to role</b>, and on this machine every role runs in one process —
+  so which role is due cannot come from the machine, nor from the work-item <em>type</em>
+  (a Bug is a Bug at every step). It comes from <b>where the item stands</b>. Each stage below
+  claims the ADO state it waits in; that state is what picks the role.
+  Saved to <code>sdlc_stage_wiring</code>, applied live. Boards are at
+  <a href="/dashboard/board">Board</a>.
+</p>
+
+{% if flash %}
+<div class="rl-flash {{ 'ok' if flash[0] == 'green' else 'bad' }}">{{ flash[1]|safe }}</div>
+{% endif %}
+
+{% if collisions %}
+<div class="rl-flash bad">
+  <b>A hand-off lands back in a trigger state</b>
+  {% for name, state in collisions %}
+  <div>• <code>{{ name }}</code> finishes into <code>{{ state }}</code>, which also starts work —
+    items would be picked up forever.</div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<form method="post" action="/dashboard/relay">
+  <div class="rl-card">
+    <div class="rl-hd">
+      <h3>Stages</h3>
+      <span>Leave <b>Waits in</b> blank to leave a stage unwired — it then behaves exactly as before.</span>
+    </div>
+
+    <div class="rl-grid">
+      <div class="rl-head">Stage</div>
+      <div class="rl-head">Waits in (ADO state)</div>
+      <div class="rl-head">Shows while running</div>
+      <div class="rl-head">Run-now tag</div>
+      <div class="rl-head" style="text-align:center">Starts itself</div>
+
+      {% for r in rows %}
+      <div class="rl-row {{ '' if r.queue_state else 'off' }}"></div>
+      <div class="rl-stage">
+        <b>{{ r.name }}</b>{% if r.role %}<span class="role">{{ r.role }}</span>{% endif %}
+        <span class="goal">{{ r.goal }}</span>
+        {% if r.opens %}
+        <span class="rl-opens">
+          <span class="rl-pill">opens {{ r.opens | join(', ') }}</span>
+        </span>
+        {% elif r.in_profiles %}
+        <span class="rl-opens">
+          <span class="rl-pill mute" title="This stage runs inside these profiles but is not their first step, so it does not own a door.">in {{ r.in_profiles | join(', ') }}</span>
+        </span>
+        {% endif %}
+      </div>
+      <div>
+        <input type="text" class="rl-in" name="stage_{{ r.name }}_queue" value="{{ r.queue_state }}"
+               list="rl-states" placeholder="blank = not wired"
+               title="The ADO state an item waits in for this stage. Only a profile's FIRST stage owns a door.">
+      </div>
+      <div>
+        <input type="text" class="rl-in" name="stage_{{ r.name }}_working" value="{{ r.working_state }}"
+               list="rl-states" placeholder="{{ in_progress or 'global in-progress state' }}"
+               title="State shown while this stage runs. Blank falls back to the machine-wide one.">
+      </div>
+      <div>
+        <input type="text" class="rl-in mono" name="stage_{{ r.name }}_tag" value="{{ r.entry_tag }}"
+               placeholder="{{ entry_tag }}"
+               title="One-shot tag that starts this stage where it stands. Blank uses the shared one.">
+      </div>
+      <div style="display:flex;justify-content:center">
+        <label class="rl-auto {{ 'on' if r.auto else '' }}"
+               title="Ticked: the poller starts it with nobody pressing anything. Unticked: it waits for ▶ Run on the board.">
+          <input type="checkbox" name="stage_{{ r.name }}_auto" {% if r.auto %}checked{% endif %}>auto
+        </label>
+      </div>
+      <div class="rl-row-sep"></div>
+      {% endfor %}
+    </div>
+
+    <datalist id="rl-states">
+      {% for s in known_states %}<option value="{{ s }}"></option>{% endfor %}
+    </datalist>
+  </div>
+
+  <div class="rl-card">
+    <div class="rl-hd">
+      <h3>The chain as configured</h3>
+      <span>What a wired stage means, read left to right.</span>
+    </div>
+    {% set wired = rows | selectattr('queue_state') | list %}
+    {% if wired %}
+    <div class="rl-chain">
+      {% for r in wired %}
+      {% if not loop.first %}<span class="rl-arrow">→</span>{% endif %}
+      <span class="rl-step {{ 'auto' if r.auto else 'wait' }}">
+        <b>{{ r.name }}</b>
+        <span>{{ r.queue_state }}</span>
+        <span>{{ '▶ starts itself' if r.auto else '⏸ waits for Run' }}</span>
+      </span>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="rl-chain"><span class="rl-none">Nothing wired yet — the machine uses Trigger states alone.</span></div>
+    {% endif %}
+
+    <div class="rl-eff">
+      <span class="k">Poller starts from</span>
+      {% for s in effective_states %}<span class="rl-pill">{{ s }}</span>{% endfor %}
+      {% if not effective_states %}<span class="rl-none">nothing — no item can be picked up</span>{% endif %}
+    </div>
+    <div class="rl-eff" style="padding-top:0">
+      <span class="k">Configured trigger states</span>
+      {% for s in trigger_states %}<span class="rl-pill mute">{{ s }}</span>{% endfor %}
+      <span class="rl-none" style="margin-left:6px">
+        a stage wired <b>auto</b> adds its state here; one wired <b>not</b> auto removes it —
+        which is the whole point of putting the dial next to the state it governs.
+      </span>
+    </div>
+  </div>
+
+  <div class="rl-card">
+    <div class="rl-hd">
+      <h3>Profiles</h3>
+      <span>A profile is just an ordered list of stages; its door is its first one.</span>
+    </div>
+    <div class="rl-prof">
+      {% for name, stage_names in profiles.items() %}
+      <div class="rl-prof-card">
+        <b>{{ name }}</b>
+        <div>{{ stage_names | join(' → ') }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="savebar">
+    <span class="note">Applied live — no restart. Nothing wired = behaviour unchanged.</span>
+    <span style="display:flex;gap:10px">
+      <button type="submit" name="reset" value="1" class="btn-ghost"
+              onclick="return confirm('Remove all stage wiring? The machine falls back to Trigger states.')">
+        ↩ Clear wiring
+      </button>
+      <button type="submit" class="btn-save">💾 Save relay</button>
+    </span>
+  </div>
+</form>
+
+<script>
+  document.addEventListener('change', function (e) {
+    if (e.target.matches('.rl-auto input')) {
+      e.target.closest('.rl-auto').classList.toggle('on', e.target.checked);
+    }
+  });
+</script>
+{% endblock %}

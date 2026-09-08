@@ -97,6 +97,7 @@ async def start_items(container, ids: list[int]) -> int:
     active_states = cfg.effective_trigger_states
     start_state = cfg.planning_start_state or (active_states[0] if active_states else "")
     trigger_states = {s.strip().lower() for s in active_states}
+    wired = {s.strip().lower() for s in cfg.wired_queue_states if s.strip()}
     started = 0
     for iid in ids:
         item = await c.ado.get_work_item(iid)
@@ -104,7 +105,17 @@ async def start_items(container, ids: list[int]) -> int:
             continue
         if trigger and trigger.lower() not in {t.lower() for t in item.tags}:
             await c.ado.add_tag(iid, trigger)
-        if start_state and (item.state or "").strip().lower() not in trigger_states:
+        # A wired queue state NAMES the role that is due. Moving the item out of it to
+        # make it pollable would throw that away and the run would fall back to the
+        # default profile — pressing Run on the QC board would start the whole
+        # pipeline. Release it with the one-shot entry tag instead: a tag-only query
+        # finds it where it stands.
+        state_now = (item.state or "").strip().lower()
+        if state_now in wired:
+            entry = (cfg.stage_entry_tag or "").strip()
+            if entry and entry.lower() not in {t.lower() for t in item.tags}:
+                await c.ado.add_tag(iid, entry)
+        elif start_state and state_now not in trigger_states:
             await c.ado.update_state(iid, start_state)
         started += 1
     return started

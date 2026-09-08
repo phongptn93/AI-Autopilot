@@ -668,6 +668,18 @@ class SdlcStage(BaseModel):
     auto: bool = False
 
 
+def stage_wiring_value(wiring: Any, key: str, default: Any = "") -> Any:
+    """Read one wiring field whether it arrived as a model or a plain dict.
+
+    Config reaches the runtime two ways — pydantic (YAML/env, validated) and a live
+    dashboard apply — and a reader that only handles one of them fails at the next
+    poll rather than at save time, which is the worst place to find out.
+    """
+    if isinstance(wiring, dict):
+        return wiring.get(key, default)
+    return getattr(wiring, key, default)
+
+
 class SdlcStageWiring(BaseModel):
     """Where one SDLC stage lives on the ADO board.
 
@@ -1343,6 +1355,12 @@ class Settings(BaseSettings):
     # E.g. {"implement": {"queue_state": "Ready for Development", "auto": true},
     #       "test": {"queue_state": "Ready for Testing", "working_state": "In Testing"}}
     sdlc_stage_wiring: dict[str, SdlcStageWiring] = Field(default_factory=dict)
+    # One-shot "start this stage now" tag, for a queue state marked auto=false.
+    # Such a state is deliberately NOT in the poll query, so a manual start cannot go
+    # through the state — moving the item into a trigger state would throw away the
+    # very thing that says which role is due. A tag is found regardless of state, and
+    # is consumed on pickup. A stage may name its own via ``entry_tag``.
+    stage_entry_tag: str = "autopilot-run"
     # Extra / overriding profiles merged over the built-ins (name → ordered stage names).
     sdlc_profiles: dict[str, list[str]] = Field(default_factory=dict)
     # Handoff: profile name → ADO state to set when its stages complete (the next
@@ -1711,10 +1729,19 @@ class Settings(BaseSettings):
             if qs:
                 out.append((qs, bool(getattr(stage, "auto", False))))
         for wiring in (self.sdlc_stage_wiring or {}).values():
-            qs = (wiring.queue_state or "").strip()
+            qs = str(stage_wiring_value(wiring, "queue_state", "") or "").strip()
             if qs:
-                out.append((qs, bool(wiring.auto)))
+                out.append((qs, bool(stage_wiring_value(wiring, "auto", False))))
         return out
+
+    @property
+    def wired_queue_states(self) -> list[str]:
+        """Every state a wired stage waits in — auto or not.
+
+        These states MEAN something (they name the role that is due), so nothing may
+        move an item out of one just to make it pollable.
+        """
+        return [qs for qs, _auto in self._stage_wiring()]
 
     @property
     def effective_trigger_states(self) -> list[str]:

@@ -20,6 +20,7 @@ from ai_autopilot.data import PipelineState, QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
 from ai_autopilot.execution.pr_scorer import RunScore, ScoreInput, score_badge_html, score_run
 from ai_autopilot.execution.sdlc_plan import (
+    entry_tags,
     handoff_state,
     handoff_tag,
     profile_for_state,
@@ -248,6 +249,7 @@ class AdoPollerService:
         # Force a clean re-run for items a human tagged for restart: wipe SDLC
         # progress and dispatch immediately (from any state) — see method docstring.
         await self._reconcile_restart_requests()
+        await self._reconcile_stage_entries()
 
         self._log.debug("polling ADO for pending work items")
         items = await c.ado.get_pending_work_items()
@@ -595,6 +597,42 @@ class AdoPollerService:
                 "from scratch using your latest comments.</div>",
             )
             self._log.info("restart requested", id=item.id, state=item.state)
+            asyncio.create_task(self._process(item))
+
+    async def _reconcile_stage_entries(self) -> None:
+        """Start items whose stage was released by hand (the board's ▶ Run).
+
+        A queue state marked ``auto=false`` is deliberately absent from the poll
+        query, so a manual start cannot go through the state: moving the item into a
+        trigger state to make it pollable would erase the one thing that says which
+        role is due, and the run would fall back to the default profile — QC pressing
+        Run would get the whole pipeline. The tag is found by a tag-only query, so the
+        item starts exactly where it stands, in the role its state names.
+        """
+        c, cfg = self._c, self._config
+        if cfg.dry_run:
+            return
+        per_stage = entry_tags(cfg)
+        shared = (cfg.stage_entry_tag or "").strip().lower()
+        if not per_stage and not shared:
+            return
+        try:
+            tagged = await c.ado.get_all_tagged_work_items()
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("stage entry reconcile: fetch failed", error=str(exc))
+            return
+        for item in tagged:
+            held = {(t or "").strip().lower(): t for t in item.tags}
+            hit = next((t for t in held if t in per_stage or (shared and t == shared)), None)
+            if hit is None or item.id in self._live or item.id in self._processed:
+                continue
+            await c.ado.remove_tag(item.id, held[hit])   # one-shot: consumed on pickup
+            await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
+            self._processed[item.id] = datetime.now(UTC)  # block same-cycle re-pick
+            self._log.info(
+                "stage entry released", id=item.id, state=item.state,
+                tag=held[hit], profile=profile_for_state(item.state or "", cfg) or "(default)",
+            )
             asyncio.create_task(self._process(item))
 
     def _is_my_user(self, email: str | None, name: str | None) -> bool:

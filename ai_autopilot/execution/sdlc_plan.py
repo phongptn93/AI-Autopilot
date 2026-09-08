@@ -24,7 +24,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
-from ai_autopilot.config import SdlcStage
+from ai_autopilot.config import SdlcStage, stage_wiring_value
 from ai_autopilot.execution.pr_scorer import ScoreInput
 from ai_autopilot.logging_config import get_logger
 
@@ -106,10 +106,20 @@ def _catalog(cfg: Settings) -> dict[str, SdlcStage]:
             _log.warning("sdlc: wiring for an unknown stage — ignored", stage=name)
             continue
         cat[name] = base.model_copy(update={
-            f: getattr(wiring, f)
+            f: stage_wiring_value(wiring, f, False if f == "auto" else "")
             for f in ("queue_state", "working_state", "entry_tag", "auto")
         })
     return cat
+
+
+def stage_catalog(cfg: Settings) -> dict[str, SdlcStage]:
+    """Every stage this machine knows, wiring applied — what the Relay page edits."""
+    return _catalog(cfg)
+
+
+def profile_map(cfg: Settings) -> dict[str, list[str]]:
+    """``profile -> ordered stage names``, built-ins plus config overrides."""
+    return _profile_map(cfg)
 
 
 def profile_names(cfg: Settings) -> list[str]:
@@ -180,6 +190,28 @@ def waiting_states(cfg: Settings) -> list[str]:
         qs = (stage.queue_state or "").strip()
         if qs and not stage.auto and qs not in out:
             out.append(qs)
+    return out
+
+
+def entry_tag_for(profile_name: str, cfg: Settings) -> str:
+    """The one-shot tag that starts this profile regardless of the item's state."""
+    stage = entry_stage(profile_name, cfg)
+    own = (stage.entry_tag or "").strip() if stage else ""
+    return own or (cfg.stage_entry_tag or "").strip()
+
+
+def entry_tags(cfg: Settings) -> dict[str, str]:
+    """``lower(tag) -> profile`` for every profile that has an entry door.
+
+    The machine-wide tag maps to whichever profile the item's CURRENT state names,
+    so it is resolved at pickup rather than listed here.
+    """
+    out: dict[str, str] = {}
+    for name in sorted(_profile_map(cfg)):
+        stage = entry_stage(name, cfg)
+        own = (stage.entry_tag or "").strip() if stage else ""
+        if own:
+            out[own.lower()] = name
     return out
 
 

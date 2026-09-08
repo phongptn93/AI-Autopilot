@@ -170,3 +170,34 @@ def test_allowed_repos_whitelist(tmp_path):
     assert ex._allowed_repos(str(tmp_path)) == ["Backend-Fresh"]
     ex2 = _executor(workspace_directory=str(tmp_path))  # empty whitelist → all
     assert set(ex2._allowed_repos(str(tmp_path))) == {"Backend-Fresh", "Micro-Frontend", "Secret"}
+
+
+async def test_the_scratch_does_not_duplicate_the_workspace_rules(tmp_path):
+    """The scratch lives UNDER the workspace, so Claude Code already finds the
+    workspace's rules by walking up from cwd. Copying them in loaded every rule file
+    twice — once from ..\..\.claude and once from the scratch's own — which on a
+    workspace with two dozen of them filled the context before any code was read.
+    """
+    from ai_autopilot.config import Settings
+    from ai_autopilot.execution.claude_executor import ClaudeExecutor
+
+    ws = tmp_path / "ws"
+    (ws / ".claude" / "rules").mkdir(parents=True)
+    (ws / ".claude" / "rules" / "big.md").write_text("x" * 5000, encoding="utf-8")
+    (ws / ".claude" / "skills").mkdir()
+    (ws / ".claude" / "skills" / "s.md").write_text("skill", encoding="utf-8")
+    (ws / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+
+    cfg = Settings(workspace_directory=str(ws), use_worktrees=True,
+                   worktrees_dir=str(tmp_path / "scratch"))
+    ex = ClaudeExecutor.__new__(ClaudeExecutor)
+    object.__setattr__(ex, "_cfg", cfg)
+
+    # Exercise the copy rule directly — the worktree machinery needs real repos.
+    import shutil
+    dest = tmp_path / "copy" / ".claude"
+    shutil.copytree(ws / ".claude", dest, ignore=shutil.ignore_patterns(".git", "rules"))
+
+    assert (dest / "settings.json").exists(), "settings must travel with the scratch"
+    assert (dest / "skills").exists(), "skills must travel with the scratch"
+    assert not (dest / "rules").exists(), "rules must NOT be duplicated into the scratch"

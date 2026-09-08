@@ -1120,10 +1120,23 @@ class AdoPollerService:
         self._live[item.id] = record_id
         if profile:
             self._live_profiles[item.id] = profile
+        # Say WHAT this session was sent to do. The relay means a run is no longer
+        # "the whole item" — it is one role's steps — and a reader of the work item
+        # cannot see that anywhere else. Without it the same sentence appears whether
+        # the session is running a single QC check or the entire pipeline.
+        scope = ""
+        if stages:
+            steps = " → ".join(st.name for st in stages)
+            scope = (
+                f"<br/>Running <b>{profile}</b>: <code>{steps}</code>"
+                "<br/><i>Only these steps — a later role picks the item up from its "
+                "own board.</i>"
+            )
         await c.ado.add_comment(
             item.id,
             "<div><b>🎮 Live session started</b><br/>Remote Control enabled — open claude.ai "
-            f"and attach to session <code>{session}</code> to watch or steer it.</div>",
+            f"and attach to session <code>{session}</code> to watch or steer it."
+            f"{scope}</div>",
         )
         # Broadcast the start to Teams/Zalo/email as every other execution mode does. This
         # path only ever wrote the ADO comment above, so on an interactive machine a

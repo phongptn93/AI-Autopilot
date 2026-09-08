@@ -795,11 +795,18 @@ class ClaudeExecutor:
             Path(scratch).mkdir(parents=True, exist_ok=False)  # noqa: ASYNC240
             # Copy (not link) the shared config so teardown can never delete the
             # real .claude. Exclude its own .git to keep the copy small.
+            #
+            # And exclude `rules`: the scratch lives UNDER the workspace, so Claude
+            # Code already discovers the workspace's rules by walking up from cwd.
+            # Copying them in meant every rule file was loaded twice, once from the
+            # workspace and once from the scratch's own copy, which on a workspace
+            # with two dozen of them filled the context before any code was read and
+            # left sessions thrashing on autocompact.
             src_claude = Path(workspace) / ".claude"
             if src_claude.is_dir():
                 shutil.copytree(  # noqa: ASYNC240 - small local copy
                     src_claude, Path(scratch) / ".claude",
-                    ignore=shutil.ignore_patterns(".git"),
+                    ignore=shutil.ignore_patterns(".git", "rules"),
                 )
             worktreed: list[str] = []
             for repo in repos:

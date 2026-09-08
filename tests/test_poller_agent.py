@@ -1081,3 +1081,28 @@ async def test_an_item_stranded_by_the_live_tag_is_reported_once():
     assert len(warned) == 1
     assert warned[0]["id"] == 8626
     assert "autopilot-restart" in warned[0]["hint"]
+
+
+async def test_the_live_session_comment_says_which_role_it_is_running():
+    """With the relay, a run is no longer "the whole item" — it is one role's steps,
+    and a reader of the work item cannot see that anywhere else. The same sentence
+    used to appear whether the session was running a single QC check or all six."""
+    p, c = _poller()
+    c.config.sdlc_loop_enabled = True
+    c.config.execution_mode = "interactive"
+    c.config.sdlc_default_profile = "qc"
+    item = WorkItemInfo(id=8965, title="t", work_item_type="Requirement",
+                        state="Active", tags=["autopilot"])
+    await p._dispatch_interactive(item)
+
+    said = " ".join(str(x) for x in c.ado.comments)
+    assert "Live session started" in said
+    assert "<b>qc</b>" in said and "test" in said
+    assert "a later role picks the item up" in said
+
+    # Unscoped runs keep the plain notice — there is no role to name.
+    c.config.sdlc_loop_enabled = False
+    c.config.sdlc_stage_wiring = {}
+    c.ado.comments.clear()
+    await p._dispatch_interactive(item)
+    assert "Running" not in " ".join(str(x) for x in c.ado.comments)

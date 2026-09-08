@@ -336,31 +336,61 @@ class StateSyncService:
             item.assigned_to_email, item.assigned_to, self._config.auto_transition_assignee
         )
 
-    def _skip(self, pr_id: int, source: str, why: str) -> None:
+    def _skip(self, pr_id: int, source: str, why: str,
+              item_id: int | None = None, note: str = "") -> None:
         """Note that a merged PR was walked past, and why — once per PR.
 
         A skip here is the whole failure mode: the PR is merged, the branch is gone,
         and the card sits where it was. Every one of these returns used to be silent,
         which is why "it merged and nothing moved" could be asked twice about two
         different items and answered neither time.
+
+        ``why`` is the KIND of skip and must not name the item: the summary groups by
+        it, and an id baked into the string makes every entry unique, so the list grows
+        one line per PR — which is the wall this summary exists to replace. The id goes
+        in ``item_id``, and anything specific to it in ``note``.
         """
         if pr_id in self._skipped:
             return
         if len(self._skipped) > 500:  # a marker set, not storage
             self._skipped.clear()
         self._skipped.add(pr_id)
-        self._skipped_new.append((source.removeprefix("refs/heads/") or "?", why))
+        self._skipped_new.append(
+            (source.removeprefix("refs/heads/") or "?", why, item_id, note)
+        )
 
     def _flush_skipped(self) -> None:
-        """One line per scan for the merged PRs that moved no card, not one per PR."""
+        """One line per scan for the merged PRs that moved no card, not one per PR.
+
+        Grouped by kind and capped on both axes: the first scan after a restart sees
+        the whole backlog (hundreds of merged PRs), and a summary that grows with it
+        is the wall again in one line instead of many.
+        """
         if not self._skipped_new:
             return
-        branches = [b for b, _ in self._skipped_new]
+        groups: dict[str, list[str]] = {}
+        for _branch, why, item_id, note in self._skipped_new:
+            label = f"#{item_id}{note}" if item_id is not None else ""
+            groups.setdefault(why, []).append(label)
+        reasons = []
+        for why in sorted(groups):
+            ids = [i for i in groups[why] if i]
+            if not ids:
+                reasons.append(f"{why} ({len(groups[why])} PR)")
+                continue
+            shown = ", ".join(ids[:5]) + ("…" if len(ids) > 5 else "")
+            reasons.append(f"{why} ({len(ids)}): {shown}")
+        # The same branch can be merged more than once; three copies of it in a
+        # six-slot sample says less than three different ones.
+        seen: list[str] = []
+        for branch, *_ in self._skipped_new:
+            if branch not in seen:
+                seen.append(branch)
         self._log.info(
             "merged PRs that advanced no work item",
-            count=len(branches),
-            branches=branches[:6] + (["…"] if len(branches) > 6 else []),
-            reasons=sorted({why for _, why in self._skipped_new}),
+            count=len(self._skipped_new),
+            branches=seen[:6] + (["…"] if len(seen) > 6 else []),
+            reasons=reasons,
             hint="a merged PR only moves a card when its branch prefix is ours, a work "
                  "item is linked to it, and that item carries a trigger tag",
         )
@@ -402,23 +432,23 @@ class StateSyncService:
         named = parse_work_item_id(source)
         via = ""
         if work_item_id is not None and named is not None and named != work_item_id:
-            via = f" (linked in ADO; the branch name says #{named})"
+            via = f" (branch says #{named})"
         if work_item_id is None:
             self._skip(pr_id, source, "no work item linked to the PR, and none in the "
                        "branch name")
             return
         item = await c.ado.get_work_item(work_item_id)
         if item is None:
-            self._skip(pr_id, source, f"work item #{work_item_id} could not be read{via}")
+            self._skip(pr_id, source, "work item could not be read", work_item_id, via)
             return
         if not self._has_trigger_tag(item):
-            self._skip(pr_id, source, f"#{work_item_id} carries no trigger tag ("
-                       + ", ".join(cfg.effective_trigger_tags) + ")" + via)
+            self._skip(pr_id, source, "carries no trigger tag ("
+                       + ", ".join(cfg.effective_trigger_tags) + ")", work_item_id, via)
             return
         if not self._assignee_ok(item):
             self._skip(pr_id, source,
-                       f"#{work_item_id} is not assigned to "
-                       f"{cfg.auto_transition_assignee}{via}")
+                       f"not assigned to {cfg.auto_transition_assignee}",
+                       work_item_id, via)
             return
         # Never pull an item BACKWARD: if it's already at/after the merge state
         # (merged / deployed / done), just remember the PR and leave it alone. This

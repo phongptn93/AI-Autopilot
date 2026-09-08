@@ -1234,7 +1234,7 @@ class ClaudeExecutor:
                 # A scratch kept alive for review (console still open, PR still open)
                 # is NOT an orphan — its worktree is where the rework happens.
                 if runs.is_dir() and any(runs.glob("*.session.json")):
-                    self._log.info("prune_orphans: keeping open session scratch", path=str(sub))
+                    self._log.debug("prune_orphans: keeping open session scratch", path=str(sub))
                     continue
                 try:
                     old = (now - sub.stat().st_mtime) > self._ORPHAN_AGE_LIMIT_SECONDS
@@ -1243,7 +1243,7 @@ class ClaudeExecutor:
                 if finished or old:
                     await self.release_scratch(str(sub))  # remove worktrees + dir safely
                 else:
-                    self._log.info("prune_orphans: keeping live/recent scratch", path=str(sub))
+                    self._log.debug("prune_orphans: keeping live/recent scratch", path=str(sub))
         for repo in discover_repos(workspace):
             src_repo = str(Path(workspace) / repo)
             async with self._repo_lock(src_repo):

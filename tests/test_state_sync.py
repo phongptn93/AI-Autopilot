@@ -572,5 +572,34 @@ async def test_a_skip_says_when_the_link_and_the_branch_name_disagree():
     svc._flush_skipped()
     assert len(said) == 1
     reason = said[0]["reasons"][0]
-    assert "#8955" in reason and "carries no trigger tag" in reason
-    assert "branch name says #8951" in reason
+    assert "carries no trigger tag" in reason
+    assert "#8955 (branch says #8951)" in reason
+
+
+async def test_the_summary_groups_by_reason_instead_of_growing_with_the_backlog():
+    """The first scan after a restart sees every merged PR at once — 405 of them on a
+    real machine. Baking the item id into the reason made every entry unique, so the
+    'distinct reasons' list grew one line per PR: the wall again, inside one line."""
+    from types import SimpleNamespace
+
+    from ai_autopilot.config import Settings
+    from ai_autopilot.services.state_sync import StateSyncService
+
+    said: list = []
+    svc = StateSyncService(SimpleNamespace(config=Settings(), ado=None))
+    svc._log = SimpleNamespace(info=lambda msg, **kw: said.append(kw),
+                               debug=lambda *a, **k: None, warning=lambda *a, **k: None)
+    for n in range(12):
+        svc._skip(1000 + n, "refs/heads/feat/same-branch", "carries no trigger tag (x)", 8000 + n)
+    svc._skip(2000, "refs/heads/other", "no work item linked to the PR")
+    svc._flush_skipped()
+
+    assert len(said) == 1
+    line = said[0]
+    assert line["count"] == 13
+    # One entry per KIND, not per PR — with a capped sample of the items behind it.
+    assert len(line["reasons"]) == 2
+    tagless = next(r for r in line["reasons"] if "no trigger tag" in r)
+    assert "(12): #8000, #8001, #8002, #8003, #8004…" in tagless
+    # A branch merged many times fills the sample once, not six times.
+    assert line["branches"] == ["feat/same-branch", "other"]

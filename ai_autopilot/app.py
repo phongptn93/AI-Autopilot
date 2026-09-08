@@ -218,7 +218,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 request, config
             ):
                 return _dashboard_challenge(request)
-        return await call_next(request)
+        response = await call_next(request)
+        # Dashboard pages are server-rendered snapshots of mutable config, and nothing
+        # told the browser so. After a save the 303 lands back on the same URL, which a
+        # cache is free to answer from its copy — so the form redraws the values you
+        # just replaced, and the operator concludes the save failed. The Board hides
+        # this because it re-fetches its columns over XHR; the editors do not.
+        if path.startswith("/dashboard") and "html" in (
+            response.headers.get("content-type") or ""
+        ):
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
 
     @app.get("/health")
     async def health_endpoint(response: Response) -> dict:

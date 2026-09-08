@@ -71,3 +71,26 @@ def test_alert_settings_save_from_the_page(client: TestClient, tmp_path):
     cfg = Settings(**{k: v for k, v in saved.items() if k in Settings.model_fields})
     assert not cfg.wants_alert("completed", 10)     # success is INFO → below the floor
     assert cfg.wants_alert("failed", 20)
+
+
+def test_dashboard_pages_are_never_served_from_a_cache(tmp_path):
+    """A dashboard page is a snapshot of mutable config, and nothing said so.
+
+    After a save the 303 lands back on the same URL, which a cache is free to answer
+    from its copy — the form redraws the values you just replaced and the save looks
+    like it failed. The Board hides this because it re-fetches its columns over XHR;
+    the editors do not.
+    """
+    from starlette.testclient import TestClient
+
+    from ai_autopilot.app import create_app
+    from ai_autopilot.config import Settings
+
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        for path in ("/dashboard", "/dashboard/board-views", "/dashboard/relay",
+                     "/dashboard/settings", "/dashboard/workspaces"):
+            head = client.get(path).headers.get("cache-control", "")
+            assert "no-store" in head, f"{path} may be cached: {head!r}"
+        # Probes are not dashboard HTML and keep their own headers.
+        assert "no-store" not in (client.get("/health").headers.get("cache-control") or "")

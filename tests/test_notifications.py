@@ -210,3 +210,31 @@ def test_a_started_card_carries_no_duration():
     msg = NotificationMessage(work_item=_item(), type=NotificationType.STARTED, skill="agent")
     facts = TeamsNotifier._payload(msg)["attachments"][0]["content"]["body"][1]["facts"]
     assert not any(f["title"] == "Duration" for f in facts)
+
+
+def test_no_log_call_shadows_structlogs_event_argument():
+    """``log.debug("msg", event=x)`` is a TypeError, not a typo you find later.
+
+    structlog binds the message itself to ``event``, so a keyword by that name
+    collides with it: ``BoundLogger.debug() got multiple values for argument
+    'event'``. It raised from inside a notify path, which took down processing of
+    the whole work item — a log line failing a run. Grepping is not enough (the
+    call spans lines), so the check is structural.
+    """
+    import ast
+    import pathlib
+
+    log_methods = {"debug", "info", "warning", "error", "exception", "critical", "msg"}
+    offenders = []
+    for path in pathlib.Path("ai_autopilot").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in log_methods or not node.args:
+                continue
+            if any(kw.arg == "event" for kw in node.keywords):
+                offenders.append(f"{path}:{node.lineno}")
+    assert not offenders, (
+        "log call passes event= alongside a message: " + ", ".join(offenders)
+    )

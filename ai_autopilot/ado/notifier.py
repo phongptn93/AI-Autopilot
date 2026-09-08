@@ -171,7 +171,10 @@ class AdoNotifier:
         if not self._config.wants_alert(message.event, int(message.severity)):
             self._log.debug(
                 "notification suppressed by alert policy",
-                event=message.event, severity=message.severity.name,
+                # NOT event= : structlog takes the message itself as `event`, so a
+                # kwarg by that name collides with it and raises TypeError — inside
+                # a notify path, which meant the whole work item failed to process.
+                alert_event=message.event, severity=message.severity.name,
             )
             return
         if await self._hold_if_quiet(message):

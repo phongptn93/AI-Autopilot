@@ -80,7 +80,7 @@ class TeamsNotifier(NotificationChannel):
         if skipped:
             self._log.debug(
                 "teams channels skipped by routing",
-                event=event, severity=message.severity.name, channels=skipped,
+                alert_event=event, severity=message.severity.name, channels=skipped,
             )
         return wanted
 

@@ -65,6 +65,11 @@ class PrMonitorService:
         self._hot_task: asyncio.Task | None = None
         # PRs this loop does not own, already explained once (see _inspect_pr).
         self._unowned: set[int] = set()
+        # Newly-seen unowned PRs, buffered so a scan reports them as ONE line. In a
+        # shared repo most PRs are hand-made, so a line each turned the normal case
+        # into dozens of near-identical entries — the same hint repeated verbatim,
+        # burying everything the log was actually for.
+        self._unowned_new: list[tuple[str, str]] = []
 
     def start(self) -> None:
         if not self._config.feedback_loop_enabled:
@@ -110,6 +115,7 @@ class PrMonitorService:
             self._hot.pop(key, None)  # cooled down → back to the global scan only
         for (repo_id, _pr_id), (_exp, repo_name, pr) in list(self._hot.items()):
             await self._inspect_pr(repo_id, repo_name, pr)
+        self._flush_unowned()
 
     def kick(self, repo_id: str, repo_name: str, pr: dict) -> None:
         """Webhook fast-path: inspect ONE PR right now instead of waiting for the
@@ -224,12 +230,34 @@ class PrMonitorService:
                 if wid is not None:
                     active_items.add(wid)
                 await self._inspect_pr(repo_id, repo_name, pr)
+        self._flush_unowned()
         # Only prune when the scan actually saw repos — a transient empty result
         # (e.g. an ADO error) must not wipe the caches.
         if repos:
             self._prune_caches(active_pr_ids, active_branches, active_items)
             await self._release_closed_budgets(active_items)
             await self._close_finished_sessions(active_items)
+
+    def _flush_unowned(self) -> None:
+        """One line per scan for the PRs this loop skipped, not one line per PR.
+
+        Silent in the steady state: ``_unowned`` marks each PR once, so a repo full
+        of hand-made branches is announced on the first pass and never again. The
+        branch list is capped — the point is "these were skipped and here is the
+        switch", which six names make as well as sixty.
+        """
+        if not self._unowned_new:
+            return
+        branches = [b for b, _ in self._unowned_new]
+        self._log.info(
+            "PRs not owned by the feedback loop — skipped",
+            count=len(branches),
+            branches=branches[:6] + (["…"] if len(branches) > 6 else []),
+            reasons=sorted({why for _, why in self._unowned_new}),
+            hint="enable pr_reviewer_tracking_enabled to answer /commands on "
+                 "hand-made PRs",
+        )
+        self._unowned_new.clear()
 
     async def _close_finished_sessions(self, active_items: set[int]) -> None:
         """Close the interactive console of items whose PR is no longer open.
@@ -444,14 +472,7 @@ class PrMonitorService:
                 self._unowned.add(pr_id)
                 if len(self._unowned) > 500:  # a marker set, not storage
                     self._unowned.clear()
-                self._log.info(
-                    "PR not owned by the feedback loop — commands there need PR "
-                    "reviewer tracking",
-                    pr=pr_id, repo=repo_name, branch=source_ref.removeprefix("refs/heads/"),
-                    reason=why,
-                    hint="enable pr_reviewer_tracking_enabled to answer /commands on "
-                         "hand-made PRs",
-                )
+                self._unowned_new.append((source_ref.removeprefix("refs/heads/"), why))
             return
 
         threads = await c.ado.get_pull_request_threads(repo_id, pr_id)

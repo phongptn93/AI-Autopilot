@@ -324,14 +324,23 @@ async def test_unowned_pr_is_explained_once():
     said: list = []
     # structlog does not go through caplog — watch the service's own logger.
     svc._log = SimpleNamespace(
-        info=lambda msg, **kw: said.append(kw.get("reason", msg)),
+        info=lambda msg, **kw: said.append(kw),
         warning=lambda *a, **k: None, error=lambda *a, **k: None, debug=lambda *a, **k: None,
     )
     pr = {"pullRequestId": 3861, "sourceRefName": "refs/heads/dxmpm/material-usage"}
     await svc._inspect_pr("repo-id", "Micro-Frontend", pr)
     await svc._inspect_pr("repo-id", "Micro-Frontend", pr)   # a rescan stays quiet
     assert svc._unowned == {3861}
-    assert len(said) == 1 and "prefix" in said[0]
+    # A scan reports the PRs it skipped as ONE line, not one line each: in a shared
+    # repo most PRs are hand-made, and a line apiece buried everything else.
+    assert said == []
+    svc._flush_unowned()
+    assert len(said) == 1
+    assert said[0]["count"] == 1
+    assert said[0]["branches"] == ["dxmpm/material-usage"]
+    assert any("prefix" in why for why in said[0]["reasons"])
+    svc._flush_unowned()          # nothing new → nothing said
+    assert len(said) == 1
 
 
 async def test_a_bot_branch_without_an_id_falls_back_to_the_prs_linked_work_item():

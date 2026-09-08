@@ -224,8 +224,11 @@
   .lv-mine { display:inline-flex; align-items:center; gap:6px; justify-content:center; white-space:nowrap;
     font-size:11px; font-weight:600; color:var(--text-dim); border:1px solid var(--border);
     background:var(--bg-input); border-radius:7px; padding:5px 8px; cursor:pointer; }
-  .lv-mine.on { color:var(--accent-hover); border-color:rgba(99,102,241,.45); background:var(--accent-bg); }
+  .lv-mine.on { color:#fff; font-weight:700; border-color:var(--accent);
+    background:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .lv-mine.on::before { content:"✓"; font-weight:800; font-size:11px; }
   .lv-mine input { accent-color:var(--accent); margin:0; }
+  .lv-mine.on input { accent-color:#fff; }
   .lv-in { background:var(--bg-input); color:var(--text); border:1px solid var(--border);
     border-radius:var(--radius-sm); padding:7px 9px; font-size:12.5px; font-family:inherit; min-width:0; }
   .lv-in:focus { outline:none; border-color:var(--accent); }
@@ -256,6 +259,9 @@
   .tone-teal { border-left:3px solid #22c9b8; } .tone-amber { border-left:3px solid var(--amber); }
   .tone-green { border-left:3px solid var(--green); } .tone-red { border-left:3px solid var(--red); }
 
+  .lv-turnlist { font-size:11px; color:var(--accent-hover); background:var(--accent-bg);
+    border-radius:20px; padding:2px 10px; white-space:nowrap; }
+  .lv-turnlist.none { color:var(--amber); background:var(--amber-bg); }
   .lv-match { font-size:11px; font-weight:700; color:var(--green); background:var(--green-bg);
     border-radius:20px; padding:2px 10px; margin-left:auto; white-space:nowrap; }
   .lv-match + .lv-order-lens { margin-left:12px; }
@@ -389,6 +395,12 @@
           <option value="{{ name }}" {% if lens.profile == name %}selected{% endif %}>▶ Run: {{ name }}</option>
           {% endfor %}
         </select>
+        {% set turn_lanes = lens.stages | selectattr('mine') | map(attribute='name') | list %}
+        <span class="lv-turnlist {{ 'none' if not turn_lanes else '' }}"
+              title="Lanes this process calls its turn. Read from the same saved value as the tick boxes below — if they disagree, the page is stale.">
+          {% if turn_lanes %}your turn: <b>{{ turn_lanes | join(', ') }}</b>
+          {% else %}no lane is this process's turn{% endif %}
+        </span>
         <span class="lv-match {{ 'zero' if not lens.turn else '' }}"
               title="Items waiting on this process right now (in a stage marked 'your turn'){% if lens.tags %}, out of {{ lens.matches }} it can see{% endif %}">
           {{ lens.turn }} waiting · sees {{ lens.matches }}/{{ board_total }}

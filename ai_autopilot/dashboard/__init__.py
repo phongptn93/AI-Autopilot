@@ -963,21 +963,29 @@ def create_dashboard_router() -> APIRouter:
             and not lenses_mod.my_turn_claims(v)
         ]
 
+        # Every field the FORM can submit has to survive this copy. It is a whitelist,
+        # so a field left out is not merely hidden — the form re-posts without it and
+        # the next save DELETES it. `mine` and `profile` were missing: the "your turn"
+        # box always drew empty and ▶ Run always read "— off —", and pressing Save on
+        # that page wiped both from the config. Add a field to the editor, add it here.
         shown = [
             {
                 "key": str(x.get("key") or ""),
                 "label": str(x.get("label") or ""),
                 "icon": str(x.get("icon") or ""),
                 "hint": str(x.get("hint") or ""),
+                "profile": str(x.get("profile") or ""),
                 "tags": [str(t) for t in (x.get("tags") or [])],
                 "stages": [
                     {
                         "name": str(st.get("name") or ""),
                         "columns": [str(cc) for cc in (st.get("columns") or [])],
-                        "states": [str(x) for x in (st.get("states") or [])],
+                        "states": [str(v) for v in (st.get("states") or [])],
+                        "tags": [str(v) for v in (st.get("tags") or [])],
                         "tone": str(st.get("tone") or "slate"),
                         "hint": str(st.get("hint") or ""),
                         "drop": str(st.get("drop") or ""),
+                        "mine": bool(st.get("mine")),
                     }
                     for st in (x.get("stages") or [])
                     if isinstance(st, dict)

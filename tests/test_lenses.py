@@ -857,3 +857,33 @@ def test_review_filters_answer_one_question_each(tmp_path):
     # No filter, or one nobody set, leaves the list alone.
     assert len(filt(prs, {}, me)) == 4
     assert len(filt(prs, {"status": "all", "repo": "all"}, me)) == 4
+
+
+def test_the_editor_renders_every_field_the_form_can_submit(tmp_path, monkeypatch):
+    """The page rebuilds each lens through a whitelist, so a field left out of it is
+    not merely hidden — the form re-posts without it and the next Save DELETES it.
+
+    `mine` and `profile` were missing: "your turn" always drew empty and the Run
+    select always read "off", so pressing Save on that page silently wiped both. The
+    Board kept showing YOUR TURN (it reads the config, not the form), which is what
+    made it look like a display quirk instead of data loss.
+    """
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    saved = [{
+        "key": "ba", "label": "BA", "profile": "ba", "tags": [],
+        "stages": [
+            {"name": "Intake", "columns": ["Queued"], "tone": "slate", "drop": "Queued",
+             "mine": True, "tags": ["handoff-ba"], "states": ["Ready for Analysis"]},
+            {"name": "Delivered", "columns": ["Done"], "tone": "green", "drop": "Done"},
+        ],
+    }]
+    with _client(tmp_path, board_lenses=saved) as client:
+        page = client.get("/dashboard/board-views").text
+        assert 'name="lens0_stage0_mine" checked' in page, "'your turn' lost on the way out"
+        assert 'name="lens0_stage1_mine" >' in page or 'name="lens0_stage1_mine">' in page
+        assert 'value="ba" selected' in page, "the Run profile was lost on the way out"
+        # A lane's parking tags and states must come back selected too, or saving
+        # drops them the same way.
+        assert 'value="handoff-ba"' in page and "checked" in page
+        assert "Ready for Analysis" in page

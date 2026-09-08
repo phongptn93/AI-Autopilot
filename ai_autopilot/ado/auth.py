@@ -69,6 +69,16 @@ class AdoAuthService:
         self._token: TokenInfo | None = None
         self._lock = asyncio.Lock()
 
+    @property
+    def organization(self) -> str:
+        """The configured organization URL, trailing slash stripped.
+
+        Public because the health check needs it: an ADO URL without the org segment
+        is a 404 whatever the credentials, and reading it off a private attribute is
+        how that stays easy to get wrong.
+        """
+        return (self._config.ado_organization or "").strip().rstrip("/")
+
     async def get_auth_header(self) -> dict[str, str]:
         """Return an Authorization header dict for ADO REST calls."""
         if self._config.ado_pat:

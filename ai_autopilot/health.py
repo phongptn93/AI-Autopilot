@@ -40,9 +40,15 @@ async def check_ado(auth: AdoAuthService, http: httpx.AsyncClient) -> HealthChec
     start = time.monotonic()
     try:
         headers = await auth.get_auth_header()
-        resp = await http.get(
-            "https://dev.azure.com/_apis/projects?$top=1&api-version=7.1", headers=headers
-        )
+        # The organization segment is not optional: dev.azure.com/_apis/projects with
+        # no org is a 404 for everyone, always, whatever the credentials. This check
+        # reported "Degraded - ADO API returned 404" on a machine whose poller was
+        # querying ADO successfully in the same second, which sends a reader hunting
+        # a token that was never the problem.
+        org = getattr(auth, "organization", "")
+        if not org:
+            return _result("ado", HealthStatus.DEGRADED, "no ADO organization configured", start)
+        resp = await http.get(f"{org}/_apis/projects?$top=1&api-version=7.1", headers=headers)
         status = (
             HealthStatus.HEALTHY if resp.status_code < 400 else HealthStatus.DEGRADED
         )

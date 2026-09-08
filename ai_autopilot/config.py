@@ -666,6 +666,7 @@ class SdlcStage(BaseModel):
     working_state: str = ""
     entry_tag: str = ""
     auto: bool = False
+    runs_profile: str = ""
 
 
 def stage_wiring_value(wiring: Any, key: str, default: Any = "") -> Any:
@@ -704,6 +705,12 @@ class SdlcStageWiring(BaseModel):
     working_state: str = ""    # state while it runs (blank → global state_in_progress)
     entry_tag: str = ""        # transient "run this stage now" tag; consumed and removed
     auto: bool = False         # may the poller start it with nobody pressing Run?
+    # Which profile to run when an item arrives in ``queue_state``. Only needed when
+    # SEVERAL profiles start at this stage — `analyze` opens both `ba` and `full`, and
+    # picking between them by iteration order would mean wiring "Ready for Analysis"
+    # silently ran the one-stage `ba` instead of the whole pipeline. Blank and
+    # unambiguous is fine; blank and ambiguous refuses to guess.
+    runs_profile: str = ""
 
     # NOTE: there is deliberately no ``done_state`` here. Where a profile hands off is
     # a property of the PROFILE, not of a stage: ``dev`` and ``full`` both end at the

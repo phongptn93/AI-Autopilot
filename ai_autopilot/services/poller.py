@@ -26,6 +26,7 @@ from ai_autopilot.execution.sdlc_plan import (
     profile_for_state,
     profile_stages,
     resolve_profile_name,
+    resolve_stages,
     working_state_for,
 )
 from ai_autopilot.logging_config import get_logger
@@ -911,17 +912,22 @@ class AdoPollerService:
         """Control plane around the agent: track, run, read structured result, react."""
         c, cfg = self._c, self._config
 
-        # Closed-loop SDLC engine (opt-in) — headless only, takes precedence.
-        if cfg.sdlc_loop_enabled:
-            await self._process_sdlc(item, classified)
-            return
-
-        # Interactive mode: launch a Remote-Control session and let the human steer.
+        # Execution MODE decides who does the work; the SDLC relay decides WHICH work.
+        # They used to be one switch: the engine is headless, and it pre-empted
+        # interactive — so turning the relay on to get per-role runs quietly took away
+        # the Remote-Control session the team steers, which is the opposite trade for
+        # a team that works BY steering. The session now carries the role's stages in
+        # its brief (see _build_brief), so it can answer both.
         if cfg.execution_mode == "interactive":
             if len(self._live) >= cfg.max_concurrent:
                 self._processed.pop(item.id, None)  # at capacity — retry next cycle
                 return
             await self._dispatch_interactive(item)
+            return
+
+        # Headless: the closed-loop engine runs the stages itself.
+        if cfg.sdlc_loop_enabled:
+            await self._process_sdlc(item, classified)
             return
 
         await c.state_repo.set(item.id, PipelineState.IN_PROGRESS, title=item.title)
@@ -1039,8 +1045,19 @@ class AdoPollerService:
         # is the only thing that records it — so the ADO state picks the profile, and
         # the session is briefed on that role's steps alone.
         # Unwired install → no profile → the whole-item brief it has always had.
-        profile = profile_for_state(item.state or "", cfg)
-        stages = profile_stages(profile, cfg) if profile else None
+        # With the relay on, the profile is resolved the same way the engine would
+        # (tag > machine pin > state > work-item type > default), so an interactive
+        # run does the SAME stages a headless one would have. With it off, only an
+        # explicitly wired state scopes the run — otherwise the brief is the whole
+        # item, exactly as before.
+        if cfg.sdlc_loop_enabled:
+            profile = resolve_profile_name(
+                item.tags, item.work_item_type, cfg, state=item.state or ""
+            )
+            stages = resolve_stages(item.tags, item.work_item_type, cfg, state=item.state or "")
+        else:
+            profile = profile_for_state(item.state or "", cfg)
+            stages = profile_stages(profile, cfg) if profile else None
         launched, session, run_dir = await c.executor.dispatch_interactive(
             item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft, stages=stages
         )

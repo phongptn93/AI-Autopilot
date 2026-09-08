@@ -18,7 +18,7 @@ from pathlib import Path
 
 from ai_autopilot.config import SdlcStage, Settings
 from ai_autopilot.execution.claude_client import ClaudeRun, Usage
-from ai_autopilot.execution.claude_executor import ClaudeExecutor, _branch_name
+from ai_autopilot.execution.claude_executor import ClaudeExecutor, _branch_name, pretrust_claude_dir
 from ai_autopilot.execution.pr_scorer import score_badge_html, score_run
 from ai_autopilot.execution.result_contract import clear_result, find_result
 from ai_autopilot.execution.sdlc_plan import (
@@ -95,6 +95,11 @@ class SdlcLoopEngine:
 
         scratch = await self._exec._acquire_agent_scratch(item.id, repos)
         run_dir = scratch or workspace
+        # Trust the scratch, exactly as the agent and interactive paths do. Without
+        # this the worktree is an unknown origin to Claude Code, which then SKIPS the
+        # .claude/settings.json we copied in — every permissions.allow entry ignored,
+        # so each stage stalls on approvals the operator thought they had granted.
+        pretrust_claude_dir(run_dir)
         # An SDLC item is many Claude calls; History reports per ITEM, so the run
         # detail is accumulated rather than reduced to a token count on the way past.
         usage = Usage()

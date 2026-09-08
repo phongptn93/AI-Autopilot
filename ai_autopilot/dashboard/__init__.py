@@ -1082,6 +1082,7 @@ def create_dashboard_router() -> APIRouter:
                 "name": st.name, "role": st.role, "goal": st.goal,
                 "queue_state": st.queue_state, "working_state": st.working_state,
                 "entry_tag": st.entry_tag, "auto": st.auto,
+                "runs_profile": st.runs_profile,
                 "opens": sorted(entry_of.get(st.name, [])),
                 "in_profiles": sorted(p for p, ss in profiles.items() if st.name in ss),
             }
@@ -1122,6 +1123,7 @@ def create_dashboard_router() -> APIRouter:
             queue = str(form.get(f"stage_{name}_queue", "")).strip()
             working = str(form.get(f"stage_{name}_working", "")).strip()
             tag = str(form.get(f"stage_{name}_tag", "")).strip()
+            runs = str(form.get(f"stage_{name}_profile", "")).strip()
             auto = bool(form.get(f"stage_{name}_auto"))
             # No queue state = not wired. Keeping a half-row would leave a working
             # state or an auto flag with no door to apply to, which reads as
@@ -1130,7 +1132,7 @@ def create_dashboard_router() -> APIRouter:
                 continue
             wiring[name] = {
                 "queue_state": queue, "working_state": working,
-                "entry_tag": tag, "auto": auto,
+                "entry_tag": tag, "auto": auto, "runs_profile": runs,
             }
         settings_form.save_to_yaml(config_file_path(), {"sdlc_stage_wiring": wiring})
         # YAML takes plain dicts; the live config must get validated objects, or the

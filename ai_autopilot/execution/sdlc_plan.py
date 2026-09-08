@@ -107,7 +107,7 @@ def _catalog(cfg: Settings) -> dict[str, SdlcStage]:
             continue
         cat[name] = base.model_copy(update={
             f: stage_wiring_value(wiring, f, False if f == "auto" else "")
-            for f in ("queue_state", "working_state", "entry_tag", "auto")
+            for f in ("queue_state", "working_state", "entry_tag", "auto", "runs_profile")
         })
     return cat
 
@@ -166,10 +166,31 @@ def profile_for_state(state: str, cfg: Settings) -> str:
     wanted = (state or "").strip().lower()
     if not wanted:
         return ""
-    for name in sorted(_profile_map(cfg)):
+    profiles = _profile_map(cfg)
+    matches = [
+        name for name in sorted(profiles)
+        if (getattr(entry_stage(name, cfg), "queue_state", "") or "").strip().lower() == wanted
+    ]
+    if not matches:
+        return ""
+    if len(matches) == 1:
+        return matches[0]
+    # Several profiles start here — `analyze` opens both `ba` and `full`. Breaking the
+    # tie by iteration order would have wired "Ready for Analysis" to the one-stage
+    # `ba` and quietly never run the pipeline, so the wiring must SAY which.
+    chosen = ""
+    for name in matches:
         stage = entry_stage(name, cfg)
-        if stage is not None and (stage.queue_state or "").strip().lower() == wanted:
-            return name
+        want = (getattr(stage, "runs_profile", "") or "").strip()
+        if want:
+            chosen = want
+            break
+    if chosen and chosen in profiles:
+        return chosen
+    _log.warning(
+        "sdlc: several profiles start in this state — set 'runs_profile' on the stage",
+        state=state, candidates=matches,
+    )
     return ""
 
 
@@ -260,11 +281,12 @@ def resolve_profile_name(tags: list[str], work_item_type: str, cfg: Settings,
     return cfg.sdlc_default_profile or "full"
 
 
-def resolve_stages(tags: list[str], work_item_type: str, cfg: Settings) -> list[SdlcStage]:
+def resolve_stages(tags: list[str], work_item_type: str, cfg: Settings,
+                   state: str = "") -> list[SdlcStage]:
     """Concrete ordered stage list for an item (see ``resolve_profile_name`` for the
     precedence). An explicit per-machine ``sdlc_stages`` wins directly; otherwise the
     resolved profile is expanded. Unknown profile → default profile (logged)."""
-    name = resolve_profile_name(tags, work_item_type, cfg)
+    name = resolve_profile_name(tags, work_item_type, cfg, state=state)
     if name == "custom":
         return list(cfg.sdlc_stages)
     stages = profile_stages(name, cfg)

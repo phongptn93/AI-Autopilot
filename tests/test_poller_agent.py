@@ -985,3 +985,48 @@ async def test_an_unwired_machine_still_gets_the_whole_item_brief():
                         state="Ready for Testing", tags=["autopilot"])
     await p._dispatch_interactive(item)
     assert c.executor.briefed_stages is None
+
+
+async def test_interactive_mode_is_not_taken_away_by_turning_the_relay_on():
+    """Execution MODE says who does the work; the relay says WHICH work.
+
+    They used to be one switch: the engine is headless and pre-empted interactive, so
+    enabling the relay to get per-role runs silently removed the Remote-Control
+    session the team steers. The session carries the role's stages in its brief now,
+    so it answers both — and an item briefed for `full` runs the same stages the
+    headless engine would have.
+    """
+    p, c = _poller()
+    c.config.sdlc_loop_enabled = True
+    c.config.execution_mode = "interactive"
+    c.config.sdlc_default_profile = "full"
+    item = WorkItemInfo(id=7, title="t", work_item_type="Bug", state="New", tags=["autopilot"])
+    await p._process_agent(item, item)
+    assert c.executor.briefed_stages == [
+        "analyze", "design", "implement", "test", "review", "pr",
+    ]
+
+    # A wired state still narrows it to that role.
+    from ai_autopilot.config import SdlcStageWiring
+    c.config.sdlc_stage_wiring = {
+        "test": SdlcStageWiring(queue_state="Ready for Testing", working_state="In Testing"),
+    }
+    qc = WorkItemInfo(id=8, title="t", work_item_type="Bug",
+                      state="Ready for Testing", tags=["autopilot"])
+    await p._dispatch_interactive(qc)
+    assert c.executor.briefed_stages == ["test"]
+
+
+async def test_headless_mode_still_runs_the_engine():
+    p, c = _poller()
+    c.config.sdlc_loop_enabled = True
+    c.config.execution_mode = "headless"
+    ran: list[int] = []
+    p._process_sdlc = lambda item, classified: _noop(ran, item.id)
+    item = WorkItemInfo(id=9, title="t", work_item_type="Bug", state="New", tags=["autopilot"])
+    await p._process_agent(item, item)
+    assert ran == [9]
+
+
+async def _noop(sink, value):
+    sink.append(value)

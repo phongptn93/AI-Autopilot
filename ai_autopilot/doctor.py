@@ -169,6 +169,38 @@ def check_deploy_stage(config: Settings) -> list[Finding]:
     return out or [Finding(OK, "Deploy stage is configured")]
 
 
+def check_relay_wiring(config: Settings) -> list[Finding]:
+    """A wired queue state that names several profiles, with no choice made.
+
+    ``analyze`` is the first stage of BOTH ``ba`` and ``full``, so wiring it to
+    "Ready for Analysis" does not say which one an item arriving there should run.
+    The resolver refuses to guess — picking by iteration order would have run the
+    one-stage ``ba`` and quietly never run the pipeline — so an unresolved tie means
+    nothing starts from that state at all, which is worth saying out loud.
+    """
+    from ai_autopilot.execution import sdlc_plan
+
+    wiring = config.sdlc_stage_wiring or {}
+    if not wiring:
+        return []
+    profiles = sdlc_plan.profile_map(config)
+    out: list[Finding] = []
+    for name in sorted(wiring):
+        stage = sdlc_plan.stage_catalog(config).get(name)
+        if stage is None or not (stage.queue_state or "").strip():
+            continue
+        opens = sorted(p for p, ss in profiles.items() if ss and ss[0] == name)
+        if len(opens) > 1 and not (stage.runs_profile or "").strip():
+            out.append(Finding(
+                WARN, f"'{stage.queue_state}' does not say which profile to run",
+                f"Stage '{name}' starts {' and '.join(opens)}, so an item arriving in "
+                "that state names more than one. Nothing runs from it until the tie "
+                "is broken.",
+                "Pick one on the stage's row at /dashboard/relay (runs_profile).",
+            ))
+    return out or [Finding(OK, "Relay wiring is unambiguous")]
+
+
 def check_workspace(config: Settings) -> list[Finding]:
     ws = (config.workspace_directory or "").strip()
     if not ws:
@@ -924,7 +956,7 @@ def check_board_processes(config: Settings) -> list[Finding]:
 
 
 CHECKS = (
-    check_ado, check_trigger, check_trigger_state_roles, check_projects,
+    check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
     check_deploy_stage, check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,

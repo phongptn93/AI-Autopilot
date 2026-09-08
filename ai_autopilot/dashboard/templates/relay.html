@@ -45,6 +45,11 @@
   .rl-pill { font-family:var(--mono); font-size:10px; padding:1px 7px; border-radius:5px;
     background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.4); }
   .rl-pill.mute { background:var(--bg-input); color:var(--text-dim); border-color:var(--border); }
+  /* `analyze` starts BOTH `ba` and `full`. Picking between them by iteration order
+     would have wired "Ready for Analysis" to the one-stage `ba` and quietly never
+     run the pipeline — so the choice is asked for, right where it is created. */
+  .rl-pick { width:auto; padding:2px 6px; font-size:10.5px; margin-top:3px; }
+  .rl-row.ambig .rl-pick { border-color:rgba(245,166,35,.55); }
 
   .rl-in { width:100%; background:var(--bg-input); color:var(--text); border:1px solid var(--border);
     border-radius:var(--radius-sm); padding:7px 9px; font-size:12.5px; font-family:inherit;
@@ -129,13 +134,23 @@
       <div class="rl-head" style="text-align:center">Starts itself</div>
 
       {% for r in rows %}
-      <div class="rl-row {{ '' if r.queue_state else 'off' }}"></div>
+      <div class="rl-row {{ '' if r.queue_state else 'off' }}
+                  {{ 'ambig' if r.queue_state and r.opens | length > 1 and not r.runs_profile else '' }}"></div>
       <div class="rl-stage">
         <b>{{ r.name }}</b>{% if r.role %}<span class="role">{{ r.role }}</span>{% endif %}
         <span class="goal">{{ r.goal }}</span>
         {% if r.opens %}
         <span class="rl-opens">
           <span class="rl-pill">opens {{ r.opens | join(', ') }}</span>
+          {% if r.opens | length > 1 %}
+          <select class="rl-in rl-pick" name="stage_{{ r.name }}_profile"
+                  title="Several profiles start at this stage, so the wiring has to say which one an item arriving here should run. Left unset, nothing runs from this state rather than guessing.">
+            <option value="">— pick a profile —</option>
+            {% for p in r.opens %}
+            <option value="{{ p }}" {% if r.runs_profile == p %}selected{% endif %}>run {{ p }}</option>
+            {% endfor %}
+          </select>
+          {% endif %}
         </span>
         {% elif r.in_profiles %}
         <span class="rl-opens">

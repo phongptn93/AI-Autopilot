@@ -348,3 +348,46 @@ async def _awaited(value):
 
 async def _record(sink, entry):
     sink.append(entry)
+
+
+def test_a_state_that_names_two_profiles_is_refused_not_guessed():
+    """`analyze` is the first stage of BOTH `ba` and `full`, so wiring it to a state
+    does not say which one to run. Breaking the tie by iteration order would have
+    picked the one-stage `ba` and quietly never run the pipeline."""
+    from ai_autopilot.config import SdlcStageWiring, Settings
+    from ai_autopilot.execution.sdlc_plan import profile_for_state, profile_map
+
+    opens = [p for p, ss in profile_map(Settings()).items() if ss and ss[0] == "analyze"]
+    assert set(opens) == {"ba", "full"}          # the tie is real, not hypothetical
+
+    ambiguous = Settings(sdlc_stage_wiring={
+        "analyze": SdlcStageWiring(queue_state="Ready for Analysis"),
+    })
+    assert profile_for_state("Ready for Analysis", ambiguous) == ""   # refuses to guess
+
+    named = Settings(sdlc_stage_wiring={
+        "analyze": SdlcStageWiring(queue_state="Ready for Analysis", runs_profile="full"),
+    })
+    assert profile_for_state("Ready for Analysis", named) == "full"
+
+    # A stage only one profile starts at needs no choice.
+    assert profile_for_state("Ready for Testing", Settings(sdlc_stage_wiring={
+        "test": SdlcStageWiring(queue_state="Ready for Testing"),
+    })) == "qc"
+
+
+def test_doctor_names_the_unresolved_tie():
+    from ai_autopilot.config import SdlcStageWiring, Settings
+    from ai_autopilot.doctor import check_relay_wiring
+
+    warn = check_relay_wiring(Settings(sdlc_stage_wiring={
+        "analyze": SdlcStageWiring(queue_state="Ready for Analysis"),
+    }))
+    assert {f.level for f in warn} == {"warn"}
+    assert "Ready for Analysis" in warn[0].title
+
+    ok = check_relay_wiring(Settings(sdlc_stage_wiring={
+        "analyze": SdlcStageWiring(queue_state="Ready for Analysis", runs_profile="full"),
+    }))
+    assert {f.level for f in ok} == {"ok"}
+    assert check_relay_wiring(Settings()) == []     # nothing wired → nothing to say

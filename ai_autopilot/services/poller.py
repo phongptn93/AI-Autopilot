@@ -13,6 +13,7 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 
 from ai_autopilot import metrics
+from ai_autopilot.board import handoff_states
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.data import PipelineState, QualityKind
@@ -481,6 +482,14 @@ class AdoPollerService:
 
         Loop-safe: only acts on trigger states the autopilot never sets itself
         (its output states are excluded), and only on items carrying a skip tag.
+
+        A state that means SOMEONE ELSE has the item is never a reopen signal, even
+        when it is also a trigger state. Moving a finished bug to "Ready for Testing"
+        hands it to QC; it does not send it back to the bot. Without this, adding such
+        a state to trigger_states silently strips autopilot-done from every finished
+        item already parked there and reworks the lot — and then fights the person
+        putting them back, because each restore looks like another reopen. That is not
+        hypothetical: it happened to #8526 and #8107, twice each, seconds apart.
         """
         c, cfg = self._c, self._config
         if cfg.dry_run or not cfg.reprocess_on_reopen:
@@ -489,6 +498,12 @@ class AdoPollerService:
             cfg.state_in_progress, cfg.state_in_review, cfg.state_needs_human,
             cfg.resolved_state, cfg.state_report, cfg.state_failed,
         ) if s}
+        # Parking spots for other roles: states a human uses to mean "done" and the
+        # board's hand-off columns. Both say the item moved ON, not back.
+        output |= {s.lower() for s in cfg.done_states if s}
+        for handoff in (cfg.board_review_state, cfg.board_deploy_state,
+                        getattr(cfg, "board_testing_state", None)):
+            output |= handoff_states(handoff)
         reopen_states = {s.lower() for s in cfg.trigger_states} - output
         skip_tags = {t.lower() for t in (
             cfg.processed_tag, cfg.review_tag, cfg.escalation_tag, cfg.failed_tag,

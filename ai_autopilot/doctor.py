@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ai_autopilot import flows as flows_mod
 from ai_autopilot import lenses as lenses_mod
-from ai_autopilot.board import board_columns
+from ai_autopilot.board import board_columns, handoff_states
 from ai_autopilot.config import Settings, describe_users, is_ambiguous_user, parse_hhmm
 from ai_autopilot.scheduling import resolve_tz
 
@@ -81,6 +81,46 @@ def check_trigger(config: Settings) -> list[Finding]:
             "Set a trigger tag (Tags & Trigger) or tick at least one trigger state.",
         )]
     return [Finding(OK, "Trigger configured")]
+
+
+def check_trigger_state_roles(config: Settings) -> list[Finding]:
+    """One ADO state cannot mean both "start work here" and "someone else has it".
+
+    A trigger state says the autopilot should pick the item up. A done state, or a
+    board hand-off column's state, says a person already moved it ON. Configure one
+    state as both and every finished item parked there is picked up again — and each
+    time a human puts it back, it is taken again, because the restore looks like one
+    more reopen. Adding "Ready for Testing" to trigger_states did exactly that here.
+
+    Offline and cheap, because the damage is silent: the board looks configured and
+    the rework shows up as the bot arguing with QC.
+    """
+    triggers = {s.strip().lower(): s.strip() for s in config.trigger_states if s.strip()}
+    if not triggers:
+        return []
+    roles: dict[str, list[str]] = {}
+    for label, states in (
+        ("a Done state", {s.strip().lower() for s in config.done_states if s.strip()}),
+        ("the Ready for review column", handoff_states(config.board_review_state)),
+        ("the Ready for deploy column", handoff_states(config.board_deploy_state)),
+        ("the Ready for testing column",
+         handoff_states(getattr(config, "board_testing_state", None))),
+    ):
+        for state in states & set(triggers):
+            roles.setdefault(triggers[state], []).append(label)
+    if not roles:
+        return [Finding(OK, "Trigger states are the autopilot's alone")]
+    return [
+        Finding(
+            WARN, f"'{name}' is a trigger state AND {' / '.join(also)}",
+            "The autopilot starts work on items in this state, but it is also where "
+            "a person parks work that has moved on — so anything finished and waiting "
+            "there gets reworked, and putting it back starts it again.",
+            "Untick it under Tags & Trigger → Trigger states. Leaving it on the board "
+            "column is fine: that only decides where the card is drawn.",
+        )
+        for name, also in sorted(roles.items())
+    ]
 
 
 def check_workspace(config: Settings) -> list[Finding]:
@@ -838,7 +878,8 @@ def check_board_processes(config: Settings) -> list[Finding]:
 
 
 CHECKS = (
-    check_ado, check_trigger, check_projects, check_workspace, check_workspaces,
+    check_ado, check_trigger, check_trigger_state_roles, check_projects,
+    check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,
     check_teams_bot,

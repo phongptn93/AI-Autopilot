@@ -378,3 +378,29 @@ def test_muting_every_channel_is_called_out():
         {"name": "#dev", "url": "https://a.example/w/1", "active": False},
     ])
     assert "Every Teams channel is muted" in _titles(found, doctor.WARN)
+
+
+def test_doctor_flags_a_state_that_means_two_opposite_things():
+    """A trigger state that is also a hand-off / Done state reworks finished items.
+
+    The board and the trigger list are configured on different pages, so nothing on
+    screen shows the collision — it surfaces as the bot re-running work QC already
+    signed off, which is the expensive way to find out.
+    """
+    from ai_autopilot.config import Settings
+    from ai_autopilot.doctor import check_trigger_state_roles
+
+    clean = Settings(trigger_states=["New", "Active"],
+                     board_testing_state=["Ready for Testing"])
+    assert {f.level for f in check_trigger_state_roles(clean)} == {"ok"}
+
+    clashing = Settings(
+        trigger_states=["New", "Ready for Testing", "Closed"],
+        board_testing_state=["Ready for Testing", "In Testing"],
+        done_states=["Closed"],
+    )
+    findings = check_trigger_state_roles(clashing)
+    assert {f.level for f in findings} == {"warn"}
+    titles = " ".join(f.title for f in findings)
+    assert "Ready for Testing" in titles and "Closed" in titles
+    assert "New" not in titles          # the one honest trigger state is left alone

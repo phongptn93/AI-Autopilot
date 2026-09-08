@@ -198,6 +198,28 @@ async def test_reconcile_reopened_clears_skip_tags():
     assert [wid for wid, _ in c.ado.removed] == [7]    # only the reopened one
 
 
+async def test_a_hand_off_state_is_never_a_reopen_signal():
+    """Moving a finished bug to "Ready for Testing" hands it to QC, not back to the bot.
+
+    Regression for a real incident: adding that state to trigger_states made the
+    poller strip autopilot-done from every finished item already parked there and
+    rework the lot (#8526, #8107) — then take each one again as fast as a person
+    could put it back, because every restore looked like one more reopen.
+    """
+    p, c = _poller()
+    done = c.config.processed_tag
+    c.config.trigger_states = [*c.config.trigger_states, "Ready for Testing", "Ready for UAT"]
+    c.config.board_testing_state = ["Ready for Testing", "In Testing"]
+    c.config.done_states = ["Ready for UAT"]
+    c.ado.tagged_items = [
+        _tagged(7, "New", ["autopilot", done]),                 # a real reopen
+        _tagged(8, "Ready for Testing", ["autopilot", done]),   # QC has it → keep
+        _tagged(9, "Ready for UAT", ["autopilot", done]),       # a Done state → keep
+    ]
+    await p._reconcile_reopened()
+    assert [wid for wid, _ in c.ado.removed] == [7]
+
+
 async def test_reconcile_reopened_respects_toggle_off():
     p, c = _poller()
     c.config.reprocess_on_reopen = False

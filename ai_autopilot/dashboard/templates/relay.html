@@ -45,6 +45,9 @@
   .rl-pill { font-family:var(--mono); font-size:10px; padding:1px 7px; border-radius:5px;
     background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.4); }
   .rl-pill.mute { background:var(--bg-input); color:var(--text-dim); border-color:var(--border); }
+  .rl-pill.added { background:var(--green-bg); color:var(--green); border-color:rgba(46,204,113,.45); }
+  .rl-pill.gone { background:transparent; color:var(--text-dim); border-style:dashed;
+    text-decoration:line-through; }
   /* `analyze` starts BOTH `ba` and `full`. Picking between them by iteration order
      would have wired "Ready for Analysis" to the one-stage `ba` and quietly never
      run the pipeline — so the choice is asked for, right where it is created. */
@@ -129,7 +132,7 @@
     <div class="rl-grid">
       <div class="rl-head">Stage</div>
       <div class="rl-head">Waits in (ADO state)</div>
-      <div class="rl-head">Shows while running</div>
+      <div class="rl-head">Shows while running (ADO state)</div>
       <div class="rl-head">Run-now tag</div>
       <div class="rl-head" style="text-align:center">Starts itself</div>
 
@@ -154,7 +157,7 @@
         </span>
         {% elif r.in_profiles %}
         <span class="rl-opens">
-          <span class="rl-pill mute" title="This stage runs inside these profiles but is not their first step, so it does not own a door.">in {{ r.in_profiles | join(', ') }}</span>
+          <span class="rl-pill mute" title="This stage runs inside these profiles but is not the first step of any, so no state can start a run at it.">no door — runs inside {{ r.in_profiles | join(', ') }}</span>
         </span>
         {% endif %}
       </div>
@@ -165,12 +168,12 @@
       </div>
       <div>
         <input type="text" class="rl-in" name="stage_{{ r.name }}_working" value="{{ r.working_state }}"
-               list="rl-states" placeholder="{{ in_progress or 'global in-progress state' }}"
+               list="rl-states" placeholder="falls back to {{ in_progress or 'the global state' }}"
                title="State shown while this stage runs. Blank falls back to the machine-wide one.">
       </div>
       <div>
         <input type="text" class="rl-in mono" name="stage_{{ r.name }}_tag" value="{{ r.entry_tag }}"
-               placeholder="{{ entry_tag }}"
+               placeholder="falls back to {{ entry_tag }}"
                title="One-shot tag that starts this stage where it stands. Blank uses the shared one.">
       </div>
       <div style="display:flex;justify-content:center">
@@ -211,16 +214,28 @@
 
     <div class="rl-eff">
       <span class="k">Poller starts from</span>
-      {% for s in effective_states %}<span class="rl-pill">{{ s }}</span>{% endfor %}
+      {% for s in effective_states %}
+      <span class="rl-pill {{ 'added' if s in added_states else '' }}">{{ s }}</span>
+      {% endfor %}
+      {% for s in removed_states %}<span class="rl-pill gone">{{ s }}</span>{% endfor %}
       {% if not effective_states %}<span class="rl-none">nothing — no item can be picked up</span>{% endif %}
     </div>
     <div class="rl-eff" style="padding-top:0">
-      <span class="k">Configured trigger states</span>
-      {% for s in trigger_states %}<span class="rl-pill mute">{{ s }}</span>{% endfor %}
-      <span class="rl-none" style="margin-left:6px">
-        a stage wired <b>auto</b> adds its state here; one wired <b>not</b> auto removes it —
-        which is the whole point of putting the dial next to the state it governs.
+      {% if added_states or removed_states %}
+      <span class="rl-none">
+        the wiring
+        {% if added_states %}<b>added</b> {{ added_states | join(', ') }}{% endif %}
+        {% if added_states and removed_states %} and {% endif %}
+        {% if removed_states %}<b>removed</b> {{ removed_states | join(', ') }}{% endif %}
+        — the rest is your Trigger states as configured.
       </span>
+      {% else %}
+      <span class="rl-none">
+        same as your configured Trigger states — no wired stage adds or removes one yet.
+        Tick <b>auto</b> to let a state start work by itself, or leave it unticked to
+        take a state out and make that step wait for <b>▶ Run</b>.
+      </span>
+      {% endif %}
     </div>
   </div>
 

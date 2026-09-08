@@ -1095,6 +1095,18 @@ def create_dashboard_router() -> APIRouter:
                  profiles={k: list(v) for k, v in sorted(profiles.items())},
                  trigger_states=cfg.trigger_states,
                  effective_states=cfg.effective_trigger_states,
+                 # What the wiring actually CHANGED. Two identical rows of chips
+                 # answer "did my wiring do anything?" with a shrug; the difference
+                 # is the whole reason both rows are on the page.
+                 added_states=[
+                     s for s in cfg.effective_trigger_states
+                     if s.strip().lower() not in {t.strip().lower() for t in cfg.trigger_states}
+                 ],
+                 removed_states=[
+                     s for s in cfg.trigger_states
+                     if s.strip().lower()
+                     not in {t.strip().lower() for t in cfg.effective_trigger_states}
+                 ],
                  entry_tag=cfg.stage_entry_tag,
                  collisions=sdlc_plan.handoff_collisions(cfg),
                  in_progress=cfg.state_in_progress),

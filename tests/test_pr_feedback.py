@@ -357,3 +357,59 @@ async def test_closing_a_pr_forgets_its_budget(tmp_path):
     assert await repo.review_budget(5) == ("", 0, 0)
     await repo.forget_pr_budget(5)          # idempotent
     await db.dispose()
+
+
+def test_thread_context_is_what_a_teammate_would_read_first():
+    """A mention is usually the shortest comment in its thread — "@bot còn đó không?" —
+    while the request is the comment above it. Judging the mention alone answered a
+    concrete ask with a generic review."""
+    from ai_autopilot.config import BOT_COMMENT_PREFIX
+    from ai_autopilot.services.pr_feedback import thread_context
+
+    mention = {"id": 3, "content": "@bot mày có nghe không"}
+    thread = {"comments": [
+        {"id": 1, "author": {"displayName": "Lam Huynh"},
+         "content": "<div>FE có ClientSettingService sao không dùng?</div>"},
+        {"id": 2, "content": BOT_COMMENT_PREFIX + "<div>đang xem</div>"},   # bot: not the ask
+        {"id": 9, "commentType": "system", "content": "status changed"},    # noise
+        mention,
+    ]}
+    ctx = thread_context(thread, mention)
+    assert "Lam Huynh: FE có ClientSettingService sao không dùng?" in ctx
+    assert "đang xem" not in ctx and "status changed" not in ctx
+    assert "mày có nghe không" not in ctx        # the mention itself is not context
+
+    # Long threads keep the tail: the newest exchange is what the ask refers to.
+    last = {"id": 9999, "content": "@bot ?"}
+    long_thread = {"comments": [
+        {"id": 1000 + i, "author": {"displayName": "X"}, "content": f"<p>line {i}</p>"}
+        for i in range(200)
+    ] + [last]}
+    tail = thread_context(long_thread, last, limit=80)
+    assert len(tail) <= 80 and "line 199" in tail
+
+
+async def test_a_mention_carries_the_thread_into_the_run():
+    """The inferred command AND the real request both reach the agent, so the run works
+    on what was asked rather than on "mày có nghe không"."""
+    from ai_autopilot.config import Settings
+    from ai_autopilot.execution import feedback_handler as fh
+
+    async def _fake_infer(config, text):
+        assert "ClientSettingService" in text     # the thread reached the inference
+        return "/ai", False
+
+    original, fh.infer_mention_command = fh.infer_mention_command, _fake_infer
+    try:
+        cmd = {
+            "via_mention": True,
+            "instruction": "mày có nghe không",
+            "thread_context": "Lam Huynh: FE có ClientSettingService sao không dùng?",
+        }
+        advisory = await fh.resolve_command(Settings(), cmd)
+    finally:
+        fh.infer_mention_command = original
+
+    assert advisory is False                       # an actionable ask, read correctly
+    assert cmd["instruction"].startswith("/ai ")
+    assert "ClientSettingService" in cmd["instruction"]

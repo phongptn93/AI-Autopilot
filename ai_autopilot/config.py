@@ -247,6 +247,16 @@ def _mentions(text: str) -> list[tuple[int, int, str, str]]:
     return sorted(found)
 
 
+def comment_text(text: str) -> str:
+    """Public name for :func:`_plain` — comment HTML as plain text.
+
+    Anything reading ADO comments outside this module needs it (the thread context a
+    mention is answered with, for one), and a private helper copied per caller is how
+    two subtly different HTML strippers end up in one codebase.
+    """
+    return _plain(text)
+
+
 def _plain(text: str) -> str:
     """Comment HTML → plain text (ADO stores comments as HTML).
 

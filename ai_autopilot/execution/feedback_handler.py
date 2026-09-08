@@ -212,12 +212,22 @@ async def resolve_command(config: Settings, cmd: dict) -> bool:
     from a bare @mention — in which case ``cmd["instruction"]`` is rewritten to carry the
     inferred command so ``_guidance`` / ``_AGENT_FOR`` route it like any other.
 
+    A mention is read WITH the thread it sits in. The mention itself is usually the
+    shortest comment there — "@bot mày có nghe không" — while the actual request is the
+    comment above it, so judging the mention alone answered a concrete ask ("FE thiếu
+    ClientSettingService…") with a generic review. A teammate reads the thread first;
+    so does this. The inferred command still defaults to advisory on any doubt, and the
+    context is passed on as the instruction so the run works on the real request.
+
     One helper for every caller (PR babysitter, reviewer tracker) so the advisory default
-    for mentions can't be honoured in one place and forgotten in another."""
+    for mentions can't be honoured in one place and forgotten in another.
+    """
     if cmd.get("via_mention"):
-        command, advisory = await infer_mention_command(config, cmd["instruction"])
-        if command:
-            cmd["instruction"] = f"{command} {cmd['instruction']}"
+        asked = str(cmd.get("instruction") or "").strip()
+        context = str(cmd.get("thread_context") or "").strip()
+        full = (context + chr(10) + asked).strip() if context else asked
+        command, advisory = await infer_mention_command(config, full)
+        cmd["instruction"] = " ".join(x for x in (command, full) if x)
         return advisory
     return match_command(cmd["instruction"], config.advisory_commands) is not None
 

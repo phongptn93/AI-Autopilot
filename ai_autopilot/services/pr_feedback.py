@@ -10,7 +10,13 @@ import re
 from typing import Any
 from urllib.parse import unquote
 
-from ai_autopilot.config import BotIdentity, find_bot_mention, is_bot_signed, match_command
+from ai_autopilot.config import (
+    BotIdentity,
+    comment_text,
+    find_bot_mention,
+    is_bot_signed,
+    match_command,
+)
 
 # Thread statuses that mean "no action needed".
 _RESOLVED_STATUSES = {"closed", "fixed", "wontfix", "resolved", "bydesign"}
@@ -148,8 +154,45 @@ def command_threads(
             "author_email": author.get("uniqueName"),
             "author_name": author.get("displayName"),
             "via_mention": via_mention,
+            # What the thread was about before the mention. "@bot mày có nghe không"
+            # carries no intent on its own — the ask is in the comment above it, which
+            # is exactly what a teammate reads before answering. Only for mentions:
+            # an explicit /command already said what to do.
+            "thread_context": thread_context(thread, latest) if via_mention else "",
         })
     return out
+
+
+# Offered right where a review ends, because that is the moment someone decides what
+# to do with it. A generic command list is a menu; this is the next step for THIS thread.
+FIX_OFFER = (
+    "💡 Muốn tôi sửa luôn theo các nhận xét trên? Reply "
+    "<code>/ai</code> (kèm mô tả nếu muốn giới hạn phạm vi) — tôi sẽ chỉnh code, "
+    "commit &amp; push lên chính branch này."
+)
+
+
+def thread_context(thread: dict[str, Any], upto: dict[str, Any], limit: int = 1500) -> str:
+    """The human conversation in a thread, oldest first, up to (not including) ``upto``.
+
+    A mention is usually the SHORTEST comment in the thread — "@bot còn đó không?" — and
+    reading it alone taught the intent-inference nothing, so a real request one line
+    above was answered with a generic review. Bot comments are dropped (its own replies
+    are not the ask) and the text is capped, newest kept, because only the tail matters.
+    """
+    parts: list[str] = []
+    for comment in thread.get("comments") or []:
+        if comment is upto or comment.get("id") == upto.get("id"):
+            break
+        if (comment.get("commentType") or "text") == "system":
+            continue
+        content = comment_text(comment.get("content") or "").strip()
+        if not content or is_bot_signed(comment.get("content") or ""):
+            continue
+        who = ((comment.get("author") or {}).get("displayName") or "").strip()
+        parts.append(f"{who}: {content}" if who else content)
+    text = chr(10).join(parts)
+    return text[-limit:] if len(text) > limit else text
 
 
 def newest_actionable_thread_id(threads: list[dict[str, Any]]) -> int | None:

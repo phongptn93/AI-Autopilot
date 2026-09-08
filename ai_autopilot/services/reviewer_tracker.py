@@ -30,6 +30,9 @@ from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import TaskCategory, WorkItemInfo
 from ai_autopilot.notifications.base import NotificationMessage, NotificationType
 from ai_autopilot.services.pr_feedback import (
+    FIX_OFFER as _FIX_OFFER,
+)
+from ai_autopilot.services.pr_feedback import (
     command_threads,
     is_bot_branch,
     parse_work_item_id,
@@ -771,7 +774,8 @@ class ReviewerTrackerService:
                     # was often false. Count what this run actually posted and say that.
                     posted = len(await self._bot_comment_ids(repo_id, pr_id) - before)
                     msg = (
-                        f"<div><b>🔍 Đã xem xong</b> — nhận xét chi tiết ở trên.{hint}</div>"
+                        f"<div><b>🔍 Đã xem xong</b> — nhận xét chi tiết ở trên.<br/>"
+                        f"{_FIX_OFFER}{hint}</div>"
                         if posted
                         else "<div><b>🔍 Đã xem xong — không có nhận xét nào.</b> Tôi đọc "
                              "thay đổi và không thấy vấn đề đáng nêu, nên không đăng nhận "

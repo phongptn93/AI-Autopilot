@@ -27,7 +27,7 @@ from pathlib import Path
 from ai_autopilot import activity
 from ai_autopilot.container import Container
 from ai_autopilot.diffs import Diff, parse_unified_diff
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import WorkItemInfo
 from ai_autopilot.services.pr_feedback import parse_pr_url
 
@@ -224,7 +224,7 @@ class TaskRoomService:
                     pr.get("sourceRefName", "")
                 ).removeprefix("refs/heads/")
         except Exception as exc:  # noqa: BLE001 — a label is not worth failing the page
-            _log.info("task room: PR lookup failed", pr=view.pr_id, error=str(exc))
+            _log.info("task room: PR lookup failed", pr=view.pr_id, error=describe_exc(exc))
 
 
 def _run_pr_urls(run) -> list[str]:
@@ -301,7 +301,7 @@ def _safe(fn, default):
     try:
         return fn()
     except Exception as exc:  # noqa: BLE001 — one missing section must not blank the page
-        _log.info("task room: section unavailable", error=str(exc))
+        _log.info("task room: section unavailable", error=describe_exc(exc))
         return default
 
 
@@ -309,5 +309,5 @@ async def _safe_async(coro, default, what: str):
     try:
         return await coro
     except Exception as exc:  # noqa: BLE001
-        _log.info("task room: section unavailable", section=what, error=str(exc))
+        _log.info("task room: section unavailable", section=what, error=describe_exc(exc))
         return default

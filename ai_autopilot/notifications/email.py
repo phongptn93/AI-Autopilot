@@ -7,7 +7,7 @@ from email.message import EmailMessage
 import aiosmtplib
 
 from ai_autopilot.config import Settings
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.notifications.base import NotificationChannel, NotificationMessage
 
 
@@ -42,4 +42,4 @@ class EmailNotifier(NotificationChannel):
             )
             self._log.debug("email sent", title=message.title)
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("email notification failed", error=str(exc))
+            self._log.warning("email notification failed", error=describe_exc(exc))

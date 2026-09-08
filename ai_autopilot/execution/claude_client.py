@@ -24,7 +24,7 @@ from claude_agent_sdk import (
 )
 
 from ai_autopilot import activity
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 
 _log = get_logger("execution.claude_client")
 
@@ -330,7 +330,7 @@ async def run_claude(
         except Exception as exc:  # noqa: BLE001
             if resume_id:
                 _log.warning(
-                    "resume failed — retrying from a fresh session", error=str(exc)
+                    "resume failed — retrying from a fresh session", error=describe_exc(exc)
                 )
                 resume_id = None
                 continue
@@ -341,7 +341,7 @@ async def run_claude(
                     attempt=attempt_no + 1,
                     of=_TRANSIENT_RETRIES,
                     delay=delay,
-                    error=str(exc),
+                    error=describe_exc(exc),
                 )
                 await asyncio.sleep(delay)
                 continue

@@ -34,7 +34,7 @@ from ai_autopilot import delivery
 from ai_autopilot.config import Settings, parse_hhmm
 from ai_autopilot.container import Container
 from ai_autopilot.data.entities import PipelineState
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.scheduling import QuietHours, resolve_tz
 from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
@@ -357,7 +357,7 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
         _log.warning(
             "Teams bot packages not installed (pip install .[teams-bot]) — "
             "/api/messages disabled",
-            error=str(exc),
+            error=describe_exc(exc),
         )
         return None
 
@@ -398,7 +398,7 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
                 context, config, container, reviewer_tracker, defer=deferral
             )
         except Exception as exc:  # noqa: BLE001 — a bot turn must not crash the process
-            _log.error("Teams turn failed", error=str(exc))
+            _log.error("Teams turn failed", error=describe_exc(exc))
             with contextlib.suppress(Exception):
                 await context.send_activity("⚠️ Có lỗi khi xử lý — thử lại giúp mình nhé.")
 
@@ -414,7 +414,7 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
                 await app.proactive.store_conversation(context)
                 _log.info("Teams conversation stored for proactive digest")
         except Exception as exc:  # noqa: BLE001 — must not crash the turn
-            _log.warning("storing conversation for digest failed", error=str(exc))
+            _log.warning("storing conversation for digest failed", error=describe_exc(exc))
 
     digest_task = None
     if config.teams_agent_digest_interval_hours > 0 or config.teams_agent_digest_at.strip():
@@ -503,7 +503,7 @@ async def _digest_loop(
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 — one bad cycle must not kill the loop
-            _log.error("Teams digest cycle failed", error=str(exc))
+            _log.error("Teams digest cycle failed", error=describe_exc(exc))
 
 
 # ── Daily digest — the Delivery report, rendered for chat ────────────────────
@@ -1539,7 +1539,7 @@ async def _teams_email(context) -> str | None:
         member = await TeamsInfo.get_member(context, user_id)
         return member.email or member.user_principal_name
     except Exception as exc:  # noqa: BLE001 — identity lookup must not crash the turn
-        _log.warning("Teams identity lookup failed", error=str(exc))
+        _log.warning("Teams identity lookup failed", error=describe_exc(exc))
         return None
 
 

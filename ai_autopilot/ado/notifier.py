@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from ai_autopilot.ado.client import AdoClient
 from ai_autopilot.config import Settings
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 from ai_autopilot.notifications.base import (
     NotificationChannel,
@@ -189,7 +189,7 @@ class AdoNotifier:
             try:
                 await channel.send(message)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("notification failed", channel=channel.name, error=str(exc))
+                self._log.warning("notification failed", channel=channel.name, error=describe_exc(exc))
 
     async def _hold_if_quiet(self, message: NotificationMessage) -> bool:
         """Queue the notice if it is outside hours. Returns True when it was held."""
@@ -202,7 +202,7 @@ class AdoNotifier:
                 cap=self._config.notify_quiet_max_held,
             )
         except Exception as exc:  # noqa: BLE001 — a queue failure must not lose the notice
-            self._log.warning("could not hold notification — sending", error=str(exc))
+            self._log.warning("could not hold notification — sending", error=describe_exc(exc))
             return False
         self._maybe_held = True
         self._log.info(
@@ -226,7 +226,7 @@ class AdoNotifier:
         try:
             held = await self._hold_repo.drain()
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("could not read held notifications", error=str(exc))
+            self._log.warning("could not read held notifications", error=describe_exc(exc))
             return 0
         self._maybe_held = False
         if not held:

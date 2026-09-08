@@ -7,7 +7,7 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 from ai_autopilot.plugins.base import Plugin, PostProcessor, PreProcessor, SkillProvider
 
@@ -39,7 +39,7 @@ class PluginManager:
                 await plugin.initialize(services)
                 self._plugins.append(plugin)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("plugin failed to initialize", name=plugin.name, error=str(exc))
+                self._log.warning("plugin failed to initialize", name=plugin.name, error=describe_exc(exc))
         self._log.info("plugin manager ready", count=len(self._plugins))
 
     def _discover(self, plugins_directory: str) -> list[Plugin]:
@@ -55,7 +55,7 @@ class PluginManager:
             try:
                 module = self._import_file(file)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("failed to load plugin file", file=str(file), error=str(exc))
+                self._log.warning("failed to load plugin file", file=str(file), error=describe_exc(exc))
                 continue
             for _, obj in inspect.getmembers(module, inspect.isclass):
                 if (
@@ -84,7 +84,7 @@ class PluginManager:
             try:
                 item = await pp.pre_process(item)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("pre-processor failed", name=pp.name, error=str(exc))
+                self._log.warning("pre-processor failed", name=pp.name, error=describe_exc(exc))
         return item
 
     async def run_post_processors(self, item: WorkItemInfo, result: ExecutionResult) -> None:
@@ -92,4 +92,4 @@ class PluginManager:
             try:
                 await pp.post_process(item, result)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("post-processor failed", name=pp.name, error=str(exc))
+                self._log.warning("post-processor failed", name=pp.name, error=describe_exc(exc))

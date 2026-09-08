@@ -23,7 +23,7 @@ from __future__ import annotations
 from ai_autopilot import spec_drift
 from ai_autopilot.container import Container
 from ai_autopilot.execution.result_contract import Deviation
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 from ai_autopilot.services.pr_feedback import parse_pr_url, parse_work_item_id
 
@@ -78,7 +78,7 @@ class SpecGuard:
                 if await self._link_one(repo_name, pr_id, target):
                     fixed.append(url)
             except Exception as exc:  # noqa: BLE001 — never fail a delivered run on this
-                self._log.warning("pr link check failed", id=item.id, pr=url, error=str(exc))
+                self._log.warning("pr link check failed", id=item.id, pr=url, error=describe_exc(exc))
         return fixed
 
     async def _source_ref(self, repo_name: str, pr_id: int) -> str:
@@ -126,7 +126,7 @@ class SpecGuard:
                 self._log.info("spec drift already reported — not repeating", id=item.id)
                 return 0
         except Exception as exc:  # noqa: BLE001 — a failed check must not suppress the notice
-            self._log.warning("drift dedup check failed", id=item.id, error=str(exc))
+            self._log.warning("drift dedup check failed", id=item.id, error=describe_exc(exc))
 
         notice = spec_drift.render_comment(
             found, pr_url=result.pr_url or "", tag=cfg.spec_drift_tag,
@@ -137,7 +137,7 @@ class SpecGuard:
             if cfg.spec_drift_tag:
                 await self._c.ado.add_tag(item.id, cfg.spec_drift_tag)
         except Exception as exc:  # noqa: BLE001 — the run is already delivered
-            self._log.warning("drift notice failed", id=item.id, error=str(exc))
+            self._log.warning("drift notice failed", id=item.id, error=describe_exc(exc))
             return 0
         await self._comment_on_pr(result, found)
         await self._record(item, result, found)
@@ -164,7 +164,7 @@ class SpecGuard:
                 entry[0], pr_id, spec_drift.render_pr_comment(found)
             )
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("drift PR comment failed", pr=pr_id, error=str(exc))
+            self._log.warning("drift PR comment failed", pr=pr_id, error=describe_exc(exc))
 
     async def _record(
         self, item: WorkItemInfo, result: ExecutionResult, found: list[Deviation]
@@ -175,7 +175,7 @@ class SpecGuard:
         try:
             await repo.add(item, result.pr_url or "", found)
         except Exception as exc:  # noqa: BLE001 — the ADO comment is the durable record
-            self._log.warning("drift not recorded", id=item.id, error=str(exc))
+            self._log.warning("drift not recorded", id=item.id, error=describe_exc(exc))
 
     # ── 3. a human says the specification is back in line ────────────────────
 

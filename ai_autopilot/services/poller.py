@@ -29,7 +29,7 @@ from ai_autopilot.execution.sdlc_plan import (
     resolve_stages,
     working_state_for,
 )
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.routing import plan_schedule, sort_by_priority
@@ -157,7 +157,7 @@ class AdoPollerService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._log.error("comment loop failed", error=str(exc))
+                self._log.error("comment loop failed", error=describe_exc(exc))
 
     async def _run(self) -> None:
         cfg = self._config
@@ -193,7 +193,7 @@ class AdoPollerService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._log.error("poll cycle failed", error=str(exc))
+                self._log.error("poll cycle failed", error=describe_exc(exc))
 
             cutoff = datetime.now(UTC) - timedelta(hours=1)
             self._processed = {k: v for k, v in self._processed.items() if v >= cutoff}
@@ -305,7 +305,7 @@ class AdoPollerService:
         try:
             preds, related = await c.ado.get_work_item_links(list(candidate_ids))
         except Exception as exc:  # noqa: BLE001 — never let scheduling break the poll
-            self._log.warning("link-graph fetch failed — plain priority order", error=str(exc))
+            self._log.warning("link-graph fetch failed — plain priority order", error=describe_exc(exc))
             return sort_by_priority(new_items)
 
         related = _symmetrize(related)
@@ -321,7 +321,7 @@ class AdoPollerService:
                 for a, peers in ai_edges.items():
                     related.setdefault(a, set()).update(peers)
             except Exception as exc:  # noqa: BLE001 — never let this break the poll
-                self._log.warning("ai-conflict edges fetch failed", error=str(exc))
+                self._log.warning("ai-conflict edges fetch failed", error=describe_exc(exc))
 
         # Attach links to the items (handy for the dashboard) and work out which
         # predecessors are still open (block their successors).
@@ -532,7 +532,7 @@ class AdoPollerService:
         try:
             tagged = await c.ado.get_all_tagged_work_items()
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("reopen reconcile: fetch failed", error=str(exc))
+            self._log.warning("reopen reconcile: fetch failed", error=describe_exc(exc))
             return
         for item in tagged:
             held = [t for t in item.tags if t.lower() in skip_tags]
@@ -578,7 +578,7 @@ class AdoPollerService:
         try:
             tagged = await c.ado.get_all_tagged_work_items()
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("restart reconcile: fetch failed", error=str(exc))
+            self._log.warning("restart reconcile: fetch failed", error=describe_exc(exc))
             return
         tag_l = tag.lower()
         skip_tags = {t.lower() for t in (
@@ -634,7 +634,7 @@ class AdoPollerService:
         try:
             tagged = await c.ado.get_all_tagged_work_items()
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("stage entry reconcile: fetch failed", error=str(exc))
+            self._log.warning("stage entry reconcile: fetch failed", error=describe_exc(exc))
             return
         for item in tagged:
             held = {(t or "").strip().lower(): t for t in item.tags}
@@ -707,7 +707,7 @@ class AdoPollerService:
         try:
             tagged = await c.ado.get_all_tagged_work_items()
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("comment reconcile: fetch failed", error=str(exc))
+            self._log.warning("comment reconcile: fetch failed", error=describe_exc(exc))
             return
         # None when comment_mention_enabled is off — the same switch the PR path uses, so
         # mentions are enabled or disabled everywhere at once.
@@ -719,7 +719,7 @@ class AdoPollerService:
                 comments = await c.ado.get_work_item_comments(item.id)
             except Exception as exc:  # noqa: BLE001
                 self._log.warning(
-                    "comment reconcile: comments fetch failed", id=item.id, error=str(exc)
+                    "comment reconcile: comments fetch failed", id=item.id, error=describe_exc(exc)
                 )
                 continue
             # Watermark = last BOT comment id → a command is "handled" once the bot has
@@ -833,7 +833,7 @@ class AdoPollerService:
                     else:
                         await self._process_legacy(item, classified)
                 except Exception as exc:  # noqa: BLE001
-                    self._log.error("error processing", id=item.id, error=str(exc))
+                    self._log.error("error processing", id=item.id, error=describe_exc(exc))
                     await c.notifier.notify_error(item, str(exc))
         finally:
             self._inflight.discard(item.id)
@@ -910,7 +910,7 @@ class AdoPollerService:
                         metrics.record_duration(str(item.category), result.duration_seconds)
                         self._log.info("batch member finished", id=item.id, status=status)
                 except Exception as exc:  # noqa: BLE001 — one crash must not strand the cluster
-                    self._log.error("error processing batch", ids=ids, error=str(exc))
+                    self._log.error("error processing batch", ids=ids, error=describe_exc(exc))
                     for item in items:
                         await c.notifier.notify_error(item, str(exc))
         finally:
@@ -1191,7 +1191,7 @@ class AdoPollerService:
         try:
             await self._c.executor.close_interactive(run_dir, item_id)
         except Exception as exc:  # noqa: BLE001 — never block finalise on cleanup
-            self._log.warning("could not close interactive session", id=item_id, error=str(exc))
+            self._log.warning("could not close interactive session", id=item_id, error=describe_exc(exc))
         return True
 
     async def _remove_live_tag(self, item_id: int) -> None:
@@ -1208,7 +1208,7 @@ class AdoPollerService:
         try:
             tagged = await c.ado.get_all_tagged_work_items()
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("orphan finalize: fetch failed", error=str(exc))
+            self._log.warning("orphan finalize: fetch failed", error=describe_exc(exc))
             return
         live = cfg.live_tag.lower()
         for item in tagged:

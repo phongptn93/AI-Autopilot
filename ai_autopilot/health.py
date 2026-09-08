@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 
 from ai_autopilot.ado.auth import AdoAuthService
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 
 _log = get_logger("health")
 _MIN_FREE_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB
@@ -58,7 +58,7 @@ async def check_ado(auth: AdoAuthService, http: httpx.AsyncClient) -> HealthChec
             else f"ADO API returned {resp.status_code}"
         )
     except Exception as exc:  # noqa: BLE001
-        _log.warning("ado health check failed", error=str(exc))
+        _log.warning("ado health check failed", error=describe_exc(exc))
         return _result("ado", HealthStatus.UNHEALTHY, "ADO API unreachable", start)
     return _result("ado", status, desc, start)
 
@@ -71,7 +71,7 @@ async def check_claude() -> HealthCheckResult:
 
         return _result("claude", HealthStatus.HEALTHY, "claude-agent-sdk available", start)
     except Exception as exc:  # noqa: BLE001
-        _log.warning("claude health check failed", error=str(exc))
+        _log.warning("claude health check failed", error=describe_exc(exc))
         return _result("claude", HealthStatus.UNHEALTHY, "claude-agent-sdk not importable", start)
 
 

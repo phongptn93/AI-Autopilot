@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ai_autopilot.config import Settings
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 
 # Keep only the tail of the test output — enough to see the failing assertions in
 # a log / comment without carrying megabytes of passing noise.
@@ -100,7 +100,7 @@ class TestGate:
                     summary=f"tests timed out after {self._config.test_timeout_seconds}s",
                 )
         except Exception as exc:  # noqa: BLE001 — a broken command must not crash the run
-            self._log.warning("test gate failed to launch", cmd=cmd, error=str(exc))
+            self._log.warning("test gate failed to launch", cmd=cmd, error=describe_exc(exc))
             # Couldn't even start the runner → treat as skip (don't block on our own error).
             return TestResult(passed=True, ran=False, summary=f"could not run tests: {exc}")
 

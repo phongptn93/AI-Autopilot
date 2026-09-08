@@ -22,7 +22,7 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 
 from ai_autopilot.container import Container
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 
 
 class DeliveryTrackerService:
@@ -66,7 +66,7 @@ class DeliveryTrackerService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 — a bad cycle must not kill the loop
-                self._log.error("delivery tracker cycle failed", error=str(exc))
+                self._log.error("delivery tracker cycle failed", error=describe_exc(exc))
             try:
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
@@ -111,7 +111,7 @@ class DeliveryTrackerService:
         try:
             categories = await c.ado.get_state_categories()
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("delivery tracker: state categories failed", error=str(exc))
+            self._log.warning("delivery tracker: state categories failed", error=describe_exc(exc))
             categories = {}
         written = await c.state_history.record(items, categories)
         if written:

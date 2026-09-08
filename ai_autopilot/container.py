@@ -41,7 +41,7 @@ from ai_autopilot.execution import (
 )
 from ai_autopilot.execution.sdlc_plan import handoff_collisions
 from ai_autopilot.learning import QualityLog
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.multitenant import TenantManager
 from ai_autopilot.notifications import (
     EmailNotifier,
@@ -150,7 +150,7 @@ class Container:
             try:
                 detected = await self.ado.get_connection_data()
             except Exception as exc:  # noqa: BLE001 — never block startup on this
-                self.log.warning("bot identity lookup failed", error=str(exc))
+                self.log.warning("bot identity lookup failed", error=describe_exc(exc))
             self._bot_identity = detected or {"id": "", "display_name": "", "unique_name": ""}
             if detected:
                 self.log.info(

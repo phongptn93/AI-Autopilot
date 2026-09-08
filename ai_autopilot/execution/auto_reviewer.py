@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from ai_autopilot.config import Settings
 from ai_autopilot.execution.claude_client import ClaudeRun, run_claude
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 
 
 @dataclass
@@ -73,7 +73,7 @@ class AutoReviewer:
             )
             return run.text, run
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("auto-review command failed", error=str(exc))
+            self._log.warning("auto-review command failed", error=describe_exc(exc))
             return "", None
 
 

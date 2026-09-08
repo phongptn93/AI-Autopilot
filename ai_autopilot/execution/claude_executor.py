@@ -45,7 +45,7 @@ from ai_autopilot.execution.result_contract import (
     find_result,
     parse_result_text,
 )
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.workspace import discover_repos, parse_repo_descriptions
 
@@ -112,7 +112,7 @@ def pretrust_claude_dir(path: str) -> bool:
         _log.info("pre-trusted Claude workspace", path=key)
         return True
     except Exception as exc:  # noqa: BLE001 — never block a launch on this
-        _log.warning("could not pre-trust Claude workspace", path=path, error=str(exc))
+        _log.warning("could not pre-trust Claude workspace", path=path, error=describe_exc(exc))
         return False
 
 
@@ -371,7 +371,7 @@ class ClaudeExecutor:
             self._log.error("agent timed out", id=item.id, minutes=mins)
             result = ExecutionResult.fail(item.id, "agent", f"Timed out after {mins} minutes")
         except Exception as exc:  # noqa: BLE001 — never leave the item stuck IN_PROGRESS
-            self._log.error("agent crashed", id=item.id, error=str(exc))
+            self._log.error("agent crashed", id=item.id, error=describe_exc(exc))
             result = ExecutionResult.fail(item.id, "agent", str(exc))
         finally:
             await self.release_scratch(scratch)
@@ -447,7 +447,7 @@ class ClaudeExecutor:
             self._log.error("agent batch timed out", ids=ids, minutes=mins)
             return self._batch_fail(items, f"Timed out after {mins} minutes", started)
         except Exception as exc:  # noqa: BLE001 — never leave the items stuck IN_PROGRESS
-            self._log.error("agent batch crashed", ids=ids, error=str(exc))
+            self._log.error("agent batch crashed", ids=ids, error=describe_exc(exc))
             return self._batch_fail(items, str(exc), started)
         finally:
             await self.release_scratch(scratch)
@@ -681,7 +681,7 @@ class ClaudeExecutor:
         except TimeoutError:
             return f"Review PR !{pr_id} quá thời gian ({self._config.task_timeout_minutes} phút)."
         except Exception as exc:  # noqa: BLE001 — a review failure must not crash the caller
-            self._log.warning("review_pr failed", pr=pr_id, error=str(exc))
+            self._log.warning("review_pr failed", pr=pr_id, error=describe_exc(exc))
             return f"Không review được PR !{pr_id}: {exc}"
         finally:
             await self.release_scratch(scratch)
@@ -836,7 +836,7 @@ class ClaudeExecutor:
         except Exception as exc:  # noqa: BLE001 — never block the run on isolation failure
             self._log.warning(
                 "agent scratch failed — falling back to shared workspace",
-                id=item_id, error=str(exc),
+                id=item_id, error=describe_exc(exc),
             )
             await self.release_scratch(scratch)
             return None
@@ -890,7 +890,7 @@ class ClaudeExecutor:
                         str(Path(workspace) / repo), branch, 0, exclude=str(worktree)
                     )
                 except GitError as exc:  # someone else's / dirty worktree — log, try anyway
-                    self._log.warning("stage branch blocked by a worktree", error=str(exc))
+                    self._log.warning("stage branch blocked by a worktree", error=describe_exc(exc))
             await self._git(["checkout", "-B", branch], str(worktree), check=False)
             current = (
                 await self._git(["branch", "--show-current"], str(worktree), check=False)
@@ -1022,7 +1022,7 @@ class ClaudeExecutor:
             )
             return True, session, run_dir
         except Exception as exc:  # noqa: BLE001
-            self._log.error("failed to launch interactive session", id=item.id, error=str(exc))
+            self._log.error("failed to launch interactive session", id=item.id, error=describe_exc(exc))
             await self.release_scratch(scratch)
             return False, session, workspace
 
@@ -1051,7 +1051,7 @@ class ClaudeExecutor:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(handle), encoding="utf-8")
         except OSError as exc:  # noqa: BLE001 — never fail a launch on bookkeeping
-            self._log.warning("could not record session handle", id=item_id, error=str(exc))
+            self._log.warning("could not record session handle", id=item_id, error=describe_exc(exc))
 
     def _read_session_handle(self, run_dir: str, item_id: int) -> dict | None:
         try:
@@ -1570,7 +1570,7 @@ class ClaudeExecutor:
             self._log.error("read-only run timed out", id=item_id, minutes=minutes)
             result = ExecutionResult.fail(item_id, prompt, f"Timed out after {minutes} minutes")
         except Exception as exc:  # noqa: BLE001
-            self._log.error("read-only run failed", id=item_id, error=str(exc))
+            self._log.error("read-only run failed", id=item_id, error=describe_exc(exc))
             result = ExecutionResult.fail(item_id, prompt, str(exc))
         # There's no isolation to throw away here, so a run that ignored the
         # "change nothing" contract would silently dirty the checkout — surface it.
@@ -1752,7 +1752,7 @@ class ClaudeExecutor:
             result.duration_seconds = time.monotonic() - started
             return result
         except Exception as exc:  # noqa: BLE001
-            self._log.error("execution failed", id=item_id, error=str(exc))
+            self._log.error("execution failed", id=item_id, error=describe_exc(exc))
             result = ExecutionResult.fail(item_id, prompt, str(exc))
             result.duration_seconds = time.monotonic() - started
             return result
@@ -1876,7 +1876,7 @@ class ClaudeExecutor:
         except Exception as exc:  # noqa: BLE001 — fall back to a fresh checkout
             self._log.warning(
                 "could not reuse interactive scratch — fresh checkout",
-                id=item_id, scratch=scratch, error=str(exc),
+                id=item_id, scratch=scratch, error=describe_exc(exc),
             )
             return None
         resume = self._transcript_session_id(scratch) or ""
@@ -2089,7 +2089,7 @@ class ClaudeExecutor:
                 repo or "", branch, self._config.claude_session_ttl_hours
             )
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("session lookup failed", branch=branch, error=str(exc))
+            self._log.warning("session lookup failed", branch=branch, error=describe_exc(exc))
             return None
 
     async def _save_session(self, repo: str, branch: str, run: ClaudeRun) -> None:
@@ -2230,7 +2230,7 @@ def _load_mcp_servers(workspace: str) -> dict | None:
             _log.warning(
                 "mcp config present but unreadable — NO MCP tools will load for this "
                 "run; agents lose ADO/DB tools and fall back blindly. Fix the file.",
-                path=str(path), error=str(exc),
+                path=str(path), error=describe_exc(exc),
             )
             continue
         servers = data.get("mcpServers") if isinstance(data, dict) else None

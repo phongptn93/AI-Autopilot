@@ -20,7 +20,7 @@ from ai_autopilot.config import (
 from ai_autopilot.container import Container
 from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.services.pr_feedback import (
     FIX_OFFER as _FIX_OFFER,
@@ -107,7 +107,7 @@ class PrMonitorService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._log.error("hot-lane cycle failed", error=str(exc))
+                self._log.error("hot-lane cycle failed", error=describe_exc(exc))
 
     async def _poll_hot_once(self) -> None:
         now = time.monotonic()
@@ -132,7 +132,7 @@ class PrMonitorService:
             await self._inspect_pr(repo_id, repo_name, pr)
         except Exception as exc:  # noqa: BLE001 — a background task must not die silently
             self._log.error(
-                "webhook-kicked inspection failed", pr=pr.get("pullRequestId"), error=str(exc)
+                "webhook-kicked inspection failed", pr=pr.get("pullRequestId"), error=describe_exc(exc)
             )
 
     # ── Restart-proof command state (memory cache over PrCommandRepository) ──
@@ -207,7 +207,7 @@ class PrMonitorService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._log.error("PR babysitter cycle failed", error=str(exc))
+                self._log.error("PR babysitter cycle failed", error=describe_exc(exc))
 
     async def _scan(self) -> None:
         c = self._c
@@ -280,7 +280,7 @@ class PrMonitorService:
         try:
             sessions = c.executor.list_open_sessions()
         except Exception as exc:  # noqa: BLE001 — housekeeping must not break the scan
-            self._log.warning("session sweep failed", error=str(exc))
+            self._log.warning("session sweep failed", error=describe_exc(exc))
             return
         for item_id, run_dir in sessions.items():
             if item_id in active_items or not c.executor.session_finished(run_dir, item_id):
@@ -289,7 +289,7 @@ class PrMonitorService:
                 await c.executor.close_interactive(run_dir, item_id)
                 await c.executor.release_scratch(run_dir)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("could not close session", id=item_id, error=str(exc))
+                self._log.warning("could not close session", id=item_id, error=describe_exc(exc))
                 continue
             self._log.info("interactive session closed — PR no longer open", id=item_id)
 
@@ -312,7 +312,7 @@ class PrMonitorService:
                 self._revision_counts.pop(work_item_id, None)
                 self._log.info("revision budget released — PR closed", id=work_item_id)
         except Exception as exc:  # noqa: BLE001 — housekeeping must not break the scan
-            self._log.warning("revision budget release failed", error=str(exc))
+            self._log.warning("revision budget release failed", error=describe_exc(exc))
 
     def _prune_caches(
         self, active_pr_ids: set[int], active_branches: set[tuple[str, str]],
@@ -377,7 +377,7 @@ class PrMonitorService:
         try:
             related = await self._related_draft_prs(work_item_id, primary_pr_id)
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("related-draft scan failed", id=work_item_id, error=str(exc))
+            self._log.warning("related-draft scan failed", id=work_item_id, error=describe_exc(exc))
             return
         if not related:
             return
@@ -561,7 +561,7 @@ class PrMonitorService:
         try:
             return await self._repo.record_advisory_run(pr_id, commit) > cap
         except Exception as exc:  # noqa: BLE001 — never block a review on bookkeeping
-            self._log.warning("advisory budget check failed", pr=pr_id, error=str(exc))
+            self._log.warning("advisory budget check failed", pr=pr_id, error=describe_exc(exc))
             return False
 
     async def _reply_advisory_capped(self, repo_id: str, pr_id: int, thread_id: int) -> None:
@@ -695,5 +695,5 @@ class PrMonitorService:
                 await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "active")
         except Exception as exc:  # noqa: BLE001 — a background task must not die silently
             self._log.error(
-                "PR command handler failed", id=work_item_id, pr=pr_id, error=str(exc)
+                "PR command handler failed", id=work_item_id, pr=pr_id, error=describe_exc(exc)
             )

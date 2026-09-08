@@ -19,7 +19,7 @@ import contextlib
 from datetime import UTC, datetime
 
 from ai_autopilot.container import Container
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.process_health import (
     HealthItem,
     HealthReport,
@@ -113,7 +113,7 @@ class ProcessHealthService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 — a digest must never kill the app
-                self._log.error("process-health cycle failed", error=str(exc))
+                self._log.error("process-health cycle failed", error=describe_exc(exc))
 
     async def reports(self) -> list[HealthReport]:
         """One report per polled project (also used by the dashboard / on demand)."""
@@ -126,7 +126,7 @@ class ProcessHealthService:
                     project, cfg.process_health_window_days
                 )
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("process-health fetch failed", project=project, error=str(exc))
+                self._log.warning("process-health fetch failed", project=project, error=describe_exc(exc))
                 continue
             items = [i for i in (to_health_item(f) for f in raw) if i is not None]
             out.append(build_report(

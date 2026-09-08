@@ -54,7 +54,7 @@ from ai_autopilot.lenses import (
     my_turn_count,
     render_lanes,
 )
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.pr_feedback import parse_work_item_id
 from ai_autopilot.services.spec_guard import SpecGuard
@@ -460,7 +460,7 @@ async def _pr_outcomes(c: Container) -> dict:
                     if parse_work_item_id(pr.get("sourceRefName", "")) in ours:
                         counts[key] += 1
     except Exception as exc:  # noqa: BLE001 — metrics must never break the page
-        _log.warning("pr outcome scan failed", error=str(exc))
+        _log.warning("pr outcome scan failed", error=describe_exc(exc))
         counts["ok"] = False
     decided = counts["merged"] + counts["abandoned"]
     counts["merge_rate"] = round(100 * counts["merged"] / decided) if decided else None
@@ -1193,7 +1193,7 @@ def create_dashboard_router() -> APIRouter:
             for snap in await c.pr_reviewer_repo.all_reviewers():
                 tracked[(snap.pr_id, snap.reviewer_id)] = snap
         except Exception as exc:  # noqa: BLE001 — page must render without the DB
-            _log.warning("reviewer state load failed", error=str(exc))
+            _log.warning("reviewer state load failed", error=describe_exc(exc))
         prs: list[dict] = []
         try:
             for repo in await c.ado.get_repositories():
@@ -1253,7 +1253,7 @@ def create_dashboard_router() -> APIRouter:
                         "status": _pr_status(pr, approved, blocked, pending, conflicts),
                     })
         except Exception as exc:  # noqa: BLE001
-            _log.warning("reviews page PR scan failed", error=str(exc))
+            _log.warning("reviews page PR scan failed", error=describe_exc(exc))
         _REVIEWS_CACHE.update(at=now, data=prs)
         return _render_reviews(request, prs, cfg)
 
@@ -1358,7 +1358,7 @@ def create_dashboard_router() -> APIRouter:
         try:
             projects = await c.state_history.known_projects([r.work_item_id for r in rows])
         except Exception as exc:  # noqa: BLE001 — never blank a page over a filter
-            _log.warning("workspace scoping unavailable", error=str(exc))
+            _log.warning("workspace scoping unavailable", error=describe_exc(exc))
             return rows
         return [r for r in rows if projects.get(r.work_item_id, "").lower() in allowed]
 
@@ -2474,7 +2474,7 @@ def create_dashboard_router() -> APIRouter:
                 blob, password, set(type(c.config).model_fields)
             )
         except (ValueError, yaml.YAMLError) as exc:
-            _log.warning("full config import failed", error=str(exc))
+            _log.warning("full config import failed", error=describe_exc(exc))
             return _flash("/dashboard/settings", "err_wrong_password")
         if not updates:
             return _flash("/dashboard/settings", "err_nothing")
@@ -2500,7 +2500,7 @@ def create_dashboard_router() -> APIRouter:
         try:
             updates = settings_form.import_settings(raw, set(type(c.config).model_fields))
         except (ValueError, yaml.YAMLError) as exc:
-            _log.warning("config import failed", error=str(exc))
+            _log.warning("config import failed", error=describe_exc(exc))
             return _flash("/dashboard/settings", "err_invalid")
         if not updates:
             return _flash("/dashboard/settings", "err_nothing")

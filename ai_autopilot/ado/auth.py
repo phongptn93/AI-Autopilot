@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, quote, urlparse
 import httpx
 
 from ai_autopilot.config import Settings
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 
 _AUTH_URL = "https://app.vssps.visualstudio.com/oauth2/authorize"
 _TOKEN_URL = "https://app.vssps.visualstudio.com/oauth2/token"
@@ -181,7 +181,7 @@ class AdoAuthService:
             self._log.info("token refreshed successfully")
             return self._parse_token(resp.json())
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("token refresh failed", error=str(exc))
+            self._log.warning("token refresh failed", error=describe_exc(exc))
             return None
 
     @staticmethod

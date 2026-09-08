@@ -35,7 +35,7 @@ from ai_autopilot.execution.sdlc_plan import (
 from ai_autopilot import activity
 from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.test_gate import TestGate
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 
 _PR_URL_RE = re.compile(r"https://[^\s)\"']*?/pullrequest/\d+", re.IGNORECASE)
@@ -202,7 +202,7 @@ class SdlcLoopEngine:
                 item, branch, usage, started, f"Timed out after {mins} minutes"
             )
         except Exception as exc:  # noqa: BLE001 — never leave the item stuck IN_PROGRESS
-            self._log.error("sdlc crashed", id=item.id, error=str(exc))
+            self._log.error("sdlc crashed", id=item.id, error=describe_exc(exc))
             return self._fail(item, branch, usage, started, str(exc))
         finally:
             await self._exec.release_scratch(scratch)
@@ -338,7 +338,7 @@ class SdlcLoopEngine:
         try:
             await self._ado.add_comment(item.id, html)
         except Exception as exc:  # noqa: BLE001 — a comment must never break the loop
-            self._log.warning("sdlc badge comment failed", id=item.id, error=str(exc))
+            self._log.warning("sdlc badge comment failed", id=item.id, error=describe_exc(exc))
 
     async def _escalate(
         self, item, profile, stage_index, iterations, branch, signals,

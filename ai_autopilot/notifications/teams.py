@@ -7,7 +7,7 @@ import asyncio
 import httpx
 
 from ai_autopilot.config import Settings, WebhookTarget
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.notifications.base import (
     NotificationChannel,
     NotificationMessage,
@@ -91,7 +91,7 @@ class TeamsNotifier(NotificationChannel):
         except httpx.HTTPError as exc:
             # Identify the channel by NAME (falling back to host): the full URL carries the
             # token that authorises posting to it, so it must not land in the log.
-            self._log.warning("teams webhook error", channel=target.label, error=str(exc))
+            self._log.warning("teams webhook error", channel=target.label, error=describe_exc(exc))
             return False
         if resp.status_code >= 400:
             self._log.warning(

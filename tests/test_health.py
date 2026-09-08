@@ -34,3 +34,25 @@ async def test_the_ado_check_asks_the_organization_not_the_bare_host():
     blank = await health.check_ado(AdoAuthService(Settings(ado_pat="x")), _Http())
     assert blank.status is health.HealthStatus.DEGRADED
     assert "organization" in blank.description
+
+
+def test_an_exception_with_no_message_still_names_itself():
+    """`str(exc)` is empty for every common httpx transport failure — ReadTimeout,
+    ConnectTimeout, ConnectError, ReadError, RemoteProtocolError are all raised with
+    no message. A log line reading `error=` then told the reader neither what failed
+    nor that it was a timeout at all (seen as `get_work_item_comments error error=`).
+    """
+    import httpx
+
+    from ai_autopilot.logging_config import describe_exc
+
+    for cls in (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError,
+                httpx.ReadError, httpx.RemoteProtocolError):
+        assert describe_exc(cls("")) == cls.__name__
+
+    # A message is kept, and prefixed so the kind is never lost.
+    assert describe_exc(httpx.RemoteProtocolError("peer closed")) == (
+        "RemoteProtocolError: peer closed"
+    )
+    assert describe_exc(ValueError("bad id")) == "ValueError: bad id"
+    assert describe_exc(KeyError()) == "KeyError"

@@ -26,7 +26,7 @@ from ai_autopilot.config import describe_users, is_bot_signed, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import TaskCategory, WorkItemInfo
 from ai_autopilot.notifications.base import NotificationMessage, NotificationType
 from ai_autopilot.services.pr_feedback import (
@@ -393,7 +393,7 @@ class ReviewerTrackerService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._log.error("reviewer tracker cycle failed", error=str(exc))
+                self._log.error("reviewer tracker cycle failed", error=describe_exc(exc))
 
     # ── Bot identity ─────────────────────────────────────────────────────────
 
@@ -440,7 +440,7 @@ class ReviewerTrackerService:
                 except Exception as exc:  # noqa: BLE001 — one bad PR must not stop the scan
                     self._log.error(
                         "reviewer tracking failed for PR",
-                        pr=pr.get("pullRequestId"), error=str(exc),
+                        pr=pr.get("pullRequestId"), error=describe_exc(exc),
                     )
         await self._forget_closed_prs(active_ids)
         # Bound in-memory caches to open PRs (skip when the scan saw no repos, so a
@@ -470,7 +470,7 @@ class ReviewerTrackerService:
                 # and nobody acts on it. Kept for tracing at debug.
                 self._log.debug("forgot closed PR", pr=pr_id)
         except Exception as exc:  # noqa: BLE001
-            self._log.warning("closed-PR cleanup failed", error=str(exc))
+            self._log.warning("closed-PR cleanup failed", error=describe_exc(exc))
 
     async def _record_vote(
         self, pr: dict, pr_id: int, reviewer: dict, vote: int, is_bot: bool
@@ -607,7 +607,7 @@ class ReviewerTrackerService:
         try:
             _, _, done = await self._cmd_repo.review_budget(pr_id)
         except Exception as exc:  # noqa: BLE001 — bookkeeping must not block a review
-            self._log.warning("auto-review budget check failed", pr=pr_id, error=str(exc))
+            self._log.warning("auto-review budget check failed", pr=pr_id, error=describe_exc(exc))
             return False
         return done >= cap
 
@@ -797,7 +797,7 @@ class ReviewerTrackerService:
                 )
                 await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "active")
         except Exception as exc:  # noqa: BLE001 — a background task must not die silently
-            self._log.error("PR command failed", pr=pr_id, error=str(exc))
+            self._log.error("PR command failed", pr=pr_id, error=describe_exc(exc))
 
     async def _bot_comment_ids(self, repo_id: str, pr_id: int) -> set[int]:
         """Ids of every bot-signed comment on the PR right now.
@@ -906,7 +906,7 @@ class ReviewerTrackerService:
                 )
                 await self._repo.set_reviewed_commit(pr_id, reviewer_id, commit or "@none")
         except Exception as exc:  # noqa: BLE001 — a background task must not die silently
-            self._log.error("auto-review failed", pr=pr_id, error=str(exc))
+            self._log.error("auto-review failed", pr=pr_id, error=describe_exc(exc))
         finally:
             self._reviewing.discard(pr_id)
 

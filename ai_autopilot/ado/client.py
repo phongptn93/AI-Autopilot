@@ -19,7 +19,7 @@ import httpx
 
 from ai_autopilot.ado.auth import AdoAuthService
 from ai_autopilot.config import BOT_COMMENT_PREFIX, Settings, is_bot_signed
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import TaskCategory, WorkItemInfo
 
 _API = "api-version=7.1"
@@ -249,7 +249,7 @@ class AdoClient:
                 headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
-            self._log.warning("WIQL request error", error=str(exc))
+            self._log.warning("WIQL request error", error=describe_exc(exc))
             return []
 
         text = resp.text.lstrip()
@@ -315,7 +315,7 @@ class AdoClient:
                 headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
-            self._log.warning("assignee WIQL request error", error=str(exc))
+            self._log.warning("assignee WIQL request error", error=describe_exc(exc))
             return []
         text = resp.text.lstrip()
         if resp.status_code >= 400 or not text.startswith("{"):
@@ -348,7 +348,7 @@ class AdoClient:
                 headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
-            self._log.warning("board WIQL request error", error=str(exc))
+            self._log.warning("board WIQL request error", error=describe_exc(exc))
             return []
         text = resp.text.lstrip()
         if resp.status_code >= 400 or not text.startswith("{"):
@@ -374,7 +374,7 @@ class AdoClient:
                 headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
-            self._log.warning("get_all_active_work_items request error", error=str(exc))
+            self._log.warning("get_all_active_work_items request error", error=describe_exc(exc))
             return []
         text = resp.text.lstrip()
         if resp.status_code >= 400 or not text.startswith("{"):
@@ -482,7 +482,7 @@ class AdoClient:
                 headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
-            self._log.warning("health WIQL request error", project=project, error=str(exc))
+            self._log.warning("health WIQL request error", project=project, error=describe_exc(exc))
             return []
         if resp.status_code >= 400 or not resp.text.lstrip().startswith("{"):
             self._log.warning("health WIQL failed", project=project, status=resp.status_code)
@@ -497,7 +497,7 @@ class AdoClient:
                     headers=await self._auth.get_auth_header(),
                 )
             except httpx.HTTPError as exc:
-                self._log.warning("health fetch error", project=project, error=str(exc))
+                self._log.warning("health fetch error", project=project, error=describe_exc(exc))
                 continue
             if batch.status_code >= 400:
                 self._log.warning(
@@ -548,7 +548,7 @@ class AdoClient:
         try:
             resp = await self._http.get(url, headers=await self._headers())
         except httpx.HTTPError as exc:
-            self._log.warning("get_work_item_comments error", id=work_item_id, error=str(exc))
+            self._log.warning("get_work_item_comments error", id=work_item_id, error=describe_exc(exc))
             return []
         if resp.status_code >= 400:
             self._log.warning(
@@ -817,7 +817,7 @@ class AdoClient:
                 headers=await self._headers(),
             )
         except httpx.HTTPError as exc:
-            self._log.warning("get_children request error", error=str(exc))
+            self._log.warning("get_children request error", error=describe_exc(exc))
             return []
         text = resp.text.lstrip()
         if resp.status_code >= 400 or not text.startswith("{"):
@@ -847,7 +847,7 @@ class AdoClient:
                 headers=await self._auth.get_auth_header(),
             )
         except httpx.HTTPError as exc:
-            self._log.warning("get_work_item_links request error", error=str(exc))
+            self._log.warning("get_work_item_links request error", error=describe_exc(exc))
             return preds, related
         if resp.status_code >= 400:
             self._log.warning("get_work_item_links failed", status=resp.status_code)
@@ -881,7 +881,7 @@ class AdoClient:
         try:
             resp = await self._http.get(url, headers=await self._auth.get_auth_header())
         except httpx.HTTPError as exc:
-            self._log.warning("get_connection_data error", error=str(exc))
+            self._log.warning("get_connection_data error", error=describe_exc(exc))
             return None
         if resp.status_code >= 400 or not resp.text.lstrip().startswith("{"):
             self._log.warning("get_connection_data failed", status=resp.status_code)
@@ -903,7 +903,7 @@ class AdoClient:
         try:
             resp = await self._http.get(url, headers=await self._auth.get_auth_header())
         except httpx.HTTPError as exc:
-            self._log.warning("get_pr_reviewers error", pr=pr_id, error=str(exc))
+            self._log.warning("get_pr_reviewers error", pr=pr_id, error=describe_exc(exc))
             return []
         if resp.status_code >= 400:
             self._log.warning("get_pr_reviewers failed", pr=pr_id, status=resp.status_code)
@@ -928,7 +928,7 @@ class AdoClient:
                 url, json={"vote": 0, "isRequired": required}, headers=await self._headers()
             )
         except httpx.HTTPError as exc:
-            self._log.warning("add_pr_reviewer error", pr=pr_id, error=str(exc))
+            self._log.warning("add_pr_reviewer error", pr=pr_id, error=describe_exc(exc))
             return False
         if resp.status_code >= 400:
             # Most common cause is ADO refusing the PR's own author as a reviewer — a
@@ -954,7 +954,7 @@ class AdoClient:
                 url, json={"vote": vote}, headers=await self._headers()
             )
         except httpx.HTTPError as exc:
-            self._log.warning("cast_pr_vote error", pr=pr_id, error=str(exc))
+            self._log.warning("cast_pr_vote error", pr=pr_id, error=describe_exc(exc))
             return False
         if resp.status_code >= 400:
             self._log.warning(
@@ -991,7 +991,7 @@ class AdoClient:
         try:
             resp = await self._http.post(url, json=body, headers=await self._headers())
         except httpx.HTTPError as exc:
-            self._log.warning("add_pull_request_comment error", pr=pr_id, error=str(exc))
+            self._log.warning("add_pull_request_comment error", pr=pr_id, error=describe_exc(exc))
             return False
         if resp.status_code >= 400:
             self._log.warning("add_pull_request_comment failed", pr=pr_id, status=resp.status_code)
@@ -1010,7 +1010,7 @@ class AdoClient:
         try:
             resp = await self._http.post(url, json=body, headers=await self._headers())
         except httpx.HTTPError as exc:
-            self._log.warning("reply_to_pr_thread error", pr=pr_id, error=str(exc))
+            self._log.warning("reply_to_pr_thread error", pr=pr_id, error=describe_exc(exc))
             return False
         if resp.status_code >= 400:
             self._log.warning(
@@ -1031,7 +1031,7 @@ class AdoClient:
                 url, json={"status": status}, headers=await self._headers()
             )
         except httpx.HTTPError as exc:
-            self._log.warning("set_pr_thread_status error", pr=pr_id, error=str(exc))
+            self._log.warning("set_pr_thread_status error", pr=pr_id, error=describe_exc(exc))
             return False
         if resp.status_code >= 400:
             self._log.warning(
@@ -1088,7 +1088,7 @@ class AdoClient:
                     continue
                 out[type_name] = [s for s in (sresp.json().get("value") or []) if s.get("name")]
         except httpx.HTTPError as exc:
-            self._log.warning("work-item type/state request error", error=str(exc))
+            self._log.warning("work-item type/state request error", error=describe_exc(exc))
             return {}
         self._type_states[project.lower()] = (time.monotonic(), out)
         return out

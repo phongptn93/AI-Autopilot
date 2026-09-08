@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from ai_autopilot.config import Settings
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.notifications.base import NotificationChannel, NotificationMessage
 
 _ZALO_API_URL = "https://openapi.zalo.me/v3.0/oa/message/cs"
@@ -43,4 +43,4 @@ class ZaloNotifier(NotificationChannel):
             else:
                 self._log.debug("zalo notification sent", title=message.title)
         except httpx.HTTPError as exc:
-            self._log.warning("zalo notification failed", error=str(exc))
+            self._log.warning("zalo notification failed", error=describe_exc(exc))

@@ -72,6 +72,19 @@ def configure_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 
+def describe_exc(exc: BaseException) -> str:
+    """An exception as a log value: its type, and its message when it has one.
+
+    ``str(exc)`` alone is empty for every common httpx transport failure —
+    ReadTimeout, ConnectTimeout, ConnectError, ReadError, RemoteProtocolError are
+    all raised with no message — so a line reading ``error=`` told the reader
+    neither what failed nor that it was a timeout at all.
+    """
+    text = str(exc).strip()
+    name = type(exc).__name__
+    return f"{name}: {text}" if text else name
+
+
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     """Return a bound structlog logger."""
     return structlog.stdlib.get_logger(name)

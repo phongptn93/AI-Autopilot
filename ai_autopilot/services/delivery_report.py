@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 from ai_autopilot import delivery
 from ai_autopilot.data.entities import ExecutionStatus, PipelineState
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.services.pr_feedback import parse_work_item_id
 
 _log = get_logger("services.delivery_report")
@@ -63,7 +63,7 @@ async def collect_prs(container, project_of: dict[int, str]) -> list[delivery.Pr
                     if seen is None or row.last_vote_at > seen:
                         approved_at[row.pr_id] = row.last_vote_at
         except Exception as exc:  # noqa: BLE001
-            _log.warning("delivery: reviewer state load failed", error=str(exc))
+            _log.warning("delivery: reviewer state load failed", error=describe_exc(exc))
 
     org = (config.ado_organization or "").rstrip("/")
     out: list[delivery.PrView] = []
@@ -144,7 +144,7 @@ async def gather(
         try:
             prs = await collect_prs(container, project_of)
         except Exception as exc:  # noqa: BLE001
-            _log.warning("delivery: PR collection failed", error=str(exc))
+            _log.warning("delivery: PR collection failed", error=describe_exc(exc))
     if scope is not None:
         # A PR with no linked work item cannot be attributed to a project; keep it only
         # on the unfiltered view rather than assigning it to one arbitrarily.
@@ -159,7 +159,7 @@ async def gather(
             changes = await history.changes_since(now - timedelta(days=days * 2))
             history_since = await history.first_seen()
         except Exception as exc:  # noqa: BLE001
-            _log.warning("delivery: state history load failed", error=str(exc))
+            _log.warning("delivery: state history load failed", error=describe_exc(exc))
     if scope is not None:
         changes = [c for c in changes if (c.project or "").lower() in scope]
 
@@ -225,6 +225,6 @@ async def delivered_since(container, since: datetime, *, now: datetime | None = 
     try:
         changes = await history.changes_since(since)
     except Exception as exc:  # noqa: BLE001
-        _log.warning("delivery: delivered_since failed", error=str(exc))
+        _log.warning("delivery: delivered_since failed", error=describe_exc(exc))
         return 0
     return len(delivery.delivered_between(changes, since, now or datetime.now(UTC)))

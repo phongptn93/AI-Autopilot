@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from ai_autopilot.execution.claude_client import run_claude
-from ai_autopilot.logging_config import get_logger
+from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.routing.conflict_ai import build_judge_prompt, parse_verdict, suspicious_pairs
 from ai_autopilot.routing.planning_groups import group_by_links
 from ai_autopilot.routing.scheduler import plan_schedule
@@ -30,7 +30,7 @@ async def analyze(container, ids: list[int]) -> dict:
     try:
         preds, related = await c.ado.get_work_item_links(ids)
     except Exception as exc:  # noqa: BLE001 — analysis must degrade, not crash
-        _log.warning("planning analyze: link fetch failed", error=str(exc))
+        _log.warning("planning analyze: link fetch failed", error=describe_exc(exc))
         preds, related = {}, {}
 
     groups = group_by_links(items, preds, related)
@@ -61,7 +61,7 @@ async def analyze(container, ids: list[int]) -> dict:
                 )
                 verdict = parse_verdict(run.text)
             except Exception as exc:  # noqa: BLE001 — one bad judge must not fail Analyze
-                _log.warning("planning analyze: judge failed", a=a_id, b=b_id, error=str(exc))
+                _log.warning("planning analyze: judge failed", a=a_id, b=b_id, error=describe_exc(exc))
                 verdict = None
             if verdict and verdict["score"] >= cfg.planning_ai_min_score:
                 ai.append({"a": a_id, "b": b_id, "shared": shared, **verdict})
@@ -74,7 +74,7 @@ async def analyze(container, ids: list[int]) -> dict:
                     )
                 except Exception as exc:  # noqa: BLE001 — persistence must not fail Analyze
                     _log.warning("planning analyze: conflict persist failed",
-                                 a=a_id, b=b_id, error=str(exc))
+                                 a=a_id, b=b_id, error=describe_exc(exc))
 
     return {
         "items": items,

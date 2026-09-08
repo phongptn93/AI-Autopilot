@@ -175,8 +175,8 @@
   .lv-parks > summary { list-style:none; cursor:pointer; display:flex; flex-wrap:wrap;
     align-items:center; gap:5px; padding:3px 0 4px; }
   .lv-parks > summary::-webkit-details-marker { display:none; }
-  .lv-parks > summary::before { content:"b8"; color:var(--text-dim); font-size:9px; width:9px; }
-  .lv-parks[open] > summary::before { content:"be"; }
+  .lv-parks > summary::before { content:"▸"; color:var(--text-dim); font-size:9px; width:9px; }
+  .lv-parks[open] > summary::before { content:"▾"; }
   .lv-parks > summary:hover .lv-parks-k { color:var(--accent-hover); }
   .lv-parks-k { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
     color:var(--text-dim); }

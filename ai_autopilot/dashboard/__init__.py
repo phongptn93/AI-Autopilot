@@ -1564,6 +1564,28 @@ def create_dashboard_router() -> APIRouter:
                             await c.ado.remove_tag(item_id, tag)
                 break
 
+        # Pressing Run is a person saying "this is not moving, go" — so it has to
+        # release what is holding the item. A run killed with its process leaves the
+        # live tag behind and never writes a result, and the poller skips that tag:
+        # the card sits there, Run reports started=1, and nothing happens. Only the
+        # poller knows whether a session is REALLY running, so ask it — clearing the
+        # tag under a live console would dispatch a second one onto the same branch.
+        live_tag = (c.config.live_tag or "").strip()
+        if live_tag and item is not None:
+            poller = getattr(request.app.state, "poller", None)
+            running = poller.has_live_session(item_id) if poller is not None else True
+            held_live = next(
+                (t for t in item.tags if t.strip().lower() == live_tag.lower()), None
+            )
+            if held_live and not running:
+                with contextlib.suppress(Exception):
+                    await c.ado.remove_tag(item_id, held_live)
+                _log.info("board run released a stranded live tag",
+                          id=item_id, tag=held_live)
+            elif held_live:
+                _log.info("board run: a session is still live — nothing released",
+                          id=item_id, tag=held_live)
+
         profile = (view.profile or "").strip()
         if profile and c.config.sdlc_loop_enabled:
             prefix = (c.config.sdlc_profile_tag_prefix or "sdlc:").strip()

@@ -938,3 +938,45 @@ def test_review_belongs_to_dev_once_qc_has_a_queue_of_its_own():
     by_key = {x["key"]: view_of(x, cols) for x in default_lenses(shapes["review only"])}
     assert my_turn_columns(by_key["qc"]) == {"Ready for review"}
     assert "Ready for review" not in my_turn_columns(by_key["dev"])
+
+
+def test_run_releases_a_live_tag_no_session_is_behind(tmp_path):
+    """Pressing Run is a person saying "this is not moving, go", so it must release
+    what is holding the item.
+
+    A run killed with its process leaves the live tag behind and never writes a
+    result; the poller skips that tag, so the card sits there while Run reports
+    started=1 and nothing happens (#8626). But only the poller knows whether a
+    session is REALLY running — clearing the tag under a live console would dispatch
+    a second one onto the same branch.
+    """
+    from types import SimpleNamespace
+
+    removed: list[tuple[int, str]] = []
+
+    class _Ado:
+        async def get_all_tagged_work_items(self):
+            return []
+        async def get_work_item(self, iid):
+            return SimpleNamespace(id=iid, title="t", work_item_type="Bug", state="Active",
+                                   tags=["vm-autopilot", "autopilot-live"])
+        async def remove_tag(self, iid, tag):
+            removed.append((iid, tag))
+        async def add_tag(self, iid, tag):
+            pass
+        async def update_state(self, iid, state):
+            return True
+
+    with _client(tmp_path, live_tag="autopilot-live", trigger_tag="vm-autopilot") as client:
+        client.app.state.container.ado = _Ado()
+
+        # No session tracked → the tag is stranded, and Run clears it.
+        client.app.state.poller = SimpleNamespace(has_live_session=lambda _i: False)
+        client.post("/dashboard/board/run", data={"item_id": "8626", "view": "ba"})
+        assert removed == [(8626, "autopilot-live")]
+
+        # A session IS running → leave it alone, or a second console joins the branch.
+        removed.clear()
+        client.app.state.poller = SimpleNamespace(has_live_session=lambda _i: True)
+        client.post("/dashboard/board/run", data={"item_id": "8626", "view": "ba"})
+        assert removed == []

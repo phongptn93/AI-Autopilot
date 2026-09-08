@@ -605,6 +605,15 @@ class AdoPollerService:
             self._log.info("restart requested", id=item.id, state=item.state)
             asyncio.create_task(self._process(item))
 
+    def has_live_session(self, item_id: int) -> bool:
+        """Is THIS process actually running an interactive session for the item?
+
+        The live tag alone cannot answer it: a run killed with its process leaves the
+        tag behind forever. Only the in-memory table knows, which is why the board's
+        Run button has to ask rather than read the tag.
+        """
+        return item_id in self._live
+
     async def _reconcile_stage_entries(self) -> None:
         """Start items whose stage was released by hand (the board's ▶ Run).
 

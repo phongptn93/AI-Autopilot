@@ -164,6 +164,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 started.append(svc)
                 if isinstance(svc, PrMonitorService):
                     app.state.pr_monitor = svc  # webhook fast-path targets it directly
+                if isinstance(svc, AdoPollerService):
+                    app.state.poller = svc      # the board asks it about live sessions
 
             teams_bot = build_teams_agent(config, container, reviewer_tracker)
             if teams_bot is not None:

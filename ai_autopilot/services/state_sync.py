@@ -395,21 +395,30 @@ class StateSyncService:
                        + ", ".join(cfg.bot_branch_prefixes))
             return
         work_item_id = await self._work_item_for(repo_id, pr_id, source)
+        # ADO's link beats the branch name, and when the two disagree the log has to
+        # SAY so: a line naming branch "bugfix/8951-…" and then work item #8955 reads
+        # like a bug in the resolver, when in fact it is a PR linked to a different
+        # item than its branch was named for — which is itself worth someone's eye.
+        named = parse_work_item_id(source)
+        via = ""
+        if work_item_id is not None and named is not None and named != work_item_id:
+            via = f" (linked in ADO; the branch name says #{named})"
         if work_item_id is None:
             self._skip(pr_id, source, "no work item linked to the PR, and none in the "
                        "branch name")
             return
         item = await c.ado.get_work_item(work_item_id)
         if item is None:
-            self._skip(pr_id, source, f"work item #{work_item_id} could not be read")
+            self._skip(pr_id, source, f"work item #{work_item_id} could not be read{via}")
             return
         if not self._has_trigger_tag(item):
             self._skip(pr_id, source, f"#{work_item_id} carries no trigger tag ("
-                       + ", ".join(cfg.effective_trigger_tags) + ")")
+                       + ", ".join(cfg.effective_trigger_tags) + ")" + via)
             return
         if not self._assignee_ok(item):
             self._skip(pr_id, source,
-                       f"#{work_item_id} is not assigned to {cfg.auto_transition_assignee}")
+                       f"#{work_item_id} is not assigned to "
+                       f"{cfg.auto_transition_assignee}{via}")
             return
         # Never pull an item BACKWARD: if it's already at/after the merge state
         # (merged / deployed / done), just remember the PR and leave it alone. This

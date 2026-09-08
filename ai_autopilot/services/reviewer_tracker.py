@@ -466,7 +466,9 @@ class ReviewerTrackerService:
                     # and a recycled PR id would inherit a spent allowance.
                     with contextlib.suppress(Exception):
                         await self._cmd_repo.forget_pr_budget(pr_id)
-                self._log.info("forgot closed PR", pr=pr_id)
+                # Bookkeeping, not news: every PR that closes produces one of these,
+                # and nobody acts on it. Kept for tracing at debug.
+                self._log.debug("forgot closed PR", pr=pr_id)
         except Exception as exc:  # noqa: BLE001
             self._log.warning("closed-PR cleanup failed", error=str(exc))
 

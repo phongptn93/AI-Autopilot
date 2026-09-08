@@ -534,3 +534,43 @@ async def test_the_baseline_is_still_taken_once_on_a_fresh_install():
     await svc._restore()
     await svc._scan()
     assert c.ado.states == []               # an old green build ships nothing
+
+
+async def test_a_skip_says_when_the_link_and_the_branch_name_disagree():
+    """ADO's link beats the branch name, and the log has to say when they differ.
+
+    A line naming branch "bugfix/8951-…" and then work item #8955 reads like a bug in
+    the resolver. It is not — the PR is linked to a different item than its branch was
+    named for, which is itself worth someone's eye.
+    """
+    from types import SimpleNamespace
+
+    from ai_autopilot.config import Settings
+    from ai_autopilot.services.state_sync import StateSyncService
+
+    said: list = []
+    cfg = Settings(trigger_tag="vm-autopilot", bot_branch_prefixes=["bugfix/"],
+                   auto_transition_enabled=True)
+
+    class _Ado:
+        async def get_pull_request_work_items(self, repo_id, pr_id):
+            return [8955]                       # the LINK says 8955…
+        async def get_work_item(self, wid):
+            return SimpleNamespace(id=wid, title="t", work_item_type="Bug",
+                                   state="Active", tags=[])   # …and it is untagged
+
+    svc = StateSyncService(SimpleNamespace(config=cfg, ado=_Ado()))
+    svc._log = SimpleNamespace(info=lambda msg, **kw: said.append(kw),
+                               debug=lambda *a, **k: None,
+                               warning=lambda *a, **k: None,
+                               error=lambda *a, **k: None)
+    # …while the BRANCH is named for 8951.
+    await svc._handle_merged_pr("repo", {
+        "pullRequestId": 3864,
+        "sourceRefName": "refs/heads/bugfix/8951-sync-product-name-finished-goods",
+    })
+    svc._flush_skipped()
+    assert len(said) == 1
+    reason = said[0]["reasons"][0]
+    assert "#8955" in reason and "carries no trigger tag" in reason
+    assert "branch name says #8951" in reason

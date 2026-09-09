@@ -88,6 +88,12 @@ FIELDS: tuple[Field, ...] = (
           "Tag an item with this to WIPE its SDLC progress and reprocess from scratch, "
           "from any state, using your latest comments. Reopen resumes mid-loop; restart "
           "redoes from stage 0. Blank = off."),
+    Field("stage_entry_tag", "▶ Run-now tag (shared fallback)", "text", "Tags & Trigger",
+          "Tag an item with this to start the role its CURRENT state names, right where "
+          "it stands — the way to run a role whose door is deliberately not in the poll "
+          "query. Consumed on pickup. Every role on the Roles page falls back to this "
+          "one unless it names its own; that page could show the fallback but gave you "
+          "nowhere to change it. Blank = no shared tag (per-role tags still work)."),
     Field("poll_interval_seconds", "Poll interval (seconds)", "int", "Tags & Trigger"),
     # ── Outcomes → tag + state ──
     # The policy table: for each outcome, the ADO tag to add and the ADO state to
@@ -889,6 +895,55 @@ def save_to_yaml(path: Path, updates: Mapping[str, Any]) -> None:
     path.write_text(
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
+
+
+def run_now_tag_conflict(stage_entry_tag: str, config: Any) -> str:
+    """Why this run-now tag must not be saved, or "" when it is fine.
+
+    One collision is destructive rather than merely confusing. The run-now sweep reads
+    every item carrying a TRIGGER tag and REMOVES the tag it matched on (one-shot: it
+    is consumed on pickup). Set the run-now tag to the trigger tag and the first sweep
+    strips ownership off every item the autopilot has — they vanish from every query it
+    makes, with nothing said. That is unrecoverable by waiting; somebody has to re-tag
+    the board by hand.
+
+    The outcome tags are a softer clash: ``apply_outcome`` clears the other outcome
+    tags whenever it applies one, so a run-now tag living in that set is wiped at
+    random moments and the "run now" never happens.
+    """
+    tag = (stage_entry_tag or "").strip().lower()
+    if not tag:
+        return ""
+    triggers = {t.strip().lower() for t in getattr(config, "effective_trigger_tags", []) or []}
+    # The assignee-trigger tag is NOT in effective_trigger_tags, but it IS in the WIQL
+    # the sweep reads (``_candidate_clause`` ORs it in), so an item claimed by it is
+    # swept and stripped exactly like one carrying a plain trigger tag. Leaving it out
+    # here would have guarded the front door and left the side one open.
+    atag = str(getattr(config, "assignee_trigger_tag", "") or "").strip().lower()
+    if atag:
+        triggers.add(atag)
+    if tag in triggers:
+        return (
+            "it is this machine's TRIGGER tag. The run-now sweep removes the tag it "
+            "matched on, so the first pass would strip ownership from every work item "
+            "the autopilot has and they would disappear from its queries."
+        )
+    outcomes = {
+        str(t).strip().lower()
+        for t in (
+            getattr(config, "processed_tag", ""), getattr(config, "review_tag", ""),
+            getattr(config, "escalation_tag", ""), getattr(config, "failed_tag", ""),
+            getattr(config, "live_tag", ""), getattr(config, "restart_tag", ""),
+        )
+        if str(t).strip()
+    }
+    if tag in outcomes:
+        return (
+            "it is already one of the outcome tags. Applying any outcome clears the "
+            "others, so this tag would be wiped at moments unrelated to running "
+            "anything, and the run it was meant to trigger never happens."
+        )
+    return ""
 
 
 def apply_to_config(config: Any, updates: Mapping[str, Any]) -> None:

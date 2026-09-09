@@ -185,3 +185,119 @@ def test_sdlc_roles_wins_over_the_deprecated_keys():
     roles = sdlc_plan.effective_roles(cfg)
     assert set(roles) == {"dev"}
     assert "Ready for Testing" not in cfg.effective_trigger_states
+
+
+def test_a_non_auto_door_that_is_a_trigger_state_is_warned_about_on_its_own_row(tmp_path):
+    """The trap, where it is set: a role's autonomy wins over Trigger states, so leaving
+    the box off REMOVES that state from the poll query while Settings still lists it.
+    The operator who unticks it does not expect the autopilot to stop taking that work,
+    so the row has to say it."""
+    with _client(
+        tmp_path,
+        trigger_states=["New", "Active"],
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Active", auto=False)},
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        assert "removes it from the poll query" in page
+        assert "Trigger state" in page
+
+
+def test_an_auto_door_on_a_trigger_state_is_stated_without_alarm(tmp_path):
+    """`auto` ADDS the door, so the pages agree — say so, but do not cry wolf."""
+    with _client(
+        tmp_path,
+        trigger_states=["New", "Active"],
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Active", auto=True)},
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        assert "this role owns it either way" in page
+        assert "removes it from the poll query" not in page
+
+
+def test_a_door_of_its_own_gets_no_trigger_warning(tmp_path):
+    """Wiring a role to a state nobody triggers on removes nothing."""
+    with _client(
+        tmp_path,
+        trigger_states=["New"],
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        # Neither half of the per-row notice fires. Asserted on the exact wording, not
+        # on "Trigger state": the page explains that phrase in its static help text.
+        assert "removes it from the poll query" not in page
+        assert "this role owns it either way" not in page
+
+
+def test_the_when_done_placeholder_names_the_state_a_blank_field_really_sets(tmp_path):
+    """Every other placeholder on this page states its real fallback; this one claimed
+    a blank field means "stop and wait for a person". It does not — handoff_state falls
+    back to resolved_state, so the item is moved to Resolved. The hint below the field
+    already knew that; the placeholder people read while typing did not."""
+    with _client(
+        tmp_path, resolved_state="Resolved",
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        assert "falls back to Resolved" in page
+        assert "blank = stop and wait for a person" not in page
+
+
+def test_it_says_stop_only_when_there_really_is_no_fallback(tmp_path):
+    with _client(
+        tmp_path, resolved_state="",
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
+    ) as client:
+        assert "blank = stop and wait for a person" in client.get("/dashboard/roles").text
+
+
+def test_the_page_says_where_the_shared_run_now_tag_is_changed(tmp_path):
+    """The page named the fallback in a placeholder and owned no way to change it —
+    stage_entry_tag had no field on any screen, so the only way to edit it was by hand
+    in YAML. It has a field now; this page points at it."""
+    with _client(
+        tmp_path, stage_entry_tag="autopilot-run",
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        assert "falls back to autopilot-run" in page
+        assert "/dashboard/settings" in page and "shared" in page
+
+
+def test_it_does_not_promise_a_shared_fallback_that_is_not_set(tmp_path):
+    with _client(
+        tmp_path, stage_entry_tag="",
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        assert "No shared fallback is set" in page
+        assert "falls back to nothing" in page
+
+
+def test_a_role_run_now_tag_equal_to_the_trigger_tag_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    """The same destruction as the shared tag, reached through a different page: the
+    sweep consumes the tag it matched on, so this would strip the trigger tag off every
+    item the autopilot owns. Settings refuses it; this door has to as well."""
+    with _client(tmp_path, trigger_tag="vm-claude-autopilot") as client:
+        resp = client.post(
+            "/dashboard/roles",
+            data={"role_dev_waits": "Ready for Dev", "role_dev_stages": "implement",
+                  "role_dev_tag": "vm-claude-autopilot"},
+            follow_redirects=False,
+        )
+        assert resp.cookies["autopilot_flash"] == "err_role_tag_clash"
+        assert not client.app.state.container.config.sdlc_roles   # nothing applied
+
+
+def test_a_role_run_now_tag_of_its_own_saves(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    with _client(tmp_path, trigger_tag="vm-claude-autopilot") as client:
+        resp = client.post(
+            "/dashboard/roles",
+            data={"role_dev_waits": "Ready for Dev", "role_dev_stages": "implement",
+                  "role_dev_tag": "vm-claude-autopilot-run-dev"},
+            follow_redirects=False,
+        )
+        assert resp.cookies["autopilot_flash"] == "roles_saved"
+        saved = client.app.state.container.config.sdlc_roles["dev"]
+        assert saved.entry_tag == "vm-claude-autopilot-run-dev"

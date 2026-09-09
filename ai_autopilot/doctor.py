@@ -125,6 +125,100 @@ def check_trigger_state_roles(config: Settings) -> list[Finding]:
     ]
 
 
+def check_role_doors_vs_triggers(config: Settings) -> list[Finding]:
+    """A role's door silently rewrites the Trigger states list on another page.
+
+    ``effective_trigger_states`` lets a wired role state its own autonomy and that
+    statement wins: ``auto`` ADDS its door to the poll query, and a role explicitly NOT
+    auto REMOVES it. That is the point of putting the dial next to the state it governs
+    — but it is invisible from the Settings page, which goes on listing a state the
+    poller no longer touches. Someone untickng a checkbox on the Roles page does not
+    expect the autopilot to stop picking up work.
+
+    Offline: both lists are config, so this is answerable without ADO.
+    """
+    from ai_autopilot.execution import sdlc_plan
+
+    triggers = {s.strip().lower(): s.strip() for s in config.trigger_states if s.strip()}
+    if not triggers:
+        return []
+    removed, added = [], []
+    for name, role in sorted(sdlc_plan.effective_roles(config).items()):
+        door = (getattr(role, "waits_in", "") or "").strip()
+        if not door:
+            continue
+        if door.lower() in triggers:
+            bucket = added if getattr(role, "auto", False) else removed
+            bucket.append((name, triggers[door.lower()]))
+    out: list[Finding] = []
+    for name, state in removed:
+        out.append(Finding(
+            WARN, f"'{state}' is a Trigger state, but role '{name}' holds it and is not auto",
+            "A role that is not auto REMOVES its door from the poll query, so the "
+            f"autopilot no longer picks up items sitting in '{state}' — even though "
+            "Settings still lists it as a trigger state. Only ▶ Run or the run-now "
+            "tag starts them.",
+            f"Tick 'starts itself' on the '{name}' row at /dashboard/roles, or drop "
+            f"'{state}' from Trigger states so the two pages agree.",
+        ))
+    if not out and added:
+        return [Finding(OK, "Role doors and trigger states agree")]
+    return out
+
+
+def check_run_now_tags(config: Settings) -> list[Finding]:
+    """Run-now tags that mean something else already — including one that destroys work.
+
+    The dashboard refuses these on save, but config.yaml is hand-edited and imported,
+    and the damaging case leaves no trace: the sweep consumes the tag it matched on, so
+    a run-now tag equal to the trigger tag strips ownership from every item on the first
+    pass. They vanish from every query the autopilot makes and only a human re-tagging
+    the board brings them back.
+
+    Also names two roles sharing a run-now tag — the tag maps to ONE role, so the loser
+    is simply never reachable by tag.
+    """
+    from ai_autopilot.dashboard.settings_form import run_now_tag_conflict
+    from ai_autopilot.execution import sdlc_plan
+
+    out: list[Finding] = []
+    shared = (config.stage_entry_tag or "").strip()
+    why = run_now_tag_conflict(shared, config)
+    if why:
+        out.append(Finding(
+            ERROR, f"Run-now tag '{shared}' already means something else",
+            f"Cannot be used because {why}",
+            "Give it a name of its own — naming it after the trigger tag reads well "
+            "and keeps the family together, e.g. '<trigger-tag>-run'.",
+        ))
+
+    seen: dict[str, str] = {}
+    for name, role in sorted(sdlc_plan.effective_roles(config).items()):
+        own = (getattr(role, "entry_tag", "") or "").strip()
+        if not own:
+            continue
+        why = run_now_tag_conflict(own, config)
+        if why:
+            out.append(Finding(
+                ERROR, f"Role '{name}' has a run-now tag that already means something else",
+                f"'{own}' cannot be used because {why}",
+                f"Rename it on the '{name}' row at /dashboard/roles.",
+            ))
+        low = own.lower()
+        if low in seen:
+            out.append(Finding(
+                WARN, f"Roles '{seen[low]}' and '{name}' share the run-now tag '{own}'",
+                "A run-now tag maps to ONE role, so only the first is ever reachable "
+                "by it — the other cannot be started by tag at all.",
+                "Give each role its own tag at /dashboard/roles.",
+            ))
+        seen[low] = name
+
+    if out:
+        return out
+    return [Finding(OK, "Run-now tags are unambiguous")] if shared or seen else []
+
+
 def check_deploy_stage(config: Settings) -> list[Finding]:
     """The 🚀 Deployed stage only fires under conditions nothing on the page states.
 
@@ -957,7 +1051,8 @@ def check_board_processes(config: Settings) -> list[Finding]:
 
 CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
-    check_deploy_stage, check_workspace, check_workspaces,
+    check_role_doors_vs_triggers, check_run_now_tags, check_deploy_stage,
+    check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,
     check_teams_bot,

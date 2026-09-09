@@ -1106,3 +1106,42 @@ async def test_the_live_session_comment_says_which_role_it_is_running():
     c.ado.comments.clear()
     await p._dispatch_interactive(item)
     assert "Running" not in " ".join(str(x) for x in c.ado.comments)
+
+
+def test_the_poll_query_says_where_it_differs_from_the_trigger_states():
+    """Someone reading the log to find out why an item in a trigger state is never
+    picked up used to find nothing: the role wiring rewrites the query on a different
+    page from the one that lists the states, and the amendment was never stated."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.services.poller import AdoPollerService
+
+    said: list[tuple[str, dict]] = []
+    cfg = Settings(
+        trigger_states=["New", "Active"],
+        sdlc_roles={
+            "dev": SdlcRole(stages=["implement"], waits_in="Active", auto=False),
+            "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing", auto=True),
+        },
+    )
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._log = type("L", (), {"info": lambda _s, e, **kw: said.append((e, kw))})()
+    svc._log_trigger_amendments()
+
+    assert len(said) == 1
+    kw = said[0][1]
+    assert kw["dropped"] == ["Active"]              # not auto → removed from the query
+    assert kw["added"] == ["Ready for Testing"]     # auto → added
+    assert "New" in kw["polled"]
+
+
+def test_nothing_is_said_when_the_wiring_changes_no_state():
+    """Silent in the steady state — an untouched install must not gain a line."""
+    from ai_autopilot.services.poller import AdoPollerService
+
+    said: list = []
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = Settings(trigger_states=["New", "Active"])
+    svc._log = type("L", (), {"info": lambda _s, e, **kw: said.append(e)})()
+    svc._log_trigger_amendments()
+    assert said == []

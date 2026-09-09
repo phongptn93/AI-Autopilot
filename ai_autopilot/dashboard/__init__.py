@@ -134,6 +134,17 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "err_nothing": ("red", "⚠️ Tệp không chứa setting nào áp dụng được."),
     "err_password": ("red", "⚠️ Cần mật khẩu của tệp."),
     "err_wrong_password": ("red", "⚠️ Sai mật khẩu, hoặc tệp bị hỏng."),
+    "err_role_tag_clash": (
+        "red",
+        "⛔ Chưa lưu — một <b>Run-now tag</b> của vai trò trùng tag đã có nghĩa khác "
+        "(xem log). Đặt tên riêng cho nó rồi lưu lại.",
+    ),
+    "err_run_tag_clash": (
+        "red",
+        "⛔ Chưa lưu — <b>Run-now tag</b> trùng một tag đang có nghĩa khác. Xem chi "
+        "tiết trong log; đặt một tên riêng (ví dụ <code>&lt;trigger-tag&gt;-run</code>) "
+        "rồi lưu lại.",
+    ),
     "err_no_export_password": (
         "red",
         "⚠️ Chưa đặt <b>Full-export password</b> — file sẽ không được bảo vệ. Đặt "
@@ -1100,6 +1111,13 @@ def create_dashboard_router() -> APIRouter:
         roles = sdlc_plan.effective_roles(cfg)
         catalog = sdlc_plan.stage_catalog(cfg)
         doors = [(r.waits_in or "").strip().lower() for r in roles.values()]
+        # A door that is ALSO a trigger state is the one place this page silently
+        # rewrites a setting made on another page: the role's own autonomy wins, so
+        # leaving `auto` off REMOVES that state from the poll query. Deliberate — the
+        # dial belongs next to the state it governs — but invisible until now, and an
+        # operator who unticks a box does not expect the autopilot to stop picking up
+        # a state that Settings still lists.
+        triggers = {(t or "").strip().lower() for t in cfg.trigger_states if (t or "").strip()}
         rows = []
         for name, role in sorted(roles.items()):
             door = (role.waits_in or "").strip()
@@ -1122,6 +1140,9 @@ def create_dashboard_router() -> APIRouter:
                 # Two roles behind one door: the state cannot say which is due, so the
                 # runtime refuses it. Shown on both rows rather than only in a log.
                 "clash": bool(door) and doors.count(door.lower()) > 1,
+                # "This door is also a trigger state" — with `auto` off the state is
+                # dropped from the poll query, with it on the state is added.
+                "is_trigger": bool(door) and door.lower() in triggers,
                 # Where the item goes next — blank is a real answer (it stops).
                 "lands_on": next(
                     (n for n, r in sorted(roles.items())
@@ -1194,6 +1215,19 @@ def create_dashboard_router() -> APIRouter:
                 "done_tag": str(form.get(f"role_{name}_done_tag", "")).strip(),
                 "auto": bool(form.get(f"role_{name}_auto")),
             }
+        # Same destructive collision as the shared tag, reachable through a different
+        # page: a role's run-now tag equal to a trigger tag makes the sweep strip
+        # ownership off every item. Settings refuses it; this door has to as well.
+        for name, row in sorted(roles.items()):
+            why = settings_form.run_now_tag_conflict(row["entry_tag"], c.config)
+            if why:
+                _log.error(
+                    "roles rejected: run-now tag collides", role=name,
+                    tag=row["entry_tag"], reason=why,
+                    hint="name it after the trigger tag, e.g. '<trigger-tag>-run-" + name + "'",
+                )
+                return _flash("/dashboard/roles", "err_role_tag_clash")
+
         settings_form.save_to_yaml(config_file_path(), {"sdlc_roles": roles})
         # YAML takes plain dicts; the live config must get validated objects, or the
         # very next poll reads a raw dict where a model is expected.
@@ -2293,6 +2327,20 @@ def create_dashboard_router() -> APIRouter:
         raw_password = updates.pop("dashboard_auth_password", None)
         if raw_password:
             updates["dashboard_auth_password_hash"] = security.hash_password(raw_password)
+
+        # Refuse the whole save rather than dropping the one bad field: a partial save
+        # is how you end up believing a setting took. The destructive case earns it —
+        # a run-now tag equal to the trigger tag strips ownership off the entire board
+        # on the next sweep, and no amount of waiting undoes that.
+        if "stage_entry_tag" in updates:
+            why = settings_form.run_now_tag_conflict(updates["stage_entry_tag"], c.config)
+            if why:
+                _log.error(
+                    "settings rejected: run-now tag collides", reason=why,
+                    tag=updates["stage_entry_tag"],
+                    hint="name it after the trigger tag, e.g. '<trigger-tag>-run'",
+                )
+                return _flash("/dashboard/settings", "err_run_tag_clash")
 
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)

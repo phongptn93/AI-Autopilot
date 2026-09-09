@@ -1191,3 +1191,63 @@ def test_settings_page_shows_the_time_windows_and_saves_them(tmp_path, monkeypat
     assert QuietHours(Settings(**{
         k: v for k, v in saved.items() if k in Settings.model_fields
     })).enabled is True
+
+
+def test_the_shared_run_now_tag_can_be_set_from_settings(tmp_path, monkeypatch):
+    """It had no field on any screen: the Roles page showed it as every role's fallback
+    while the only way to change it was hand-editing YAML."""
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        assert "stage_entry_tag" in client.get("/dashboard/settings").text
+        resp = client.post(
+            "/dashboard/settings",
+            data={"stage_entry_tag": "run-it-now"}, follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert client.app.state.container.config.stage_entry_tag == "run-it-now"
+    assert yaml.safe_load(cfg_file.read_text())["stage_entry_tag"] == "run-it-now"
+
+
+def test_a_run_now_tag_equal_to_the_trigger_tag_is_refused_at_save(tmp_path, monkeypatch):
+    """Refused, not silently dropped: the sweep consumes the tag it matched on, so this
+    setting would strip the trigger tag off every work item the autopilot owns."""
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        trigger_tag="vm-claude-autopilot",
+    )
+    with TestClient(create_app(settings)) as client:
+        resp = client.post(
+            "/dashboard/settings",
+            data={"trigger_tag": "vm-claude-autopilot",
+                  "stage_entry_tag": "vm-claude-autopilot"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert resp.cookies["autopilot_flash"] == "err_run_tag_clash"
+        # Nothing applied, and nothing written — a partial save is how you end up
+        # believing a setting took.
+        assert client.app.state.container.config.stage_entry_tag != "vm-claude-autopilot"
+    assert not cfg_file.exists() or "stage_entry_tag" not in (
+        yaml.safe_load(cfg_file.read_text()) or {}
+    )
+
+
+def test_the_suffixed_run_now_tag_saves_fine(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        trigger_tag="vm-claude-autopilot",
+    )
+    with TestClient(create_app(settings)) as client:
+        resp = client.post(
+            "/dashboard/settings",
+            data={"trigger_tag": "vm-claude-autopilot",
+                  "stage_entry_tag": "vm-claude-autopilot-run"},
+            follow_redirects=False,
+        )
+        assert resp.cookies.get("autopilot_flash") == "saved"
+        assert client.app.state.container.config.stage_entry_tag == "vm-claude-autopilot-run"

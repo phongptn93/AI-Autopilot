@@ -175,14 +175,14 @@
         <div class="rl-f">
           <label>Run-now tag</label>
           <input type="text" class="rl-in mono" name="role_{{ r.name }}_tag" value="{{ r.entry_tag }}"
-                 placeholder="falls back to {{ entry_tag }}">
-          <span class="rl-hint">Starts it where it stands, whatever the state. Removed on pickup.</span>
+                 placeholder="falls back to {{ entry_tag or 'nothing' }}">
+<span class="rl-hint">Starts it where it stands, whatever the state. Removed on pickup.{% if entry_tag %} Blank uses the shared <b>{{ entry_tag }}</b> (<a href="/dashboard/settings#Tags%20%26%20Trigger">change it</a>).{% else %} No shared fallback is set — blank means this role has no run-now tag.{% endif %}</span>
         </div>
 
         <div class="rl-f">
           <label>When done →</label>
           <input type="text" class="rl-in" name="role_{{ r.name }}_done" value="{{ r.done }}"
-                 list="rl-states" placeholder="blank = stop and wait for a person">
+                 list="rl-states" placeholder="{% if resolved_state %}falls back to {{ resolved_state }}{% else %}blank = stop and wait for a person{% endif %}">
           {% if r.lands_on %}
           <span class="rl-hint">Hands to <b>{{ r.lands_on }}</b>.</span>
           {% elif r.dead_end and r.done %}
@@ -211,6 +211,17 @@
             {% if r.auto %}Adds <b>{{ r.waits_in or 'its door' }}</b> to the poll query.
             {% else %}Waits for ▶ Run or the run-now tag.{% endif %}
           </span>
+          {% if r.is_trigger %}
+          <span class="rl-hint {{ '' if r.auto else 'bad' }}">
+            {% if r.auto %}
+              <b>{{ r.waits_in }}</b> is also a Trigger state — this role owns it either way.
+            {% else %}
+              ⚠ <b>{{ r.waits_in }}</b> is a <b>Trigger state</b> in Settings, and this box
+              being off <b>removes it from the poll query</b> — the autopilot stops picking
+              up items sitting there. Tick auto, or take it out of Trigger states.
+            {% endif %}
+          </span>
+          {% endif %}
         </div>
       </div>
     </div>

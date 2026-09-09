@@ -136,6 +136,31 @@ class AdoPollerService:
         self._task = asyncio.create_task(self._run(), name="ado-poller")
         self._comment_task = asyncio.create_task(self._comment_run(), name="ado-comment-loop")
 
+    def _log_trigger_amendments(self) -> None:
+        """Say, once at startup, where the poll query differs from ``trigger_states``.
+
+        A wired role states its own autonomy and that statement wins — ``auto`` adds its
+        door, a role explicitly NOT auto removes it. Deliberate, but it happens on a
+        different page from the one listing trigger states, so the Settings page goes on
+        naming a state the poller no longer touches. Anyone reading the log to work out
+        why an item in that state is never picked up found nothing at all.
+        """
+        cfg = self._config
+        configured = [(s or "").strip() for s in cfg.trigger_states if (s or "").strip()]
+        effective = [(s or "").strip() for s in cfg.effective_trigger_states if (s or "").strip()]
+        low = {s.lower() for s in effective}
+        dropped = [s for s in configured if s.lower() not in low]
+        added = [s for s in effective if s.lower() not in {c.lower() for c in configured}]
+        if not dropped and not added:
+            return
+        self._log.info(
+            "poll states amended by the role wiring",
+            configured=configured, polled=effective,
+            dropped=dropped, added=added,
+            hint="a role that is not 'starts itself' removes its door from the query; "
+                 "an auto one adds it — see /dashboard/roles",
+        )
+
     async def stop(self) -> None:
         for task in (self._task, self._comment_task):
             if task is not None:
@@ -170,6 +195,7 @@ class AdoPollerService:
             poll_interval=cfg.poll_interval_seconds,
             dry_run=cfg.dry_run,
         )
+        self._log_trigger_amendments()
 
         if not cfg.has_auth:
             self._log.warning(

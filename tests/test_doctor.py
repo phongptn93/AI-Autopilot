@@ -404,3 +404,113 @@ def test_doctor_flags_a_state_that_means_two_opposite_things():
     titles = " ".join(f.title for f in findings)
     assert "Ready for Testing" in titles and "Closed" in titles
     assert "New" not in titles          # the one honest trigger state is left alone
+
+
+def test_a_role_door_that_is_also_a_trigger_state_is_named():
+    """The trap: a role's own autonomy wins over the Trigger states list, so leaving
+    'starts itself' off REMOVES that state from the poll query — while the Settings
+    page goes on listing it. Nothing said so, so the autopilot simply stopped picking
+    up work in a state the operator still believed was a trigger."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.doctor import check_role_doors_vs_triggers
+
+    cfg = Settings(
+        trigger_states=["New", "Active"],
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Active", auto=False)},
+    )
+    found = check_role_doors_vs_triggers(cfg)
+    assert len(found) == 1
+    assert "Active" in found[0].title and "dev" in found[0].title
+    assert "no longer picks up" in found[0].detail
+    # And the config really does behave that way — the warning is not theoretical.
+    assert "active" not in {s.lower() for s in cfg.effective_trigger_states}
+
+
+def test_an_auto_role_holding_a_trigger_state_is_not_a_warning():
+    """`auto` ADDS the door, so the two pages agree and there is nothing to report."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.doctor import check_role_doors_vs_triggers
+
+    cfg = Settings(
+        trigger_states=["New", "Active"],
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Active", auto=True)},
+    )
+    found = check_role_doors_vs_triggers(cfg)
+    assert [f.level for f in found] == [doctor.OK]
+    assert "active" in {s.lower() for s in cfg.effective_trigger_states}
+
+
+def test_a_door_that_is_not_a_trigger_state_is_left_alone():
+    """Wiring a role to a state of its own removes nothing — no warning to give."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.doctor import check_role_doors_vs_triggers
+
+    cfg = Settings(
+        trigger_states=["New"],
+        sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
+    )
+    assert check_role_doors_vs_triggers(cfg) == []
+
+
+def test_a_run_now_tag_equal_to_the_trigger_tag_is_an_error():
+    """The destructive one. The run-now sweep reads every item carrying a TRIGGER tag
+    and removes the tag it matched on, so this setting strips ownership off the whole
+    board on the first pass — the items vanish from every query and only a human
+    re-tagging them brings them back."""
+    from ai_autopilot.doctor import check_run_now_tags
+
+    cfg = Settings(trigger_tag="vm-claude-autopilot", stage_entry_tag="vm-claude-autopilot")
+    found = check_run_now_tags(cfg)
+    assert [f.level for f in found] == [doctor.ERROR]
+    assert "strip ownership" in found[0].detail
+
+
+def test_the_suffixed_run_now_tag_is_accepted():
+    """'<trigger-tag>-run' is a different whole tag — ADO matches tags whole, and the
+    sweep compares them exactly, so there is no collision."""
+    from ai_autopilot.doctor import check_run_now_tags
+
+    cfg = Settings(trigger_tag="vm-claude-autopilot",
+                   stage_entry_tag="vm-claude-autopilot-run")
+    assert [f.level for f in check_run_now_tags(cfg)] == [doctor.OK]
+
+
+def test_a_run_now_tag_that_is_an_outcome_tag_is_an_error():
+    """Applying any outcome clears the other outcome tags, so this one is wiped at
+    moments unrelated to running anything."""
+    from ai_autopilot.doctor import check_run_now_tags
+
+    cfg = Settings(trigger_tag="mine", processed_tag="autopilot-done",
+                   stage_entry_tag="autopilot-done")
+    found = check_run_now_tags(cfg)
+    assert [f.level for f in found] == [doctor.ERROR]
+    assert "outcome tags" in found[0].detail
+
+
+def test_two_roles_sharing_a_run_now_tag_is_named():
+    """The tag maps to ONE role; the loser is unreachable by tag and nothing said so."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.doctor import check_run_now_tags
+
+    cfg = Settings(
+        trigger_tag="mine",
+        sdlc_roles={
+            "dev": SdlcRole(stages=["implement"], entry_tag="go"),
+            "qc": SdlcRole(stages=["test"], entry_tag="go"),
+        },
+    )
+    found = [f for f in check_run_now_tags(cfg) if f.level == doctor.WARN]
+    assert len(found) == 1 and "'dev'" in found[0].title and "'qc'" in found[0].title
+
+
+def test_the_assignee_trigger_tag_counts_as_a_trigger_tag_for_this_check():
+    """It is not in effective_trigger_tags, but it IS in the WIQL the sweep reads, so
+    an item claimed by it is stripped exactly like any other. Guarding only the front
+    door left this one open."""
+    from ai_autopilot.doctor import check_run_now_tags
+
+    cfg = Settings(trigger_tag="mine", assignee_trigger_tag="ai-autopilot",
+                   assignee_trigger_user="Someone", stage_entry_tag="ai-autopilot")
+    found = check_run_now_tags(cfg)
+    assert [f.level for f in found] == [doctor.ERROR]
+    assert "strip ownership" in found[0].detail

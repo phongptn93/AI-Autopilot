@@ -21,6 +21,30 @@ import pytest  # noqa: E402
 from ai_autopilot.execution.claude_client import ClaudeRun  # noqa: E402
 
 
+_SENTINEL_CONFIG = Path(os.environ["AUTOPILOT_CONFIG_FILE"])
+
+
+@pytest.fixture(autouse=True)
+def _config_file_stays_absent():
+    """Fail the test that WRITES the sentinel config, not the 34 that read it after.
+
+    The path above is chosen to not exist so ``Settings()`` falls back to defaults. A
+    test that POSTs to a settings/roles endpoint without pointing the env var at its own
+    tmp_path creates it — and from then on every ``Settings()`` in the run silently
+    inherits whatever it saved. That surfaced as three dozen assertion failures in
+    unrelated modules, none of them near the cause.
+    """
+    yield
+    if _SENTINEL_CONFIG.exists():
+        written = _SENTINEL_CONFIG.read_text(encoding="utf-8")
+        _SENTINEL_CONFIG.unlink()
+        raise AssertionError(
+            "this test wrote the shared sentinel config, which would poison every "
+            "later Settings() in the run. Point AUTOPILOT_CONFIG_FILE at tmp_path "
+            "(monkeypatch.setenv) before saving. It wrote: " + written
+        )
+
+
 @dataclass
 class ClaudeCall:
     """One recorded ``ClaudeExecutor._run_claude`` invocation."""

@@ -406,7 +406,8 @@ class StateSyncService:
         PR in silence, which is the state flow never firing on work that shipped.
 
         Same order as the PR babysitter's ``_work_item_for``: the two must agree, or a
-        PR the bot talks on is a PR whose card it then refuses to move.
+        PR the bot talks on is a PR whose card it then refuses to move. The client memoises
+        the lookup, so the two loops cost one request between them rather than one each.
         """
         with contextlib.suppress(Exception):
             linked = await self._c.ado.get_pull_request_work_items(repo_id, pr_id)

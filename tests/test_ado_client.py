@@ -184,3 +184,71 @@ async def test_failure_logs_the_ids_and_the_ado_message(capsys):
     logged = capsys.readouterr().out
     assert "999" in logged
     assert "TF401232" in logged          # the actionable part, previously thrown away
+
+
+async def test_the_pr_work_item_link_is_fetched_once_per_ttl():
+    """Five callers ask the same question about the same pull requests every cycle (the
+    state sync, the PR babysitter, the delivery report and two dashboard pages), and the
+    link costs one request per PR. Without the memo, adding the lookup to the report and
+    the dashboard turned a percentage into hundreds of requests per page load."""
+    import time as _time
+
+    calls: list[tuple[str, int]] = []
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"value": [{"id": 8962}]}
+
+    c = _client(ado_project="P")
+
+    async def _send(method, url, **kw):
+        calls.append((method, len(calls)))
+        return _Resp()
+
+    async def _auth_header():
+        return {}
+
+    c._send = _send
+    c._auth = type("A", (), {"get_auth_header": staticmethod(_auth_header)})()
+
+    assert await c.get_pull_request_work_items("r1", 7) == [8962]
+    assert await c.get_pull_request_work_items("r1", 7) == [8962]
+    assert len(calls) == 1                       # second read served from the memo
+    assert await c.get_pull_request_work_items("r1", 8) == [8962]
+    assert len(calls) == 2                       # a different PR is its own question
+
+    # The memo is short-lived on purpose: a link is often attached by a person after the
+    # fact, so "no work item" must not stick for the rest of the day.
+    c._pr_items[("r1", 7)] = (_time.monotonic() - 10_000, ())
+    assert await c.get_pull_request_work_items("r1", 7) == [8962]
+    assert len(calls) == 3
+
+
+async def test_a_failed_link_lookup_is_not_memoised():
+    """A blank served for the whole TTL would read as "this PR is about nothing" — and
+    on the state-flow path that means a merged PR that moves no card."""
+    class _Resp:
+        status_code = 503
+        text = "throttled"
+
+        def json(self):
+            return {}
+
+    calls: list[int] = []
+    c = _client(ado_project="P")
+
+    async def _send(method, url, **kw):
+        calls.append(1)
+        return _Resp()
+
+    async def _auth_header():
+        return {}
+
+    c._send = _send
+    c._auth = type("A", (), {"get_auth_header": staticmethod(_auth_header)})()
+
+    assert await c.get_pull_request_work_items("r1", 7) == []
+    assert await c.get_pull_request_work_items("r1", 7) == []
+    assert len(calls) == 2                       # retried, not served from a cached blank

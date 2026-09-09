@@ -886,9 +886,12 @@ def test_deleting_a_channel_row_removes_it(tmp_path, monkeypatch):
 class _FakeAdoPRs:
     """Just enough ADO for _pr_outcomes; ``boom`` makes the scan fail."""
 
-    def __init__(self, completed=(), active=(), abandoned=(), boom=False):
+    def __init__(self, completed=(), active=(), abandoned=(), boom=False, links=None):
         self._sets = {"c": list(completed), "a": list(active), "x": list(abandoned)}
         self._boom = boom
+        # PR id → linked work items, as ADO holds them. The scan asks only for branches
+        # whose name carries no id (see _pr_outcomes), so most tests need none.
+        self._links = dict(links or {})
 
     async def get_repositories(self):
         if self._boom:
@@ -897,7 +900,13 @@ class _FakeAdoPRs:
 
     @staticmethod
     def _prs(refs):
-        return [{"sourceRefName": f"refs/heads/{r}"} for r in refs]
+        return [
+            {"sourceRefName": f"refs/heads/{r}", "pullRequestId": i}
+            for i, r in enumerate(refs, start=1)
+        ]
+
+    async def get_pull_request_work_items(self, _rid, pr_id):
+        return self._links.get(pr_id, [])
 
     async def get_completed_pull_requests(self, _rid):
         return self._prs(self._sets["c"])

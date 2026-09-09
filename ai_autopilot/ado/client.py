@@ -51,6 +51,15 @@ _FIELDS = (
 # oldest-first rather than allowed to grow for the life of the process.
 _MAX_PROJECT_MEMO = 5000
 
+# PR → its linked work items. The link is ONE request per pull request, and callers
+# want the same answer about the same PRs on every cycle (the state sync, the PR
+# babysitter, the delivery report, two dashboard pages). Memoised with a short TTL so a
+# repeat scan is free, and bounded so it cannot grow for the life of the process. Short
+# rather than permanent because a link is added by a person after the fact — a PR
+# resolved as "no work item" must not stay that way for the rest of the day.
+_PR_ITEM_TTL_SECONDS = 300.0
+_MAX_PR_ITEM_MEMO = 5000
+
 # ADO relation types used for dependency-aware scheduling (P1).
 _REL_PREDECESSOR = "System.LinkTypes.Dependency-Reverse"  # this item depends on target
 _REL_SUCCESSOR = "System.LinkTypes.Dependency-Forward"    # target depends on this item
@@ -92,12 +101,16 @@ class AdoClient:
         # work-item id → its System.TeamProject, learned whenever we map an item.
         # Saves a round trip on the project-scoped endpoints (comments).
         self._item_projects: dict[int, str] = {}
+        # (repo_id, pr_id) → (fetched_at, linked work-item ids). See
+        # get_pull_request_work_items.
+        self._pr_items: dict[tuple[str, int], tuple[float, tuple[int, ...]]] = {}
 
     def refresh(self) -> None:
         """Re-read the organization URL after a live config change."""
         self._base = self._config.ado_organization.rstrip("/")
         self._type_states = {}  # a different org/project has different types
         self._item_projects = {}
+        self._pr_items = {}
 
     async def _headers(self, content_type: str = "application/json") -> dict[str, str]:
         headers = await self._auth.get_auth_header()
@@ -734,7 +747,24 @@ class AdoClient:
     async def get_pull_request_work_items(
         self, repo_id: str, pr_id: int, project: str = ""
     ) -> list[int]:
-        """Ids of the work items linked to a PR (empty when none, or on error)."""
+        """Ids of the work items linked to a PR (empty when none, or on error).
+
+        This is the authoritative answer to "what is this PR about" — a branch name is
+        only a convention, and one whose last segment opening with a number is not
+        evidence ("fix/500-error-handling" is not work item 500). Callers keep the
+        branch name as a FALLBACK, for a PR carrying no link at all.
+
+        Memoised with a short TTL, because five callers ask about the same pull requests
+        on every cycle (the state sync, the PR babysitter, the delivery report and two
+        dashboard pages) and this costs one request per PR. Short rather than permanent:
+        a link is often attached by a person after the fact, so a PR resolved as "no
+        work item" must not stay that way for the rest of the day. Failures are NOT
+        memoised — the next scan retries instead of serving a blank for the whole TTL.
+        """
+        key = (repo_id, pr_id)
+        hit = self._pr_items.get(key)
+        if hit is not None and time.monotonic() - hit[0] < _PR_ITEM_TTL_SECONDS:
+            return list(hit[1])
         resp = await self._send(
             "GET",
             self._git_url(
@@ -747,10 +777,14 @@ class AdoClient:
                 "get_pull_request_work_items failed", pr=pr_id, status=resp.status_code
             )
             return []
-        return [
+        ids = [
             int(w["id"]) for w in (resp.json().get("value") or [])
             if str(w.get("id", "")).isdigit()
         ]
+        if len(self._pr_items) >= _MAX_PR_ITEM_MEMO:
+            self._pr_items.clear()  # a memo, not storage: drop it wholesale
+        self._pr_items[key] = (time.monotonic(), tuple(ids))
+        return ids
 
     async def link_work_item_to_pr(
         self, work_item_id: int, project_guid: str, repo_guid: str, pr_id: int, pr_url: str = ""

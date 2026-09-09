@@ -457,7 +457,19 @@ async def _pr_outcomes(c: Container) -> dict:
                 ("abandoned", c.ado.get_abandoned_pull_requests),
             ):
                 for pr in await fetch(rid):
-                    if parse_work_item_id(pr.get("sourceRefName", "")) in ours:
+                    # Branch name FIRST here, unlike everywhere else, and only asking
+                    # ADO for the link when the name carries no id. Precedence is
+                    # flipped on purpose: this scan already costs 1 + 3N requests, and
+                    # every PR the autopilot opened is named `<prefix>/<id>-<slug>`, so
+                    # link-first would add one request per PR — hundreds — to compute a
+                    # percentage. The fallback still closes the gap it is here for: a
+                    # PR whose branch was named without an id is no longer invisible.
+                    wid = parse_work_item_id(pr.get("sourceRefName", ""))
+                    if wid is None:
+                        linked = await c.ado.get_pull_request_work_items(
+                            rid, pr.get("pullRequestId") or 0)
+                        wid = linked[0] if linked else None
+                    if wid in ours:
                         counts[key] += 1
     except Exception as exc:  # noqa: BLE001 — metrics must never break the page
         _log.warning("pr outcome scan failed", error=describe_exc(exc))
@@ -1206,6 +1218,14 @@ def create_dashboard_router() -> APIRouter:
                     if not cfg.target_in_scope(pr.get("targetRefName", "")):
                         continue
                     pr_id = pr.get("pullRequestId")
+                    # ADO's link first, the branch name second — the order the state
+                    # sync and the PR babysitter use. Showing only what the branch name
+                    # spelled left the work-item column blank on every PR named without
+                    # an id, and wrong on any branch whose name merely opens with a
+                    # number. The client memoises the lookup, so a page refresh inside
+                    # the TTL costs nothing.
+                    _links = await c.ado.get_pull_request_work_items(rid, pr_id or 0)
+                    _linked = _links[0] if _links else None
                     reviewers = []
                     bot_reviewed = False
                     for r in pr.get("reviewers") or []:
@@ -1242,7 +1262,8 @@ def create_dashboard_router() -> APIRouter:
                         "created": pr.get("creationDate") or "",
                         "age": _pr_age(pr.get("creationDate")),
                         "conflicts": conflicts,
-                        "work_item": parse_work_item_id(pr.get("sourceRefName", "")),
+                        "work_item": _linked or parse_work_item_id(
+                            pr.get("sourceRefName", "")),
                         "url": f"{org}/{project}/_git/{quote(rname, safe='')}"
                                f"/pullrequest/{pr_id}",
                         "reviewers": reviewers,

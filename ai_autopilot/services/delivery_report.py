@@ -80,7 +80,13 @@ async def collect_prs(container, project_of: dict[int, str]) -> list[delivery.Pr
                 if r.get("id") and not r.get("isContainer")
             ]
             votes = [(r, int(r.get("vote") or 0)) for r in reviewers]
-            wid = parse_work_item_id(pr.get("sourceRefName", "")) or 0
+            # ADO's link first, the branch name second — the same order the state sync
+            # and the PR babysitter use. Reading only the name dropped every PR whose
+            # branch carries no id, so a report meant to show what is in flight quietly
+            # under-counted exactly the PRs nobody had named conventionally.
+            linked = await container.ado.get_pull_request_work_items(repo_id, pr_id)
+            wid = (linked[0] if linked else parse_work_item_id(
+                pr.get("sourceRefName", ""))) or 0
             item_project = project_of.get(wid, "")
             code_project = config.code_project_for(item_project)
             out.append(delivery.PrView(

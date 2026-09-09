@@ -806,7 +806,8 @@ def test_every_map_field_shows_its_own_example():
     assert all(ph for _, ph in maps), [k for k, ph in maps if not ph]
     assert len({ph for _, ph in maps}) == len(maps)      # no two share an example
     by_key = dict(maps)
-    assert "=>" in by_key["sdlc_profile_tags"] and "Ready for" not in by_key["sdlc_profile_tags"]
+    # The type map is the one left here that is easiest to confuse with a state map.
+    assert "=>" in by_key["sdlc_type_profiles"] and "Ready for" not in by_key["sdlc_type_profiles"]
 
 
 def test_profile_resolution_order_is_stated_where_it_is_chosen():
@@ -819,8 +820,18 @@ def test_profile_resolution_order_is_stated_where_it_is_chosen():
     order = [f.key for f in FIELDS if f.section.startswith("Closed-loop SDLC")]
     assert order.index("sdlc_profile") < order.index("sdlc_type_profiles")
     assert order.index("sdlc_type_profiles") < order.index("sdlc_default_profile")
-    # The hand-offs sit last, together, under the draft switch that delays them.
-    assert order[-3:] == ["sdlc_advance_on_draft", "sdlc_profile_states", "sdlc_profile_tags"]
+
+
+def test_the_hand_offs_are_not_editable_here_any_more():
+    """They are a role's way OUT, and a role's way out is the next role's way IN —
+    two facts that only mean something side by side, which is why they moved to the
+    Roles page. Left here they were also filed under a loop that does not gate them:
+    the hand-off applies with sdlc_loop_enabled off."""
+    from ai_autopilot.dashboard.settings_form import FIELDS
+
+    keys = {f.key for f in FIELDS}
+    assert "sdlc_profile_states" not in keys
+    assert "sdlc_profile_tags" not in keys
 
 
 # ── Reviews page filters ─────────────────────────────────────────────────────

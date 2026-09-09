@@ -404,19 +404,10 @@ FIELDS: tuple[Field, ...] = (
           "Closed-loop SDLC (v2)",
           "Apply the hand-offs below even when the PR is still a draft. Off (recommended) = a "
           "draft waits for human review before the next role is called."),
-    Field("sdlc_profile_states", "Hand off by ADO state (profile => state)", "map",
-          "Closed-loop SDLC (v2)",
-          "One 'profile => ADO state' per line — set when that profile completes, so the next "
-          "machine's trigger_states picks it up. Visible to anyone reading the ADO board, but "
-          "the state must exist on that work-item type.",
-          placeholder="ba => Ready for Dev"),
-    Field("sdlc_profile_tags", "Hand off by tag (profile => tag)", "map",
-          "Closed-loop SDLC (v2)",
-          "One 'profile => tag' per line — added when that profile completes. Needs no ADO "
-          "state change at all: the poller already ignores a tagged item, so it waits there "
-          "until someone presses ▶ Run on the Board process that claims the tag "
-          "(/dashboard/board-views). Use either hand-off, or both.",
-          placeholder="ba => handoff-dev"),
+    # Hand-off used to be edited here, keyed by profile, under a heading about a loop
+    # that does not gate it — it applies with the loop OFF. It now lives beside the
+    # door it feeds, on /dashboard/roles, because one role's way out IS the next
+    # role's way in and no page ever showed those two facts together.
     # ── Planning workbench ──
     Field("planning_ai_analysis", "AI conflict analysis", "bool", "Planning workbench",
           "The Analyze action runs bounded Claude judges over keyword-overlapping pairs "

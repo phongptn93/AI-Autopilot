@@ -119,7 +119,10 @@ def _cfg(**over):
 
 
 async def test_happy_path_runs_dev_profile_and_opens_pr():
-    ex = FakeExecutor(runs=[FakeRun("implemented"), FakeRun(f"opened {_PR}")])
+    # implement, review and pr each run a skill — review is not the exception it was.
+    ex = FakeExecutor(
+        runs=[FakeRun("implemented"), FakeRun("reviewed"), FakeRun(f"opened {_PR}")]
+    )
     ado, repo = FakeAdo(), FakeRepo()
     engine = _engine(_cfg(), ex, FakeReviewer([ReviewResult(passed=True)]), ado, repo)
     res = await engine.run(_item())
@@ -132,7 +135,7 @@ async def test_happy_path_runs_dev_profile_and_opens_pr():
 
 
 async def test_review_failure_exhausts_budget_and_escalates():
-    ex = FakeExecutor(runs=[FakeRun("implemented")])          # only implement uses _run_claude
+    ex = FakeExecutor(runs=[FakeRun("implemented")])          # review reruns on each revise
     fails = [ReviewResult(passed=False, critical_issues=["SQLi"])] * 5
     ado, repo = FakeAdo(), FakeRepo()
     engine = _engine(_cfg(sdlc_max_iterations=2), ex, FakeReviewer(fails), ado, repo)
@@ -150,14 +153,14 @@ async def test_resume_skips_completed_stages():
         work_item_id=1, profile="dev", stage_index=1, iterations=0,
         branch="feature/1-x", signals_json=StageSignals(files_changed=1).to_json(),
     )
-    ex = FakeExecutor(runs=[FakeRun(f"opened {_PR}")])   # only the pr stage runs a skill
+    ex = FakeExecutor(runs=[FakeRun("reviewed"), FakeRun(f"opened {_PR}")])
     engine = _engine(_cfg(), ex, FakeReviewer([ReviewResult(passed=True)]), FakeAdo(), repo)
     res = await engine.run(_item())
 
     assert res.success and res.pr_url == _PR
-    # Resumed at review → implement was skipped; only the pr stage runs a skill.
-    assert len(ex.run_prompts()) == 1
-    assert "implement" not in ex.run_prompts()[0]
+    # Resumed at review → implement was skipped; review and pr each run their skill.
+    assert len(ex.run_prompts()) == 2
+    assert not any("'implement'" in prompt for prompt in ex.run_prompts())
 
 
 async def test_stage_prompt_lets_ai_choose_by_default():
@@ -391,3 +394,51 @@ def test_doctor_names_the_unresolved_tie():
     }))
     assert {f.level for f in ok} == {"ok"}
     assert check_relay_wiring(Settings()) == []     # nothing wired → nothing to say
+
+
+async def test_review_stage_runs_a_skill_and_is_still_gated():
+    """Review used to skip straight to the gate: its goal never reached an agent and
+    the workspace's review skills were never chosen. It must do both now."""
+    ex = FakeExecutor(
+        runs=[FakeRun("implemented"), FakeRun("reviewed"), FakeRun(f"opened {_PR}")]
+    )
+    engine = _engine(_cfg(), ex, FakeReviewer([ReviewResult(passed=True)]), FakeAdo(), FakeRepo())
+    res = await engine.run(_item())
+
+    assert res.success
+    prompts = ex.run_prompts()
+    assert len(prompts) == 3                       # implement, review, pr
+    review_prompt = prompts[1]
+    assert "'review'" in review_prompt
+    # The goal reaches the agent — including the half the hard-coded gate never asked.
+    assert "correctness and security" in review_prompt
+    assert "Choose and run the most appropriate skill(s)" in review_prompt
+
+
+async def test_review_stage_bills_both_its_calls():
+    """The stage makes two model calls (its own skill + the gate); billing one of
+    them understated every SDLC run."""
+    ex = FakeExecutor(runs=[
+        FakeRun("implemented", tokens=5), FakeRun("reviewed", tokens=7),
+        FakeRun(f"opened {_PR}", tokens=5),
+    ])
+    gate = FakeRun("- [None] no issues found", tokens=11)
+    reviewer = FakeReviewer([ReviewResult(passed=True, run=gate)])
+    engine = _engine(_cfg(), ex, reviewer, FakeAdo(), FakeRepo())
+    res = await engine.run(_item())
+
+    assert res.success
+    assert res.cost_tokens == 5 + 7 + 5 + 11       # the gate call is billed too
+
+
+async def test_artifact_skill_is_asked_for_when_a_stage_declares_one():
+    """``artifact_skill`` was config nothing read — three stages set it and no code
+    path ever ran it."""
+    eng = _engine(_cfg(), FakeExecutor(), FakeReviewer(), FakeAdo(), FakeRepo())
+    assert "bugfix-report" in eng._stage_prompt(_item(), CATALOG["review"], "feature/1-x")
+
+
+async def test_no_artifact_line_when_a_stage_declares_none():
+    eng = _engine(_cfg(), FakeExecutor(), FakeReviewer(), FakeAdo(), FakeRepo())
+    p = eng._stage_prompt(_item(), CATALOG["implement"], "feature/1-x")
+    assert "skill to produce its report" not in p

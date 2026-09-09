@@ -119,10 +119,10 @@ class SdlcLoopEngine:
 
             while stage_index < len(stages):
                 stage = stages[stage_index]
-                run_text, is_error, stage_run = await self._run_stage(
+                run_text, is_error, stage_runs = await self._run_stage(
                     item, stage, run_dir, scratch, repos, branch, touched
                 )
-                usage.add(stage_run)
+                usage.add(*stage_runs)
 
                 self._absorb(signals, stage, run_text, is_error)
                 agent = find_result(run_dir, item.id)
@@ -212,49 +212,33 @@ class SdlcLoopEngine:
     async def _run_stage(
         self, item: WorkItemInfo, stage: SdlcStage, run_dir: str,
         scratch: str | None, repos: list[str], branch: str, touched: set[str],
-    ) -> tuple[str, bool, ClaudeRun | None]:
-        """Run one stage; return (output text, is_error, the ClaudeRun). Commits changes,
-        runs AutoReviewer for the review gate, and pushes + parses the PR for the
-        pr stage."""
+    ) -> tuple[str, bool, list[ClaudeRun | None]]:
+        """Run one stage; return (output text, is_error, EVERY ClaudeRun it made).
+
+        Commits what the stage produced, gates the review stage with AutoReviewer +
+        TestGate, and pushes + parses the PR for the pr stage.
+
+        A stage hands back a LIST because the review stage both does its own work and
+        is then gated — two model calls. Returning one of them billed the item for
+        less than the stage actually spent.
+        """
         ws = self._config.workspace_directory
         activity.append(ws, item.id, f"▶ stage: {stage.name} ({stage.role})")
-        # Review stage: AutoReviewer is the structured gate signal (no separate skill run).
-        if stage.role == "review":
-            primary = self._primary_dir(run_dir, scratch, touched, repos)
-            review = await self._reviewer.review(primary)
-            self._pending_review = review  # consumed in _absorb
-            activity.append(ws, item.id, "🔍 auto-review " + ("passed" if review.passed else "found issues"))
-            # Same gate stage runs the test suite; its result feeds signals.ci_passed
-            # (sdlc_plan hard-fails on ci_passed is False).
-            if review.critical_issues or review.warnings:
-                findings = review.critical_issues + review.warnings
-                await self._record_quality(
-                    item.id, QualityKind.REVIEW_FINDING, value=len(findings),
-                    stage=stage.name, actor="auto-review",
-                    detail=" | ".join(findings[:10]),
-                )
-            tests = await self._test_gate.run(primary)
-            self._pending_tests = tests  # consumed in _absorb
-            if tests.ran:
-                activity.append(ws, item.id, "🧪 tests " + ("passed" if tests.passed else "FAILED"))
-                if not tests.passed:
-                    await self._record_quality(
-                        item.id, QualityKind.TEST_FAILED, stage=stage.name,
-                        actor="test-gate", detail=tests.summary,
-                    )
-            # The review gate makes its own Claude call; hand it back so its tokens are
-            # billed to the item. Returning 0 here is what made an SDLC run report less
-            # than it actually spent. None when auto-review is off or the call failed.
-            return review.raw_output, False, review.run
 
         # For the pr stage, make sure the branch is on origin before /pr-create.
         if stage.produces_pr and scratch and touched:
             await self._exec.push_stage_branch(scratch, sorted(touched), branch)
 
+        # EVERY stage runs its skill — review included. Review used to be the one
+        # stage that skipped straight to the gate, so its goal ("correctness and
+        # security") never reached an agent and the workspace's own review skills
+        # were never chosen: the gate's hard-coded security prompt WAS the stage,
+        # and half the goal went unread.
         prompt = self._stage_prompt(item, stage, branch)
         run = await self._exec._run_claude(
             prompt, run_dir, on_event=lambda line: activity.append(ws, item.id, line)
         )
+        runs: list[ClaudeRun | None] = [run]
         if scratch and not stage.produces_pr:
             msg = f"sdlc({stage.name}): #{item.id}"
             committed = await self._exec.stage_commit(scratch, repos, msg)
@@ -262,7 +246,49 @@ class SdlcLoopEngine:
             self._pending_files = sum(len(v) for v in committed.values())
         else:
             self._pending_files = 0
-        return run.text, run.is_error, run
+
+        # Gate AFTER the stage's own work, so the signal describes what the item ends
+        # up with: a fix the review stage just made counts in its own verdict.
+        if stage.role == "review":
+            runs.append(await self._gate_review(item, stage, run_dir, scratch, repos, touched))
+        return run.text, run.is_error, runs
+
+    async def _gate_review(
+        self, item: WorkItemInfo, stage: SdlcStage, run_dir: str,
+        scratch: str | None, repos: list[str], touched: set[str],
+    ) -> ClaudeRun | None:
+        """AutoReviewer + TestGate — the review stage's structured gate signals.
+
+        Returns the reviewer's Claude call so its tokens are billed to the item;
+        counting it as zero understated the cost of every SDLC run by a whole call.
+        """
+        ws = self._config.workspace_directory
+        primary = self._primary_dir(run_dir, scratch, touched, repos)
+        review = await self._reviewer.review(primary)
+        self._pending_review = review  # consumed in _absorb
+        activity.append(
+            ws, item.id,
+            "🔍 auto-review " + ("passed" if review.passed else "found issues"),
+        )
+        if review.critical_issues or review.warnings:
+            findings = review.critical_issues + review.warnings
+            await self._record_quality(
+                item.id, QualityKind.REVIEW_FINDING, value=len(findings),
+                stage=stage.name, actor="auto-review",
+                detail=" | ".join(findings[:10]),
+            )
+        # Same gate stage runs the test suite; its result feeds signals.ci_passed
+        # (sdlc_plan hard-fails on ci_passed is False).
+        tests = await self._test_gate.run(primary)
+        self._pending_tests = tests  # consumed in _absorb
+        if tests.ran:
+            activity.append(ws, item.id, "🧪 tests " + ("passed" if tests.passed else "FAILED"))
+            if not tests.passed:
+                await self._record_quality(
+                    item.id, QualityKind.TEST_FAILED, stage=stage.name,
+                    actor="test-gate", detail=tests.summary,
+                )
+        return review.run
 
     def _absorb(
         self, signals: StageSignals, stage: SdlcStage, run_text: str, is_error: bool
@@ -283,7 +309,8 @@ class SdlcLoopEngine:
 
     def _stage_prompt(self, item: WorkItemInfo, stage: SdlcStage, branch: str) -> str:
         """Brief for one stage. By default it states the goal and lets Claude choose
-        the skill(s); a non-blank ``stage.skill`` pins a specific command."""
+        the skill(s); a non-blank ``stage.skill`` pins a specific command, and a
+        non-blank ``stage.artifact_skill`` asks for its report on top."""
         skill = stage.skill
         if skill == "route":
             skill = self._router.route(item) or ""
@@ -301,6 +328,16 @@ class SdlcLoopEngine:
                 f" Goal: {goal} Choose and run the most appropriate skill(s) in this "
                 f"workspace for this stage — do not assume one.{draft}"
             )
+        # A stage may also name an HTML artifact producer. This was config nothing
+        # read: three stages declare one (technical-note / architecture-report /
+        # bugfix-report) and no code path ran it, so the report silently never
+        # appeared however the stage was configured.
+        artifact = ""
+        if stage.artifact_skill:
+            artifact = (
+                f" When the stage work is done, also run the `{stage.artifact_skill}` "
+                f"skill to produce its report for this item."
+            )
         # A human steered this item via a comment (poller's comment-reaction loop) —
         # carry that guidance into EVERY stage as the top-priority instruction, so a
         # resumed loop acts on the latest direction rather than its original plan.
@@ -312,7 +349,7 @@ class SdlcLoopEngine:
                 "top-priority instruction for this stage, overriding earlier assumptions "
                 f"where they conflict:\n\n{item.pending_comment}"
             )
-        return (head + body).strip() + guidance
+        return (head + body + artifact).strip() + guidance
 
     # ── helpers ──────────────────────────────────────────────────────────────
 

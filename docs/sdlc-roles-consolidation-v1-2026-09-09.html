@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SDLC Roles — Gộp cấu hình vai trò · Technical Note</title>
+<style>
+  :root {
+    --primary: #1a56db; --bg: #f8fafc; --card: #fff; --border: #e2e8f0;
+    --text: #1e293b; --muted: #64748b;
+    --green: #16a34a; --amber: #d97706; --red: #dc2626; --blue: #3b82f6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text);
+    line-height: 1.6; padding: 2rem; max-width: 1200px; margin: 0 auto;
+  }
+  h1 { font-size: 1.75rem; margin-bottom: .5rem; }
+  h2 { font-size: 1.35rem; margin: 2rem 0 1rem; padding-bottom: .5rem; border-bottom: 2px solid var(--primary); color: var(--primary); }
+  h3 { font-size: 1.1rem; margin: 1.5rem 0 .75rem; }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .9rem; }
+  th, td { padding: .6rem .8rem; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+  tr:hover { background: #f8fafc; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: .85em; font-family: 'Cascadia Code', 'Fira Code', monospace; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; font-size: .85rem; line-height: 1.5; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: .8rem; font-weight: 600; white-space: nowrap; }
+  .badge-new { background: #dcfce7; color: var(--green); }
+  .badge-modified { background: #fef3c7; color: var(--amber); }
+  .badge-deleted { background: #fee2e2; color: var(--red); }
+  .rev { display:inline-block; background:#ede9fe; color:#7c3aed; padding:2px 10px; border-radius:12px; font-size:.9rem; vertical-align:middle; }
+  .svg-container { text-align: center; margin: 1.5rem 0; overflow-x: auto; }
+  .svg-container svg { max-width: 100%; height: auto; }
+  .example { background: #fffbeb; border-left: 4px solid var(--amber); padding: 1rem 1.5rem; border-radius: 0 8px 8px 0; margin: 1rem 0; }
+  .example strong { color: var(--amber); }
+  .info { background: #eff6ff; border-left: 4px solid var(--blue); padding: 1rem 1.5rem; border-radius: 0 8px 8px 0; margin: 1rem 0; }
+  .info strong { color: var(--primary); }
+  .danger { background:#fef2f2; border-left:4px solid var(--red); padding:1rem 1.5rem; border-radius:0 8px 8px 0; margin:1rem 0; }
+  .danger strong { color: var(--red); }
+  .tag { display: inline-block; background: #ede9fe; color: #7c3aed; padding: 1px 8px; border-radius: 4px; font-size: .8rem; margin-right: 6px; }
+  .ok { color: var(--green); font-weight: 700; }
+  .no { color: var(--red); font-weight: 700; }
+  footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .85rem; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>SDLC Roles — Gộp cấu hình vai trò về một khối <span class="rev">v1</span></h1>
+<p class="subtitle">
+  Một vai trò (BA / DEV / QC) từng được cấu hình ở 5 nơi khác nhau. Note này ghi lại việc gộp
+  chúng về <code>sdlc_roles</code>, trang <code>/dashboard/roles</code> thay <code>/dashboard/relay</code>,
+  và 3 lỗi thật tìm thấy trong SDLC loop &mdash; Ngày: 2026-09-09
+</p>
+
+<!-- ========== CROSS-REFERENCES ========== -->
+<h2>1. Note liên quan</h2>
+<div class="card">
+<table>
+  <thead><tr><th>Path</th><th>Chủ đề</th><th>Trạng thái</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>docs/ai-autopilot-sdlc-v2-report.html</code></td>
+      <td>Bản build SDLC v2 ban đầu (stage machine, gate, profile)</td>
+      <td><span class="badge badge-modified">Partial overlap</span> &mdash; stage machine vẫn đúng; phần cấu hình profile/wiring đã đổi</td>
+    </tr>
+    <tr>
+      <td><code>docs/planning-sdlc-v2-full-guide.html</code></td>
+      <td>Planning Workbench &amp; SDLC v2</td>
+      <td><span class="badge badge-modified">Partial overlap</span> &mdash; 3 chỗ nhắc <code>sdlc_profile_states</code> nay đã deprecated</td>
+    </tr>
+  </tbody>
+</table>
+<p style="margin-top:.75rem;color:var(--muted);font-size:.9rem">
+  Note này <strong>không supersede</strong> cả hai: chúng mô tả cỗ máy stage, còn note này mô tả
+  <em>cách cấu hình vai trò</em>. Phần giao nhau duy nhất là tên các config key.
+</p>
+</div>
+
+<!-- ========== TỔNG QUAN ========== -->
+<h2>2. Tổng quan</h2>
+<div class="card">
+  <p><strong>Vấn đề:</strong> Máy này chạy mọi vai trò trong một process, nên "đến lượt vai trò nào"
+  không suy ra được từ máy, cũng không từ loại work item (một Bug vẫn là Bug ở mọi bước) &mdash; chỉ có
+  <em>state trên ADO</em> mới nói được. Cơ chế đó đã có, nhưng cửa vào bị gắn vào <strong>stage</strong>
+  thay vì vào <strong>vai trò</strong>, mà chỉ stage <em>đầu tiên</em> của một profile mới có cửa.
+  Hệ quả: 4 field im lặng vô hiệu ở hầu hết các dòng, <code>pr</code> vẽ ra một cửa mà không state nào mở được,
+  và hai profile dùng chung stage đầu phải có thêm <code>runs_profile</code> để phân giải.
+  Cộng thêm cửa ra nằm ở trang khác, khoá theo thứ khác.</p>
+
+  <p style="margin-top:.75rem"><strong>Giải pháp:</strong> Gắn cửa vào <strong>vai trò</strong>.
+  Một khối <code>sdlc_roles</code> duy nhất giữ cả bộ stage, cửa vào và cửa ra. Cả 4 cái bẫy biến mất
+  <em>do cấu trúc</em> chứ không phải do dán thêm cảnh báo &mdash; vì một vai trò có đúng một cửa,
+  theo định nghĩa.</p>
+
+  <div class="info">
+    <strong>Bằng chứng mô hình bị lệch một tầng:</strong> cả 6 chỗ gọi <code>entry_stage()</code> trong
+    codebase đều đang làm cùng một phép biến đổi &mdash; <em>vai trò → cửa của nó</em>. Dữ liệu muốn được
+    khoá theo vai trò; nó đang bị khoá theo stage.
+  </div>
+</div>
+
+<!-- ========== TRƯỚC / SAU ========== -->
+<h2>3. Trước và sau</h2>
+<div class="card">
+<div class="svg-container">
+<svg viewBox="0 0 940 430" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="10" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,3 L0,6Z" fill="#475569"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="10" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,3 L0,6Z" fill="#dc2626"/>
+    </marker>
+    <filter id="shadow"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity=".1"/></filter>
+  </defs>
+
+  <!-- ===== TRƯỚC ===== -->
+  <rect x="16" y="14" width="450" height="400" rx="12" fill="#fef2f2" stroke="#fca5a5" stroke-dasharray="6 4"/>
+  <text x="34" y="40" font-size="14" font-weight="700" fill="#b91c1c">TRƯỚC — cửa gắn vào STAGE, cấu hình rải 5 nơi</text>
+
+  <rect x="34" y="56" width="180" height="34" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#shadow)"/>
+  <text x="124" y="78" text-anchor="middle" font-size="11.5" font-weight="600">sdlc_profiles (YAML)</text>
+  <text x="228" y="77" font-size="10.5" fill="#64748b">bộ stage — không có UI</text>
+
+  <rect x="34" y="100" width="180" height="34" rx="8" fill="#fee2e2" stroke="#ef4444" filter="url(#shadow)"/>
+  <text x="124" y="122" text-anchor="middle" font-size="11.5" font-weight="700" fill="#991b1b">sdlc_stage_wiring</text>
+  <text x="228" y="121" font-size="10.5" fill="#64748b">cửa vào — trang Relay</text>
+
+  <rect x="34" y="144" width="180" height="34" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#shadow)"/>
+  <text x="124" y="166" text-anchor="middle" font-size="11.5" font-weight="600">sdlc_profile_states</text>
+  <text x="228" y="165" font-size="10.5" fill="#64748b">cửa ra — trang Settings</text>
+
+  <rect x="34" y="188" width="180" height="34" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#shadow)"/>
+  <text x="124" y="210" text-anchor="middle" font-size="11.5" font-weight="600">sdlc_profile_tags</text>
+  <text x="228" y="209" font-size="10.5" fill="#64748b">tag khi xong — Settings</text>
+
+  <rect x="34" y="232" width="180" height="34" rx="8" fill="#fff" stroke="#94a3b8" filter="url(#shadow)"/>
+  <text x="124" y="254" text-anchor="middle" font-size="11.5" font-weight="600">BoardView.profile</text>
+  <text x="228" y="253" font-size="10.5" fill="#64748b">nút ▶ Run — Board views</text>
+
+  <!-- hệ quả -->
+  <rect x="34" y="286" width="414" height="112" rx="10" fill="#fff" stroke="#fca5a5"/>
+  <text x="48" y="308" font-size="11.5" font-weight="700" fill="#b91c1c">4 cái bẫy sinh ra từ chỗ lệch</text>
+  <text x="48" y="329" font-size="11" fill="#334155">• dòng pr là cửa ma — không state nào mở được</text>
+  <text x="48" y="348" font-size="11" fill="#334155">• working_state / entry_tag vô hiệu ở 4/6 dòng</text>
+  <text x="48" y="367" font-size="11" fill="#334155">• analyze phải chọn runs_profile, quên thì im lặng không chạy</text>
+  <text x="48" y="386" font-size="11" fill="#334155">• phải nhớ luật "chỉ stage đầu mới có cửa"</text>
+
+  <!-- mũi tên giữa 2 khối -->
+  <line x1="474" y1="215" x2="516" y2="215" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===== SAU ===== -->
+  <rect x="524" y="14" width="400" height="400" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-dasharray="6 4"/>
+  <text x="542" y="40" font-size="14" font-weight="700" fill="#15803d">SAU — cửa gắn vào VAI TRÒ, một khối duy nhất</text>
+
+  <rect x="542" y="56" width="364" height="150" rx="10" fill="#dcfce7" stroke="#16a34a" stroke-width="2" filter="url(#shadow)"/>
+  <text x="558" y="79" font-size="12.5" font-weight="700" fill="#14532d">sdlc_roles</text>
+  <text x="558" y="101" font-size="11" fill="#166534">dev:</text>
+  <text x="576" y="121" font-size="11" fill="#166534">stages:   [implement, review, pr]</text>
+  <text x="576" y="140" font-size="11" fill="#166534">waits_in: "Ready for Development"   ← cửa vào</text>
+  <text x="576" y="159" font-size="11" fill="#166534">shows:    "In Development"</text>
+  <text x="576" y="178" font-size="11" fill="#166534">done:     "Ready for Testing"       ← cửa ra</text>
+  <text x="576" y="197" font-size="11" fill="#166534">auto:     true</text>
+
+  <!-- chuỗi -->
+  <rect x="542" y="228" width="96" height="46" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="590" y="248" text-anchor="middle" font-size="12" font-weight="700" fill="#1e40af">ba</text>
+  <text x="590" y="264" text-anchor="middle" font-size="9.5" fill="#64748b">analyze</text>
+
+  <line x1="640" y1="251" x2="676" y2="251" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="680" y="228" width="96" height="46" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="728" y="248" text-anchor="middle" font-size="12" font-weight="700" fill="#1e40af">dev</text>
+  <text x="728" y="264" text-anchor="middle" font-size="9.5" fill="#64748b">impl→review→pr</text>
+
+  <line x1="778" y1="251" x2="814" y2="251" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="818" y="228" width="88" height="46" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+  <text x="862" y="248" text-anchor="middle" font-size="12" font-weight="700" fill="#92400e">qc</text>
+  <text x="862" y="264" text-anchor="middle" font-size="9.5" fill="#78350f">⏸ chờ người</text>
+
+  <text x="542" y="296" font-size="10.5" fill="#475569">done của vai trò này = waits_in của vai trò kế — đó là toàn bộ dây chuyền.</text>
+
+  <rect x="542" y="310" width="364" height="88" rx="10" fill="#fff" stroke="#86efac"/>
+  <text x="558" y="332" font-size="11.5" font-weight="700" fill="#15803d">Cả 4 bẫy biến mất do cấu trúc</text>
+  <text x="558" y="353" font-size="11" fill="#334155">• bảng liệt kê vai trò → không còn dòng pr để wire nhầm</text>
+  <text x="558" y="372" font-size="11" fill="#334155">• mỗi vai trò đúng 1 cửa → mọi ô đều có nghĩa</text>
+  <text x="558" y="391" font-size="11" fill="#334155">• ba và full là 2 dòng riêng → runs_profile bị xoá</text>
+</svg>
+</div>
+</div>
+
+<!-- ========== MODEL ========== -->
+<h2>4. Model mới và ánh xạ</h2>
+<div class="card">
+<pre><code>class SdlcRole(BaseModel):
+    stages: list[str] = []     # tên stage theo thứ tự, tra trong CATALOG
+    waits_in: str = ""         # ADO state item đứng chờ vai trò này  (cửa vào)
+    entry_tag: str = ""        # tag ép chạy ngay; trống → stage_entry_tag chung
+    shows: str = ""            # state khi đang chạy; trống → state_in_progress
+    done: str = ""             # state khi xong (tùy chọn — trống = dừng)
+    done_tag: str = ""         # tag khi xong (tùy chọn)
+    auto: bool = False         # được tự khởi động từ waits_in?</code></pre>
+
+<table>
+  <thead><tr><th>Config cũ</th><th>Trở thành</th></tr></thead>
+  <tbody>
+    <tr><td><code>sdlc_profiles[name]</code></td><td><code>sdlc_roles[name].stages</code></td></tr>
+    <tr><td><code>sdlc_stage_wiring[entry].queue_state</code></td><td><code>.waits_in</code></td></tr>
+    <tr><td><code>sdlc_stage_wiring[entry].working_state</code></td><td><code>.shows</code></td></tr>
+    <tr><td><code>sdlc_stage_wiring[entry].entry_tag</code></td><td><code>.entry_tag</code></td></tr>
+    <tr><td><code>sdlc_stage_wiring[entry].auto</code></td><td><code>.auto</code></td></tr>
+    <tr><td><code>sdlc_stage_wiring[entry].runs_profile</code></td><td><span class="badge badge-deleted">Xoá</span> bất khả thi theo cấu trúc</td></tr>
+    <tr><td><code>sdlc_profile_states[name]</code></td><td><code>.done</code></td></tr>
+    <tr><td><code>sdlc_profile_tags[name]</code></td><td><code>.done_tag</code></td></tr>
+  </tbody>
+</table>
+
+<div class="info">
+  <strong>Tương thích ngược, không có flag day.</strong> <code>effective_roles(cfg)</code> trả về
+  <code>sdlc_roles</code> nếu có; nếu rỗng thì <em>suy ra</em> từ 4 key cũ. Suy diễn tái hiện đúng cả
+  luật <code>runs_profile</code>: một cửa đã có chủ thì vai trò khác dùng chung stage đầu
+  <strong>không</strong> được thừa hưởng &mdash; nếu không, một cài đặt sẵn sẽ âm thầm bắt đầu chạy
+  vai trò khác. Có test riêng cho điều này.
+</div>
+</div>
+
+<!-- ========== 3 LỖI THẬT ========== -->
+<h2>5. Ba lỗi thật tìm thấy trong SDLC loop</h2>
+<div class="card">
+
+<h3>5.1. Stage <code>review</code> không chạy skill nào cả</h3>
+<p><code>_run_stage()</code> short-circuit ở <code>role == "review"</code> và <code>return</code>
+<strong>trước khi</strong> <code>_stage_prompt()</code> kịp được gọi. Hệ quả:</p>
+<ul style="margin:.5rem 0 0 1.5rem">
+  <li>Goal khai là <em>"Review the change for correctness <strong>and security</strong>"</em> → không bao giờ tới agent.</li>
+  <li>Prompt thật của <code>AutoReviewer</code> hard-code, <strong>chỉ hỏi security</strong>, <code>permission_mode="plan"</code> → bỏ hẳn vế <em>correctness</em>.</li>
+  <li>Các skill <code>review-pr</code> / <code>security-review</code> / <code>code-review</code> có sẵn trong workspace → stage review không dùng cái nào.</li>
+</ul>
+<p style="margin-top:.75rem">Bằng chứng nằm ngay trong activity log: <code>implement</code> và <code>pr</code>
+có dòng <code>… working</code> (agent chạy), <code>review</code> thì không.</p>
+<pre><code>▶ stage: implement (dev)
+… working
+▶ stage: review (review)
+🔍 auto-review passed      ← không có "… working"
+▶ stage: pr (pr)
+… working</code></pre>
+<p><strong>Sửa:</strong> bỏ short-circuit. Thứ tự mới: agent chạy skill → commit → <em>rồi mới</em> gate.
+Gate đặt <strong>sau</strong> có chủ ý: nếu stage review vừa sửa một lỗi, verdict phải tính cả bản sửa đó.</p>
+
+<h3>5.2. <code>artifact_skill</code> là config chết</h3>
+<p>Ba stage khai báo nó (<code>analyze→technical-note</code>, <code>design→architecture-report</code>,
+<code>review→bugfix-report</code>) nhưng grep toàn repo cho <strong>zero reader</strong> &mdash; chỉ có định nghĩa
+và 3 chỗ gán. Comment ghi <code>(Phase 2)</code>. Nghĩa là dù bật SDLC, review stage cũng không sinh
+<code>bugfix-report</code> như tên gọi gợi ra. <strong>Sửa:</strong> nối vào <code>_stage_prompt()</code>.</p>
+
+<h3>5.3. Stage review bill thiếu một lần gọi model</h3>
+<p>Stage này thực hiện <strong>2</strong> lần gọi model (skill của chính nó + gate), nhưng
+<code>_run_stage()</code> chỉ trả về một <code>ClaudeRun</code>. <strong>Sửa:</strong> trả về
+<code>list[ClaudeRun]</code>, caller dùng <code>usage.add(*stage_runs)</code>. Có test khẳng định
+<code>5+7+5+11 == 28</code>.</p>
+
+<div class="example">
+  <strong>Vì sao đáng ghi lại:</strong> ba lỗi này nằm trong phần code <em>ít được chạy thật nhất</em>
+  của hệ thống, và tìm ra cả ba chỉ trong một lượt rà. Đó là dữ liệu để cân nhắc trước khi bật
+  <code>sdlc_loop_enabled</code>.
+</div>
+</div>
+
+<!-- ========== HAI CÔNG TẮC ========== -->
+<h2>6. Hai công tắc dễ hiểu nhầm</h2>
+<div class="card">
+<p>Bật <code>sdlc_loop_enabled</code> <strong>một mình không chạy loop</strong>. Nhánh interactive
+<code>return</code> trước khi chạm tới cờ đó:</p>
+<pre><code>poller.py:935   if cfg.execution_mode == "interactive":
+poller.py:939       await self._dispatch_interactive(item)
+poller.py:940       return              ← THOÁT ở đây
+
+poller.py:942   # Headless: the closed-loop engine runs the stages itself.
+poller.py:943   if cfg.sdlc_loop_enabled:      ← không bao giờ tới, nếu interactive</code></pre>
+
+<table>
+  <thead><tr><th>Chế độ</th><th>Chọn vai trò bằng</th><th>Hệ quả</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>interactive</code> + loop <strong>tắt</strong> <em>(mặc định)</em></td>
+      <td><code>profile_for_state()</code> — chỉ state đã wire</td>
+      <td>Không wire → không có vai trò → brief là <strong>toàn bộ item</strong></td>
+    </tr>
+    <tr>
+      <td><code>interactive</code> + loop <strong>bật</strong></td>
+      <td>Cả thang: tag → pin → state → type map → <strong>default</strong></td>
+      <td>Item ở state chưa wire cũng bị gán vai trò, rơi về <code>full</code> → mọi run bị đóng khung vào 6 stage. <strong>Không</strong> phải điều cái tên gợi ra.</td>
+    </tr>
+    <tr>
+      <td><code>headless</code> + loop bật</td>
+      <td>Như trên</td>
+      <td>Đây mới là lúc stage machine thật sự chạy (gate / revise / escalate)</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="info">
+  <strong>Việc tách hai công tắc là cố ý.</strong> Comment tại <code>poller.py:930-934</code> ghi rõ:
+  trước kia chúng là một, và bật relay để có run theo vai trò thì <em>âm thầm mất luôn session
+  Remote-Control mà team đang lái</em> &mdash; đánh đổi ngược hẳn với cách team làm việc.
+</div>
+</div>
+
+<!-- ========== ĐÁNH GIÁ TEST GATE ========== -->
+<h2>7. Test gate &amp; score badge — đánh giá trên chính 2 repo của dự án</h2>
+<div class="card">
+<p>Hai cơ chế này chỉ có khi chạy <strong>headless + loop</strong>. Kiểm tra thực tế cho thấy chưa dùng được
+với setup hiện tại:</p>
+
+<table>
+  <thead><tr><th>Đường chạy</th><th>Test gate</th><th>Auto-review</th></tr></thead>
+  <tbody>
+    <tr><td><code>execute()</code> / <code>revise()</code> / <code>run_loop()</code></td><td class="ok">Có</td><td class="ok">Có</td></tr>
+    <tr><td>SDLC loop, stage <code>review</code></td><td class="ok">Có</td><td class="ok">Có</td></tr>
+    <tr><td><code>run_agent()</code> — AI-native headless</td><td class="no">Không</td><td class="no">Không</td></tr>
+    <tr><td><strong><code>dispatch_interactive()</code> — chế độ đang chạy</strong></td><td class="no">Không</td><td class="no">Không</td></tr>
+  </tbody>
+</table>
+
+<h3>Auto-detect trên 2 repo thật</h3>
+<table>
+  <thead><tr><th>Repo</th><th>Detect ra</th><th>Vấn đề</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>Backend-Fresh</code></td>
+      <td><code>dotnet test --nologo</code> (có <code>Nois.Solution.sln</code> ở root)</td>
+      <td>Đúng lệnh, nhưng build + test cả solution trong worktree mới tinh (phải restore) rất dễ vượt
+          <code>test_timeout_seconds</code> mặc định <strong>600s</strong>. Timeout trả
+          <code>passed=False</code> → <strong>chặn PR</strong>, không phải skip.</td>
+    </tr>
+    <tr>
+      <td><code>Micro-Frontend</code></td>
+      <td><code>npm test --silent</code> (<code>"test": "ng test"</code>)</td>
+      <td><code>ng test</code> mặc định là <strong>watch mode + cần browser</strong>. Thiếu
+          <code>--watch=false --browsers=ChromeHeadless</code> thì không bao giờ exit → treo hết 600s →
+          <strong>chặn mọi PR frontend</strong>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="danger">
+  <strong><code>test_command</code> là MỘT chuỗi global</strong> (<code>config.py:1465</code>). Dự án có 2 stack:
+  đặt <code>dotnet test</code> thì FE sai, đặt <code>npm test</code> thì BE sai → buộc phải dựa vào
+  auto-detect, mà auto-detect thì dính đúng hai bẫy trên. Không có đường cấu hình per-repo.
+</div>
+
+<h3>Score badge mỗi stage — không đáng</h3>
+<p>Chính code nói (<code>sdlc_plan.py:325</code>): <em>"<code>score_run</code> produces a headline 0–100 badge
+for humans, but its PR-shaped rubric <strong>can't fairly gate an intermediate stage</strong>"</em>.
+Vì vậy <code>is_blocking()</code> <strong>không dùng</strong> score. Nhưng <code>_comment_badge</code> vẫn đăng
+đúng con số đó lên ADO ở mọi stage &mdash; publish một điểm mà hệ thống tự tuyên bố là không công bằng cho
+stage đó (<code>implement</code> luôn trông tệ vì chưa có PR). Với <code>full</code> = 6 stage kèm revise là
+8–10 comment trên một work item, đúng nơi <code>needs_human</code> và <code>deviations</code> cũng đăng.</p>
+<p><strong>Kết luận:</strong> đáng một badge ở <em>cuối</em> run; không đáng mỗi stage một cái.</p>
+</div>
+
+<!-- ========== FILES CHANGED ========== -->
+<h2>8. Files thay đổi</h2>
+<div class="card">
+<table>
+  <thead><tr><th>#</th><th>File</th><th>Thay đổi</th><th>Trạng thái</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>ai_autopilot/config.py</code></td>
+        <td>Thêm <code>SdlcRole</code>, field <code>sdlc_roles</code>; <code>_stage_wiring()</code> đọc roles trước, legacy sau; đánh dấu deprecated 4 key cũ</td>
+        <td><span class="badge badge-modified">+64 −?</span></td></tr>
+    <tr><td>2</td><td><code>ai_autopilot/execution/sdlc_plan.py</code></td>
+        <td>Thêm <code>effective_roles()</code>; viết lại <code>profile_for_state</code>, <code>working_state_for</code>, <code>entry_tags</code>, <code>entry_tag_for</code>, <code>handoff_state</code>, <code>handoff_tag</code>, <code>auto_states</code>, <code>waiting_states</code> theo vai trò</td>
+        <td><span class="badge badge-modified">143 dòng</span></td></tr>
+    <tr><td>3</td><td><code>ai_autopilot/execution/sdlc_loop.py</code></td>
+        <td>Stage <code>review</code> chạy skill; tách <code>_gate_review()</code>; <code>_run_stage</code> trả <code>list[ClaudeRun]</code>; nối <code>artifact_skill</code></td>
+        <td><span class="badge badge-modified">111 dòng</span></td></tr>
+    <tr><td>4</td><td><code>ai_autopilot/dashboard/__init__.py</code></td>
+        <td><code>roles_page</code> + <code>save_roles</code> thay <code>relay_page</code>/<code>save_relay</code>; <code>/relay</code> → 301; ▶ Run đóng dấu vai trò ở mọi chế độ</td>
+        <td><span class="badge badge-modified">158 dòng</span></td></tr>
+    <tr><td>5</td><td><code>ai_autopilot/dashboard/templates/roles.html</code></td>
+        <td>Trang mới: một dòng một vai trò, chọn bộ stage, chuỗi có cảnh báo ngõ cụt</td>
+        <td><span class="badge badge-new">Mới · 305 dòng</span></td></tr>
+    <tr><td>6</td><td><code>ai_autopilot/dashboard/settings_form.py</code></td>
+        <td>Gỡ <code>sdlc_profile_states</code> / <code>sdlc_profile_tags</code> khỏi form</td>
+        <td><span class="badge badge-modified">−17</span></td></tr>
+    <tr><td>7</td><td><code>ai_autopilot/dashboard/templates/base.html</code></td>
+        <td>Nav: Relay → Roles</td>
+        <td><span class="badge badge-modified">1 dòng</span></td></tr>
+    <tr><td>8</td><td><code>tests/test_roles_page.py</code></td>
+        <td>9 test: hiển thị, ngõ cụt, trùng cửa, lưu &amp; áp dụng live, clear, redirect, và 3 test back-compat</td>
+        <td><span class="badge badge-new">Mới · 187 dòng</span></td></tr>
+    <tr><td>9</td><td><code>tests/test_relay_page.py</code></td>
+        <td>Thay bởi <code>test_roles_page.py</code></td>
+        <td><span class="badge badge-deleted">Xoá</span></td></tr>
+    <tr><td>10</td><td><code>tests/test_sdlc_loop.py</code></td>
+        <td>4 test mới cho stage review + artifact_skill + billing; sửa 3 fixture cũ vốn <em>mã hoá cứng chính cái bug</em></td>
+        <td><span class="badge badge-modified">+63</span></td></tr>
+    <tr><td>11</td><td><code>tests/test_lenses.py</code></td>
+        <td>Cập nhật 2 test khẳng định thứ tự field cũ; thêm test chốt hand-off đã rời Settings</td>
+        <td><span class="badge badge-modified">+17</span></td></tr>
+  </tbody>
+</table>
+<p style="color:var(--muted);font-size:.9rem">Tổng: 9 file sửa (+388 / −271), 2 file mới. Test suite: <strong>1091 passed</strong> (trước: 1080).</p>
+</div>
+
+<!-- ========== EDGE CASES ========== -->
+<h2>9. Edge cases</h2>
+<div class="card">
+<table>
+  <thead><tr><th>Case</th><th>Xử lý</th></tr></thead>
+  <tbody>
+    <tr><td><code>sdlc_roles</code> rỗng, có config cũ</td>
+        <td><code>effective_roles()</code> suy ra từ 4 key cũ → hành vi <strong>không đổi</strong> cho tới khi lưu trang Roles một lần</td></tr>
+    <tr><td>Cửa cũ có <code>runs_profile</code></td>
+        <td>Chỉ vai trò được chỉ định thừa hưởng cửa; vai trò khác dùng chung stage đầu nhận <code>waits_in=""</code></td></tr>
+    <tr><td>Hai vai trò cùng <code>waits_in</code></td>
+        <td><code>profile_for_state()</code> trả <code>""</code> + log warning; trang tô đỏ <strong>cả hai dòng</strong> kèm lý do</td></tr>
+    <tr><td><code>done</code> để trống</td>
+        <td>Vẫn fallback về <code>resolved_state</code>. Trang nói đúng state sẽ được áp (<code>⇥ Resolved (nobody waits here)</code>), không nói "stops" chung chung</td></tr>
+    <tr><td><code>done</code> trỏ vào state không vai trò nào chờ</td>
+        <td>Cảnh báo <strong>ngõ cụt</strong> ngay tại ô, và trên dải chuỗi</td></tr>
+    <tr><td><code>done</code> trùng một <code>trigger_states</code> thô</td>
+        <td><code>handoff_collides()</code> assert lúc khởi động → app không lên được. Trang hiện banner đỏ kèm cách sửa</td></tr>
+    <tr><td>Nhấn "Clear roles"</td>
+        <td>Ghi map <strong>rỗng</strong>, không xoá key &mdash; vắng key nghĩa là "suy ra từ config cũ", sẽ làm sống lại đúng thứ vừa yêu cầu gỡ</td></tr>
+    <tr><td>Bookmark cũ <code>/dashboard/relay</code></td>
+        <td>301 → <code>/dashboard/roles</code></td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ========== KIỂM CHỨNG ========== -->
+<h2>10. Kiểm chứng</h2>
+<div class="card">
+<p>Cấu hình ba → dev → qc qua HTTP thật, rồi đọc lại config và phân giải:</p>
+<pre><code>config.yaml chỉ chứa    : ['sdlc_roles']
+Poller starts from      : New, Proposed, +Ready for Analysis, +Ready for Development
+                          (KHÔNG có Ready for Testing — qc để auto tắt)
+
+Ready for Analysis      -> ba   [analyze]                shows=In Analysis    done=Ready for Development
+Ready for Development   -> dev  [implement, review, pr]  shows=In Development done=Ready for Testing
+Ready for Testing       -> qc   [test]                   shows=In Testing     done=Resolved (fallback)
+
+dead-end được cảnh báo  : True</code></pre>
+
+<div class="example">
+  <strong>Smoke test lộ ra một chỗ đã sửa:</strong> <code>done</code> để trống <em>không</em> phải "dừng hẳn"
+  &mdash; nó fallback về <code>resolved_state</code>. Ban đầu trang vẽ "⇥ stops", tức nói sai. Giờ
+  <code>lands_on</code> / <code>dead_end</code> tính theo state <strong>thật sự được áp</strong>.
+</div>
+
+<p style="margin-top:1rem"><strong>Lint:</strong> ruff còn 10 lỗi trên các file đã đụng &mdash; đã đối chiếu với
+HEAD, cả 10 đều <strong>pre-existing</strong>. Thay đổi này còn xoá được 1 lỗi <code>E501</code> cũ.</p>
+</div>
+
+<!-- ========== CÒN LẠI ========== -->
+<h2>11. Còn lại / đề xuất</h2>
+<div class="card">
+<table>
+  <thead><tr><th>Việc</th><th>Vì sao</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Chưa commit</strong></td>
+      <td>Toàn bộ thay đổi trên đang ở working tree.</td>
+    </tr>
+    <tr>
+      <td><code>.venv</code> có bản <code>ai_autopilot 2.7.0</code> cài cứng trong site-packages</td>
+      <td>Chạy từ repo root thì Python lấy working tree, nhưng script chạy từ thư mục khác sẽ
+          <strong>im lặng</strong> import bản 2.7.0 &mdash; đúng cái làm smoke test đầu tiên trả 404.
+          Nên <code>pip uninstall ai_autopilot</code> hoặc <code>pip install -e .</code></td>
+    </tr>
+    <tr>
+      <td>Test gate cho chế độ interactive</td>
+      <td>Chạy test gate + auto-review sau khi session xong, trước hand-off → chặn hồi quy mà không
+          phải bỏ interactive. <strong>Điều kiện:</strong> <code>test_command</code> phải thành per-repo trước,
+          nếu không FE sẽ bị chặn oan (mục 7)</td>
+    </tr>
+    <tr>
+      <td>Scratch <code>agent-8965</code> còn stale</td>
+      <td>Tạo trước fix v2.26.0 nên vẫn còn <code>.claude/rules</code> copy → vẫn double-load 24 rule.
+          <code>_reusable_session_scratch()</code> tái dùng nguyên trạng, không tự dựng lại</td>
+    </tr>
+    <tr>
+      <td>Bật <code>sdlc_loop_enabled</code></td>
+      <td><strong>Chưa nên.</strong> Bốn yêu cầu (chạy theo vai trò, trigger bằng state/tag, state khi chạy,
+          tự kéo sang state kế) đều đã chạy với loop <em>tắt</em>. Loop thêm gate/revise/escalate &mdash;
+          không nằm trong yêu cầu &mdash; và đổi lại là mất session đang lái</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  Generated: 2026-09-09 &bull; Project: AI-Autopilot &bull; Module: SDLC / Relay → Roles<br>
+  See also: <code>docs/ai-autopilot-sdlc-v2-report.html</code> &bull; <code>docs/planning-sdlc-v2-full-guide.html</code>
+</footer>
+
+</body>
+</html>

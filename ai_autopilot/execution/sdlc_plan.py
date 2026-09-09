@@ -24,7 +24,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
-from ai_autopilot.config import SdlcStage, stage_wiring_value
+from ai_autopilot.config import SdlcRole, SdlcStage, stage_wiring_value
 from ai_autopilot.execution.pr_scorer import ScoreInput
 from ai_autopilot.logging_config import get_logger
 
@@ -83,11 +83,46 @@ PROFILES: dict[str, list[str]] = {
 }
 
 
+def effective_roles(cfg: Settings) -> dict[str, SdlcRole]:
+    """Every role this machine knows: what it runs, and its way in and out.
+
+    ``sdlc_roles`` is the source of truth. When it is empty the same shape is DERIVED
+    from the four deprecated keys, so an install that predates the Roles page keeps
+    behaving identically until somebody saves that page once.
+
+    Derivation reproduces the old rules exactly, including the one the new shape makes
+    impossible: a stage-keyed door with ``runs_profile`` set belonged to THAT profile
+    alone, so every other profile sharing the entry stage got no door.
+    """
+    if cfg.sdlc_roles:
+        return dict(cfg.sdlc_roles)
+
+    stage_sets = dict(PROFILES)
+    stage_sets.update(cfg.sdlc_profiles or {})
+    wiring_by_stage = cfg.sdlc_stage_wiring or {}
+    roles: dict[str, SdlcRole] = {}
+    for name, stage_names in stage_sets.items():
+        door = SdlcRole(stages=list(stage_names))
+        entry = stage_names[0] if stage_names else ""
+        wiring = wiring_by_stage.get(entry)
+        if wiring is not None:
+            owner = str(stage_wiring_value(wiring, "runs_profile", "") or "").strip()
+            # An owned door belongs to one profile; the others sharing the entry stage
+            # had none, which is precisely the tie `runs_profile` existed to break.
+            if not owner or owner == name:
+                door.waits_in = str(stage_wiring_value(wiring, "queue_state", "") or "")
+                door.shows = str(stage_wiring_value(wiring, "working_state", "") or "")
+                door.entry_tag = str(stage_wiring_value(wiring, "entry_tag", "") or "")
+                door.auto = bool(stage_wiring_value(wiring, "auto", False))
+        door.done = (cfg.sdlc_profile_states or {}).get(name, "")
+        door.done_tag = (cfg.sdlc_profile_tags or {}).get(name, "")
+        roles[name] = door
+    return roles
+
+
 def _profile_map(cfg: Settings) -> dict[str, list[str]]:
-    """Built-in profiles with any config-defined profiles merged over them."""
-    merged = dict(PROFILES)
-    merged.update(cfg.sdlc_profiles or {})
-    return merged
+    """``role -> ordered stage names``, from the role definitions."""
+    return {name: list(role.stages) for name, role in effective_roles(cfg).items()}
 
 
 def _catalog(cfg: Settings) -> dict[str, SdlcStage]:
@@ -145,106 +180,91 @@ def profile_stages(name: str, cfg: Settings) -> list[SdlcStage]:
 
 
 def entry_stage(profile_name: str, cfg: Settings) -> SdlcStage | None:
-    """The stage a profile STARTS at — the one whose queue state is its front door."""
+    """The first stage a role runs. Kept for callers that want the stage object; the
+    role's door no longer lives on it."""
     stages = profile_stages(profile_name, cfg)
     return stages[0] if stages else None
 
 
 def profile_for_state(state: str, cfg: Settings) -> str:
-    """The profile an item in this ADO state should run, or "" if none claims it.
-
-    Matches a profile's ENTRY stage, not any stage it contains: "Ready for Testing"
-    is where QC's work begins, and `full` merely passes through `test` on its way —
-    so only `qc` may claim that door. Without this a state would name several
-    profiles and the choice would come down to iteration order.
+    """The role an item in this ADO state should run, or "" if none claims it.
 
     This is the piece a central machine cannot work without. Role is not a property
     of the machine (one box runs them all) nor of the work-item type (a Bug is a Bug
     at every step); it is where the item stands right now, which only the ADO state
     records.
+
+    Two roles claiming one state is a genuine contradiction — the state cannot say
+    which role is due — so it is refused rather than broken by iteration order. It is
+    also now visible: both rows show the same door on one page.
     """
     wanted = (state or "").strip().lower()
     if not wanted:
         return ""
-    profiles = _profile_map(cfg)
     matches = [
-        name for name in sorted(profiles)
-        if (getattr(entry_stage(name, cfg), "queue_state", "") or "").strip().lower() == wanted
+        name for name, role in sorted(effective_roles(cfg).items())
+        if (role.waits_in or "").strip().lower() == wanted
     ]
-    if not matches:
-        return ""
     if len(matches) == 1:
         return matches[0]
-    # Several profiles start here — `analyze` opens both `ba` and `full`. Breaking the
-    # tie by iteration order would have wired "Ready for Analysis" to the one-stage
-    # `ba` and quietly never run the pipeline, so the wiring must SAY which.
-    chosen = ""
-    for name in matches:
-        stage = entry_stage(name, cfg)
-        want = (getattr(stage, "runs_profile", "") or "").strip()
-        if want:
-            chosen = want
-            break
-    if chosen and chosen in profiles:
-        return chosen
-    _log.warning(
-        "sdlc: several profiles start in this state — set 'runs_profile' on the stage",
-        state=state, candidates=matches,
-    )
+    if len(matches) > 1:
+        _log.warning(
+            "sdlc: two roles wait in the same state — give each its own",
+            state=state, roles=matches,
+        )
     return ""
 
 
 def auto_states(cfg: Settings) -> list[str]:
-    """Queue states whose stage is marked ``auto`` — the hand-offs that self-start."""
+    """Door states marked ``auto`` — the hand-offs that self-start."""
     out: list[str] = []
-    for stage in _catalog(cfg).values():
-        qs = (stage.queue_state or "").strip()
-        if qs and stage.auto and qs not in out:
-            out.append(qs)
+    for role in effective_roles(cfg).values():
+        door = (role.waits_in or "").strip()
+        if door and role.auto and door not in out:
+            out.append(door)
     return out
 
 
 def waiting_states(cfg: Settings) -> list[str]:
-    """Queue states explicitly marked NOT auto — they wait for a person to press Run."""
+    """Door states explicitly NOT auto — they wait for a person to press Run."""
     out: list[str] = []
-    for stage in _catalog(cfg).values():
-        qs = (stage.queue_state or "").strip()
-        if qs and not stage.auto and qs not in out:
-            out.append(qs)
+    for role in effective_roles(cfg).values():
+        door = (role.waits_in or "").strip()
+        if door and not role.auto and door not in out:
+            out.append(door)
     return out
 
 
 def entry_tag_for(profile_name: str, cfg: Settings) -> str:
-    """The one-shot tag that starts this profile regardless of the item's state."""
-    stage = entry_stage(profile_name, cfg)
-    own = (stage.entry_tag or "").strip() if stage else ""
+    """The one-shot tag that starts this role regardless of the item's state."""
+    role = effective_roles(cfg).get(profile_name)
+    own = (role.entry_tag or "").strip() if role else ""
     return own or (cfg.stage_entry_tag or "").strip()
 
 
 def entry_tags(cfg: Settings) -> dict[str, str]:
-    """``lower(tag) -> profile`` for every profile that has an entry door.
+    """``lower(tag) -> role`` for every role that names its own run-now tag.
 
-    The machine-wide tag maps to whichever profile the item's CURRENT state names,
-    so it is resolved at pickup rather than listed here.
+    The machine-wide tag maps to whichever role the item's CURRENT state names, so it
+    is resolved at pickup rather than listed here.
     """
     out: dict[str, str] = {}
-    for name in sorted(_profile_map(cfg)):
-        stage = entry_stage(name, cfg)
-        own = (stage.entry_tag or "").strip() if stage else ""
+    for name, role in sorted(effective_roles(cfg).items()):
+        own = (role.entry_tag or "").strip()
         if own:
             out[own.lower()] = name
     return out
 
 
 def working_state_for(profile_name: str, cfg: Settings) -> str:
-    """ADO state to show while this profile runs. Blank → the global one.
+    """ADO state to show while this role runs. Blank → the global one.
 
     Two roles running at once on one machine both reading "Active" is a board that
     cannot say who is holding the work — which is the whole reason a QC run should
     read "In Testing".
     """
-    stage = entry_stage(profile_name, cfg)
-    return (stage.working_state or "").strip() if stage else ""
+    role = effective_roles(cfg).get(profile_name)
+    return (role.shows or "").strip() if role else ""
 
 
 def resolve_profile_name(tags: list[str], work_item_type: str, cfg: Settings,
@@ -332,11 +352,13 @@ def decide(stage: SdlcStage, blocking: bool, iterations: int, budget: int) -> st
 def handoff_state(profile_name: str, cfg: Settings) -> str:
     """ADO state to set when ``profile_name`` completes — the next role's front door.
 
-    Keyed by profile, not by stage: ``dev`` and ``full`` both finish at the ``pr``
-    stage yet hand to different roles, so this cannot live on the stage the way the
-    entry wiring does. Falls back to ``resolved_state`` then blank.
+    A role's ``done`` is the next role's ``waits_in``; that is the whole chain, and
+    keeping both halves on one object is what lets a reader see it. Falls back to
+    ``resolved_state`` then blank.
     """
-    return (cfg.sdlc_profile_states or {}).get(profile_name) or cfg.resolved_state or ""
+    role = effective_roles(cfg).get(profile_name)
+    own = (role.done or "").strip() if role else ""
+    return own or cfg.resolved_state or ""
 
 
 def handoff_tag(profile_name: str, cfg: Settings) -> str:
@@ -346,7 +368,8 @@ def handoff_tag(profile_name: str, cfg: Settings) -> str:
     a completed profile already stops there; this tag is what says WHO it stopped
     for, which a board lane then claims. Blank = no tag hand-off for that profile.
     """
-    return (cfg.sdlc_profile_tags or {}).get(profile_name, "").strip()
+    role = effective_roles(cfg).get(profile_name)
+    return (role.done_tag or "").strip() if role else ""
 
 
 def handoff_collisions(cfg: Settings) -> list[tuple[str, str]]:

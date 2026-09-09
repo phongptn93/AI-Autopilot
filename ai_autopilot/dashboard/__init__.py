@@ -41,7 +41,7 @@ from ai_autopilot.board import (
     latest_records,
     parse_drop_map,
 )
-from ai_autopilot.config import SdlcStageWiring, config_file_path, matches_any_user
+from ai_autopilot.config import SdlcRole, config_file_path, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
 from ai_autopilot.data.entities import PipelineState, QualityKind
@@ -124,8 +124,8 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "lens_reset": ("green", "↩ Đã khôi phục bộ quy trình mặc định (BA / Dev / QC)."),
     "lens_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                             "vẫn được giữ."),
-    "relay_saved": ("green", "✅ Đã lưu dây chuyền (stage → state) và áp dụng ngay."),
-    "relay_cleared": ("green", "↩ Đã gỡ toàn bộ wiring — máy quay về dùng Trigger states."),
+    "roles_saved": ("green", "✅ Đã lưu vai trò (stage · cửa vào · cửa ra) và áp dụng ngay."),
+    "roles_cleared": ("green", "↩ Đã gỡ toàn bộ vai trò — máy quay về dùng Trigger states."),
     "ws_saved": ("green", "✅ Đã lưu workspace và áp dụng ngay (không cần khởi động lại)."),
     "ws_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                           "vẫn được giữ."),
@@ -1073,15 +1073,21 @@ def create_dashboard_router() -> APIRouter:
         )
         return _flash("/dashboard/board-views", "lens_saved")
 
-    @router.get("/relay", response_class=HTMLResponse)
-    async def relay_page(request: Request):
-        """The relay in one table: which ADO state each stage waits in, what it shows
-        while running, and whether it starts by itself.
+    @router.get("/relay")
+    async def relay_page_moved():
+        """The relay is now edited per ROLE, not per stage. Kept so old links land."""
+        return RedirectResponse("/dashboard/roles", status_code=301)
 
-        These three facts used to live in three different places keyed by three
-        different things — trigger_states, state_in_progress, sdlc_profile_states —
-        so nothing on screen showed that they described the same step. That is how a
-        QC hand-off became a trigger and reworked finished work.
+    @router.get("/roles", response_class=HTMLResponse)
+    async def roles_page(request: Request):
+        """One row per role: the stages it runs, and its way in and out.
+
+        Everything a role needs used to be spread over five places — the stage set in
+        YAML only, the door on the stage-keyed wiring, the hand-off in Settings under
+        a heading about a loop that does not gate it, the fallbacks elsewhere again.
+        Nothing on screen showed that one role's way OUT is the next role's way IN,
+        which is exactly the fact that, unseen, let a hand-off state be used as a
+        trigger and rework finished work (#8526).
         """
         c: Container = request.app.state.container
         cfg = c.config
@@ -1090,29 +1096,51 @@ def create_dashboard_router() -> APIRouter:
         except Exception:  # noqa: BLE001 — ADO down costs the picker, not the page
             states_by_type = {}
         known = sorted({(n or "").strip() for names in states_by_type.values() for n in names if n})
+
+        roles = sdlc_plan.effective_roles(cfg)
         catalog = sdlc_plan.stage_catalog(cfg)
-        profiles = sdlc_plan.profile_map(cfg)
-        # Which profiles start at each stage — the door it owns, if any.
-        entry_of: dict[str, list[str]] = {}
-        for name, stage_names in profiles.items():
-            if stage_names:
-                entry_of.setdefault(stage_names[0], []).append(name)
-        rows = [
-            {
-                "name": st.name, "role": st.role, "goal": st.goal,
-                "queue_state": st.queue_state, "working_state": st.working_state,
-                "entry_tag": st.entry_tag, "auto": st.auto,
-                "runs_profile": st.runs_profile,
-                "opens": sorted(entry_of.get(st.name, [])),
-                "in_profiles": sorted(p for p, ss in profiles.items() if st.name in ss),
-            }
-            for st in catalog.values()
-        ]
+        doors = [(r.waits_in or "").strip().lower() for r in roles.values()]
+        rows = []
+        for name, role in sorted(roles.items()):
+            door = (role.waits_in or "").strip()
+            # What actually gets applied, not what was typed: a blank `done` still
+            # falls back to resolved_state, so a chain drawn from the raw field would
+            # claim the item stops dead when the runtime is about to move it.
+            out_state = sdlc_plan.handoff_state(name, cfg).strip()
+            rows.append({
+                "name": name,
+                "stages": list(role.stages),
+                "waits_in": role.waits_in, "shows": role.shows, "entry_tag": role.entry_tag,
+                "done": role.done, "done_tag": role.done_tag, "auto": role.auto,
+                # The state the runtime will really set — role.done, or the fallback.
+                "effective_done": out_state,
+                # What each stage is for, so picking a stage set is not guesswork.
+                "goals": [
+                    {"name": s, "goal": getattr(catalog.get(s), "goal", "")}
+                    for s in role.stages
+                ],
+                # Two roles behind one door: the state cannot say which is due, so the
+                # runtime refuses it. Shown on both rows rather than only in a log.
+                "clash": bool(door) and doors.count(door.lower()) > 1,
+                # Where the item goes next — blank is a real answer (it stops).
+                "lands_on": next(
+                    (n for n, r in sorted(roles.items())
+                     if out_state and (r.waits_in or "").strip().lower() == out_state.lower()),
+                    "",
+                ),
+                "dead_end": bool(out_state) and not any(
+                    (r.waits_in or "").strip().lower() == out_state.lower() for r in roles.values()
+                ),
+            })
+
         flash = _take_flash(request)
         response = _TEMPLATES.TemplateResponse(
-            request, "relay.html",
-            _ctx(request, "relay", rows=rows, known_states=known, flash=flash,
-                 profiles={k: list(v) for k, v in sorted(profiles.items())},
+            request, "roles.html",
+            _ctx(request, "roles", rows=rows, known_states=known, flash=flash,
+                 all_stages=[
+                     {"name": s.name, "role": s.role, "goal": s.goal}
+                     for s in catalog.values()
+                 ],
                  trigger_states=cfg.trigger_states,
                  effective_states=cfg.effective_trigger_states,
                  # What the wiring actually CHANGED. Two identical rows of chips
@@ -1129,55 +1157,58 @@ def create_dashboard_router() -> APIRouter:
                  ],
                  entry_tag=cfg.stage_entry_tag,
                  collisions=sdlc_plan.handoff_collisions(cfg),
+                 resolved_state=cfg.resolved_state,
                  in_progress=cfg.state_in_progress),
         )
         if flash is not None:
             response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
         return response
 
-    @router.post("/relay")
-    async def save_relay(request: Request):
-        """Save the stage wiring. A row with no queue state is simply not wired."""
+    @router.post("/roles")
+    async def save_roles(request: Request):
+        """Save the role definitions. Every field of a row belongs to that role, so a
+        row is saved whenever it says anything at all — there is no half-row to drop."""
         c: Container = request.app.state.container
         form = await request.form()
         if form.get("reset"):
-            updates = {"sdlc_stage_wiring": {}}
+            # Clearing writes an EMPTY map rather than removing the key: absent means
+            # "derive from the deprecated keys", which would resurrect the very wiring
+            # the operator just asked to be rid of.
+            updates = {"sdlc_roles": {}}
             settings_form.save_to_yaml(config_file_path(), updates)
             settings_form.apply_to_config(c.config, updates)
-            _log.info("relay wiring cleared via dashboard")
-            return _flash("/dashboard/relay", "relay_cleared")
+            _log.info("roles cleared via dashboard")
+            return _flash("/dashboard/roles", "roles_cleared")
 
-        wiring: dict[str, dict] = {}
+        roles: dict[str, dict] = {}
         for key in form:
-            if not key.startswith("stage_") or not key.endswith("_queue"):
+            if not key.startswith("role_") or not key.endswith("_waits"):
                 continue
-            name = key[len("stage_"):-len("_queue")]
-            queue = str(form.get(f"stage_{name}_queue", "")).strip()
-            working = str(form.get(f"stage_{name}_working", "")).strip()
-            tag = str(form.get(f"stage_{name}_tag", "")).strip()
-            runs = str(form.get(f"stage_{name}_profile", "")).strip()
-            auto = bool(form.get(f"stage_{name}_auto"))
-            # No queue state = not wired. Keeping a half-row would leave a working
-            # state or an auto flag with no door to apply to, which reads as
-            # configured and does nothing.
-            if not queue:
-                continue
-            wiring[name] = {
-                "queue_state": queue, "working_state": working,
-                "entry_tag": tag, "auto": auto, "runs_profile": runs,
+            name = key[len("role_"):-len("_waits")]
+            roles[name] = {
+                "stages": form.getlist(f"role_{name}_stages"),
+                "waits_in": str(form.get(f"role_{name}_waits", "")).strip(),
+                "shows": str(form.get(f"role_{name}_shows", "")).strip(),
+                "entry_tag": str(form.get(f"role_{name}_tag", "")).strip(),
+                "done": str(form.get(f"role_{name}_done", "")).strip(),
+                "done_tag": str(form.get(f"role_{name}_done_tag", "")).strip(),
+                "auto": bool(form.get(f"role_{name}_auto")),
             }
-        settings_form.save_to_yaml(config_file_path(), {"sdlc_stage_wiring": wiring})
+        settings_form.save_to_yaml(config_file_path(), {"sdlc_roles": roles})
         # YAML takes plain dicts; the live config must get validated objects, or the
         # very next poll reads a raw dict where a model is expected.
         settings_form.apply_to_config(c.config, {
-            "sdlc_stage_wiring": {k: SdlcStageWiring(**v) for k, v in wiring.items()}
+            "sdlc_roles": {k: SdlcRole(**v) for k, v in roles.items()}
         })
-        _log.info("relay wiring updated via dashboard", stages=sorted(wiring))
+        _log.info("roles updated via dashboard", roles=sorted(roles))
         await c.audit_repo.record(
-            actor="dashboard", source="dashboard", action="config.relay_updated",
-            target=", ".join(f"{k}->{v['queue_state']}" for k, v in sorted(wiring.items()))[:300],
+            actor="dashboard", source="dashboard", action="config.roles_updated",
+            target=", ".join(
+                f"{k}: {v['waits_in'] or '—'}→{v['done'] or 'stop'}"
+                for k, v in sorted(roles.items()) if v["waits_in"] or v["done"]
+            )[:300],
         )
-        return _flash("/dashboard/relay", "relay_saved")
+        return _flash("/dashboard/roles", "roles_saved")
 
     @router.get("/reviews", response_class=HTMLResponse)
     async def reviews(request: Request):
@@ -1608,7 +1639,12 @@ def create_dashboard_router() -> APIRouter:
                           id=item_id, tag=held_live)
 
         profile = (view.profile or "").strip()
-        if profile and c.config.sdlc_loop_enabled:
+        # Stamp the role whatever the run mode. This used to be gated on
+        # sdlc_loop_enabled, which is a HEADLESS switch — so on an interactive machine
+        # (the default) pressing Run on the QC board said nothing about QC, and the
+        # run fell back to whatever the item's state happened to resolve to. A person
+        # pressing a role's Run button IS the statement of which role is due.
+        if profile:
             prefix = (c.config.sdlc_profile_tag_prefix or "sdlc:").strip()
             wanted = f"{prefix}{profile}"
             for tag in (item.tags if item else []):

@@ -196,7 +196,7 @@ def check_relay_wiring(config: Settings) -> list[Finding]:
                 f"Stage '{name}' starts {' and '.join(opens)}, so an item arriving in "
                 "that state names more than one. Nothing runs from it until the tie "
                 "is broken.",
-                "Pick one on the stage's row at /dashboard/relay (runs_profile).",
+                "Pick one on the role's row at /dashboard/roles (runs_profile).",
             ))
     return out or [Finding(OK, "Relay wiring is unambiguous")]
 

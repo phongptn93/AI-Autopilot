@@ -655,7 +655,7 @@ class SdlcStage(BaseModel):
     role: str = ""                 # ba|design|dev|qc|review|pr (free string, for display)
     goal: str = ""                 # what the stage should achieve (Claude picks the skill)
     skill: str = ""                # OPTIONAL pin: "/implement-task-be {id}" | "route" | ""
-    artifact_skill: str = ""       # optional HTML producer, e.g. "technical-note" (Phase 2)
+    artifact_skill: str = ""       # optional HTML producer, e.g. "technical-note"
     gate: str = "hard"             # soft|hard
     produces_pr: bool = False      # this stage opens the PR
 
@@ -718,6 +718,37 @@ class SdlcStageWiring(BaseModel):
     # would have to mean two things. ``sdlc_profile_states`` keys it correctly.
     # The entry side has no such problem — only a profile's FIRST stage is consulted,
     # and each profile has its own.
+
+
+class SdlcRole(BaseModel):
+    """One role in the relay: the stages it runs, and its way in and out.
+
+    This supersedes ``SdlcStageWiring``. That model hung the door on the STAGE, but
+    only a profile's FIRST stage could own one — so four fields were silently inert on
+    every other row, ``pr`` rendered a door no state could open, and two profiles
+    sharing an entry stage needed ``runs_profile`` to break a tie that only existed
+    because the door was on the wrong object. Every one of those disappears by
+    construction once the door belongs to the role: a role has exactly one, always.
+
+    The way out lives here too. Splitting it off into ``sdlc_profile_states`` was the
+    residue of the old shape — a stage could not own a ``done`` state because ``dev``
+    and ``full`` share the ``pr`` stage, but a ROLE can, because the role *is* the
+    thing that hands off. Keeping both halves in one object is the point: a reader can
+    see that one role's ``done`` is the next role's ``waits_in``, which is exactly what
+    nobody could see when these lived on separate pages (#8526).
+
+    Blank ``done`` is a real answer, not a missing one: the item stops there and waits
+    for a person. That is the default, because auto-advancing a finished hand-off is
+    the mistake that reworked completed items.
+    """
+
+    stages: list[str] = []     # stage names in order, resolved against the catalog
+    waits_in: str = ""         # ADO state an item waits in for this role (the door)
+    entry_tag: str = ""        # one-shot "run now" tag; blank → the shared stage_entry_tag
+    shows: str = ""            # state while it runs (blank → global state_in_progress)
+    done: str = ""             # state when it finishes (blank → stop, wait for a person)
+    done_tag: str = ""         # tag added when it finishes (blank → none)
+    auto: bool = False         # may the poller start it with nobody pressing Run?
 
 
 class ScheduledLoop(BaseModel):
@@ -1361,10 +1392,16 @@ class Settings(BaseSettings):
     sdlc_profile_tag_prefix: str = "sdlc:"
     # Map work-item type → profile, e.g. {"Bug": "dev", "User Story": "full"}.
     sdlc_type_profiles: dict[str, str] = Field(default_factory=dict)
-    # Board wiring per stage name, overlaid on the built-in catalog so adding a queue
-    # state to "test" does not mean restating its goal and gate. See SdlcStageWiring.
-    # E.g. {"implement": {"queue_state": "Ready for Development", "auto": true},
-    #       "test": {"queue_state": "Ready for Testing", "working_state": "In Testing"}}
+    # ── The relay, keyed by ROLE (this is the one to set) ──
+    # role name → the stages it runs plus its way in and out. See SdlcRole. E.g.
+    # {"dev": {"stages": ["implement", "review", "pr"],
+    #          "waits_in": "Ready for Development", "shows": "In Development",
+    #          "done": "Ready for Testing", "auto": true}}
+    # Empty → built from the four deprecated keys below, so an existing install is
+    # unchanged until it is saved once from the Roles page.
+    sdlc_roles: dict[str, SdlcRole] = Field(default_factory=dict)
+    # DEPRECATED — superseded by sdlc_roles; still read so old configs keep working.
+    # Board wiring per stage name, overlaid on the built-in catalog. See SdlcStageWiring.
     sdlc_stage_wiring: dict[str, SdlcStageWiring] = Field(default_factory=dict)
     # One-shot "start this stage now" tag, for a queue state marked auto=false.
     # Such a state is deliberately NOT in the poll query, so a manual start cannot go
@@ -1372,11 +1409,14 @@ class Settings(BaseSettings):
     # very thing that says which role is due. A tag is found regardless of state, and
     # is consumed on pickup. A stage may name its own via ``entry_tag``.
     stage_entry_tag: str = "autopilot-run"
+    # DEPRECATED — superseded by sdlc_roles.stages.
     # Extra / overriding profiles merged over the built-ins (name → ordered stage names).
     sdlc_profiles: dict[str, list[str]] = Field(default_factory=dict)
+    # DEPRECATED — superseded by sdlc_roles.done.
     # Handoff: profile name → ADO state to set when its stages complete (the next
     # machine's trigger_states pick it up). Blank/absent → reuse resolved_state.
     sdlc_profile_states: dict[str, str] = Field(default_factory=dict)
+    # DEPRECATED — superseded by sdlc_roles.done_tag.
     # Handoff, the tag twin of sdlc_profile_states: profile name -> tag added when its
     # stages complete. A tag needs no ADO process change (states belong to a work-item
     # type and an admin has to define them), and the poller ALREADY ignores an item
@@ -1733,8 +1773,20 @@ class Settings(BaseSettings):
         return self.model_copy(update=updates)
 
     def _stage_wiring(self) -> list[tuple[str, bool]]:
-        """``(queue_state, auto)`` from every wired stage — inline and overlay."""
+        """``(door state, auto)`` for every wired role — the poll query's amendments.
+
+        Reads ``sdlc_roles`` when it is set and the deprecated stage-keyed wiring
+        otherwise, so an install that has not been saved from the Roles page yet keeps
+        the exact pickup set it had. Only the operator's own config is consulted: the
+        built-in stage catalog lives in ``sdlc_plan`` and a default has no door.
+        """
         out: list[tuple[str, bool]] = []
+        if self.sdlc_roles:
+            for role in self.sdlc_roles.values():
+                door = str(stage_wiring_value(role, "waits_in", "") or "").strip()
+                if door:
+                    out.append((door, bool(stage_wiring_value(role, "auto", False))))
+            return out
         for stage in self.sdlc_stages or []:
             qs = (getattr(stage, "queue_state", "") or "").strip()
             if qs:

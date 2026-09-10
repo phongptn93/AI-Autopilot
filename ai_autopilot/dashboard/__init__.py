@@ -1124,7 +1124,7 @@ def create_dashboard_router() -> APIRouter:
 
         roles = sdlc_plan.effective_roles(cfg)
         catalog = sdlc_plan.stage_catalog(cfg)
-        doors = [(r.waits_in or "").strip().lower() for r in roles.values()]
+        doors = [d.lower() for r in roles.values() for d in sdlc_plan.role_doors(r)]
         # A door that is ALSO a trigger state is the one place this page silently
         # rewrites a setting made on another page: the role's own autonomy wins, so
         # leaving `auto` off REMOVES that state from the poll query. Deliberate — the
@@ -1134,7 +1134,7 @@ def create_dashboard_router() -> APIRouter:
         triggers = {(t or "").strip().lower() for t in cfg.trigger_states if (t or "").strip()}
         rows = []
         for name, role in sorted(roles.items()):
-            door = (role.waits_in or "").strip()
+            own_doors = sdlc_plan.role_doors(role)
             # What actually gets applied, not what was typed: a blank `done` still
             # falls back to resolved_state, so a chain drawn from the raw field would
             # claim the item stops dead when the runtime is about to move it.
@@ -1153,18 +1153,21 @@ def create_dashboard_router() -> APIRouter:
                 ],
                 # Two roles behind one door: the state cannot say which is due, so the
                 # runtime refuses it. Shown on both rows rather than only in a log.
-                "clash": bool(door) and doors.count(door.lower()) > 1,
+                "doors": own_doors,
+                "clash": any(doors.count(d.lower()) > 1 for d in own_doors),
                 # "This door is also a trigger state" — with `auto` off the state is
                 # dropped from the poll query, with it on the state is added.
-                "is_trigger": bool(door) and door.lower() in triggers,
+                "is_trigger": [d for d in own_doors if d.lower() in triggers],
                 # Where the item goes next — blank is a real answer (it stops).
                 "lands_on": next(
                     (n for n, r in sorted(roles.items())
-                     if out_state and (r.waits_in or "").strip().lower() == out_state.lower()),
+                     if out_state and any(d.lower() == out_state.lower()
+                                          for d in sdlc_plan.role_doors(r))),
                     "",
                 ),
                 "dead_end": bool(out_state) and not any(
-                    (r.waits_in or "").strip().lower() == out_state.lower() for r in roles.values()
+                    d.lower() == out_state.lower()
+                    for r in roles.values() for d in sdlc_plan.role_doors(r)
                 ),
             })
 

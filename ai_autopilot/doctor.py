@@ -144,12 +144,11 @@ def check_role_doors_vs_triggers(config: Settings) -> list[Finding]:
         return []
     removed, added = [], []
     for name, role in sorted(sdlc_plan.effective_roles(config).items()):
-        door = (getattr(role, "waits_in", "") or "").strip()
-        if not door:
-            continue
-        if door.lower() in triggers:
-            bucket = added if getattr(role, "auto", False) else removed
-            bucket.append((name, triggers[door.lower()]))
+        # Every door, not just the first: a role with two queues can collide on either.
+        for door in sdlc_plan.role_doors(role):
+            if door.lower() in triggers:
+                bucket = added if getattr(role, "auto", False) else removed
+                bucket.append((name, triggers[door.lower()]))
     out: list[Finding] = []
     for name, state in removed:
         out.append(Finding(

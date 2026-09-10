@@ -161,8 +161,8 @@
         <div class="rl-f">
           <label>Waits in (ADO state)</label>
           <input type="text" class="rl-in" name="role_{{ r.name }}_waits" value="{{ r.waits_in }}"
-                 list="rl-states" placeholder="blank = not wired">
-          <span class="rl-hint">The door. An item here is this role's turn.</span>
+                 list="rl-states" placeholder="blank = not wired · comma-separate for several">
+          <span class="rl-hint">The door. An item here is this role's turn. Several states? Separate them with commas — new work and rework are the same person's two queues.</span>
         </div>
 
         <div class="rl-f">
@@ -208,15 +208,15 @@
             <input type="checkbox" name="role_{{ r.name }}_auto" {% if r.auto %}checked{% endif %}>auto
           </label>
           <span class="rl-hint">
-            {% if r.auto %}Adds <b>{{ r.waits_in or 'its door' }}</b> to the poll query.
+            {% if r.auto %}Adds <b>{{ r.doors | join(', ') if r.doors else 'its door' }}</b> to the poll query.
             {% else %}Waits for ▶ Run or the run-now tag.{% endif %}
           </span>
-          {% if r.is_trigger %}
+          {% if r.is_trigger %}{% set clash_doors = r.is_trigger | join(', ') %}
           <span class="rl-hint {{ '' if r.auto else 'bad' }}">
             {% if r.auto %}
-              <b>{{ r.waits_in }}</b> is also a Trigger state — this role owns it either way.
+              <b>{{ clash_doors }}</b> is also a Trigger state — this role owns it either way.
             {% else %}
-              ⚠ <b>{{ r.waits_in }}</b> is a <b>Trigger state</b> in Settings, and this box
+              ⚠ <b>{{ clash_doors }}</b> is a <b>Trigger state</b> in Settings, and this box
               being off <b>removes it from the poll query</b> — the autopilot stops picking
               up items sitting there. Tick auto, or take it out of Trigger states.
             {% endif %}

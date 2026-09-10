@@ -743,7 +743,11 @@ class SdlcRole(BaseModel):
     """
 
     stages: list[str] = []     # stage names in order, resolved against the catalog
-    waits_in: str = ""         # ADO state an item waits in for this role (the door)
+    # ADO state(s) an item waits in for this role — the door. Comma-separated for a
+    # role with more than one queue (e.g. Dev takes new work from "Ready for
+    # Development" and rejected work back from "Rework Required"). Kept as one string
+    # so every config written before multiple doors existed reads back unchanged.
+    waits_in: str = ""
     entry_tag: str = ""        # one-shot "run now" tag; blank → the shared stage_entry_tag
     shows: str = ""            # state while it runs (blank → global state_in_progress)
     done: str = ""             # state when it finishes (blank → stop, wait for a person)
@@ -1783,9 +1787,14 @@ class Settings(BaseSettings):
         out: list[tuple[str, bool]] = []
         if self.sdlc_roles:
             for role in self.sdlc_roles.values():
-                door = str(stage_wiring_value(role, "waits_in", "") or "").strip()
-                if door:
-                    out.append((door, bool(stage_wiring_value(role, "auto", False))))
+                auto = bool(stage_wiring_value(role, "auto", False))
+                raw = str(stage_wiring_value(role, "waits_in", "") or "")
+                # A role may wait in SEVERAL states (new work and rework are the same
+                # person's two queues), so every one of them amends the poll query.
+                for part in raw.replace(chr(10), ",").split(","):
+                    door = part.strip()
+                    if door:
+                        out.append((door, auto))
             return out
         for stage in self.sdlc_stages or []:
             qs = (getattr(stage, "queue_state", "") or "").strip()

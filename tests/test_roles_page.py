@@ -301,3 +301,44 @@ def test_a_role_run_now_tag_of_its_own_saves(tmp_path, monkeypatch):
         assert resp.cookies["autopilot_flash"] == "roles_saved"
         saved = client.app.state.container.config.sdlc_roles["dev"]
         assert saved.entry_tag == "vm-claude-autopilot-run-dev"
+
+
+def test_a_role_can_wait_in_more_than_one_state(tmp_path):
+    """One door was too few for a real board: a developer takes new work from
+    "Ready for Development" AND takes rejected work back from "Rework Required" — same
+    person, same stages, two queues. The second queue had no owner at all."""
+    from ai_autopilot.execution.sdlc_plan import profile_for_state, role_doors
+
+    cfg = Settings(sdlc_roles={"dev": SdlcRole(
+        stages=["implement"], waits_in="Ready for Development, Rework Required",
+        auto=True,
+    )})
+    assert role_doors(cfg.sdlc_roles["dev"]) == ["Ready for Development", "Rework Required"]
+    assert profile_for_state("Rework Required", cfg) == "dev"
+    assert profile_for_state("Ready for Development", cfg) == "dev"
+    # Both doors amend the poll query, so both queues are actually swept.
+    polled = {s.lower() for s in cfg.effective_trigger_states}
+    assert {"ready for development", "rework required"} <= polled
+
+
+def test_both_doors_are_shown_on_the_row(tmp_path):
+    with _client(
+        tmp_path,
+        sdlc_roles={"dev": SdlcRole(stages=["implement"],
+                                    waits_in="Ready for Development, Rework Required",
+                                    auto=True)},
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        assert "Ready for Development, Rework Required" in page
+
+
+def test_two_roles_clashing_on_the_second_door_is_still_caught(tmp_path):
+    """A role with two queues can collide on either — checking only the first would
+    have let the state that cannot say who is due through."""
+    from ai_autopilot.execution import sdlc_plan
+
+    cfg = Settings(sdlc_roles={
+        "dev": SdlcRole(stages=["implement"], waits_in="Ready for Development, Rework Required"),
+        "qc": SdlcRole(stages=["test"], waits_in="Rework Required"),
+    })
+    assert sdlc_plan.profile_for_state("Rework Required", cfg) == ""   # refused, not guessed

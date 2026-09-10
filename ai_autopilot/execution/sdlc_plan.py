@@ -83,6 +83,33 @@ PROFILES: dict[str, list[str]] = {
 }
 
 
+def role_doors(role: object) -> list[str]:
+    """Every ADO state this role waits in — a role may have more than one door.
+
+    One door was too few for a real board. A developer takes new work from
+    "Ready for Development" AND takes rejected work back from "Rework Required": same
+    person, same stages, two queues. With a single ``waits_in`` the second queue had no
+    owner at all, and the only way to start it was to tag the item by hand.
+
+    Stored as ONE comma-separated string rather than a list so every config written
+    before this reads back unchanged and no migration is needed; blank entries and
+    duplicates are dropped, order is kept.
+    """
+    raw = getattr(role, "waits_in", "") if not isinstance(role, str) else role
+    out: list[str] = []
+    for part in str(raw or "").replace(chr(10), ",").split(","):
+        door = part.strip()
+        if door and door.lower() not in {d.lower() for d in out}:
+            out.append(door)
+    return out
+
+
+def first_door(role: object) -> str:
+    """The role's primary door — what a one-line summary should name."""
+    doors = role_doors(role)
+    return doors[0] if doors else ""
+
+
 def effective_roles(cfg: Settings) -> dict[str, SdlcRole]:
     """Every role this machine knows: what it runs, and its way in and out.
 
@@ -203,7 +230,7 @@ def profile_for_state(state: str, cfg: Settings) -> str:
         return ""
     matches = [
         name for name, role in sorted(effective_roles(cfg).items())
-        if (role.waits_in or "").strip().lower() == wanted
+        if any(d.lower() == wanted for d in role_doors(role))
     ]
     if len(matches) == 1:
         return matches[0]
@@ -219,9 +246,9 @@ def auto_states(cfg: Settings) -> list[str]:
     """Door states marked ``auto`` — the hand-offs that self-start."""
     out: list[str] = []
     for role in effective_roles(cfg).values():
-        door = (role.waits_in or "").strip()
-        if door and role.auto and door not in out:
-            out.append(door)
+        for door in role_doors(role) if role.auto else ():
+            if door not in out:
+                out.append(door)
     return out
 
 
@@ -229,9 +256,9 @@ def waiting_states(cfg: Settings) -> list[str]:
     """Door states explicitly NOT auto — they wait for a person to press Run."""
     out: list[str] = []
     for role in effective_roles(cfg).values():
-        door = (role.waits_in or "").strip()
-        if door and not role.auto and door not in out:
-            out.append(door)
+        for door in () if role.auto else role_doors(role):
+            if door not in out:
+                out.append(door)
     return out
 
 

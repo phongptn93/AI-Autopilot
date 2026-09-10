@@ -7,7 +7,13 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from ai_autopilot.config import Settings
-from ai_autopilot.data import Database, PrReviewerRepository, PrReviewerState
+from ai_autopilot.data import (
+    Database,
+    ExecutionRepository,
+    PrReviewerRepository,
+    PrReviewerState,
+)
+from ai_autopilot.data.entities import ExecutionStatus
 from ai_autopilot.models import ExecutionResult
 from ai_autopilot.services.reviewer_tracker import (
     VOTE_APPROVED,
@@ -52,7 +58,7 @@ class _FakeFeedback:
         self.verdict = verdict
 
     async def handle_feedback(self, item, branch, feedback, revision, repo="",
-                              review_only=False):
+                              review_only=False, pr_id=0):
         self.calls.append(feedback)
         return ExecutionResult.ok(item.id, "review", f"posted.\nVERDICT: {self.verdict}")
 
@@ -84,6 +90,7 @@ async def _make(ado, feedback, **overrides):
     db = Database("sqlite+aiosqlite:///:memory:")
     await db.create_all()
     repo = PrReviewerRepository(db)
+    executions = ExecutionRepository(db)
     async def bot_identity() -> dict:
         return await ado.get_connection_data()
 
@@ -92,6 +99,7 @@ async def _make(ado, feedback, **overrides):
 
     c = SimpleNamespace(
         config=config, ado=ado, feedback=feedback, pr_reviewer_repo=repo,
+        execution_repo=executions,
         bot_identity=bot_identity, mention_identity=mention_identity,
     )
     return ReviewerTrackerService(c), repo, db
@@ -170,7 +178,7 @@ async def test_new_commit_rearms_auto_review():
 async def test_failed_review_does_not_loop():
     class _FailingFeedback(_FakeFeedback):
         async def handle_feedback(self, item, branch, feedback, revision, repo="",
-                                  review_only=False):
+                                  review_only=False, pr_id=0):
             self.calls.append(feedback)
             return ExecutionResult.fail(item.id, "review", "boom")
 
@@ -388,3 +396,20 @@ async def test_commands_need_an_invitation_unless_a_mention_counts_as_one():
     handled.clear()
     await _run(_svc(pr_commands_on_any_pr=True), [{"is_bot": False}])
     assert handled == [3861]                               # the mention is the consent
+
+
+async def test_auto_review_lands_in_history():
+    # An auto-review is a full model run. Until it was recorded, the only trace it
+    # left was a log line: History could not answer "what has the bot reviewed, when,
+    # and at what cost".
+    ado = _FakeAdo([_pr([_bot_reviewer()])])
+    svc, _, db = await _make(ado, _FakeFeedback(), code_project="DxFactory")
+
+    await svc._scan()
+    await _drain(svc)
+
+    rows, total = await ExecutionRepository(db).search()
+    assert total == 1
+    assert rows[0].skill_used == "pr-auto-review"
+    assert rows[0].status is ExecutionStatus.SUCCESS
+    assert rows[0].project == "DxFactory"   # else the workspace filter hides it

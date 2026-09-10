@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import secrets
 import time
 from collections import Counter, OrderedDict
@@ -432,6 +433,19 @@ def work_item_link_base(cfg) -> str:
 
 _REVIEWS_CACHE: dict = {"at": 0.0, "data": None}
 _REVIEWS_TTL = 30.0
+
+_FEED_KEY_RE = re.compile(r"^(?:pr-)?[0-9]+$")
+
+
+def _feed_key(raw: str) -> str:
+    """Validate an activity-feed key from the URL before it reaches the filesystem.
+
+    The key is a string now (PR runs are keyed ``pr-<id>``) and it is interpolated
+    straight into a path, so it is held to exactly the two shapes we mint: ``<id>``
+    and ``pr-<id>``. Anything else yields "", which reads an empty feed rather than
+    whatever ``../..`` pointed at.
+    """
+    return raw if _FEED_KEY_RE.match(raw) else ""
 
 
 async def _pr_outcomes(c: Container) -> dict:
@@ -1723,19 +1737,25 @@ def create_dashboard_router() -> APIRouter:
         _log.info("board move", id=item_id, column=column, action=action)
         return Response(status_code=204)
 
+    # ``item_id`` is a str, not an int: PR-level runs (auto-review, comment commands)
+    # are keyed "pr-<id>" so they can't collide with a work item of the same number —
+    # see ``activity.pr_key``.
     @router.get("/activity/{item_id}", response_class=HTMLResponse)
-    async def activity_view(request: Request, item_id: int):
+    async def activity_view(request: Request, item_id: str):
         c: Container = request.app.state.container
-        feed = activity.read(c.config.workspace_directory, item_id)
+        feed = activity.read(c.config.workspace_directory, _feed_key(item_id))
         return _TEMPLATES.TemplateResponse(
-            request, "activity.html", _ctx(request, "board", item_id=item_id, feed=feed)
+            request, "activity.html",
+            _ctx(request, "board", item_id=item_id, feed=feed,
+                 is_pr=item_id.startswith("pr-")),
         )
 
     @router.get("/activity/{item_id}/partial", response_class=PlainTextResponse)
-    async def activity_partial(request: Request, item_id: int):
+    async def activity_partial(request: Request, item_id: str):
         c: Container = request.app.state.container
         return PlainTextResponse(
-            activity.read(c.config.workspace_directory, item_id) or "(no activity yet — waiting for the agent…)"
+            activity.read(c.config.workspace_directory, _feed_key(item_id))
+            or "(no activity yet — waiting for the agent…)"
         )
 
     @router.get("/history", response_class=HTMLResponse)

@@ -248,7 +248,7 @@ class FeedbackHandler:
 
     async def handle_feedback(
         self, item: WorkItemInfo, branch_name: str, feedback: str, revision: int,
-        repo: str = "", review_only: bool = False,
+        repo: str = "", review_only: bool = False, pr_id: int = 0,
     ) -> ExecutionResult:
         command = self._command_verb(feedback)
         self._log.info(
@@ -270,6 +270,7 @@ class FeedbackHandler:
         result = await self._executor.revise(
             item, branch_name, prompt, draft_pr=self._config.pr_is_draft,
             repo=repo, allow_no_changes=review_only, read_only=review_only,
+            pr_id=pr_id,
         )
         if result.success:
             self._log.info("feedback addressed", id=item.id, revision=revision, command=command)

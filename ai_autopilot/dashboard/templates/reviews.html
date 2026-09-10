@@ -160,6 +160,7 @@
                 {{ pr.repo }} · <code>{{ pr.source }}</code>
                 · by {{ pr.author }}{% if pr.age %} · {{ pr.age }} ago{% endif %}
                 {% if pr.work_item %} · WI #{{ pr.work_item }}{% endif %}
+                · <a class="table-link" href="/dashboard/activity/pr-{{ pr.id }}">👁 review activity</a>
             </div>
         </div>
         <div class="chips">

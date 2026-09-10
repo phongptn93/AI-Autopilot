@@ -16,29 +16,56 @@ RUNS_SUBDIR = Path(".autopilot") / "runs"
 _MAX_BYTES = 200_000  # only keep the readable tail
 
 
-def _path(workspace: str, item_id: int) -> Path:
+def pr_key(pr_id: int) -> str:
+    """Feed key for a PR-level run (auto-review, /review, /fix on a comment).
+
+    Work-item ids and PR ids are separate ADO namespaces that both land in this one
+    directory, and a review's work item is often synthetic (the PR id stands in when
+    the branch encodes no item) — so filing a review under a bare number would sooner
+    or later overwrite the feed of somebody's work item with the same number.
+    """
+    return f"pr-{pr_id}"
+
+
+def _path(workspace: str, item_id: int | str) -> Path | None:
+    """The feed file, or ``None`` when there is no workspace to put it in.
+
+    Without a workspace the path would be relative and the feed would be scattered
+    into whatever directory the process happens to run from — files nobody reads,
+    written into a checkout. No workspace, no feed.
+    """
+    if not workspace:
+        return None
     return Path(workspace) / RUNS_SUBDIR / f"{item_id}.activity.log"
 
 
-def clear(workspace: str, item_id: int) -> None:
+def clear(workspace: str, item_id: int | str) -> None:
+    path = _path(workspace, item_id)
+    if path is None:
+        return
     with contextlib.suppress(OSError):
-        _path(workspace, item_id).unlink()
+        path.unlink()
 
 
-def append(workspace: str, item_id: int, line: str) -> None:
+def append(workspace: str, item_id: int | str, line: str) -> None:
     """Append one timestamped activity line (best-effort; never raises)."""
+    path = _path(workspace, item_id)
+    if path is None:
+        return
     with contextlib.suppress(OSError):
-        path = _path(workspace, item_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%H:%M:%S")
         with path.open("a", encoding="utf-8") as f:
             f.write(f"[{ts}] {line}\n")
 
 
-def read(workspace: str, item_id: int) -> str:
+def read(workspace: str, item_id: int | str) -> str:
     """Return the tail of the activity log, or '' if none."""
+    path = _path(workspace, item_id)
+    if path is None:
+        return ""
     try:
-        data = _path(workspace, item_id).read_text(encoding="utf-8", errors="replace")
+        data = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
     return data[-_MAX_BYTES:] if len(data) > _MAX_BYTES else data

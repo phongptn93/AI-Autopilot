@@ -163,6 +163,19 @@ def command_threads(
     return out
 
 
+def command_verb(instruction: str | None, commands: list[str] | tuple[str, ...]) -> str:
+    """The leading ``/command`` in a comment, lower-cased, or ``"other"``.
+
+    Labels metrics and History rows, so it must stay a small closed set — the
+    instruction itself is free text a user wrote.
+    """
+    low = (instruction or "").lstrip().lower()
+    for cmd in commands or ():
+        if cmd.startswith("/") and low.startswith(cmd.lower()):
+            return cmd.lower()
+    return "other"
+
+
 # Offered right where a review ends, because that is the moment someone decides what
 # to do with it. A generic command list is a menu; this is the next step for THIS thread.
 FIX_OFFER = (

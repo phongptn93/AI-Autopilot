@@ -1497,7 +1497,7 @@ class ClaudeExecutor:
     async def revise(
         self, item: WorkItemInfo, branch: str, prompt: str,
         draft_pr: bool = False, repo: str = "", allow_no_changes: bool = False,
-        read_only: bool = False,
+        read_only: bool = False, pr_id: int = 0,
     ) -> ExecutionResult:
         """Address PR feedback on an EXISTING branch (push updates the open PR).
 
@@ -1506,10 +1506,12 @@ class ClaudeExecutor:
         mapping — see ``_revise_repo``. ``allow_no_changes`` (review-only commands) makes a
         run that produced no file changes count as SUCCESS — the agent reported via comment.
         ``read_only`` (advisory commands like /review) skips the checkout/worktree lifecycle
-        entirely — the agent inspects ``origin/<branch>`` and comments, changing nothing."""
+        entirely — the agent inspects ``origin/<branch>`` and comments, changing nothing.
+        ``pr_id`` names the PR the run belongs to; it keys the read-only run's activity
+        feed, which a work-item id cannot do (see ``activity.pr_key``)."""
         repo_path, base_branch = self._revise_repo(item, repo)
         if read_only:
-            return await self._run_read_only(item.id, repo_path, branch, prompt)
+            return await self._run_read_only(item.id, repo_path, branch, prompt, pr_id=pr_id)
         # Feedback on a PR an interactive session opened: work it in that session's
         # own scratch so the conversation can be resumed (see ``rework_scratch``).
         # Its console is idle by now — close it first, or two processes would be
@@ -1532,7 +1534,7 @@ class ClaudeExecutor:
         )
 
     async def _run_read_only(
-        self, item_id: int, repo: str, branch: str, prompt: str
+        self, item_id: int, repo: str, branch: str, prompt: str, pr_id: int = 0
     ) -> ExecutionResult:
         """Run an advisory command (e.g. /review) with no checkout at all.
 
@@ -1552,6 +1554,11 @@ class ClaudeExecutor:
         It is not a sandbox: ``Bash`` stays available because the review needs
         ``git diff``, and a shell can write files. That is why the dirty-check below
         remains — the deny list removes the likely accident, not every possibility.
+
+        Like every other run, it streams to the dashboard's activity feed. This is the
+        path that fires unattended on every PR the bot is added to, so it is the one an
+        operator has no other way to watch: without the feed a review is a single log
+        line, then silence for minutes, then a comment on ADO.
         """
         started = time.monotonic()
         # Only the fetch touches .git — serialise it against worktree bookkeeping,
@@ -1560,24 +1567,37 @@ class ClaudeExecutor:
             await self._git(["fetch", "origin", branch], repo, check=False)
         claude_cwd = self._config.workspace_directory or repo
         dirty_before = await self._git("status --porcelain", repo, check=False)
+        workspace = self._config.workspace_directory
+        feed = activity.pr_key(pr_id) if pr_id else item_id
         self._log.info(
-            "running claude (read-only, no checkout)", id=item_id, branch=branch, cwd=claude_cwd
+            "running claude (read-only, no checkout)", id=item_id, branch=branch,
+            cwd=claude_cwd, pr=pr_id or None,
+        )
+        activity.clear(workspace, feed)
+        activity.append(
+            workspace, feed,
+            f"🔍 read-only run started — {Path(repo).name} · {branch}"
+            + (f" · PR !{pr_id}" if pr_id else ""),
         )
         try:
             resume = await self._resume_for(repo, branch)
             claude_run = await self._run_claude(
                 prompt, claude_cwd, repo=repo, resume=resume,
                 disallowed_tools=list(_READ_ONLY_DENY),
+                on_event=lambda line: activity.append(workspace, feed, line),
             )
             await self._save_session(repo, branch, claude_run)
+            activity.append(workspace, feed, "✅ read-only run finished")
             result = ExecutionResult.ok(item_id, prompt, claude_run.text)
             apply_usage(result, claude_run)
         except TimeoutError:
             minutes = self._config.task_timeout_minutes
             self._log.error("read-only run timed out", id=item_id, minutes=minutes)
+            activity.append(workspace, feed, f"⏱ timed out after {minutes} minutes")
             result = ExecutionResult.fail(item_id, prompt, f"Timed out after {minutes} minutes")
         except Exception as exc:  # noqa: BLE001
             self._log.error("read-only run failed", id=item_id, error=describe_exc(exc))
+            activity.append(workspace, feed, f"❌ run failed — {describe_exc(exc)}")
             result = ExecutionResult.fail(item_id, prompt, str(exc))
         # There's no isolation to throw away here, so a run that ignored the
         # "change nothing" contract would silently dirty the checkout — surface it.

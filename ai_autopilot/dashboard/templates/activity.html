@@ -2,8 +2,11 @@
 {% block content %}
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
     <div>
-        <h2>Live activity — #{{ item_id }}</h2>
-        <p>What the agent is doing right now. <a class="table-link" href="/dashboard/board">← back to Board</a></p>
+        <h2>Live activity — {% if is_pr %}PR !{{ item_id[3:] }}{% else %}#{{ item_id }}{% endif %}</h2>
+        <p>What the agent is doing right now.
+            {% if is_pr %}<a class="table-link" href="/dashboard/reviews">← back to Reviews</a>
+            {% else %}<a class="table-link" href="/dashboard/board">← back to Board</a>{% endif %}
+        </p>
     </div>
     <div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-muted)">
         <span class="live-dot"></span><span id="act-updated">auto-refresh 3s</span>

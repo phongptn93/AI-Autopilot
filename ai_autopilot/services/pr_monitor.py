@@ -27,10 +27,12 @@ from ai_autopilot.services.pr_feedback import (
 )
 from ai_autopilot.services.pr_feedback import (
     command_threads,
+    command_verb,
     is_bot_branch,
     parse_work_item_id,
     unowned_reason,
 )
+from ai_autopilot.services.run_history import close_run, open_run
 
 
 class PrMonitorService:
@@ -673,11 +675,15 @@ class PrMonitorService:
             # run added (see _bot_comment_ids).
             before = await self._bot_comment_ids(repo_id, pr_id)
             guard = contextlib.nullcontext() if advisory else lock
+            record = await open_run(
+                c, cfg, item, f"pr-command {command_verb(cmd['instruction'], cfg.comment_commands)}"
+            )
             async with guard, self._sem:
                 result = await c.feedback.handle_feedback(
                     item, branch, cmd["instruction"], revision,
-                    repo=repo_name, review_only=advisory,
+                    repo=repo_name, review_only=advisory, pr_id=pr_id,
                 )
+            await close_run(c, record, result)
             # Lock released: replies/board updates below don't touch the branch, and the
             # next queued command on it can start immediately.
             # Resolving below doesn't end the conversation: command detection is

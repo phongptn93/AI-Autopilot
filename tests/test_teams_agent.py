@@ -1317,13 +1317,13 @@ async def test_review_pr_denies_the_file_mutating_tools(monkeypatch, fake_claude
     assert "Bash" not in rec.last.disallowed_tools   # the review needs `git diff`
 
 
-async def test_advisory_run_denies_mutators_without_a_checkout(monkeypatch, fake_claude):
+async def test_advisory_run_denies_mutators_without_a_checkout(monkeypatch, fake_claude, tmp_path):
     """This path has NO worktree to discard — it runs against the shared workspace, so the
     deny list is the only thing standing between an advisory command and your checkout."""
     from ai_autopilot.execution.auto_reviewer import AutoReviewer
     from ai_autopilot.execution.claude_executor import ClaudeExecutor
 
-    cfg = Settings(workspace_directory=".")
+    cfg = Settings(workspace_directory=str(tmp_path))
     ex = ClaudeExecutor(cfg, AutoReviewer(cfg))
 
     async def fake_git(args, repo, check=True):
@@ -1334,7 +1334,7 @@ async def test_advisory_run_denies_mutators_without_a_checkout(monkeypatch, fake
     monkeypatch.setattr(ex, "_save_session", lambda repo, branch, run: asyncio.sleep(0))
     rec = fake_claude(ex, text="reviewed")
 
-    result = await ex._run_read_only(42, ".", "feature/be/42-x", "review this")
+    result = await ex._run_read_only(42, str(tmp_path), "feature/be/42-x", "review this")
     assert result.success
     for tool in ("Write", "Edit", "NotebookEdit"):
         assert tool in rec.last.disallowed_tools, tool

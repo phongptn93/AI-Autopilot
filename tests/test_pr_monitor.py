@@ -22,7 +22,7 @@ class _FakeAdo:
         return self.threads
 
     async def get_work_item(self, work_item_id):
-        return SimpleNamespace(id=work_item_id, title="t")
+        return WorkItemInfo(id=work_item_id, title="t")
 
     async def reply_to_pull_request_thread(self, repo_id, pr_id, thread_id, text):
         self.replies.append(text)
@@ -48,7 +48,7 @@ class _FakeFeedback:
         self.calls: list[str] = []
 
     async def handle_feedback(self, item, branch, feedback, revision, repo="",
-                              review_only=False):
+                              review_only=False, pr_id=0):
         self.calls.append(feedback)
         self.active += 1
         self.max_active = max(self.max_active, self.active)
@@ -76,6 +76,20 @@ async def _no_mention_identity():
     return None
 
 
+class _FakeExecutions:
+    """Records the History rows a PR command opens and closes."""
+
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    async def start_execution(self, item, skill, trigger_tag=None) -> int:
+        self.rows.append({"item": item.id, "skill": skill, "project": item.project, "result": None})
+        return len(self.rows) - 1
+
+    async def complete_execution(self, record_id: int, result) -> None:
+        self.rows[record_id]["result"] = result
+
+
 def _service(ado, feedback, **overrides) -> PrMonitorService:
     config = Settings(
         comment_command="/ai, /review", max_concurrent=4,
@@ -83,6 +97,7 @@ def _service(ado, feedback, **overrides) -> PrMonitorService:
     )
     c = SimpleNamespace(
         config=config, ado=ado, feedback=feedback, executor=None,
+        execution_repo=_FakeExecutions(),
         # No bot identity in these fakes → @mention detection is simply off, so these
         # tests keep exercising the plain /command path.
         bot_identity=_no_bot_identity, mention_identity=_no_mention_identity,
@@ -529,3 +544,20 @@ async def _record(sink, value):
 
 async def _no_bot():
     return ""
+
+
+async def test_pr_command_lands_in_history():
+    # /review is a full model run. Recorded, History can say what the bot was asked to
+    # do on which PR, and how it went; unrecorded it left only a log line.
+    ado = _FakeAdo([_thread(10, 1, "/review this")])
+    svc = _service(ado, _FakeFeedback(), ado_project="Khatoco", code_project="DxFactory")
+
+    await svc._inspect_pr("repo-1", "repo-a", _PR)
+    await asyncio.gather(*svc._tasks)
+
+    rows = svc._c.execution_repo.rows
+    assert len(rows) == 1
+    assert rows[0]["skill"] == "pr-command /review"
+    assert rows[0]["item"] == 42
+    assert rows[0]["project"] == "DxFactory"   # else the workspace filter hides it
+    assert rows[0]["result"].success is True   # closed with the run's outcome

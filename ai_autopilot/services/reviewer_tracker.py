@@ -34,9 +34,11 @@ from ai_autopilot.services.pr_feedback import (
 )
 from ai_autopilot.services.pr_feedback import (
     command_threads,
+    command_verb,
     is_bot_branch,
     parse_work_item_id,
 )
+from ai_autopilot.services.run_history import close_run, open_run
 
 # ADO reviewer vote scale.
 VOTE_APPROVED = 10
@@ -659,12 +661,7 @@ class ReviewerTrackerService:
         return lock
 
     def _verb(self, instruction: str) -> str:
-        """Leading /command in a comment (for metrics labels), or 'other'."""
-        low = (instruction or "").lstrip().lower()
-        for cmd in self._config.comment_commands:
-            if cmd.startswith("/") and low.startswith(cmd.lower()):
-                return cmd
-        return "other"
+        return command_verb(instruction, self._config.comment_commands)
 
     # ── Interactive commands (/review, /ai) on PRs the bot reviews ───────────
 
@@ -760,11 +757,15 @@ class ReviewerTrackerService:
             # whether it found anything is not knowable from the exit code.
             before = await self._bot_comment_ids(repo_id, pr_id)
             guard = contextlib.nullcontext() if advisory else lock
+            record = await open_run(
+                self._c, self._config, item, f"pr-command {self._verb(cmd['instruction'])}"
+            )
             async with guard, self._sem:
                 result = await c.feedback.handle_feedback(
                     item, branch, cmd["instruction"], revision=0,
-                    repo=repo_name, review_only=advisory,
+                    repo=repo_name, review_only=advisory, pr_id=pr_id,
                 )
+            await close_run(self._c, record, result)
             # Single source of truth (see Settings.comment_command_hint_html) — blank when
             # the command trigger is off.
             hint_html = self._config.comment_command_hint_html
@@ -850,11 +851,13 @@ class ReviewerTrackerService:
                     "review to it via the Task tool (it is purpose-built for PR review); "
                     "still end YOUR final response with the VERDICT line."
                 )
+            record = await open_run(self._c, self._config, item, "pr-auto-review")
             async with self._sem:
                 result = await c.feedback.handle_feedback(
                     item, branch, instruction, revision=0,
-                    repo=repo_name, review_only=True,
+                    repo=repo_name, review_only=True, pr_id=pr_id,
                 )
+            await close_run(self._c, record, result)
             vote: int | None = None
             if result.success:
                 vote = self._parse_verdict(result.output)

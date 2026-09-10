@@ -482,3 +482,30 @@ def test_build_prompt_legacy_is_skill_only(repo: Path):
     item = WorkItemInfo(id=42, title="x", work_item_type="Task")
     item.category = TaskCategory.BACKEND_TASK
     assert ex._build_prompt(item, "/api-controller 42", str(repo)) == "/api-controller 42"
+
+
+async def test_read_only_run_streams_to_the_pr_activity_feed(repo: Path, fake_claude):
+    # The auto-review path fires unattended on every PR the bot is added to, so its
+    # feed is the only way to watch one happen. It must stream like any other run,
+    # and under the PR's own key — not the work item's.
+    from ai_autopilot import activity
+    from ai_autopilot.models import WorkItemInfo
+
+    ws = repo.parent
+    ex = _executor(workspace_directory=str(ws))
+    rec = fake_claude(ex, text="findings posted")
+
+    item = WorkItemInfo(id=8946, title="t")
+    result = await ex.revise(
+        item, "dxfac/task-8946-x", "review it", repo=repo.name, read_only=True, pr_id=3882,
+    )
+    assert result.success is True
+    # Play back one streamed event the way the SDK does.
+    rec.last.kwargs["on_event"]("🔧 Bash · git diff origin/main")
+
+    feed = activity.read(str(ws), activity.pr_key(3882))
+    assert "read-only run started" in feed
+    assert "git diff origin/main" in feed          # the run is visible while it runs
+    assert "read-only run finished" in feed
+    assert "PR !3882" in feed
+    assert activity.read(str(ws), 8946) == ""      # work item #8946's own feed untouched

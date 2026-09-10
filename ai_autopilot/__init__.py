@@ -1,3 +1,3 @@
 """AI Autopilot — autonomously process Azure DevOps work items with the Claude Agent SDK."""
 
-__version__ = "2.28.0"
+__version__ = "2.28.1"

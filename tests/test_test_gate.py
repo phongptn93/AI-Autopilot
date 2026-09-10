@@ -72,3 +72,31 @@ async def test_gate_times_out(tmp_path):
     ).run(str(tmp_path))
     assert res.ran is True and res.passed is False
     assert "timed out" in res.summary
+
+
+def test_angular_is_not_detected_as_a_watch_run(tmp_path):
+    """`ng test` defaults to WATCH mode and wants a real browser, so plain `npm test`
+    never exits: the gate burns the whole timeout and reports a failure, blocking every
+    frontend PR for a reason that has nothing to do with the change."""
+    import json
+
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"test": "ng test"}}), encoding="utf-8")
+    cmd = detect_test_command(str(tmp_path))
+    assert "--watch=false" in cmd and "ChromeHeadless" in cmd
+
+
+def test_a_script_that_already_settles_watch_is_left_alone(tmp_path):
+    import json
+
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"test": "ng test --watch=false"}}), encoding="utf-8")
+    assert detect_test_command(str(tmp_path)) == "npm test --silent"
+
+
+def test_a_plain_node_test_script_is_unchanged(tmp_path):
+    import json
+
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"test": "jest"}}), encoding="utf-8")
+    assert detect_test_command(str(tmp_path)) == "npm test --silent"

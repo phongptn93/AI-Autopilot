@@ -155,3 +155,30 @@ def test_the_refusal_names_everyone_allowed_and_stays_bounded():
     shown = describe_users(long)
     assert shown.startswith("u0@x.vn · u1@x.vn") and "(+3 nữa)" in shown
     assert describe_users([]) == ""
+
+
+def test_the_test_command_is_resolved_per_repo():
+    """One command cannot serve a project with two stacks: dotnet test checks every
+    frontend change with the wrong runner, npm test does the same to the backend."""
+    cfg = Settings(
+        test_command="python -m pytest -q",
+        test_commands=[
+            "Backend-Fresh = dotnet test --nologo",
+            "Micro-Frontend = npm test -- --watch=false --browsers=ChromeHeadless",
+        ],
+    )
+    assert cfg.test_command_for("Backend-Fresh") == "dotnet test --nologo"
+    assert "--watch=false" in cfg.test_command_for("Micro-Frontend")
+    assert cfg.test_command_for("micro-frontend") == cfg.test_command_for("Micro-Frontend")
+    # A repo with no line of its own falls back to the flat setting.
+    assert cfg.test_command_for("Something-Else") == "python -m pytest -q"
+    assert cfg.test_command_for("") == "python -m pytest -q"
+
+
+def test_the_timeout_is_resolved_per_repo():
+    cfg = Settings(test_timeout_seconds=600, test_timeouts=["Backend-Fresh = 1800"])
+    assert cfg.test_timeout_for("Backend-Fresh") == 1800
+    assert cfg.test_timeout_for("Micro-Frontend") == 600
+    # Nonsense never takes the gate down — it falls back.
+    assert Settings(test_timeouts=["A = zero"]).test_timeout_for("A") == 600
+    assert Settings(test_timeouts=["A = -5"]).test_timeout_for("A") == 600

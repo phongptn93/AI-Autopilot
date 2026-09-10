@@ -278,7 +278,20 @@ FIELDS: tuple[Field, ...] = (
     Field("test_gate_enabled", "🧪 Auto-test-gate", "bool", "🧪 Quality gates",
           "Run the repo's test suite in the worktree before opening a PR; a red run blocks "
           "the PR and lowers the run score. Off = no test run."),
-    Field("test_command", "↳ Test command", "text", "🧪 Quality gates",
+    Field("test_commands", "↳ Test command per repo", "list", "🧪 Quality gates",
+          "One line per repo, <code>Repo = command</code>. A project with more than one "
+          "stack cannot be served by a single command — set dotnet test and every "
+          "frontend change is checked by the wrong runner, set npm test and every "
+          "backend one is. A repo with no line here falls back to the command below, "
+          "then to auto-detection.",
+          placeholder="Backend-Fresh = dotnet test --nologo"),
+    Field("test_timeouts", "↳ Test timeout per repo (seconds)", "list", "🧪 Quality gates",
+          "One line per repo, <code>Repo = seconds</code>. A .NET solution restoring and "
+          "building from a fresh worktree takes several times what a frontend unit run "
+          "does; one number for both means either the backend times out or the frontend "
+          "hangs for a quarter of an hour before anyone is told. A timeout BLOCKS the PR.",
+          placeholder="Backend-Fresh = 1800"),
+    Field("test_command", "↳ Test command (fallback for every repo)", "text", "🧪 Quality gates",
           "Command to run the tests (in the repo worktree). Blank = auto-detect "
           "(pytest / dotnet test / npm test); no runner found = skipped, never blocks."),
     Field("test_timeout_seconds", "↳ Test timeout (seconds)", "int", "🧪 Quality gates",

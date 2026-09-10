@@ -512,6 +512,41 @@ def check_effort(config: Settings) -> list[Finding]:
     return [Finding(OK, "Reasoning effort valid")]
 
 
+def check_test_gate_per_repo(config: Settings) -> list[Finding]:
+    """One test command cannot serve a project with more than one stack.
+
+    Set ``dotnet test`` and every frontend change is checked by the wrong runner; set
+    ``npm test`` and every backend one is. The remaining option, auto-detection, walks
+    into two traps of its own — an Angular ``ng test`` that never exits and a .NET
+    solution that restores from scratch — and a timeout BLOCKS the pull request, so the
+    failure lands on changes that had nothing to do with it.
+    """
+    if not config.test_gate_enabled:
+        return []
+    repos = [r for r in (config.allowed_repos or []) if str(r).strip()]
+    configured = {name.lower() for name, _ in config._pairs(config.test_commands)}
+    if len(repos) > 1 and not configured:
+        return [Finding(
+            WARN, f"One test command for {len(repos)} repos",
+            "Repos in scope: " + ", ".join(str(r) for r in repos[:6])
+            + ("…" if len(repos) > 6 else "")
+            + ". Whatever single command is set, it is the wrong runner for all but one "
+              "of them, and auto-detection is what the per-repo setting exists to avoid "
+              "having to trust.",
+            "Add a line per repo under Quality gates → Test command per repo, e.g. "
+            "'Backend-Fresh = dotnet test --nologo'.",
+        )]
+    missing = [r for r in repos if str(r).strip().lower() not in configured]
+    if configured and missing:
+        return [Finding(
+            WARN, f"{len(missing)} repo(s) fall back to the shared test command",
+            "No line for: " + ", ".join(str(r) for r in missing[:6])
+            + ("…" if len(missing) > 6 else ""),
+            "Give each repo its own line, or confirm the fallback really is right for it.",
+        )]
+    return [Finding(OK, "Test gate has a command per repo")] if configured else []
+
+
 def check_autonomy(config: Settings) -> list[Finding]:
     if config.autonomy_level != "unattended":
         return [Finding(OK, f"Autonomy level: {config.autonomy_level}")]
@@ -1101,7 +1136,7 @@ CHECKS = (
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
     check_deploy_stage,
     check_workspace, check_workspaces,
-    check_concurrency, check_delivery, check_effort,
+    check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,
     check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,

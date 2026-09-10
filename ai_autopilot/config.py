@@ -1467,6 +1467,13 @@ class Settings(BaseSettings):
     # Explicit test command; blank = auto-detect (pytest / dotnet test / npm test)
     # from the files in the worktree. No runner detected = skip (never blocks).
     test_command: str = ""
+    # Per-repo overrides, "<repo> = <command>" / "<repo> = <seconds>". A project with
+    # more than one stack cannot be served by one command: set `dotnet test` and every
+    # frontend change is checked by the wrong runner, set `npm test` and every backend
+    # one is. Before these existed the only way out was auto-detection, which walks
+    # into the two traps detect_test_command now avoids.
+    test_commands: list[str] = Field(default_factory=list)
+    test_timeouts: list[str] = Field(default_factory=list)
     test_timeout_seconds: int = 600
 
     # ── PR scoring ("get a score": grade each run from objective signals) ──
@@ -1840,6 +1847,47 @@ class Settings(BaseSettings):
                 out.append(qs)
                 seen.add(qs.lower())
         return out
+
+    def _pairs(self, entries: list[str]) -> list[tuple[str, str]]:
+        """``["a = b", ...]`` → ordered ``(key, value)``. Blank/keyless lines dropped."""
+        out: list[tuple[str, str]] = []
+        for entry in entries or []:
+            sep = "=" if "=" in str(entry) else (":" if ":" in str(entry) else "")
+            if not sep:
+                continue
+            key, value = str(entry).split(sep, 1)
+            if key.strip() and value.strip():
+                out.append((key.strip(), value.strip()))
+        return out
+
+    def test_command_for(self, repo: str) -> str:
+        """The test command for ``repo`` — its own entry, else the flat setting.
+
+        Blank means the caller falls back to auto-detection. Matched case-insensitively
+        because a repo name is typed by hand here and read from git elsewhere."""
+        want = (repo or "").strip().lower()
+        if want:
+            for name, cmd in self._pairs(self.test_commands):
+                if name.lower() == want:
+                    return cmd
+        return (self.test_command or "").strip()
+
+    def test_timeout_for(self, repo: str) -> int:
+        """Seconds to allow ``repo``'s tests — its own entry, else the flat setting.
+
+        A .NET solution restoring and building from a fresh worktree can take several
+        times what a frontend unit run does, and one number for both means either the
+        backend times out or the frontend hangs for a quarter of an hour before anyone
+        is told."""
+        want = (repo or "").strip().lower()
+        if want:
+            for name, value in self._pairs(self.test_timeouts):
+                if name.lower() == want:
+                    with contextlib.suppress(ValueError):
+                        seconds = int(float(value))
+                        if seconds > 0:
+                            return seconds
+        return self.test_timeout_seconds
 
     @property
     def effective_trigger_tags(self) -> list[str]:

@@ -56,11 +56,41 @@ def detect_test_command(work_dir: str) -> str | None:
         try:
             import json
 
-            if "test" in (json.loads(pkg.read_text(encoding="utf-8")).get("scripts") or {}):
+            scripts = json.loads(pkg.read_text(encoding="utf-8")).get("scripts") or {}
+            script = str(scripts.get("test", ""))
+            if script:
+                # `ng test` defaults to WATCH mode and wants a real browser, so plain
+                # `npm test` never exits: the gate then burns the whole timeout and
+                # reports a failure, blocking every frontend PR for a reason that has
+                # nothing to do with the change. Ask for the one-shot headless run
+                # unless the script already settles it.
+                if "ng test" in script and "--watch" not in script:
+                    return "npm test -- --watch=false --browsers=ChromeHeadless"
                 return "npm test --silent"
         except (OSError, ValueError):
             pass
     return None
+
+
+async def repo_name_for(work_dir: str) -> str:
+    """The repo a worktree belongs to, read from its ``origin`` remote.
+
+    Not from the path: a worktree is named ``r<item>-<digest>`` and carries no trace of
+    the repo, so per-repo settings had nothing to match on. Blank on any failure — the
+    caller then uses the flat setting, which is what a single-repo install wants anyway.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", work_dir, "remote", "get-url", "origin",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+    except Exception:  # noqa: BLE001 — identifying the repo must not break the gate
+        return ""
+    url = (out or b"").decode("utf-8", "replace").strip()
+    if not url:
+        return ""
+    return url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
 
 
 class TestGate:
@@ -74,12 +104,14 @@ class TestGate:
         if not self._config.test_gate_enabled:
             return TestResult(passed=True, ran=False, summary="test gate disabled")
 
-        cmd = self._config.test_command.strip() or detect_test_command(work_dir)
+        repo = await repo_name_for(work_dir)
+        cmd = self._config.test_command_for(repo) or detect_test_command(work_dir)
+        timeout = self._config.test_timeout_for(repo)
         if not cmd:
-            self._log.info("test gate: no runner detected — skipping", dir=work_dir)
+            self._log.info("test gate: no runner detected — skipping", dir=work_dir, repo=repo)
             return TestResult(passed=True, ran=False, summary="no test runner detected")
 
-        self._log.info("running test gate", dir=work_dir, cmd=cmd)
+        self._log.info("running test gate", dir=work_dir, repo=repo, cmd=cmd, timeout=timeout)
         try:
             proc = await asyncio.create_subprocess_shell(
                 cmd,
@@ -88,16 +120,23 @@ class TestGate:
                 stderr=asyncio.subprocess.STDOUT,
             )
             try:
-                out, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=self._config.test_timeout_seconds
-                )
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except TimeoutError:
                 proc.kill()
                 await proc.wait()
-                self._log.warning("test gate timed out", dir=work_dir, cmd=cmd)
+                # A timeout BLOCKS, so the note has to say which repo, which command and
+                # which setting to raise. The two ways to get here are a runner that
+                # never exits and a suite that genuinely needs longer than one global
+                # number allowed — and the reader cannot tell them apart without this.
+                self._log.warning("test gate timed out", dir=work_dir, repo=repo, cmd=cmd,
+                                  timeout=timeout,
+                                  hint="raise it for this repo under Quality gates → "
+                                       "test_timeouts, or fix a runner that never exits")
                 return TestResult(
                     passed=False, ran=True,
-                    summary=f"tests timed out after {self._config.test_timeout_seconds}s",
+                    summary=(f"tests timed out after {timeout}s"
+                             + (f" in {repo}" if repo else "")
+                             + f" (command: {cmd})"),
                 )
         except Exception as exc:  # noqa: BLE001 — a broken command must not crash the run
             self._log.warning("test gate failed to launch", cmd=cmd, error=describe_exc(exc))

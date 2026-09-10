@@ -55,12 +55,50 @@ def _ensure_dashboard_password() -> None:
     print("  Giving up after 3 attempts — starting WITHOUT a dashboard password.", file=sys.stderr)
 
 
-_USAGE = """usage: ai-autopilot [doctor | pr-doctor <pull request url>]
+_USAGE = """usage: ai-autopilot [doctor | pr-doctor <url> | evals [dir] [--min-pass-rate R]]
 
   (no argument)  start the autopilot (poller, PR babysitter, dashboard, webhooks)
   doctor         audit the configuration for coherence and exit
   pr-doctor URL  say why a comment on that pull request did not reach the autopilot
+  evals [dir]    run the agent-configuration eval suite (default dir: evals/) and exit
+                 non-zero when the pass rate is under --min-pass-rate (default 1.0)
 """
+
+
+def _run_evals(args: list[str]) -> int:
+    """``ai-autopilot evals`` — run the suite and return a shell exit code.
+
+    Threshold defaults to 1.0. A suite whose whole purpose is to catch a regression
+    should start by demanding no regression at all; a team that needs slack can say so
+    explicitly, which is a decision worth having on the command line where it is read.
+    """
+    import asyncio as _asyncio
+
+    from ai_autopilot import evals as evals_mod
+    from ai_autopilot.config import load_settings
+
+    directory, threshold = "evals", 1.0
+    rest = list(args)
+    if rest and not rest[0].startswith("-"):
+        directory = rest.pop(0)
+    for i, arg in enumerate(rest):
+        if arg == "--min-pass-rate" and i + 1 < len(rest):
+            try:
+                threshold = float(rest[i + 1])
+            except ValueError:
+                print(f"not a number: {rest[i + 1]}", file=sys.stderr)
+                return 2
+
+    cases = evals_mod.load_cases(directory)
+    if not cases:
+        print(f"No eval cases under {directory!r} — nothing to prove.", file=sys.stderr)
+        return 1
+    config = load_settings()
+    result = _asyncio.run(
+        evals_mod.run_suite(cases, evals_mod.claude_runner(config))
+    )
+    print(evals_mod.format_report(result, threshold))
+    return 0 if result.pass_rate >= threshold else 1
 
 
 def main() -> None:
@@ -79,6 +117,10 @@ def main() -> None:
             from ai_autopilot import pr_doctor
 
             sys.exit(pr_doctor.run(argv[1] if len(argv) > 1 else ""))
+        if argv[0] in ("evals", "--evals"):
+            # Same spirit as `doctor`: it must run without a live autopilot, because it
+            # is what CI calls on a change to the skills and rules that steer the agent.
+            sys.exit(_run_evals(argv[1:]))
         if argv[0] in ("-h", "--help", "help"):
             print(_USAGE)
             sys.exit(0)

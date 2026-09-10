@@ -1,0 +1,52 @@
+# Seed cases. Each asserts a FACT about how the configuration steers the agent, so it
+# survives a model upgrade — see evals/README.md for why that rule matters.
+
+- name: claude-md-is-loaded
+  # The cheapest possible regression: if setting_sources ever stops loading the project
+  # config, every other case in this suite silently starts grading a stock agent that
+  # has never read a single rule of ours. This one fails first and says so.
+  prompt: |
+    Read CLAUDE.md in this repository and answer in plain text, in one sentence:
+    what does it say about which language to reply in? If you cannot find CLAUDE.md,
+    say exactly: CLAUDE_MD_NOT_FOUND
+  cwd: "."
+  allowed_tools: ["Read", "Glob", "Grep"]
+  checks:
+    - kind: not_contains
+      value: CLAUDE_MD_NOT_FOUND
+
+- name: bugfix-workflow-demands-a-failing-test-first
+  # The skill's whole point is that a test which existed BEFORE the fix, and which the
+  # agent could not rewrite, is the proof the bug is gone. If an edit ever loosens that
+  # into "add a test afterwards", the skill still reads fine and no longer works.
+  prompt: |
+    Read .claude/skills/bugfix-workflow/SKILL.md and answer in plain text:
+    does it require reproducing the bug before fixing it? Quote the step.
+  cwd: "."
+  allowed_tools: ["Read", "Glob", "Grep"]
+  checks:
+    - kind: regex
+      value: "reproduc|repro"
+
+- name: security-review-names-owasp
+  # The skill exists to apply a named standard. A rewrite that drops the standard leaves
+  # a skill that sounds like a security review and grades against nothing in particular.
+  prompt: |
+    Read .claude/skills/security-review/SKILL.md and answer in plain text:
+    which published standard does it review against?
+  cwd: "."
+  allowed_tools: ["Read", "Glob", "Grep"]
+  checks:
+    - kind: contains
+      value: OWASP
+
+- name: the-repo-tests-still-pass
+  # Not a model check at all — a floor. If the suite is green while the code is red, the
+  # pass rate is measuring the wrong thing, and this case says so before anyone trusts it.
+  prompt: "Reply with exactly: OK"
+  cwd: "."
+  allowed_tools: []
+  timeout_seconds: 120
+  checks:
+    - kind: shell
+      value: python -m pytest -q tests/test_evals.py

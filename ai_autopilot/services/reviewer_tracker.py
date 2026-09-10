@@ -107,6 +107,41 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
+# The SDK's ProcessError builds its whole message from these two parts and discards the
+# real output, so a message that is ONLY these parts explains nothing.
+_SDK_BOILERPLATE = (
+    re.compile(r"command failed with exit code\s*-?\d+", re.I),
+    re.compile(r"\(exit code:\s*-?\d+\)", re.I),
+    re.compile(r"error output:\s*check stderr output for details", re.I),
+)
+
+
+def _failure_reason(error: str | None, limit: int = 400) -> str:
+    """What to tell a pull request when a run failed.
+
+    The SDK's ProcessError message is self-referential — it says the command failed and
+    sends the reader after output the SDK threw away — so pasting it onto a PR spends a
+    colleague's attention and gives them nothing. Seen on #3881.
+
+    Decided by what SURVIVES stripping that boilerplate, not by whether the boilerplate
+    is present: the CLI's real stderr is attached to the same message now, so the common
+    case is boilerplate WRAPPING the actual cause, and a test for the wrapper alone
+    would throw the cause away with it.
+    """
+    text = " ".join((error or "").split())
+    remainder = text
+    for pattern in _SDK_BOILERPLATE:
+        remainder = pattern.sub(" ", remainder)
+    remainder = " ".join(remainder.replace("Error output:", " ").split()).strip(" .:-")
+    if not remainder:
+        return ("agent không chạy được (tiến trình thoát sớm, chưa kịp báo lý do). "
+                "Log đầy đủ ở trang <b>History</b> của autopilot.")
+    if not text:
+        return ("lượt chạy kết thúc mà không báo lý do. Chi tiết ở trang "
+                "<b>History</b> của autopilot.")
+    return remainder if len(remainder) <= limit else remainder[:limit] + " …"
+
+
 class ReviewerTrackerService:
     def __init__(self, c: Container) -> None:
         self._c = c
@@ -792,9 +827,15 @@ class ReviewerTrackerService:
                 await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "fixed")
             else:
                 verb = "xem" if advisory else "xử lý"
+                # A pull request is read by colleagues and customers, so the failure
+                # note has to be worth their time. `result.error` can be the SDK's own
+                # "Command failed with exit code 1 / Check stderr output for details" —
+                # which names no cause and sends the reader after output that no longer
+                # exists. Say what is known, and point at the place that HAS the detail.
+                reason = _failure_reason(result.error)
                 await c.ado.reply_to_pull_request_thread(
                     repo_id, pr_id, tid,
-                    f"<div><b>⚠️ Chưa {verb} được:</b> {result.error}{hint}</div>",
+                    f"<div><b>⚠️ Chưa {verb} được:</b> {reason}{hint}</div>",
                 )
                 await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "active")
         except Exception as exc:  # noqa: BLE001 — a background task must not die silently

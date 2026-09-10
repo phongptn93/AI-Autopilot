@@ -77,3 +77,39 @@ async def test_deny_list_is_independent_of_the_allow_list(monkeypatch):
     options = await _run(monkeypatch, disallowed_tools=["Write"])
     assert options.disallowed_tools == ["Write"]
     assert not options.allowed_tools
+
+
+def test_the_cli_stderr_replaces_the_sdk_placeholder():
+    """ProcessError hardcodes stderr="Check stderr output for details" and throws the
+    real output away, so the only account of why the CLI died was a sentence pointing at
+    something unreachable — and this project posts that onto pull requests."""
+    from claude_agent_sdk import ProcessError
+
+    from ai_autopilot.execution.claude_client import _attach_stderr
+
+    exc = ProcessError("Command failed with exit code 1", exit_code=1,
+                       stderr="Check stderr output for details")
+    _attach_stderr(exc, ["error: credit balance is too low", "run /login"])
+
+    assert "credit balance is too low" in exc.stderr
+    assert "Check stderr output" not in str(exc)
+    assert "credit balance is too low" in str(exc)
+
+
+def test_stderr_the_sdk_actually_kept_is_left_alone():
+    from claude_agent_sdk import ProcessError
+
+    from ai_autopilot.execution.claude_client import _attach_stderr
+
+    exc = ProcessError("nope", exit_code=2, stderr="a real message the SDK captured")
+    _attach_stderr(exc, ["something we tailed"])
+    assert exc.stderr == "a real message the SDK captured"
+
+
+def test_an_exception_without_stderr_is_untouched():
+    """Explaining a failure must never become a second failure."""
+    from ai_autopilot.execution.claude_client import _attach_stderr
+
+    exc = ValueError("plain")
+    _attach_stderr(exc, ["tail"])
+    assert str(exc) == "plain"

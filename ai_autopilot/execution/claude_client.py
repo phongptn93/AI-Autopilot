@@ -9,6 +9,7 @@ of scraping stdout the way the legacy .NET CLI shell-out did.
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
@@ -25,6 +26,44 @@ from claude_agent_sdk import (
 
 from ai_autopilot import activity
 from ai_autopilot.logging_config import describe_exc, get_logger
+
+# How much of the CLI's stderr to keep. Enough to carry a stack tail or an auth refusal,
+# short enough that it can be shown to a person without burying the point.
+_STDERR_TAIL_LINES = 40
+
+# The SDK's placeholder for output it did not keep. Recognised by text because it is the
+# only handle there is: ProcessError sets it unconditionally, so a message carrying it
+# is one the SDK could not explain, not one that had nothing to say.
+_SDK_STDERR_PLACEHOLDER = "Check stderr output for details"
+
+
+def _attach_stderr(exc: BaseException, tail) -> None:
+    """Put the CLI's real stderr on the exception, replacing the SDK's placeholder.
+
+    ``ProcessError`` builds its message once in ``__init__`` and hardcodes
+    ``stderr="Check stderr output for details"`` — the output itself is discarded. The
+    result is a failure report that names no cause and directs the reader to something
+    unreachable, and this project posts ``result.error`` straight onto a pull request,
+    where colleagues and customers read it.
+
+    Best-effort in every direction: an exception with no ``stderr`` attribute, or one we
+    cannot write to, is left exactly as it was. Explaining a failure must never become a
+    second failure.
+    """
+    if not tail or not hasattr(exc, "stderr"):
+        return
+    captured = "\n".join(tail)
+    try:
+        current = getattr(exc, "stderr", None) or ""
+        if current and _SDK_STDERR_PLACEHOLDER not in current:
+            return                              # the SDK kept something real — leave it
+        exc.stderr = captured
+        message = str(exc)
+        if _SDK_STDERR_PLACEHOLDER in message:
+            exc.args = (message.replace(_SDK_STDERR_PLACEHOLDER, captured),)
+    except Exception:  # noqa: BLE001 — never fail while explaining a failure
+        pass
+
 
 _log = get_logger("execution.claude_client")
 
@@ -229,8 +268,22 @@ async def run_claude(
     if effort and effort_level is None:
         _log.warning("ignoring unknown effort level", effort=effort,
                      allowed=sorted(_EFFORT_LEVELS))
+    # The CLI's own stderr, kept because the SDK throws it away. On a non-zero exit it
+    # raises ProcessError(stderr="Check stderr output for details") — a placeholder, not
+    # the output — so the only account of WHY the CLI died was a sentence telling the
+    # reader to go and read something that no longer exists anywhere. That text has been
+    # posted verbatim onto pull requests.
+    stderr_tail: deque[str] = deque(maxlen=_STDERR_TAIL_LINES)
+
+    def _capture_stderr(line: str) -> None:
+        text = (line or "").strip()
+        if text:
+            stderr_tail.append(text)
+
     def _build_options(resume_id: str | None) -> ClaudeAgentOptions:
-        options = ClaudeAgentOptions(cwd=work_dir, permission_mode=permission_mode)
+        options = ClaudeAgentOptions(
+            cwd=work_dir, permission_mode=permission_mode, stderr=_capture_stderr,
+        )
         if allowed_tools is not None:
             # `[]` must mean "no tools" (e.g. pure-text classification callers) —
             # `if allowed_tools:` treated an empty list as falsy and silently left the
@@ -325,7 +378,7 @@ async def run_claude(
         try:
             run = await _attempt(resume_id)
             break
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             raise  # a timeout is a real failure — never silently re-run
         except Exception as exc:  # noqa: BLE001
             if resume_id:
@@ -334,6 +387,7 @@ async def run_claude(
                 )
                 resume_id = None
                 continue
+            _attach_stderr(exc, stderr_tail)
             if attempt_no < _TRANSIENT_RETRIES and _is_transient(exc):
                 delay = _TRANSIENT_BACKOFF * (2**attempt_no)
                 _log.warning(

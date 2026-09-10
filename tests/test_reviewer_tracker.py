@@ -413,3 +413,44 @@ async def test_auto_review_lands_in_history():
     assert rows[0].skill_used == "pr-auto-review"
     assert rows[0].status is ExecutionStatus.SUCCESS
     assert rows[0].project == "DxFactory"   # else the workspace filter hides it
+
+
+def test_the_sdk_placeholder_is_not_what_a_pull_request_is_told():
+    """Seen on PR #3881: the bot replied "Command failed with exit code 1 (exit code: 1)\n"
+    / Error output: Check stderr output for details". That names no cause and sends the
+    reader after output the SDK discarded — spent on a page colleagues and customers
+    read."""
+    from ai_autopilot.services.reviewer_tracker import _failure_reason
+
+    said = _failure_reason(chr(10).join([
+        "Command failed with exit code 1 (exit code: 1)",
+        "Error output: Check stderr output for details",
+    ]))
+    assert "Check stderr output" not in said
+    assert "exit code" not in said
+    assert "History" in said            # points at the place that HAS the detail
+
+
+def test_a_real_error_is_shown_as_it_is():
+    """Once the CLI's stderr is attached, the message carries the actual cause — that is
+    exactly what the reader needs, so it is passed through."""
+    from ai_autopilot.services.reviewer_tracker import _failure_reason
+
+    said = _failure_reason(chr(10).join([
+        "Command failed with exit code 1 (exit code: 1)",
+        "Error output: credit balance is too low",
+    ]))
+    assert "credit balance is too low" in said
+
+
+def test_a_very_long_error_is_trimmed():
+    from ai_autopilot.services.reviewer_tracker import _failure_reason
+
+    said = _failure_reason("boom " * 500)
+    assert len(said) <= 402 and said.endswith("…")
+
+
+def test_no_error_at_all_still_says_something_useful():
+    from ai_autopilot.services.reviewer_tracker import _failure_reason
+
+    assert "History" in _failure_reason("")

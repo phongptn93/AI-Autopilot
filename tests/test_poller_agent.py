@@ -1145,3 +1145,60 @@ def test_nothing_is_said_when_the_wiring_changes_no_state():
     svc._log = type("L", (), {"info": lambda _s, e, **kw: said.append(e)})()
     svc._log_trigger_amendments()
     assert said == []
+
+
+async def test_a_handoff_releases_the_item_so_the_next_role_can_run_it():
+    """The chain stopped dead after its first leg. _handle_agent_result tags the item
+    done, the poller skips every item carrying an outcome tag, and the hand-off then
+    set the next role's state — so the board showed the right column and nothing ever
+    ran there. It looked like a configuration mistake."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.models import ExecutionResult, WorkItemInfo
+    from ai_autopilot.services.poller import AdoPollerService
+
+    cfg = Settings(
+        processed_tag="autopilot-done",
+        sdlc_roles={
+            "dev": SdlcRole(stages=["implement"], waits_in="Ready for Development",
+                            done="Ready for Testing"),
+            "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing"),
+        },
+    )
+    ado = _FakeAdo()
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._c = SimpleNamespace(ado=ado)
+    svc._log = type("L", (), {"info": lambda *a, **k: None, "error": lambda *a, **k: None})()
+    item = WorkItemInfo(id=7, title="t", work_item_type="Requirement",
+                        state="Ready for Development", tags=["autopilot-done"])
+
+    await svc._apply_sdlc_handoff(item, ExecutionResult.ok(7, "dev", "done"), "dev")
+
+    assert (7, "Ready for Testing") in ado.states       # handed to qc's door…
+    assert (7, "autopilot-done") in ado.removed         # …and released so qc can run it
+
+
+async def test_a_handoff_nobody_waits_for_stays_done():
+    """A dead end is a deliberate parking spot — a person takes it from there, and the
+    item must keep the tag that stops the poller grabbing it again."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.models import ExecutionResult, WorkItemInfo
+    from ai_autopilot.services.poller import AdoPollerService
+
+    cfg = Settings(
+        processed_tag="autopilot-done",
+        sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing",
+                                   done="Ready for UAT")},
+    )
+    ado = _FakeAdo()
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._c = SimpleNamespace(ado=ado)
+    svc._log = type("L", (), {"info": lambda *a, **k: None, "error": lambda *a, **k: None})()
+    item = WorkItemInfo(id=8, title="t", work_item_type="Requirement",
+                        state="Ready for Testing", tags=["autopilot-done"])
+
+    await svc._apply_sdlc_handoff(item, ExecutionResult.ok(8, "qc", "done"), "qc")
+
+    assert (8, "Ready for UAT") in ado.states
+    assert ado.removed == []            # nobody waits there — it stays done

@@ -31,7 +31,7 @@ from ai_autopilot.execution.sdlc_plan import (
 )
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
-from ai_autopilot.outcomes import apply_outcome
+from ai_autopilot.outcomes import all_outcome_tags, apply_outcome
 from ai_autopilot.routing import plan_schedule, sort_by_priority
 from ai_autopilot.routing.planning_groups import group_by_links
 from ai_autopilot.services.planning_analyzer import run_due_plans
@@ -1090,11 +1090,23 @@ class AdoPollerService:
                 hint=f"'{state}' must exist on work-item type '{item.work_item_type}'",
             )
             return
+        # A hand-off to ANOTHER role means the item is not finished — it is queued for
+        # somebody else — so the outcome tag this run just applied has to come off.
+        # The poller skips every item carrying one, so with the tag left on, the relay
+        # set the state, the board showed the right column, and nothing ever ran there:
+        # the chain stopped dead after its first leg and looked like a configuration
+        # mistake. Cleared only when a role really does wait in the target state; a
+        # hand-off nobody waits for is a deliberate parking spot and stays done.
+        next_role = profile_for_state(state, cfg) if state else ""
+        if next_role and next_role != name:
+            for stale in all_outcome_tags(cfg):
+                await self._c.ado.remove_tag(item.id, stale)
         if tag:
             # The tag is what a board lane claims, so the next role sees the item in
             # its own queue rather than having to know which state means "mine".
             await self._c.ado.add_tag(item.id, tag)
-        self._log.info("sdlc handoff", id=item.id, profile=name, state=state, tag=tag)
+        self._log.info("sdlc handoff", id=item.id, profile=name, state=state, tag=tag,
+                       to=next_role or "(nobody waits — parked)")
 
     async def _dispatch_interactive(self, item: WorkItemInfo) -> None:
         """Launch a Remote-Control session for the item; finalise later from its result."""

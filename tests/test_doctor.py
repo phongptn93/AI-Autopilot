@@ -514,3 +514,30 @@ def test_the_assignee_trigger_tag_counts_as_a_trigger_tag_for_this_check():
     found = check_run_now_tags(cfg)
     assert [f.level for f in found] == [doctor.ERROR]
     assert "strip ownership" in found[0].detail
+
+
+def test_a_relay_that_loops_back_on_itself_is_an_error():
+    """A hand-off now releases the item so the next leg can run — which also means a
+    ring runs forever, one agent run per lap, showing up only as a work item that keeps
+    changing state on its own."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.doctor import check_role_chain_cycle
+
+    cfg = Settings(sdlc_roles={
+        "dev": SdlcRole(stages=["implement"], waits_in="Active", done="Ready for Testing"),
+        "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing", done="Active"),
+    })
+    found = check_role_chain_cycle(cfg)
+    assert len(found) == 1 and found[0].level == doctor.ERROR
+    assert "dev" in found[0].title and "qc" in found[0].title
+
+
+def test_a_chain_that_ends_somewhere_is_fine():
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.doctor import check_role_chain_cycle
+
+    cfg = Settings(sdlc_roles={
+        "dev": SdlcRole(stages=["implement"], waits_in="Active", done="Ready for Testing"),
+        "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing", done="Ready for UAT"),
+    })
+    assert check_role_chain_cycle(cfg) == []

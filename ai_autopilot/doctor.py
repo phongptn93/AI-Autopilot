@@ -219,6 +219,54 @@ def check_run_now_tags(config: Settings) -> list[Finding]:
     return [Finding(OK, "Run-now tags are unambiguous")] if shared or seen else []
 
 
+def check_role_chain_cycle(config: Settings) -> list[Finding]:
+    """A ring in the relay: role A hands to B, and B hands back to A.
+
+    A hand-off to another role now releases the item (its outcome tag is cleared) so the
+    next leg can actually run. That is what the chain needs, and it is also what turns a
+    ring into a machine that runs forever — every lap costs a full agent run, and the
+    only symptom is a work item that keeps changing state on its own.
+
+    Offline: the chain is entirely config.
+    """
+    from ai_autopilot.execution import sdlc_plan
+
+    roles = sdlc_plan.effective_roles(config)
+    nxt: dict[str, str] = {}
+    for name in roles:
+        target = sdlc_plan.handoff_state(name, config).strip()
+        if not target:
+            continue
+        landed = sdlc_plan.profile_for_state(target, config)
+        if landed and landed != name:
+            nxt[name] = landed
+
+    out: list[Finding] = []
+    for start in sorted(nxt):
+        seen, cur = [start], nxt.get(start)
+        while cur and cur not in seen:
+            seen.append(cur)
+            cur = nxt.get(cur)
+        if cur == start and len(seen) > 1:
+            # Rotate to the alphabetically first member so the same ring reported from
+            # each of its roles is recognised as ONE finding rather than N rotations.
+            pivot = seen.index(min(seen))
+            canon = seen[pivot:] + seen[:pivot]
+            ring = " → ".join(canon + [canon[0]])
+            if any(f.title.endswith(ring) for f in out):
+                continue
+            out.append(Finding(
+                ERROR, f"The relay loops: {ring}",
+                "Each role hands to the next, and the last hands back to the first. A "
+                "hand-off releases the item so the next role can run it, so this ring "
+                "runs forever — one agent run per lap — and shows up only as a work "
+                "item changing state on its own.",
+                "Break the ring at /dashboard/roles: give one of these roles a 'when "
+                "done' state no role waits in, or leave it blank so the item parks.",
+            ))
+    return out
+
+
 def check_deploy_stage(config: Settings) -> list[Finding]:
     """The 🚀 Deployed stage only fires under conditions nothing on the page states.
 
@@ -1051,7 +1099,8 @@ def check_board_processes(config: Settings) -> list[Finding]:
 
 CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
-    check_role_doors_vs_triggers, check_run_now_tags, check_deploy_stage,
+    check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
+    check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,

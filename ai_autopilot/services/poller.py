@@ -1262,6 +1262,10 @@ class AdoPollerService:
             self._log.warning("orphan finalize: fetch failed", error=describe_exc(exc))
             return
         live = cfg.live_tag.lower()
+        # Buffered: a restart strands every item a previous process was holding, so this
+        # produced one near-identical warning per item at exactly the moment the log is
+        # being read for why the restart happened.
+        newly_stranded: list[int] = []
         for item in tagged:
             if item.id in self._live or live not in {t.lower() for t in item.tags}:
                 continue
@@ -1275,16 +1279,27 @@ class AdoPollerService:
                 # pressing ▶ Run on it does nothing visible.
                 if item.id not in self._stranded:
                     self._stranded.add(item.id)
-                    self._log.warning(
-                        "item is tagged live but this process has no session for it",
-                        id=item.id, tag=cfg.live_tag,
-                        hint=f"if its console is gone, tag {cfg.restart_tag} to release it",
-                    )
+                    newly_stranded.append(item.id)
                 continue
             await self._remove_live_tag(item.id)
             self._stranded.discard(item.id)
             await self._handle_agent_result(item, result)
             self._processed[item.id] = datetime.now(UTC)
+        if newly_stranded:
+            # The remedy moved and this line did not follow it. ▶ Run has released a
+            # stranded live tag since it learned to ask the poller whether a session is
+            # REALLY running — the tag cannot answer that, only the in-memory table can.
+            # Naming the restart tag instead sent people to something heavier than the
+            # job needs: it releases the item by WIPING its SDLC progress and starting
+            # the whole profile again.
+            self._log.warning(
+                "items tagged live with no session in this process",
+                count=len(newly_stranded), ids=sorted(newly_stranded)[:12],
+                tag=cfg.live_tag,
+                hint="press ▶ Run on the board — it checks whether a session is really "
+                     f"running and clears the tag when none is. ({cfg.restart_tag} also "
+                     "releases it, but wipes the item's SDLC progress.)",
+            )
             if await self._close_live_session(item.id, run_dir):
                 await c.executor.release_scratch(run_dir)
             self._log.info("orphan interactive session finalized", id=item.id)

@@ -1079,7 +1079,12 @@ async def test_an_item_stranded_by_the_live_tag_is_reported_once():
     await p._finalize_orphan_sessions()           # a second scan must stay quiet
 
     assert len(warned) == 1
-    assert warned[0]["id"] == 8626
+    # The payload is a batch now: a restart strands every item the previous process
+    # held, and one warning each arrived at exactly the moment the log is being read.
+    assert warned[0]["ids"] == [8626] and warned[0]["count"] == 1
+    # The remedy named is the one that exists — ▶ Run — with the restart tag kept as
+    # the heavier alternative it is, since it releases the item by wiping its progress.
+    assert "▶ Run" in warned[0]["hint"]
     assert "autopilot-restart" in warned[0]["hint"]
 
 
@@ -1202,3 +1207,44 @@ async def test_a_handoff_nobody_waits_for_stays_done():
 
     assert (8, "Ready for UAT") in ado.states
     assert ado.removed == []            # nobody waits there — it stays done
+
+
+async def test_four_stranded_items_produce_one_line_not_four():
+    """The real restart that prompted this: ids 7463, 7695, 8470 and 9012 each got their
+    own near-identical warning. The single-item path is covered above; this is about the
+    wall of them."""
+    from ai_autopilot.models import WorkItemInfo
+    from ai_autopilot.services.poller import AdoPollerService
+
+    said: list[dict] = []
+
+    class _Exec:
+        @staticmethod
+        def interactive_scratch_dir(item_id):
+            return f"/scratch/{item_id}"
+
+        @staticmethod
+        def finalize_interactive(item, run_dir):
+            return None                     # the console died with its process
+
+    class _Ado:
+        async def get_all_tagged_work_items(self):
+            return [
+                WorkItemInfo(id=i, title="t", work_item_type="Task", state="Active",
+                             tags=["autopilot-live"])
+                for i in (7463, 7695, 8470, 9012)
+            ]
+
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = Settings(live_tag="autopilot-live", restart_tag="autopilot-restart")
+    svc._c = SimpleNamespace(ado=_Ado(), executor=_Exec())
+    svc._live = {}
+    svc._stranded = set()
+    svc._log = type("L", (), {
+        "warning": lambda _s, e, **kw: said.append(kw),
+        "info": lambda *a, **k: None,
+    })()
+
+    await svc._finalize_orphan_sessions()
+    assert len(said) == 1 and said[0]["count"] == 4
+    assert said[0]["ids"] == [7463, 7695, 8470, 9012]

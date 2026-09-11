@@ -9,6 +9,8 @@ of scraping stdout the way the legacy .NET CLI shell-out did.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -26,6 +28,10 @@ from claude_agent_sdk import (
 
 from ai_autopilot import activity
 from ai_autopilot.logging_config import describe_exc, get_logger
+
+# How often a run in flight says it is alive. Long enough not to crowd a log that is
+# already busy, short enough that somebody waiting gets an answer.
+_HEARTBEAT_SECONDS = 60
 
 # How much of the CLI's stderr to keep. Enough to carry a stack tail or an auth refusal,
 # short enough that it can be shown to a person without burying the point.
@@ -312,12 +318,37 @@ async def run_claude(
             options.effort = effort_level
         return options
 
+    # What the heartbeat reports on. A run is a single log line, then minutes of
+    # silence, then a result — so an operator watching the terminal cannot tell a long
+    # run from a wedged one, and the only honest answer to "is it still going?" was to
+    # wait and see. `quiet_for` is the number that actually answers it: a run producing
+    # events is working, a run that has produced none for minutes is not.
+    pulse = {"last": "", "at": time.monotonic(), "events": 0}
+
     def _emit(line: str) -> None:
-        if on_event and line.strip():
-            try:
-                on_event(line.strip())
-            except Exception:  # noqa: BLE001 — activity must never break the run
-                pass
+        text = line.strip()
+        if not text:
+            return
+        pulse["last"] = text[:140]
+        pulse["at"] = time.monotonic()
+        pulse["events"] += 1
+        if on_event:
+            # Activity must never break the run: the feed is a convenience, the run is not.
+            with contextlib.suppress(Exception):
+                on_event(text)
+
+    async def _heartbeat() -> None:
+        """Say the run is alive, and how long since it last did anything."""
+        started_at = time.monotonic()
+        while True:
+            await asyncio.sleep(_HEARTBEAT_SECONDS)
+            _log.info(
+                "claude run in flight",
+                elapsed_s=int(time.monotonic() - started_at),
+                quiet_for_s=int(time.monotonic() - pulse["at"]),
+                events=pulse["events"],
+                last=pulse["last"] or "(nothing yet)",
+            )
 
     async def _attempt(resume_id: str | None) -> ClaudeRun:
         run = ClaudeRun()
@@ -374,32 +405,43 @@ async def run_claude(
     # A timeout is never retried here — it propagates as a real failure.
     resume_id = resume
     run: ClaudeRun | None = None
-    for attempt_no in range(_TRANSIENT_RETRIES + 1):
-        try:
-            run = await _attempt(resume_id)
-            break
-        except TimeoutError:
-            raise  # a timeout is a real failure — never silently re-run
-        except Exception as exc:  # noqa: BLE001
-            if resume_id:
-                _log.warning(
-                    "resume failed — retrying from a fresh session", error=describe_exc(exc)
-                )
-                resume_id = None
-                continue
-            _attach_stderr(exc, stderr_tail)
-            if attempt_no < _TRANSIENT_RETRIES and _is_transient(exc):
-                delay = _TRANSIENT_BACKOFF * (2**attempt_no)
-                _log.warning(
-                    "transient claude error — retrying run",
-                    attempt=attempt_no + 1,
-                    of=_TRANSIENT_RETRIES,
-                    delay=delay,
-                    error=describe_exc(exc),
-                )
-                await asyncio.sleep(delay)
-                continue
-            raise
+    # The heartbeat covers the retries too: a run that is quietly backing off and
+    # re-running is exactly as invisible as one that is working.
+    beat = asyncio.create_task(_heartbeat())
+    try:
+        for attempt_no in range(_TRANSIENT_RETRIES + 1):
+            try:
+                run = await _attempt(resume_id)
+                break
+            except TimeoutError:
+                raise  # a timeout is a real failure — never silently re-run
+            except Exception as exc:  # noqa: BLE001
+                if resume_id:
+                    _log.warning(
+                        "resume failed — retrying from a fresh session", error=describe_exc(exc)
+                    )
+                    resume_id = None
+                    continue
+                _attach_stderr(exc, stderr_tail)
+                if attempt_no < _TRANSIENT_RETRIES and _is_transient(exc):
+                    delay = _TRANSIENT_BACKOFF * (2**attempt_no)
+                    _log.warning(
+                        "transient claude error — retrying run",
+                        attempt=attempt_no + 1,
+                        of=_TRANSIENT_RETRIES,
+                        delay=delay,
+                        error=describe_exc(exc),
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+    finally:
+        # Every way out — success, timeout, or giving up after the retries — has to
+        # stop the heartbeat, or the task outlives the run it was reporting on and a
+        # finished run goes on announcing itself.
+        beat.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await beat
     assert run is not None  # loop only exits via break (success) or raise
 
     if not run.text and run.transcript:

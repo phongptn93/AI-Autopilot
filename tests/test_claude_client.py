@@ -7,6 +7,8 @@ those run cheaper and faster, which is felt most on the chat path where someone 
 
 from __future__ import annotations
 
+import asyncio
+
 import ai_autopilot.execution.claude_client as cc
 from ai_autopilot.config import Settings
 
@@ -113,3 +115,44 @@ def test_an_exception_without_stderr_is_untouched():
     exc = ValueError("plain")
     _attach_stderr(exc, ["tail"])
     assert str(exc) == "plain"
+
+
+async def test_a_run_in_flight_says_it_is_alive_and_how_long_it_has_been_quiet(monkeypatch):
+    """A run was one log line, then minutes of silence, then a result — so an operator
+    watching the terminal could not tell a long run from a wedged one. Seen on a /review
+    of PR #3881: "running claude" at 02:41:39, then nothing but ADO poll lines."""
+    said: list[dict] = []
+    monkeypatch.setattr(cc, "_HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(cc._log, "info", lambda event, **kw: said.append({"e": event, **kw}))
+
+    async def _slow_query(prompt, options):
+        await asyncio.sleep(0.08)
+        if False:
+            yield None
+
+    monkeypatch.setattr(cc, "query", _slow_query)
+    await cc.run_claude("do a thing", ".", timeout_seconds=5)
+
+    beats = [s for s in said if s["e"] == "claude run in flight"]
+    assert beats, "a run in flight must say so"
+    # quiet_for is the number that answers "is it stuck?" — a run producing events is
+    # working, one that has produced none for minutes is not.
+    assert "quiet_for_s" in beats[0] and "elapsed_s" in beats[0]
+    assert beats[0]["last"] == "(nothing yet)"
+
+
+async def test_the_heartbeat_stops_when_the_run_does(monkeypatch):
+    """A finished run that goes on announcing itself is worse than silence."""
+    said: list[str] = []
+    monkeypatch.setattr(cc, "_HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(cc._log, "info", lambda event, **kw: said.append(event))
+
+    async def _quick_query(prompt, options):
+        if False:
+            yield None
+
+    monkeypatch.setattr(cc, "query", _quick_query)
+    await cc.run_claude("quick", ".", timeout_seconds=5)
+    said.clear()
+    await asyncio.sleep(0.06)
+    assert "claude run in flight" not in said

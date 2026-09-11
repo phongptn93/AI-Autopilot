@@ -21,7 +21,7 @@ import re
 from datetime import UTC, datetime
 from urllib.parse import quote
 
-from ai_autopilot import metrics
+from ai_autopilot import activity, metrics
 from ai_autopilot.config import describe_users, is_bot_signed, matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.data import QualityKind
@@ -116,7 +116,8 @@ _SDK_BOILERPLATE = (
 )
 
 
-def _failure_reason(error: str | None, limit: int = 400) -> str:
+def _failure_reason(error: str | None, limit: int = 400,
+                    ran_seconds: float | None = None, last_event: str = "") -> str:
     """What to tell a pull request when a run failed.
 
     The SDK's ProcessError message is self-referential — it says the command failed and
@@ -134,6 +135,16 @@ def _failure_reason(error: str | None, limit: int = 400) -> str:
         remainder = pattern.sub(" ", remainder)
     remainder = " ".join(remainder.replace("Error output:", " ").split()).strip(" .:-")
     if not remainder:
+        # "Thoát sớm" was a guess, and on PR #3881 it was wrong: the run worked for
+        # twenty minutes, read the repo, called the ADO MCP server — and only then went
+        # silent and died. The activity feed knows both of those things, so say them
+        # instead of inventing a story the reader then has to un-learn.
+        if ran_seconds and ran_seconds > 60:
+            detail = f"tiến trình dừng sau {int(ran_seconds) // 60} phút chạy"
+            if last_event:
+                detail += f", việc cuối cùng nó làm: <code>{last_event[:120]}</code>"
+            return (f"{detail}, và không kịp báo lý do. Xem diễn biến đầy đủ ở trang "
+                    "<b>History</b> / feed hoạt động của autopilot.")
         return ("agent không chạy được (tiến trình thoát sớm, chưa kịp báo lý do). "
                 "Log đầy đủ ở trang <b>History</b> của autopilot.")
     if not text:
@@ -832,7 +843,12 @@ class ReviewerTrackerService:
                 # "Command failed with exit code 1 / Check stderr output for details" —
                 # which names no cause and sends the reader after output that no longer
                 # exists. Say what is known, and point at the place that HAS the detail.
-                reason = _failure_reason(result.error)
+                ran = getattr(result, "duration_seconds", 0) or 0
+                last_line, _age = activity.last_event(
+                    self._config.workspace_directory, activity.pr_key(pr_id)
+                )
+                reason = _failure_reason(result.error, ran_seconds=ran,
+                                         last_event=last_line)
                 await c.ado.reply_to_pull_request_thread(
                     repo_id, pr_id, tid,
                     f"<div><b>⚠️ Chưa {verb} được:</b> {reason}{hint}</div>",

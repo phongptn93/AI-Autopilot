@@ -454,3 +454,30 @@ def test_no_error_at_all_still_says_something_useful():
     from ai_autopilot.services.reviewer_tracker import _failure_reason
 
     assert "History" in _failure_reason("")
+
+
+def test_a_long_run_that_died_is_not_called_an_early_exit():
+    """PR #3881: the run worked for twenty minutes — read the repo, called the ADO MCP
+    server — then went silent and died. Calling that "tiến trình thoát sớm" was a guess,
+    and a wrong one the reader then has to un-learn. The feed knows how long it ran and
+    what it last did; say that."""
+    from ai_autopilot.services.reviewer_tracker import _failure_reason
+
+    said = _failure_reason(
+        chr(10).join([
+            "Command failed with exit code 1 (exit code: 1)",
+            "Error output: Check stderr output for details",
+        ]),
+        ran_seconds=1231,
+        last_event="[02:52:22] mcp__ado-newoceanis__repo_pull_request",
+    )
+    assert "thoát sớm" not in said
+    assert "20 phút" in said
+    assert "repo_pull_request" in said        # what it was doing when it stopped
+
+
+def test_a_genuinely_early_exit_still_says_so():
+    from ai_autopilot.services.reviewer_tracker import _failure_reason
+
+    said = _failure_reason("Command failed with exit code 1 (exit code: 1)", ran_seconds=3)
+    assert "thoát sớm" in said

@@ -299,6 +299,39 @@ class ExecutionRepository:
             )
             return list(rows.scalars().all())
 
+    async def spend_since(
+        self, since: datetime, projects: list[str] | None = None,
+    ) -> dict:
+        """Tokens and cost booked since ``since`` — what the agent has spent today.
+
+        ``cost_usd`` is None on runs the CLI did not price, and summing None as zero
+        would report a confident total that is quietly short. The count of unpriced runs
+        travels with the number so the page can say the total is a floor, not a fact.
+        """
+        conds = [ExecutionRecord.started_at >= since]
+        project_cond = _project_cond(projects)
+        if project_cond is not None:
+            conds.append(project_cond)
+        async with self._db.session() as session:
+            row = (await session.execute(
+                select(
+                    func.count(),
+                    func.sum(ExecutionRecord.cost_usd),
+                    func.sum(ExecutionRecord.input_tokens),
+                    func.sum(ExecutionRecord.output_tokens),
+                    func.sum(ExecutionRecord.cache_read_tokens),
+                    func.sum(ExecutionRecord.cache_creation_tokens),
+                    func.count(ExecutionRecord.cost_usd),
+                ).where(*conds)
+            )).first()
+        runs, cost, inp, out, cread, ccreate, priced = row or (0, None, 0, 0, 0, 0, 0)
+        return {
+            "runs": int(runs or 0),
+            "cost_usd": float(cost) if cost is not None else None,
+            "tokens": int((inp or 0) + (out or 0) + (cread or 0) + (ccreate or 0)),
+            "unpriced": int(runs or 0) - int(priced or 0),
+        }
+
     async def get_stats(
         self, since: datetime | None = None, trigger_tag: str | None = None,
         projects: list[str] | None = None,

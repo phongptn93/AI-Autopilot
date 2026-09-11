@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>⏱ Đang chạy</h1>
+<p class="lead">
+  Lượt chạy đang diễn ra ngay lúc này. <b>History</b> ghi việc đã xong, <b>Board</b> ghi
+  việc đang ở đâu — còn khoảng giữa “bắt đầu chạy” và “có kết quả” thì trước đây không
+  có chỗ nào nhìn.
+  Cột <b>Im lặng</b> mới là cột trả lời “có bị treo không”: lượt chạy còn sinh sự kiện là
+  đang làm việc, lượt chạy vài phút không sinh gì mới là cái đáng để mắt tới.
+</p>
+
+<div class="nw-spend">
+  {% if spend %}
+    <div class="nw-stat"><span>Hôm nay</span><b>{{ spend.runs }}</b> lượt chạy</div>
+    <div class="nw-stat">
+      <span>Chi phí</span>
+      <b>{% if spend.cost_usd is not none %}${{ '%.2f'|format(spend.cost_usd) }}{% else %}—{% endif %}</b>
+      {% if spend.unpriced %}
+        <em title="CLI không báo giá cho {{ spend.unpriced }} lượt chạy, nên đây là mức sàn chứ không phải con số đủ">
+          ≥ ({{ spend.unpriced }} lượt chưa có giá)
+        </em>
+      {% endif %}
+    </div>
+    <div class="nw-stat"><span>Token</span><b>{{ '{:,}'.format(spend.tokens) }}</b></div>
+  {% endif %}
+</div>
+
+{% if runs %}
+<table class="nw-table">
+  <thead>
+    <tr>
+      <th>Việc</th>
+      <th>Chạy cái gì</th>
+      <th class="num">Đã chạy</th>
+      <th class="num">Im lặng</th>
+      <th>Việc cuối cùng nó làm</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in runs %}
+    {% set stuck = r.quiet is not none and r.quiet >= quiet_warn_seconds %}
+    <tr class="{{ 'nw-stuck' if stuck else '' }}">
+      <td>
+        {% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">#{{ r.id }}</a>
+        {% else %}#{{ r.id }}{% endif %}
+        <div class="nw-title">{{ r.title }}</div>
+        {% if r.project %}<div class="nw-proj">{{ r.project }}</div>{% endif %}
+      </td>
+      <td><code>{{ r.skill or '—' }}</code></td>
+      <td class="num">{% if r.elapsed is not none %}{{ r.elapsed // 60 }}m {{ r.elapsed % 60 }}s{% else %}—{% endif %}</td>
+      <td class="num">
+        {% if r.quiet is none %}
+          <span class="nw-nofeed" title="Không có feed hoạt động — chưa đặt workspace directory, hoặc lượt chạy này không ghi feed">không có feed</span>
+        {% else %}
+          <b>{{ r.quiet // 60 }}m {{ r.quiet % 60 }}s</b>
+        {% endif %}
+      </td>
+      <td class="nw-last">{{ r.last or '—' }}</td>
+      <td><a class="nw-watch" href="{{ r.feed_url }}">Xem trực tiếp →</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p class="nw-note">
+  Dòng tô đỏ là lượt chạy đã hơn {{ quiet_warn_seconds // 60 }} phút không sinh sự kiện nào.
+  Chưa chắc đã hỏng — một bước build hay một lần gọi model dài đều im lặng hợp lệ — nhưng
+  đó là chỗ đáng nhìn trước tiên.
+</p>
+{% else %}
+<div class="nw-empty">
+  <b>Không có lượt chạy nào đang diễn ra.</b>
+  <p>
+    Khi autopilot nhận một work item hoặc một lệnh <code>/review</code> trên PR, nó sẽ
+    hiện ở đây kèm thời gian chạy và việc nó vừa làm.
+  </p>
+</div>
+{% endif %}
+
+<style>
+  .lead { color: var(--muted); max-width: 70ch; line-height: 1.6; margin-bottom: 18px; }
+  .nw-spend { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 20px; }
+  .nw-stat { display: flex; align-items: baseline; gap: 8px; }
+  .nw-stat span { color: var(--muted); font-size: 12px; text-transform: uppercase;
+                  letter-spacing: .04em; }
+  .nw-stat b { font-size: 20px; }
+  .nw-stat em { color: var(--muted); font-size: 12px; font-style: normal; }
+  .nw-table { width: 100%; border-collapse: collapse; }
+  .nw-table th { text-align: left; font-size: 12px; text-transform: uppercase;
+                 letter-spacing: .04em; color: var(--muted); padding: 8px 10px;
+                 border-bottom: 1px solid var(--border); }
+  .nw-table td { padding: 10px; border-bottom: 1px solid var(--border);
+                 vertical-align: top; }
+  .nw-table .num { text-align: right; white-space: nowrap; }
+  .nw-title { color: var(--muted); font-size: 13px; margin-top: 2px; max-width: 46ch; }
+  .nw-proj { color: var(--muted); font-size: 11px; margin-top: 2px; opacity: .75; }
+  .nw-last { color: var(--muted); font-size: 12px; max-width: 52ch;
+             overflow-wrap: anywhere; }
+  .nw-nofeed { color: var(--muted); font-size: 12px; font-style: italic; }
+  .nw-stuck { background: rgba(220, 80, 80, .10); }
+  .nw-stuck .num b { color: #e06c6c; }
+  .nw-watch { white-space: nowrap; font-size: 13px; }
+  .nw-note, .nw-empty { color: var(--muted); font-size: 13px; line-height: 1.6;
+                        margin-top: 16px; max-width: 70ch; }
+  .nw-empty b { color: var(--fg); }
+</style>
+
+<script>
+  // The page answers "is it still going?", so it has to keep answering it. A reload
+  // beats a partial here: the rows are few and the numbers are all derived server-side.
+  setTimeout(function () { location.reload(); }, 15000);
+</script>
+
+{% endblock %}

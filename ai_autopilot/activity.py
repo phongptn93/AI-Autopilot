@@ -9,6 +9,7 @@ operator can watch the agent work in real time instead of staring at a silent
 from __future__ import annotations
 
 import contextlib
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -69,6 +70,30 @@ def read(workspace: str, item_id: int | str) -> str:
     except OSError:
         return ""
     return data[-_MAX_BYTES:] if len(data) > _MAX_BYTES else data
+
+
+def last_event(workspace: str, item_id: int | str) -> tuple[str, float | None]:
+    """The feed's newest line and how many seconds ago it was written.
+
+    ``(line, age)`` with ``age`` ``None`` when there is no feed at all. A run that is
+    producing lines is working; one whose newest line is minutes old is the case an
+    operator actually needs to spot, and neither is visible from a list of start times.
+    The file's mtime is the clock, so this costs a stat and does not read the tail.
+    """
+    path = _path(workspace, item_id)
+    if path is None:
+        return "", None
+    try:
+        age = max(0.0, time.time() - path.stat().st_mtime)
+        with path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 4096))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return "", None
+    lines = [ln.strip() for ln in tail.splitlines() if ln.strip()]
+    return (lines[-1] if lines else ""), age
 
 
 def tool_summary(name: str, tool_input: dict | None) -> str:

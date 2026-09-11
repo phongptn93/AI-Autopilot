@@ -40,6 +40,7 @@ def test_metrics_endpoint(client: TestClient):
     [
         "/dashboard",
         "/dashboard/delivery",
+        "/dashboard/now",
         "/dashboard/board",
         "/dashboard/planning",
         "/dashboard/history",
@@ -1251,3 +1252,45 @@ def test_the_suffixed_run_now_tag_saves_fine(tmp_path, monkeypatch):
         )
         assert resp.cookies.get("autopilot_flash") == "saved"
         assert client.app.state.container.config.stage_entry_tag == "vm-claude-autopilot-run"
+
+
+def test_the_now_page_shows_a_run_in_flight_and_how_long_it_has_been_quiet(tmp_path):
+    """Between "running claude" and its result, minutes later, there was nowhere to
+    look: History records runs that FINISHED, the Board records where work stands. And
+    the operator's second question — "is it stuck?" — is answered by how long the run
+    has been QUIET, which no start time can tell you."""
+    import asyncio
+
+    from ai_autopilot import activity
+    from ai_autopilot.data import Database, ExecutionRepository
+    from ai_autopilot.models import WorkItemInfo
+
+    ws = tmp_path / "ws"
+    url = f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}"
+    settings = Settings(database_url=url, workspace_directory=str(ws))
+    with TestClient(create_app(settings)) as client:
+        # Seed through a second connection to the same file: the app's engine lives on
+        # the portal's loop, and the row only has to exist, not to be written by it.
+        async def _seed():
+            db = Database(url)
+            await ExecutionRepository(db).start_execution(
+                WorkItemInfo(id=8946, title="enhance filter search",
+                             work_item_type="Task"),
+                "pr-command review",
+            )
+
+        asyncio.run(_seed())
+        activity.append(str(ws), activity.pr_key(8946), "🔧 Read src/app.py")
+
+        page = client.get("/dashboard/now").text
+        assert "8946" in page
+        assert "enhance filter search" in page
+        assert "Read src/app.py" in page          # what it last did
+        assert "/dashboard/activity/pr-8946" in page   # and where to watch it live
+
+
+def test_the_now_page_says_so_when_nothing_is_running(tmp_path):
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/now").text
+        assert "Không có lượt chạy nào đang diễn ra" in page

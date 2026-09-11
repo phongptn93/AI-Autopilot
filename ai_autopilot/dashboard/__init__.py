@@ -8,7 +8,7 @@ import re
 import secrets
 import time
 from collections import Counter, OrderedDict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 
@@ -507,6 +507,11 @@ async def _pr_outcomes(c: Container) -> dict:
         _PR_OUTCOME_CACHE.update(at=now, data=counts)
     return counts
 
+
+# How long a run may go without producing an event before the page calls it out. The
+# heartbeat in claude_client uses the same idea: a run producing events is working,
+# one that has produced none for minutes is the case worth a person's eye.
+_QUIET_WARN_SECONDS = 180
 
 _REVIEW_STATUSES = ("awaiting", "approved", "blocked", "conflicts", "partial", "draft")
 
@@ -1822,6 +1827,58 @@ def create_dashboard_router() -> APIRouter:
         removed = await c.execution_repo.clear_all()
         _log.info("execution history cleared via dashboard", removed=removed)
         return RedirectResponse(url="/dashboard/history", status_code=303)
+
+    @router.get("/now", response_class=HTMLResponse)
+    async def now_page(request: Request):
+        """What is running RIGHT NOW — the question the dashboard could not answer.
+
+        History is a record of runs that finished and the Board is a record of where
+        work stands; between "running claude" and its result, minutes later, there was
+        nowhere to look. The operator's two real questions are "what is it working on"
+        and "is it stuck", and the second is answered by how long the run has been
+        QUIET, not by how long it has been going.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        rows, _ = await c.execution_repo.search(status="Running", limit=50)
+        rows = await _scope_rows(request, c, rows)
+        link_base = work_item_link_base(cfg)
+        now = datetime.now(UTC)
+        runs = []
+        for r in rows:
+            # A PR-level run files its feed under "pr-<id>"; a work-item run under the
+            # bare id. Reading the wrong key would show an empty feed for half of them.
+            key = (activity.pr_key(r.work_item_id)
+                   if (r.skill_used or "").startswith("pr-")
+                   else r.work_item_id)
+            line, quiet = activity.last_event(cfg.workspace_directory, key)
+            started = r.started_at
+            if started is not None and started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            runs.append({
+                "id": r.work_item_id,
+                "title": r.title or f"#{r.work_item_id}",
+                "skill": r.skill_used or "",
+                "project": r.project or "",
+                "elapsed": int((now - started).total_seconds()) if started else None,
+                "quiet": int(quiet) if quiet is not None else None,
+                "last": line,
+                "feed_url": f"/dashboard/activity/{key}",
+                "url": f"{link_base}/{r.work_item_id}" if link_base else "",
+            })
+        runs.sort(key=lambda r: r["quiet"] if r["quiet"] is not None else -1, reverse=True)
+        # Spend since midnight, so the page answers "what is this costing today" without
+        # a second trip to Analytics.
+        spend = None
+        with contextlib.suppress(Exception):
+            _, in_scope = scope_of(request, cfg)
+            midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            spend = await c.execution_repo.spend_since(midnight, projects=in_scope)
+        return _TEMPLATES.TemplateResponse(
+            request, "now.html",
+            _ctx(request, "now", runs=runs, spend=spend,
+                 quiet_warn_seconds=_QUIET_WARN_SECONDS),
+        )
 
     @router.get("/queue", response_class=HTMLResponse)
     async def queue_page(request: Request, resumed: int = 0):

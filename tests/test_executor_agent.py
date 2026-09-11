@@ -29,20 +29,20 @@ def test_map_completed_with_pr():
         summary="done",
         artifacts=[Artifact(repo="Backend-Fresh", branch="feature/be/7-x", pr_url="https://pr")],
     )
-    r = ex._result_from_agent(_item(), agent, "assisted")
+    r = ex._result_from_agent(_item(), agent)
     assert r.success and r.pr_url == "https://pr" and r.branch_name == "feature/be/7-x"
 
 
 def test_map_needs_human():
     ex = _executor()
     agent = AgentResult(status="needs_human", needs_human=True, reason="AC ambiguous")
-    r = ex._result_from_agent(_item(), agent, "assisted")
+    r = ex._result_from_agent(_item(), agent)
     assert not r.success and r.needs_human and r.error == "AC ambiguous"
 
 
 def test_map_no_result_file_is_failure():
     ex = _executor()
-    r = ex._result_from_agent(_item(), None, "assisted")
+    r = ex._result_from_agent(_item(), None)
     assert not r.success and not r.needs_human and "no result file" in r.error.lower()
 
 
@@ -51,13 +51,13 @@ def test_no_result_file_reports_what_the_agent_actually_said():
     # WHY on the work item, not just that our bookkeeping file is missing.
     ex = _executor()
     text = "Không thể implement: #123 chưa tạo endpoint /api/v1/spareParts nên FE chưa gọi được."
-    r = ex._result_from_agent(_item(), None, "assisted", run_text=text)
+    r = ex._result_from_agent(_item(), None, run_text=text)
     assert "#123" in r.error and "endpoint" in r.error
     assert r.output == text
 
 
 def test_no_result_file_truncates_a_long_transcript():
-    r = _executor()._result_from_agent(_item(), None, "assisted", run_text="x" * 5000)
+    r = _executor()._result_from_agent(_item(), None, run_text="x" * 5000)
     assert len(r.error) < 600 and r.error.endswith("x")
     assert len(r.output) == 5000  # the full text is still recorded
 
@@ -70,18 +70,29 @@ def test_build_brief_treats_an_unlanded_dependency_as_a_hard_blocker():
     assert "Being blocked is a RESULT" in brief
 
 
-def test_map_completed_without_pr_is_failure_when_not_report():
-    ex = _executor()
-    agent = AgentResult(status="completed", summary="s", artifacts=[])
-    r = ex._result_from_agent(_item(), agent, "assisted")
-    assert not r.success  # claimed completed but produced no PR → don't trust it
+def test_a_completed_run_with_no_pr_is_a_success():
+    """This used to fail. Requiring a PR made "did the work" mean "wrote code" — a
+    dev-shaped assumption the relay broke: a QC role's proof is test cases and a filed
+    bug, a BA role's is a spec, and neither opens a pull request.
 
-
-def test_map_report_mode_completes_without_pr():
+    Seen on #8965: a QC run created twenty test cases, executed all twenty, reported
+    19 pass / 1 fail and filed the failure as a bug — and landed on the work item as
+    "❌ Chưa hoàn tất" with its own account of that work pasted in as the Error."""
     ex = _executor()
-    agent = AgentResult(status="completed", summary="planned", artifacts=[])
-    r = ex._result_from_agent(_item(), agent, "report")
+    agent = AgentResult(status="completed", summary="20 test cases, 19 pass", artifacts=[])
+    r = ex._result_from_agent(_item(), agent)
     assert r.success and r.pr_url is None
+    # The poller routes a PR-less success to the `report` outcome, which is what a QC
+    # or BA run is — so nothing is lost by no longer demanding a pull request.
+
+
+def test_a_run_that_did_not_declare_itself_complete_still_fails():
+    """The guard that remains: `completed` is the agent's own claim, and a run that
+    does not make it has not finished."""
+    ex = _executor()
+    agent = AgentResult(status="failed", summary="", reason="could not build", artifacts=[])
+    r = ex._result_from_agent(_item(), agent)
+    assert not r.success and "could not build" in r.error
 
 
 def test_build_brief_includes_contract_and_autonomy():

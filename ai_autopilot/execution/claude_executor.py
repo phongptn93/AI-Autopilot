@@ -364,7 +364,7 @@ class ClaudeExecutor:
                     activity.append(
                         workspace, item.id, "⚠️ result file missing — recovered from agent output"
                     )
-            result = self._result_from_agent(item, agent, autonomy, run_text=claude_run.text)
+            result = self._result_from_agent(item, agent, run_text=claude_run.text)
             apply_usage(result, claude_run)
         except TimeoutError:
             mins = self._config.task_timeout_minutes
@@ -1039,7 +1039,7 @@ class ClaudeExecutor:
         agent = find_result(run_dir, item.id)
         if agent is None:
             return None
-        return self._result_from_agent(item, agent, self._config.autonomy_level)
+        return self._result_from_agent(item, agent)
 
     # ── Interactive session lifetime: close the console when the item is done ──
 
@@ -1259,9 +1259,7 @@ class ClaudeExecutor:
             async with self._repo_lock(src_repo):
                 await self._git(["worktree", "prune"], src_repo, check=False)
 
-    def _result_from_agent(
-        self, item, agent, autonomy: str, run_text: str = ""
-    ) -> ExecutionResult:
+    def _result_from_agent(self, item, agent, run_text: str = "") -> ExecutionResult:
         if agent is None:
             # "No result file" describes OUR bookkeeping, not what went wrong — and it
             # is what the human sees on the work item. The agent almost always said
@@ -1282,8 +1280,21 @@ class ClaudeExecutor:
             result.output = agent.summary
             result.deviations = list(agent.deviations)
             return result
-        # report mode completes without a PR; otherwise a PR URL is required.
-        if agent.is_completed and (agent.pr_url or autonomy == "report"):
+        # A completed run is a success. Requiring a PR made "did the work" mean "wrote
+        # code" — a dev-shaped assumption the relay broke the moment roles arrived: a QC
+        # role's proof is test cases and a filed bug, a BA role's is a spec, and neither
+        # opens a pull request.
+        #
+        # Seen on #8965. A QC run analysed the scope, created twenty test cases
+        # (#9017-#9036), executed all twenty, reported 19 pass / 1 fail, filed the
+        # failure as a bug and wrote the report onto the work item — then landed on the
+        # item as "❌ Chưa hoàn tất", with its own account of that work pasted in as the
+        # Error. Thirty-six minutes of correct work, reported as a failure.
+        #
+        # Nothing is lost by dropping the PR condition: the poller already routes a
+        # success with no PR to the `report` outcome, which is exactly what a QC or BA
+        # run is. What still fails is a run that did NOT declare itself complete.
+        if agent.is_completed:
             result = ExecutionResult.ok(item.id, "agent", agent.summary)
             result.deviations = list(agent.deviations)
             result.pr_urls = [a.pr_url for a in agent.artifacts if a.pr_url]
@@ -1291,7 +1302,7 @@ class ClaudeExecutor:
             if agent.artifacts:
                 result.branch_name = agent.artifacts[0].branch or None
             return result
-        reason = agent.reason or agent.summary or "no PR produced"
+        reason = agent.reason or agent.summary or "the agent did not say why"
         self._log.warning("agent incomplete", id=item.id, status=agent.status, reason=reason)
         return ExecutionResult.fail(item.id, "agent", f"Agent did not complete: {reason}")
 

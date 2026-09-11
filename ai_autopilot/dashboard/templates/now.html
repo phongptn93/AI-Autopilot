@@ -12,14 +12,19 @@
 
 <div class="nw-spend">
   {% if spend %}
-    <div class="nw-stat"><span>Hôm nay</span><b>{{ spend.runs }}</b> lượt chạy</div>
+    <div class="nw-stat"><span>Đã chạy hôm nay</span><b>{{ spend.runs }}</b> lượt</div>
     <div class="nw-stat">
       <span>Chi phí</span>
-      <b>{% if spend.cost_usd is not none %}${{ '%.2f'|format(spend.cost_usd) }}{% else %}—{% endif %}</b>
-      {% if spend.unpriced %}
-        <em title="CLI không báo giá cho {{ spend.unpriced }} lượt chạy, nên đây là mức sàn chứ không phải con số đủ">
-          ≥ ({{ spend.unpriced }} lượt chưa có giá)
-        </em>
+      {% if spend.cost_usd is not none %}
+        <b>{% if spend.unpriced %}≥{% endif %}${{ '%.2f'|format(spend.cost_usd) }}</b>
+        {% if spend.unpriced %}
+          <em title="CLI không báo giá cho {{ spend.unpriced }} lượt chạy, nên đây là mức sàn chứ không phải con số đủ">
+            ({{ spend.unpriced }} lượt chưa có giá)
+          </em>
+        {% endif %}
+      {% else %}
+        <b>—</b>
+        <em>{% if spend.runs %}CLI chưa báo giá lượt nào{% else %}chưa có lượt chạy{% endif %}</em>
       {% endif %}
     </div>
     <div class="nw-stat"><span>Token</span><b>{{ '{:,}'.format(spend.tokens) }}</b></div>

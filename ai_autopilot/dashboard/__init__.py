@@ -1882,8 +1882,15 @@ def create_dashboard_router() -> APIRouter:
 
     @router.get("/queue", response_class=HTMLResponse)
     async def queue_page(request: Request, resumed: int = 0):
-        """Review queue: items the autopilot escalated (needs human) with a reason,
-        so a human can Resume them (approve/redirect) in one place."""
+        """Needs human: items the autopilot ESCALATED, with the reason, so a person can
+        Resume them (approve/redirect) in one place.
+
+        Nothing to do with reviewing pull requests, which is what the name "Review queue"
+        said to anyone reading it directly under "Reviews" — the page next to it that
+        really is about PR reviewers. Two adjacent entries, one word apart, unrelated:
+        people opened this looking for their PR review, found an empty page, and
+        concluded the feature did not work.
+        """
         c: Container = request.app.state.container
         link_base = work_item_link_base(c.config)
         held = [s for s in await c.state_repo.all() if s.state == PipelineState.NEEDS_HUMAN]

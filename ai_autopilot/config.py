@@ -1037,6 +1037,16 @@ class Settings(BaseSettings):
     # fresh worktree + a fresh read of the codebase. Requires the scratch to still be
     # there, i.e. interactive_close_on = "pr_closed".
     interactive_resume_on_rework: bool = True
+    # Ceiling on a live session that has gone SILENT. A headless run has always had one
+    # (task_timeout_minutes); an interactive one had none, because the only thing that
+    # ended it was its own result file — which a wedged session never writes. So a
+    # session whose MCP call never returned, or whose console died with the process that
+    # launched it, held the item's live tag and its worktree until a human noticed.
+    # Measured as silence rather than total runtime: a long run is not a symptom, and a
+    # human steering from Remote Control must not be killed for thinking. Generous by
+    # default for exactly that reason; the item is released and the scratch is KEPT, so
+    # the remedy is to press Run, not to redo the work. 0 disables the watchdog.
+    interactive_idle_timeout_minutes: int = 60
     claude_allowed_tools: list[str] = Field(default_factory=list)  # empty → all tools
 
     # ── Retry & recovery ──

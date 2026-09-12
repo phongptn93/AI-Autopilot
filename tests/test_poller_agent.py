@@ -56,8 +56,13 @@ class _FakeAdo:
 
 
 class _FakeExec:
-    def __init__(self, dispatch=(True, "autopilot-7"), final=None):
+    def __init__(self, dispatch=(True, "autopilot-7"), final=None,
+                 quiet=None, last="reading OrderService.cs"):
         self._dispatch, self._final = dispatch, final
+        # How long the live session has been silent. None = "no session recorded here",
+        # which is what a fake with no opinion should say — the watchdog must then do
+        # nothing at all rather than assume the worst about a run it cannot see.
+        self._quiet, self._last = quiet, last
         self.released: list[str | None] = []
         self.closed: list[tuple[int, str | None]] = []
 
@@ -71,6 +76,12 @@ class _FakeExec:
 
     def interactive_scratch_dir(self, item_id):
         return f"/ws/agent-{item_id}"
+
+    def interactive_quiet_seconds(self, run_dir, item_id):
+        return self._quiet
+
+    def interactive_last_activity(self, run_dir):
+        return self._last, self._quiet
 
     async def release_scratch(self, run_dir):
         self.released.append(run_dir)
@@ -86,6 +97,7 @@ class _FakeExec:
 class _FakeExecRepo:
     def __init__(self):
         self.completed: list[tuple[int, bool]] = []
+        self.results: list = []
         self.retries: list[tuple[int, int]] = []
 
     async def start_execution(self, item, skill, trigger_tag=None):
@@ -93,6 +105,7 @@ class _FakeExecRepo:
 
     async def complete_execution(self, record_id, result):
         self.completed.append((record_id, result.success))
+        self.results.append(result)
 
     async def mark_retrying(self, work_item_id, retry_count):
         self.retries.append((work_item_id, retry_count))
@@ -542,6 +555,105 @@ async def test_finalize_skips_while_session_running():
     p._live = {7: 99}
     await p._finalize_live_sessions()
     assert p._live == {7: 99}                                  # still live, not finalised
+
+
+# ── Watchdog: the ceiling an interactive session never had ─────────────────────
+#
+# A headless run has always had task_timeout_minutes. An interactive one had nothing:
+# the ONLY thing that finalised it was its own result file, which a wedged session
+# never writes — so a hung MCP call or a console that died with its parent held the
+# item's live tag and its worktree forever, with the board still showing it as being
+# worked on and nobody told. These tests are about that hole, so each one states the
+# behaviour that closes it rather than just exercising the code.
+
+async def _quiet_session(quiet, **cfg_over):
+    """A poller with one live session that has been silent for ``quiet`` seconds."""
+    p, c = _poller(**cfg_over)
+    c.executor = _FakeExec(final=None, quiet=quiet, last="mcp__ado__repo_pull_request")
+    p._live = {7: 99}
+    p._live_dirs = {7: "/ws/scratch"}
+    await p._finalize_live_sessions()
+    return p, c
+
+
+async def test_a_session_silent_past_the_ceiling_is_closed_and_the_item_released():
+    """The whole point: silence forever used to mean held forever."""
+    p, c = await _quiet_session(quiet=61 * 60)                 # default ceiling is 60m
+    assert c.executor.closed == [(7, "/ws/scratch")]           # console shut
+    assert p._live == {}                                       # item no longer held
+    assert (7, c.config.live_tag) in c.ado.removed             # live tag cleared
+    assert c.execution_repo.completed == [(99, False)]         # recorded as a FAILURE
+
+
+async def test_giving_up_keeps_the_worktree_so_run_resumes_instead_of_restarting():
+    """What this knows is that the session stopped talking — not that its work was
+    worthless. The branch, the build state and the conversation are all still in that
+    worktree, so releasing it would turn a stalled run into a repeat of the whole run."""
+    _, c = await _quiet_session(quiet=61 * 60)
+    assert c.executor.released == []
+
+
+async def test_the_reason_names_the_ceiling_and_what_the_session_last_did():
+    """"Failed" with no reason sends the reader to the wrong place. The three things
+    they need are which setting ended it, where it stopped, and that the work was
+    kept — otherwise the obvious move is to restart the item from scratch."""
+    _, c = await _quiet_session(quiet=61 * 60)
+    reason = c.execution_repo.results[-1].error
+    assert "interactive_idle_timeout_minutes" in reason
+    assert "mcp__ado__repo_pull_request" in reason             # where it actually stopped
+    assert "61 minutes" in reason
+    assert "resumes" in reason
+
+
+async def test_giving_up_goes_through_the_normal_failure_policy():
+    """Not a special case: a session that stalled gets the retry budget, the
+    escalation and the notifications every other failure gets. A watchdog that only
+    logged would leave the item sitting in its working state with nobody told."""
+    _, c = await _quiet_session(quiet=61 * 60)
+    assert c.execution_repo.retries == [(7, 1)]                # first of max_retries
+
+
+async def test_a_session_inside_the_ceiling_is_left_alone():
+    """Long work is not a symptom. Killing a session that is merely slow would be
+    strictly worse than the hole this closes."""
+    p, c = await _quiet_session(quiet=59 * 60)
+    assert p._live == {7: 99} and c.executor.closed == []
+
+
+async def test_a_session_with_no_transcript_at_all_is_not_judged():
+    """Unknown is not the same as silent. A run this side cannot see must not be
+    killed on a guess — the orphan sweep already reports it."""
+    p, c = await _quiet_session(quiet=None)
+    assert p._live == {7: 99} and c.executor.closed == []
+
+
+async def test_the_watchdog_can_be_switched_off():
+    p, c = await _quiet_session(quiet=99 * 3600, interactive_idle_timeout_minutes=0)
+    assert p._live == {7: 99} and c.executor.closed == []
+
+
+async def test_a_quiet_session_is_warned_about_once_not_every_poll():
+    """The watchdog runs every poll, so a stuck session would otherwise repeat the
+    same warning until the ceiling — burying the log exactly when it is being read."""
+    p, c = _poller()
+    c.executor = _FakeExec(final=None, quiet=10 * 60)          # quiet, but under the ceiling
+    p._live = {7: 99}
+    p._live_dirs = {7: "/ws/scratch"}
+    await p._finalize_live_sessions()
+    assert p._quiet_warned == {7}
+    await p._finalize_live_sessions()
+    assert p._quiet_warned == {7}                              # not re-added, not re-warned
+
+
+async def test_a_session_that_starts_talking_again_can_be_warned_about_again():
+    p, c = _poller()
+    c.executor = _FakeExec(final=None, quiet=10 * 60)
+    p._live, p._live_dirs = {7: 99}, {7: "/ws/scratch"}
+    await p._finalize_live_sessions()
+    assert p._quiet_warned == {7}
+    c.executor._quiet = 5                                      # it woke up
+    await p._finalize_live_sessions()
+    assert p._quiet_warned == set()
 
 
 # ── /ai command loop (steer the autopilot with /ai … comments) ──────────────────

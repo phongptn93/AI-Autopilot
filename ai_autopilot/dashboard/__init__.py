@@ -513,6 +513,25 @@ async def _pr_outcomes(c: Container) -> dict:
 # one that has produced none for minutes is the case worth a person's eye.
 _QUIET_WARN_SECONDS = 180
 
+def _live_session_activity(c, item_id: int) -> tuple[str, float | None]:
+    """What an interactive session last did, and how long ago. ``("", None)`` if unknown.
+
+    Interactive runs write no activity feed: the feed comes from the SDK event stream,
+    which only a headless run has. Their own transcript is the substitute, and it lives
+    under the cwd the session was launched in — the isolated scratch normally, the
+    shared workspace on an install that does not use worktrees. Both are tried, because
+    picking only the first would leave the non-worktree install exactly as blind as
+    before.
+    """
+    for cwd in (c.executor.interactive_scratch_dir(item_id), c.config.workspace_directory):
+        if not cwd:
+            continue
+        line, quiet = c.executor.interactive_last_activity(cwd)
+        if quiet is not None:
+            return line, quiet
+    return "", None
+
+
 _REVIEW_STATUSES = ("awaiting", "approved", "blocked", "conflicts", "partial", "draft")
 
 def _filter_reviews(prs: list[dict], qp, me: list[str]) -> list[dict]:
@@ -1748,13 +1767,36 @@ def create_dashboard_router() -> APIRouter:
     # ``item_id`` is a str, not an int: PR-level runs (auto-review, comment commands)
     # are keyed "pr-<id>" so they can't collide with a work item of the same number —
     # see ``activity.pr_key``.
+    def _feed_for(c: Container, item_id: str) -> str:
+        """The live feed for an item, whichever mode is producing it.
+
+        A headless run streams its events here through the SDK. An interactive one
+        cannot — it is a separate console — so this page was permanently empty for the
+        DEFAULT execution mode, and "Watch live" led to a page that never said anything.
+        Its own transcript is read instead when the activity log has nothing.
+        """
+        feed = activity.read(c.config.workspace_directory, _feed_key(item_id))
+        if feed.strip() or item_id.startswith("pr-"):
+            return feed
+        try:
+            item_num = int(item_id)
+        except ValueError:
+            return feed
+        for cwd in (c.executor.interactive_scratch_dir(item_num),
+                    c.config.workspace_directory):
+            if not cwd:
+                continue
+            live = c.executor.interactive_feed(cwd)
+            if live.strip():
+                return live
+        return feed
+
     @router.get("/activity/{item_id}", response_class=HTMLResponse)
     async def activity_view(request: Request, item_id: str):
         c: Container = request.app.state.container
-        feed = activity.read(c.config.workspace_directory, _feed_key(item_id))
         return _TEMPLATES.TemplateResponse(
             request, "activity.html",
-            _ctx(request, "board", item_id=item_id, feed=feed,
+            _ctx(request, "board", item_id=item_id, feed=_feed_for(c, item_id),
                  is_pr=item_id.startswith("pr-")),
         )
 
@@ -1762,8 +1804,7 @@ def create_dashboard_router() -> APIRouter:
     async def activity_partial(request: Request, item_id: str):
         c: Container = request.app.state.container
         return PlainTextResponse(
-            activity.read(c.config.workspace_directory, _feed_key(item_id))
-            or "(no activity yet — waiting for the agent…)"
+            _feed_for(c, item_id) or "(no activity yet — waiting for the agent…)"
         )
 
     @router.get("/history", response_class=HTMLResponse)
@@ -1852,6 +1893,13 @@ def create_dashboard_router() -> APIRouter:
                    if (r.skill_used or "").startswith("pr-")
                    else r.work_item_id)
             line, quiet = activity.last_event(cfg.workspace_directory, key)
+            # An INTERACTIVE run writes no activity feed — it is a separate console, and
+            # the feed is written by the SDK stream a headless run has. So this page,
+            # built to answer "is it stuck", reported "no feed" for every run in the
+            # DEFAULT execution mode. Claude Code's own transcript answers the same two
+            # questions for those, from the session's own cwd.
+            if quiet is None and (r.skill_used or "").startswith("interactive"):
+                line, quiet = _live_session_activity(c, r.work_item_id)
             started = r.started_at
             if started is not None and started.tzinfo is None:
                 started = started.replace(tzinfo=UTC)

@@ -184,3 +184,87 @@ def test_reentry_does_not_reuse_a_scratch_no_session_reserved(tmp_path):
     scratch = Path(ex.interactive_scratch_dir(43))
     (scratch / "api" / ".git").mkdir(parents=True)
     assert ex._reusable_session_scratch(str(scratch), 43, ["api"]) is False
+
+
+# ── Interactive sessions: the ceiling and the bill they never had ─────────────
+#
+# An interactive run happens in a separate console, so nothing about it is visible in
+# process. That left it with no timeout (only its own result file ever ended one, and a
+# wedged session never writes one) and no recorded spend (every session was filed at
+# zero, in the DEFAULT execution mode). Both are read from the session's own transcript.
+
+def _seed_transcript(monkeypatch, tmp_path, cwd: str, *lines: str) -> None:
+    from ai_autopilot.execution import transcript
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    directory = transcript.project_dir(cwd)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "s.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _usage_line(msg_id: str, out: int) -> str:
+    import json
+
+    return json.dumps({
+        "type": "assistant", "timestamp": "2026-09-11T02:00:00.000Z",
+        "message": {"id": msg_id, "role": "assistant", "model": "claude-opus-5",
+                    "content": [{"type": "text", "text": "done"}],
+                    "usage": {"input_tokens": 2, "output_tokens": out,
+                              "cache_read_input_tokens": 50,
+                              "cache_creation_input_tokens": 0}},
+    })
+
+
+def test_a_finished_live_session_is_billed_from_its_own_transcript(tmp_path, monkeypatch):
+    """Interactive runs were recorded at zero tokens — so the cost figures described
+    only the mode nobody was running, and the default mode's spend simply vanished."""
+    import json
+
+    ex = _rework_exec(tmp_path)
+    scratch = _seed_scratch(ex, 42)
+    (scratch / ".autopilot" / "runs" / "42.json").write_text(
+        json.dumps({"status": "completed", "summary": "built it"}), encoding="utf-8")
+    _seed_transcript(monkeypatch, tmp_path, str(scratch),
+                     _usage_line("m1", 10), _usage_line("m1", 10), _usage_line("m2", 7))
+
+    item = WorkItemInfo(id=42, title="t", work_item_type="Task")
+    result = ex.finalize_interactive(item, str(scratch))
+    # m1 appears twice in the file and must be counted once: 2+10+50 + 2+7+50.
+    assert result.cost_tokens == 121
+    assert result.model_used == "claude-opus-5"
+    # The transcript carries no price, and 0.0 would be a claim rather than a gap.
+    assert result.cost_usd is None
+
+
+def test_metering_never_fails_a_run_that_succeeded(tmp_path, monkeypatch):
+    """Accounting is bookkeeping. A transcript that cannot be read must leave the run
+    unpriced, not turn a completed piece of work into a failure."""
+    import json
+
+    ex = _rework_exec(tmp_path)
+    scratch = _seed_scratch(ex, 42)
+    (scratch / ".autopilot" / "runs" / "42.json").write_text(
+        json.dumps({"status": "completed", "summary": "built it"}), encoding="utf-8")
+    monkeypatch.setattr("ai_autopilot.execution.transcript.read_usage",
+                        lambda cwd: (_ for _ in ()).throw(OSError("disk gone")))
+
+    result = ex.finalize_interactive(WorkItemInfo(id=42, title="t", work_item_type="Task"),
+                                     str(scratch))
+    assert result.success is True and result.cost_tokens == 0
+
+
+def test_a_session_that_never_recorded_anything_still_has_an_age(tmp_path, monkeypatch):
+    """A console that died at startup writes no transcript. Reading that as "unknown,
+    leave it alone" is exactly how an item stays held forever — the handle's own start
+    time is the fallback, so the watchdog can still act."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    ex = _rework_exec(tmp_path)
+    scratch = _seed_scratch(ex, 42)
+    quiet = ex.interactive_quiet_seconds(str(scratch), 42)
+    assert quiet is not None and quiet >= 0
+
+
+def test_quiet_is_unknown_when_no_session_was_ever_launched_here(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    ex = _rework_exec(tmp_path)
+    assert ex.interactive_quiet_seconds(str(tmp_path / "nowhere"), 99) is None

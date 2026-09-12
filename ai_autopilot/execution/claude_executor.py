@@ -36,6 +36,7 @@ from ai_autopilot.config import (
     BOT_COMMENT_INSTRUCTION,
     Settings,
 )
+from ai_autopilot.execution import transcript
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
 from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.execution.claude_client import ClaudeRun, apply_usage, run_claude
@@ -1039,7 +1040,34 @@ class ClaudeExecutor:
         agent = find_result(run_dir, item.id)
         if agent is None:
             return None
-        return self._result_from_agent(item, agent)
+        result = self._result_from_agent(item, agent)
+        self._apply_interactive_usage(result, run_dir)
+        return result
+
+    def _apply_interactive_usage(self, result: ExecutionResult, run_dir: str) -> None:
+        """Record what the live session spent, read from its own transcript.
+
+        A headless run gets this from the SDK result. An interactive one had no source
+        at all, so every session was filed at zero tokens — which did not merely leave
+        a column blank: it made the cost figures describe only the mode nobody runs,
+        while the default mode's spend vanished from the totals entirely.
+
+        Best-effort by design. Accounting must never be able to fail a run that
+        succeeded, so a transcript that cannot be read leaves the run unpriced (which
+        the dashboard already shows honestly) rather than raising.
+        """
+        try:
+            usage = transcript.read_usage(run_dir)
+        except Exception as exc:  # noqa: BLE001 — never fail a finished run on metering
+            self._log.warning("could not read interactive usage",
+                              cwd=run_dir, error=describe_exc(exc))
+            return
+        if usage is None or not usage.total_tokens:
+            return
+        usage.apply(result)
+        self._log.info("interactive usage recorded", cwd=run_dir,
+                       tokens=usage.total_tokens, messages=usage.messages,
+                       model=result.model_used)
 
     # ── Interactive session lifetime: close the console when the item is done ──
 
@@ -1141,18 +1169,50 @@ class ClaudeExecutor:
     def _transcript_session_id(self, cwd: str) -> str | None:
         """Session id of the newest Claude Code conversation recorded for ``cwd``.
 
-        Claude Code files transcripts under ``<config>/projects/<cwd-with-separators-
-        dashed>/<session-id>.jsonl``; the interactive CLI never tells us its session
-        id, so this is how a headless rework picks the conversation back up. Returns
-        None when the directory doesn't exist — then the rework simply starts fresh.
+        The interactive CLI never tells us its session id, so this is how a headless
+        rework picks the conversation back up. None when nothing was recorded for that
+        folder — then the rework simply starts fresh.
         """
-        config_dir = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
-        project = config_dir / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(Path(cwd)))
-        try:
-            newest = max(project.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, default=None)
-        except OSError:
-            return None
-        return newest.stem if newest else None
+        return transcript.session_id(cwd)
+
+    # ── Is a live session still working? ──────────────────────────────────────
+    #
+    # Nothing in this process can see inside an interactive session: it is a separate
+    # console, and the only thing it ever hands back is its result file. So a session
+    # that wedged (an MCP call that never returns, a CLI that died with its parent)
+    # looked exactly like one that was busy, forever — and "forever" is not an
+    # overstatement: the poller only finalises on the result file, so a hung session
+    # held its item's live tag and its worktree until somebody noticed by hand.
+    #
+    # Claude Code's own transcript is the pulse. It is appended on every message and
+    # every tool result, so the age of its last write is how long the session has been
+    # silent — the signal a watchdog can actually act on, and the one the In-flight
+    # page needs to stop reporting "no feed" for the default execution mode.
+
+    def interactive_quiet_seconds(self, run_dir: str, item_id: int) -> float | None:
+        """How long this item's live session has been silent, in seconds.
+
+        Falls back to the age of the session handle when no transcript exists yet: a
+        console that died before writing anything is precisely the case that must not
+        read as "unknown, so leave it alone" — it would sit there forever.
+        ``None`` only when there is no session here at all.
+        """
+        quiet = transcript.quiet_seconds(run_dir)
+        if quiet is not None:
+            return quiet
+        handle = self._read_session_handle(run_dir, item_id)
+        started = (handle or {}).get("started")
+        if isinstance(started, int | float) and started > 0:
+            return max(0.0, time.time() - float(started))
+        return None
+
+    def interactive_last_activity(self, run_dir: str) -> tuple[str, float | None]:
+        """``(what the live session last did, seconds ago)`` — ``("", None)`` if none."""
+        return transcript.last_activity(run_dir)
+
+    def interactive_feed(self, run_dir: str) -> str:
+        """A live session's recent actions, shaped like the activity log — '' if none."""
+        return transcript.recent(run_dir)
 
     def session_finished(self, run_dir: str, item_id: int) -> bool:
         """True when the interactive session for ``item_id`` already wrote its result

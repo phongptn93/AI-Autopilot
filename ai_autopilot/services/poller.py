@@ -114,6 +114,11 @@ class AdoPollerService:
         # finish, but one whose process died never writes a result — and the poller
         # skips the live tag, so the item goes quiet for good with nothing said.
         self._stranded: set[int] = set()
+        # Live sessions we have already warned about going quiet. The warning fires
+        # once per episode: the watchdog runs every poll, and a session that is
+        # genuinely stuck would otherwise repeat the same line into the log until the
+        # ceiling, burying everything else at exactly the moment the log is read.
+        self._quiet_warned: set[int] = set()
         # Dependency scheduling: ids we've already told the human are deferred, so we
         # comment "waiting for #X" once per episode rather than every poll cycle.
         self._deferred_notified: set[int] = set()
@@ -1202,7 +1207,11 @@ class AdoPollerService:
                 continue
             result = c.executor.finalize_interactive(item, run_dir)
             if result is None:
-                continue  # session still running
+                # Still running — or wedged, which from here looks identical. The
+                # watchdog is the only thing that can tell them apart.
+                await self._watch_live_session(item, run_dir, record_id)
+                continue
+            self._quiet_warned.discard(item_id)
             await c.execution_repo.complete_execution(record_id, result)
             if result.cost_tokens:
                 await c.cost_tracker.track(record_id, result.cost_tokens)
@@ -1226,6 +1235,86 @@ class AdoPollerService:
                 status="SUCCESS" if result.success else "FAILED",
             )
         await self._finalize_orphan_sessions()
+
+    # Quiet enough to mention in the log, not enough to act on. Deliberately the same
+    # number the In-flight page paints a row red at, so the page and the log never
+    # disagree about which runs are the ones worth looking at.
+    _QUIET_WARN_SECONDS = 180
+
+    async def _watch_live_session(
+        self, item: WorkItemInfo, run_dir: str, record_id: int
+    ) -> None:
+        """Notice a live session that has stopped producing anything, and end it.
+
+        A headless run has always had a ceiling (``task_timeout_minutes``). An
+        interactive one had none: the only thing that finalised it was its own result
+        file, and a wedged session never writes one — so an MCP call that never
+        returned, or a console that died with the process that launched it, held the
+        item's live tag and its worktree indefinitely while the board showed it as
+        being worked on. Nobody was told, because from this side "busy" and "wedged"
+        produce exactly the same silence.
+
+        The measure is SILENCE, not elapsed time. Long runs are normal and a human
+        steering from Remote Control is allowed to think; what is never normal is a
+        session that has produced nothing for an hour.
+        """
+        cfg = self._config
+        quiet = self._c.executor.interactive_quiet_seconds(run_dir, item.id)
+        if quiet is None:
+            return  # no session recorded here — nothing to judge
+        limit = max(0, cfg.interactive_idle_timeout_minutes) * 60
+        if limit and quiet >= limit:
+            await self._give_up_on_live_session(item, run_dir, record_id, quiet)
+            return
+        if quiet < self._QUIET_WARN_SECONDS:
+            self._quiet_warned.discard(item.id)
+            return
+        if item.id not in self._quiet_warned:
+            self._quiet_warned.add(item.id)
+            last, _ = self._c.executor.interactive_last_activity(run_dir)
+            self._log.warning(
+                "live session has gone quiet", id=item.id, quiet_s=int(quiet),
+                last=last[:160] or "(nothing recorded)",
+                gives_up_in_s=int(limit - quiet) if limit else None,
+                hint="watch it at /dashboard/now, or attach to the session to steer it",
+            )
+
+    async def _give_up_on_live_session(
+        self, item: WorkItemInfo, run_dir: str, record_id: int, quiet: float
+    ) -> None:
+        """Close a session that is past the silence ceiling and release its item.
+
+        The scratch worktree is deliberately KEPT. What this knows is that the session
+        stopped talking — not that its work was worthless — and the branch, the build
+        state and the conversation are all still in there. Releasing it would turn a
+        stalled run into a repeat of the whole run; keeping it means ▶ Run resumes.
+        """
+        c, cfg = self._c, self._config
+        last, _ = c.executor.interactive_last_activity(run_dir)
+        reason = (
+            f"Live session produced nothing for {int(quiet // 60)} minutes "
+            f"(ceiling: interactive_idle_timeout_minutes = "
+            f"{cfg.interactive_idle_timeout_minutes}), so it was closed. "
+            + (f"Last thing it did: {last[:200]}. " if last else
+               "It never recorded an action — the console most likely died at startup. ")
+            + "Its worktree was kept, so pressing Run on the board resumes from where "
+              "it stopped rather than starting again."
+        )
+        await c.executor.close_interactive(run_dir, item.id)
+        result = ExecutionResult.fail(item.id, "interactive", reason)
+        await c.execution_repo.complete_execution(record_id, result)
+        await self._remove_live_tag(item.id)
+        self._live.pop(item.id, None)
+        self._live_profiles.pop(item.id, None)
+        self._live_dirs.pop(item.id, None)
+        self._quiet_warned.discard(item.id)
+        # Routed through the normal failure path so this reaches a person the same way
+        # every other failure does — retry budget, escalation, ADO comment, notifier —
+        # rather than being a silent log line about an item that just stopped moving.
+        await self._handle_agent_result(item, result)
+        self._processed[item.id] = datetime.now(UTC)
+        self._log.warning("live session gave up - closed and released", id=item.id,
+                          quiet_s=int(quiet), last=last[:160])
 
     async def _close_live_session(self, item_id: int, run_dir: str) -> bool:
         """Shut the item's Remote-Control console now that it is finalised.

@@ -210,6 +210,15 @@ FIELDS: tuple[Field, ...] = (
           "on merge/abandon. result = close as soon as the task finishes. never = leave every "
           "console open (they pile up).",
           ("pr_closed", "result", "never")),
+    Field("interactive_idle_timeout_minutes", "↳ Give up on a silent session after (minutes)",
+          "int", "Execution & Autonomy",
+          "A live session that has produced nothing for this long is closed and its item "
+          "released back to the board with the reason. Without it a wedged session (an MCP "
+          "call that never returns, a console that died) holds the item forever — the "
+          "headless path has always had 'Task timeout', this is its counterpart. Counts "
+          "SILENCE, not runtime, so long work is safe; keep it generous if you steer "
+          "sessions by hand. The scratch worktree is kept, so pressing ▶ Run resumes. "
+          "0 = no ceiling (not recommended)."),
     Field("interactive_resume_on_rework", "↳ Resume the session on rework", "bool",
           "Execution & Autonomy",
           "PR feedback runs in that session's own worktree and RESUMES its conversation, "

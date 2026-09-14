@@ -212,3 +212,62 @@ def test_a_single_state_string_still_configures_a_column():
         "Ready for Testing", "In Testing",
     ]
     assert Settings().board_testing_state == []
+
+
+def test_the_pr_link_survives_the_review_run_that_follows_it():
+    """#9016: the card reached "Ready for review" and its PR link was gone.
+
+    Every PR-level run — auto-review, /review, a comment command — files its own History
+    row against the SAME work item and has no PR of its own. So by the time a human is
+    looking at an item in review, the newest row for it IS the review, and reading the
+    PR off "the latest record" reads it off the one run guaranteed not to have one.
+    """
+    from ai_autopilot.board import latest_pr_records
+
+    item = _item(9016, ["autopilot", "autopilot-review"])
+    agent_run = ExecutionRecord(
+        work_item_id=9016, status=ExecutionStatus.SUCCESS, skill_used="agent",
+        pr_url="https://dev.azure.com/o/p/_git/Backend/pullrequest/3978",
+        pr_urls='["https://dev.azure.com/o/p/_git/Backend/pullrequest/3978",'
+                ' "https://dev.azure.com/o/p/_git/Frontend/pullrequest/3979"]',
+    )
+    # Newest first, exactly as the board queries them.
+    review_run = ExecutionRecord(
+        work_item_id=9016, status=ExecutionStatus.SUCCESS, skill_used="pr-review"
+    )
+    records = [review_run, agent_run]
+
+    board = build_board(
+        [item], latest_records(records), CFG,
+        pr_records_by_id=latest_pr_records(records),
+    )
+    card = board["In review"][0]
+
+    assert card.pr_urls == [
+        "https://dev.azure.com/o/p/_git/Backend/pullrequest/3978",
+        "https://dev.azure.com/o/p/_git/Frontend/pullrequest/3979",
+    ]
+    assert card.pr_url.endswith("/3978")
+
+
+def test_without_the_pr_lookup_the_card_falls_back_to_the_latest_record():
+    """Callers that pass no PR index keep the old behaviour — nothing else changes."""
+    item = _item(5, ["autopilot"])
+    rec = _rec(5, ExecutionStatus.SUCCESS, pr="https://example.invalid/pr/1")
+    board = build_board([item], {5: rec}, CFG)
+    assert board["Done"][0].pr_urls == ["https://example.invalid/pr/1"]
+
+
+def test_latest_pr_records_keeps_the_newest_run_that_opened_one():
+    from ai_autopilot.board import latest_pr_records
+
+    newer = ExecutionRecord(work_item_id=7, status=ExecutionStatus.SUCCESS,
+                            pr_url="https://example.invalid/pr/2")
+    older = ExecutionRecord(work_item_id=7, status=ExecutionStatus.SUCCESS,
+                            pr_url="https://example.invalid/pr/1")
+    no_pr = ExecutionRecord(work_item_id=7, status=ExecutionStatus.SUCCESS)
+
+    picked = latest_pr_records([no_pr, newer, older])
+    assert picked[7].pr_url == "https://example.invalid/pr/2"
+    # An item that never opened a PR simply is not in the index.
+    assert latest_pr_records([no_pr]) == {}

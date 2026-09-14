@@ -43,6 +43,7 @@ from ai_autopilot.board import (
     board_columns,
     build_board,
     handoff_states,
+    latest_pr_records,
     latest_records,
     parse_drop_map,
 )
@@ -869,7 +870,12 @@ def create_dashboard_router() -> APIRouter:
 
         records = await c.execution_repo.get_recent(200)
         states = {s.work_item_id: s.state.value for s in await c.state_repo.all()}
-        cols = build_board(items, latest_records(records), c.config, states)
+        cols = build_board(
+            items, latest_records(records), c.config, states,
+            # The PR link comes from the run that OPENED one, not from whatever ran
+            # last — in review, what ran last IS the review. See `latest_pr_records`.
+            pr_records_by_id=latest_pr_records(records),
+        )
 
         # Eight columns is the pipeline's shape, not a person's question. The lens
         # folds them into the few lanes one role reads; no card is dropped, so the
@@ -1066,9 +1072,12 @@ def create_dashboard_router() -> APIRouter:
         # "Waiting on this process" is the number that actually decides whether a
         # process is configured usefully: how many items sit in a stage it marked as
         # its turn. It needs the real board, so it is derived from the live view.
-        records = latest_records(await c.execution_repo.get_recent(200))
+        recent = await c.execution_repo.get_recent(200)
         pipeline_states = {s.work_item_id: s.state.value for s in await c.state_repo.all()}
-        live = build_board(items, records, c.config, pipeline_states)
+        live = build_board(
+            items, latest_records(recent), c.config, pipeline_states,
+            pr_records_by_id=latest_pr_records(recent),
+        )
 
         all_views = lenses_mod.board_views(c.config)
         parked = lenses_mod.parked_states(all_views)
@@ -2151,10 +2160,19 @@ def create_dashboard_router() -> APIRouter:
             started = r.started_at
             if started is not None and started.tzinfo is None:
                 started = started.replace(tzinfo=UTC)
+            # WHICH ROLE is running. `skill_used` cannot say: in the default execution
+            # mode it reads "interactive:<session id>", which names the console, not the
+            # work — so a page built to answer "what is it doing" could not say whether
+            # this was a QC check or the entire pipeline. The stages come from the role,
+            # because "full" means nothing until you see the six steps it stands for.
+            role = (r.profile or "").strip()
+            stages = [s.name for s in sdlc_plan.profile_stages(role, cfg)] if role else []
             runs.append({
                 "id": r.work_item_id,
                 "title": r.title or f"#{r.work_item_id}",
                 "skill": r.skill_used or "",
+                "role": role,
+                "stages": stages,
                 "project": r.project or "",
                 "elapsed": int((now - started).total_seconds()) if started else None,
                 "quiet": int(quiet) if quiet is not None else None,

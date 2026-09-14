@@ -167,7 +167,9 @@ class LoopScheduler:
 
         prompt = reports.audit_prompt(loop.prompt, loop.agents, repo)
         item = WorkItemInfo(id=0, title=f"[audit] {loop.name}")
-        record_id = await c.execution_repo.start_execution(item, f"audit:{loop.name}")
+        record_id = await c.execution_repo.start_execution(
+            item, f"audit:{loop.name}", profile=loop.name
+        )
         result = await c.executor.run_audit(loop.name, prompt, repo, base, loop.project)
         await c.execution_repo.complete_execution(record_id, result)
         if result.cost_tokens:

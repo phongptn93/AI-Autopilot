@@ -181,6 +181,12 @@ FIELDS: tuple[Field, ...] = (
     Field("auto_transition_assignee", "Only for assignee (auto transitions)", "text", "Auto transitions",
           "Restrict auto transitions to work items assigned to this person (name/email substring). "
           "Blank = any assignee. Does not affect normal task processing."),
+    Field("on_publish_state", "On PR published (draft → ready) → state (fallback)",
+          "stateone", "Auto transitions",
+          "State to set when the author takes a PR OUT of draft — the moment somebody is "
+          "actually being asked to look. Without it the review stage has to stand for "
+          "both, so an item reads 'ready for review' while its PRs are still drafts. "
+          "Blank = the publish stage does nothing. Per type at /dashboard/flow."),
     Field("on_merge_state", "On PR merged → state (fallback)", "stateone", "Auto transitions",
           "State to set when a PR the autopilot opened is merged (also marks it done). Used only "
           "for types NO flow covers — an ADO state belongs to a type, so one value here is "

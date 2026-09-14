@@ -91,8 +91,16 @@ class AdoNotifier:
                 pr_html = f"<li><b>{label}:</b><ul>{links}</ul></li>"
             else:
                 pr_html = ""
+            # Which ROLE ran, first in the list. "Skill: agent" says how the work was
+            # executed, not what it was, so a QC pass and a full pipeline run left
+            # identical comments on the item.
+            role_html = (
+                f"<li><b>SDLC role:</b> <code>{result.profile}</code></li>"
+                if result.profile else ""
+            )
             comment = (
                 "<div><b>✅ Hoàn tất</b><br/><ul>"
+                f"{role_html}"
                 f"<li><b>Skill:</b> <code>{result.skill_used}</code></li>"
                 f"<li><b>Duration:</b> {_mmss(result.duration_seconds)}</li>"
                 f"<li><b>Branch:</b> <code>{result.branch_name}</code></li>"

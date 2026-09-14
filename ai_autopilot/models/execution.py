@@ -32,6 +32,11 @@ class ExecutionResult:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
+    # Which ROLE this run was: the SDLC profile it was dispatched as (dev, qc, full…).
+    # Carried on the result so a notification can say it. "Completed #9004" with a branch
+    # and a PR does not tell a reader whether QC ran or the whole pipeline did, and the
+    # card is where most people find out a run happened at all.
+    profile: str = ""
     # The agent ran but reports it needs a human (ambiguous AC, missing info).
     # Not a failure to retry — escalate and stop.
     needs_human: bool = False

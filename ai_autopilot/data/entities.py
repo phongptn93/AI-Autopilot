@@ -504,6 +504,15 @@ class ExecutionRecord(Base):
     # Lessons the learning loop injected into this run's brief. NULL on rows written
     # before the column existed → rendered as "no badge", never as a zero claim.
     lessons_injected: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # WHICH ROLE this run is: the SDLC profile the item resolved to (dev, qc, full…).
+    # ``skill_used`` cannot answer it — for the default execution mode it is
+    # "interactive:<session id>", which names the console and not the work — so the one
+    # question an operator watching a live run asks first, "is this reviewing or is it
+    # building the whole thing", had no answer anywhere on the page. Stored rather than
+    # re-derived because by then the item has moved to its WORKING state, and resolving
+    # the role from that gives a different answer than the run was actually given.
+    # NULL on rows written before this column, and on runs with no relay wiring at all.
+    profile: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
 
 class LoopReport(Base):

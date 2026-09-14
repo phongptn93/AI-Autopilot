@@ -53,7 +53,19 @@
         <div class="nw-title">{{ r.title }}</div>
         {% if r.project %}<div class="nw-proj">{{ r.project }}</div>{% endif %}
       </td>
-      <td><code>{{ r.skill or '—' }}</code></td>
+      <td>
+        {% if r.role %}
+        <div class="nw-role"><b>{{ r.role }}</b>
+          {% if r.stages %}<span class="nw-steps">{{ r.stages | join(' → ') }}</span>
+          {% else %}<span class="nw-steps">không có bước nào được khai báo</span>{% endif %}
+        </div>
+        {% else %}
+        <div class="nw-role nw-norole" title="Không có vai trò nào khớp — lượt chạy nhận nguyên work item, không giới hạn theo bước">
+          <b>cả work item</b><span class="nw-steps">không gán vai trò</span>
+        </div>
+        {% endif %}
+        <code>{{ r.skill or '—' }}</code>
+      </td>
       <td class="num">{% if r.elapsed is not none %}{{ r.elapsed // 60 }}m {{ r.elapsed % 60 }}s{% else %}—{% endif %}</td>
       <td class="num">
         {% if r.quiet is none %}
@@ -104,6 +116,12 @@
   .nw-last { color: var(--muted); font-size: 12px; max-width: 52ch;
              overflow-wrap: anywhere; }
   .nw-nofeed { color: var(--muted); font-size: 12px; font-style: italic; }
+  /* The role reads first and the session id second: "which role is this" is the
+     question, and "interactive:autopilot-9004" was the only thing answering it. */
+  .nw-role { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+  .nw-role b { font-size: 13px; }
+  .nw-steps { color: var(--muted); font-size: 11.5px; }
+  .nw-norole b { color: var(--muted); font-weight: 600; }
   .nw-stuck { background: rgba(220, 80, 80, .10); }
   .nw-stuck .num b { color: #e06c6c; }
   .nw-watch { white-space: nowrap; font-size: 13px; }

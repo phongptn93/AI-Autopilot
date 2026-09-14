@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import time
 
+from ai_autopilot import flows as flows_mod
 from ai_autopilot.config import (
     describe_users,
     is_bot_signed,
@@ -340,7 +341,12 @@ class PrMonitorService:
     async def _on_pr_published(self, repo_id: str, pr_id: int, source_ref: str) -> None:
         """The author took a draft out of draft: NOW it is ready for review."""
         c, cfg = self._c, self._config
-        if cfg.dry_run or not (cfg.on_publish_state or "").strip():
+        # Every other stage counts as configured when EITHER the flat field or any
+        # per-type flow sets it. This one read the flat field alone — and that field has
+        # no control on any page, so the only place it could be set was the per-type
+        # flow, which this gate then ignored. The stage was configurable and could never
+        # fire, which is why an item sat in "Ready for review" with its PRs still drafts.
+        if cfg.dry_run or not flows_mod.stage_configured(cfg, "on_publish"):
             return
         work_item_id = await self._work_item_for(repo_id, pr_id, source_ref)
         if work_item_id is None:

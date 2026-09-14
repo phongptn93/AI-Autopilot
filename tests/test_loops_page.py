@@ -340,3 +340,44 @@ def test_sub_agents_survive_a_save_and_come_back_ticked(tmp_path, monkeypatch):
         assert _checked_agents(page, 0) == [
             "agent-pr-reviewer", "agent-security-reviewer"]
         assert "None picked" not in page.split('name="loop_1_name"')[0]
+
+
+def test_the_in_flight_page_names_the_role_a_run_is_for(tmp_path):
+    """"interactive:autopilot-9004" names the console, not the work. The page built to
+    answer "what is it doing" could not say whether a run was a QC check or the whole
+    pipeline — so the role is recorded when the run opens and shown here."""
+    import asyncio
+
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.models import WorkItemInfo
+
+    with _client(
+        tmp_path,
+        sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing")},
+    ) as client:
+        repo = client.app.state.container.execution_repo
+        item = WorkItemInfo(id=9004, title="Export excel", work_item_type="Task",
+                            project="TLCL-DxFac")
+        asyncio.run(repo.start_execution(item, "interactive:autopilot-9004", profile="qc"))
+
+        page = client.get("/dashboard/now").text
+        assert "interactive:autopilot-9004" in page
+        assert ">qc<" in page          # the role, named
+        assert "test" in page          # …and the steps it stands for
+
+
+def test_a_run_with_no_role_says_so_rather_than_leaving_a_blank(tmp_path):
+    """Blank would read as "unknown"; the truth is "the whole item, not scoped to a
+    role", which is a different and useful thing to know."""
+    import asyncio
+
+    from ai_autopilot.models import WorkItemInfo
+
+    with _client(tmp_path) as client:
+        repo = client.app.state.container.execution_repo
+        asyncio.run(repo.start_execution(
+            WorkItemInfo(id=8107, title="t", work_item_type="Task"), "agent"
+        ))
+
+        page = client.get("/dashboard/now").text
+        assert "cả work item" in page

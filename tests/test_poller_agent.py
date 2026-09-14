@@ -110,8 +110,12 @@ class _FakeExecRepo:
         self.completed: list[tuple[int, bool]] = []
         self.results: list = []
         self.retries: list[tuple[int, int]] = []
+        self.profiles: list[str] = []
 
-    async def start_execution(self, item, skill, trigger_tag=None):
+    async def start_execution(self, item, skill, trigger_tag=None, profile=""):
+        # `profile` is which ROLE the run is. Recorded because "interactive:<session>"
+        # names the console, not the work — see the In-flight page.
+        self.profiles.append(profile)
         return 99
 
     async def complete_execution(self, record_id, result):
@@ -1545,3 +1549,33 @@ async def test_every_run_now_tag_is_queried_not_just_the_shared_one():
     await _run_reconcile(svc)
 
     assert sorted(ado.tagged_any_queries[0]) == ["vm-autopilot-run", "vm-autopilot-run-qc"]
+
+
+async def test_a_finished_run_says_which_role_it_was():
+    """"✅ Completed #9004" with a branch and a PR does not tell a reader whether QC ran
+    or the whole pipeline did — and the card is where most people find out at all."""
+    from ai_autopilot.config import SdlcRole
+
+    svc, c = _poller(
+        sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing")},
+    )
+    item = WorkItemInfo(id=9004, title="Export excel", work_item_type="Requirement",
+                        state="Ready for Testing")
+    result = ExecutionResult.ok(9004, "agent", "done")
+
+    await svc._handle_agent_result(item, result)
+
+    assert result.profile == "qc"
+
+
+async def test_the_role_a_run_was_dispatched_as_wins_over_re_deriving_it():
+    """By the time a run finishes the item sits in its WORKING state, and resolving the
+    role from there answers a different question than the run was given."""
+    svc, c = _poller()
+    svc._live_profiles[7] = "qc"
+    item = WorkItemInfo(id=7, title="t", work_item_type="Task", state="Active")
+    result = ExecutionResult.ok(7, "agent", "done")
+
+    await svc._handle_agent_result(item, result)
+
+    assert result.profile == "qc"

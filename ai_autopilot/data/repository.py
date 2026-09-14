@@ -75,8 +75,12 @@ class ExecutionRepository:
         self._db = db
 
     async def start_execution(
-        self, item: WorkItemInfo, skill: str, trigger_tag: str | None = None
+        self, item: WorkItemInfo, skill: str, trigger_tag: str | None = None,
+        profile: str = "",
     ) -> int:
+        """Open a RUNNING row. ``profile`` is which ROLE the run is — recorded at the
+        start because the item moves to its working state immediately after, and from
+        there the role can no longer be derived."""
         async with self._db.session() as session:
             record = ExecutionRecord(
                 work_item_id=item.id,
@@ -85,6 +89,7 @@ class ExecutionRepository:
                 category=str(item.category),
                 skill_used=skill,
                 trigger_tag=trigger_tag,
+                profile=(profile or "").strip() or None,
                 status=ExecutionStatus.RUNNING,
                 started_at=datetime.now(UTC),
             )

@@ -121,6 +121,11 @@ class TeamsNotifier(NotificationChannel):
             facts.append({"title": "Skill", "value": message.skill})
         if message.result is not None:
             r = message.result
+            # Which ROLE ran. "Skill: agent" says how the work was executed, not what it
+            # was — so a QC pass and the whole pipeline produced the same card, and the
+            # branch name was the only clue either way.
+            if r.profile:
+                facts.append({"title": "SDLC role", "value": r.profile})
             facts.append({"title": "Duration", "value": _mmss(r.duration_seconds)})
             if r.branch_name:
                 facts.append({"title": "Branch", "value": r.branch_name})

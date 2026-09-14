@@ -180,11 +180,29 @@ def latest_records(records: list[ExecutionRecord]) -> dict[int, ExecutionRecord]
     return out
 
 
+def latest_pr_records(records: list[ExecutionRecord]) -> dict[int, ExecutionRecord]:
+    """Most recent record per work item THAT OPENED A PR (newest-first input).
+
+    The card's PR link cannot come from the latest record, because the latest record is
+    usually not the run that opened the PR. Every PR-level run — auto-review, a /review,
+    a comment command — files its own History row against the same work item and has no
+    PR of its own, so the newest row for an item in review is a review, and the link
+    vanished from the card at exactly the moment somebody needed it: when the item
+    reached "Ready for review" and a human had to go and look at the PR.
+    """
+    out: dict[int, ExecutionRecord] = {}
+    for r in records:
+        if _record_pr_urls(r):
+            out.setdefault(r.work_item_id, r)
+    return out
+
+
 def build_board(
     items: list[WorkItemInfo],
     records_by_id: dict[int, ExecutionRecord],
     cfg: Settings,
     states_by_id: dict[int, str] | None = None,
+    pr_records_by_id: dict[int, ExecutionRecord] | None = None,
 ) -> dict[str, list[BoardCard]]:
     """Group tagged work items into pipeline columns.
 
@@ -192,9 +210,12 @@ def build_board(
     when present; otherwise the column is derived from ADO tags + the last record.
     """
     states_by_id = states_by_id or {}
+    pr_records_by_id = pr_records_by_id or {}
     board: dict[str, list[BoardCard]] = {col: [] for col in board_columns(cfg)}
     for item in items:
         record = records_by_id.get(item.id)
+        # The run that opened the PR, which is rarely the run that finished last.
+        pr_record = pr_records_by_id.get(item.id) or record
         column = _column_for(item, record, cfg, states_by_id.get(item.id))
         if column not in board:  # configured column absent → safe fallback
             column = "Queued"
@@ -207,8 +228,8 @@ def build_board(
                 project=item.project,
                 category=_category(item.title),
                 assigned_to=item.assigned_to,
-                pr_url=record.pr_url if record else None,
-                pr_urls=_record_pr_urls(record),
+                pr_url=pr_record.pr_url if pr_record else None,
+                pr_urls=_record_pr_urls(pr_record),
                 tags=list(item.tags or []),
             )
         )

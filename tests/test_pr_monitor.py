@@ -561,3 +561,78 @@ async def test_pr_command_lands_in_history():
     assert rows[0]["item"] == 42
     assert rows[0]["project"] == "DxFactory"   # else the workspace filter hides it
     assert rows[0]["result"].success is True   # closed with the run's outcome
+
+
+async def test_the_publish_stage_fires_when_only_a_per_type_flow_sets_it():
+    """The stage could be configured and could never fire.
+
+    `on_publish_state` has no control on any settings page, so the only place it could
+    be set was a per-type flow on /dashboard/flow — and this gate read the flat field
+    alone, so that configuration was ignored. Every other stage counts as configured
+    when EITHER sets it; this one now does too.
+    """
+    from types import SimpleNamespace
+
+    applied: list[tuple[int, str]] = []
+
+    class _Ado:
+        async def get_pull_request_threads(self, *a, **k):
+            return []
+        async def get_pull_request_work_items(self, repo_id, pr_id):
+            return [9016]
+        async def get_work_item(self, wid):
+            return SimpleNamespace(id=wid, title="t", work_item_type="Bug", state="Active",
+                                   tags=[], project="P")
+
+    cfg = Settings(
+        feedback_loop_enabled=True,
+        on_publish_state="",                      # nothing flat — the only way it can be
+        work_item_flows=[{
+            "types": ["Bug"],
+            "states": {"on_publish": "Ready for Review"},
+        }],
+        bot_branch_prefixes=["bugfix/"],
+    )
+    svc = PrMonitorService(SimpleNamespace(config=cfg, ado=_Ado(),
+                                           mention_identity=_no_bot))
+    svc._log = SimpleNamespace(info=lambda *a, **k: None, debug=lambda *a, **k: None,
+                               warning=lambda *a, **k: None, error=lambda *a, **k: None)
+    svc._apply_outcome = lambda item, outcome: _record(applied, (item.id, outcome))
+
+    pr = {"pullRequestId": 78, "sourceRefName": "refs/heads/bugfix/9016-x", "isDraft": True}
+    await svc._inspect_pr("repo", "R", pr)
+    assert applied == []
+
+    pr["isDraft"] = False
+    await svc._inspect_pr("repo", "R", pr)
+    assert applied == [(9016, "on_publish")]
+
+
+async def test_the_publish_stage_stays_off_when_nothing_configures_it():
+    """Blank everywhere keeps the old behaviour: the transition is watched, nothing
+    applied. Firing here would move items on installs that never asked for it."""
+    from types import SimpleNamespace
+
+    applied: list[tuple[int, str]] = []
+
+    class _Ado:
+        async def get_pull_request_threads(self, *a, **k):
+            return []
+        async def get_pull_request_work_items(self, repo_id, pr_id):
+            return [1]
+        async def get_work_item(self, wid):
+            return SimpleNamespace(id=wid, title="t", work_item_type="Bug", state="Active",
+                                   tags=[], project="P")
+
+    cfg = Settings(feedback_loop_enabled=True, bot_branch_prefixes=["bugfix/"])
+    svc = PrMonitorService(SimpleNamespace(config=cfg, ado=_Ado(),
+                                           mention_identity=_no_bot))
+    svc._log = SimpleNamespace(info=lambda *a, **k: None, debug=lambda *a, **k: None,
+                               warning=lambda *a, **k: None, error=lambda *a, **k: None)
+    svc._apply_outcome = lambda item, outcome: _record(applied, (item.id, outcome))
+
+    pr = {"pullRequestId": 79, "sourceRefName": "refs/heads/bugfix/1-x", "isDraft": True}
+    await svc._inspect_pr("repo", "R", pr)
+    pr["isDraft"] = False
+    await svc._inspect_pr("repo", "R", pr)
+    assert applied == []

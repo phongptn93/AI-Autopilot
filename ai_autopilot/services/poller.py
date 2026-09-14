@@ -1056,7 +1056,10 @@ class AdoPollerService:
         await self._apply_outcome(item, "in_progress")
         await c.notifier.notify_started(item, "sdlc")
         record_id = await c.execution_repo.start_execution(
-            item, "sdlc", trigger_tag=self._matched_tag(item)
+            item, "sdlc", trigger_tag=self._matched_tag(item),
+            profile=resolve_profile_name(
+                item.tags, item.work_item_type, self._config, state=item.state or ""
+            ),
         )
 
         result = await c.sdlc_engine.run(item)
@@ -1210,7 +1213,8 @@ class AdoPollerService:
         if working and not cfg.dry_run:
             await c.ado.update_state(item.id, working)
         record_id = await c.execution_repo.start_execution(
-            item, f"interactive:{session}", trigger_tag=self._matched_tag(item)
+            item, f"interactive:{session}", trigger_tag=self._matched_tag(item),
+            profile=profile,
         )
         self._live[item.id] = record_id
         if profile:
@@ -1521,6 +1525,14 @@ class AdoPollerService:
 
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config
+        # Stamp the role before anything reports this run. Every notification and comment
+        # below reads the result, and none of them could say whether the run that just
+        # finished was a QC pass or the entire pipeline — the one thing a reader of
+        # "✅ Completed #9004" wants to know first.
+        if not result.profile:
+            result.profile = self._live_profiles.get(item.id) or resolve_profile_name(
+                item.tags, item.work_item_type, cfg, state=item.state or ""
+            )
         self._warn_unowned_branch(item, result)
         if result.needs_human:
             c.retry_policy.record_success(item.id)  # escalated — not a retryable failure

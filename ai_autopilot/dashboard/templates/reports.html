@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  /* ── Audit reports (scoped) ──
+     A list of runs, worst findings first in the eye's path: the severity chips sit
+     immediately after the loop name, because "did last night's review find anything
+     serious" is the only question most visits are here to answer. */
+  .main { max-width:none; }
+  .rp-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; margin-bottom:5px; }
+  .rp-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+  .rp-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:112ch; margin:0 0 14px; }
+  .rp-lede a { color:var(--accent-hover); }
+  .rp-lede code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input);
+    padding:1px 6px; border-radius:5px; }
+
+  .rp-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+    overflow:hidden; margin-bottom:16px; }
+  .rp-hd { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:baseline;
+    padding:13px 18px; border-bottom:1px solid var(--border-soft); }
+  .rp-hd h3 { font-size:14px; font-weight:650; }
+  .rp-hd span { color:var(--text-dim); font-size:12px; }
+
+  .rp-filter { display:flex; flex-wrap:wrap; gap:6px; padding:11px 18px;
+    border-bottom:1px solid var(--border-soft); }
+  .rp-filter a { font-size:11px; font-family:var(--mono); padding:4px 9px; border-radius:7px;
+    border:1px solid var(--border); background:var(--bg-input); color:var(--text-dim);
+    text-decoration:none; }
+  .rp-filter a.on { color:var(--accent-hover); border-color:rgba(99,102,241,.5);
+    background:var(--accent-bg); }
+
+  .rp-tbl { width:100%; border-collapse:collapse; }
+  .rp-tbl th { text-align:left; font-size:9.5px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.05em; color:var(--text-dim); padding:9px 18px;
+    border-bottom:1px solid var(--border-soft); }
+  .rp-tbl td { padding:11px 18px; border-bottom:1px solid var(--border-soft); font-size:12.5px;
+    vertical-align:top; }
+  .rp-tbl tr:last-child td { border-bottom:0; }
+  .rp-tbl a.name { font-family:var(--mono); font-weight:650; color:var(--text);
+    text-decoration:none; }
+  .rp-tbl a.name:hover { color:var(--accent-hover); }
+  .rp-sum { color:var(--text-dim); font-size:11.5px; line-height:1.5; margin-top:3px;
+    max-width:74ch; }
+  .rp-when { color:var(--text-dim); font-size:11px; font-family:var(--mono); white-space:nowrap; }
+
+  .sev { display:inline-block; font-size:10px; font-family:var(--mono); font-weight:700;
+    padding:1px 7px; border-radius:5px; margin-right:4px; white-space:nowrap; }
+  .sev.critical { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+  .sev.high { background:rgba(245,166,35,.14); color:var(--amber); border:1px solid rgba(245,166,35,.45); }
+  .sev.medium { background:rgba(245,166,35,.08); color:var(--amber); border:1px solid rgba(245,166,35,.3); }
+  .sev.low { background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.35); }
+  .sev.info { background:var(--bg-input); color:var(--text-dim); border:1px solid var(--border); }
+  .sev.clean { background:var(--green-bg); color:var(--green); border:1px solid rgba(46,204,113,.45); }
+  .sev.failed { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+
+  .rp-empty { padding:26px 18px; color:var(--text-dim); font-size:12.5px; line-height:1.7; }
+</style>
+
+<div class="rp-top"><h2>🛡️ Audit reports</h2></div>
+<p class="rp-lede">
+  What the <a href="/dashboard/loops">scheduled agents</a> found. Each row is one run of a
+  <b>report</b> loop — read-only by construction, so nothing here changed the repository.
+  A run that failed is still listed: a review that did not happen looks exactly like a
+  review that found nothing, and only this page can tell you which it was.
+</p>
+
+<div class="rp-card">
+  <div class="rp-hd">
+    <h3>Runs</h3>
+    <span>{{ rows|length }} shown, newest first.</span>
+  </div>
+
+  {% if loops %}
+  <div class="rp-filter">
+    <a href="/dashboard/reports" class="{{ '' if selected else 'on' }}">all</a>
+    {% for name in loops %}
+    <a href="/dashboard/reports?loop={{ name|urlencode }}"
+       class="{{ 'on' if selected == name else '' }}">{{ name }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if rows %}
+  <table class="rp-tbl">
+    <thead><tr>
+      <th>Loop</th><th>Findings</th><th>When</th><th>Took</th><th>File</th>
+    </tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>
+          <a class="name" href="/dashboard/reports/{{ r.id }}">{{ r.loop_name }}</a>
+          {% if r.summary %}<div class="rp-sum">{{ r.summary }}</div>{% endif %}
+        </td>
+        <td>
+          {% if r.status != 'success' %}<span class="sev failed">run failed</span>{% endif %}
+          {% set counts = {'critical': r.critical_count, 'high': r.high_count,
+                           'medium': r.medium_count, 'low': r.low_count, 'info': r.info_count} %}
+          {% for sev in severities if counts[sev] %}
+          <span class="sev {{ sev }}">{{ sev }} {{ counts[sev] }}</span>
+          {% endfor %}
+          {% if r.status == 'success' and not (counts.values()|sum) %}
+          <span class="sev clean">clean</span>
+          {% endif %}
+        </td>
+        <td class="rp-when">{{ r.started_at.strftime('%Y-%m-%d %H:%M') if r.started_at else '—' }}</td>
+        <td class="rp-when">{{ '%.0fs'|format(r.duration_seconds or 0) }}</td>
+        <td class="rp-when">{{ '📄' if r.html_path else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="rp-empty">
+    No audits yet. Add a <b>report</b> loop on the
+    <a href="/dashboard/loops">Scheduled agents</a> page — the presets there cover code
+    review, security, performance and spec drift — then press <b>▶ Run now</b> rather than
+    waiting for its first cron.
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1131,6 +1131,75 @@ def check_board_processes(config: Settings) -> list[Finding]:
     return out
 
 
+def check_scheduled_loops(config: Settings) -> list[Finding]:
+    """Scheduled agents that read as configured but cannot do their job.
+
+    Each of these fails in the same silent way: the loop is listed, enabled, and looks
+    set up, and the only symptom is a report that never arrives — which is
+    indistinguishable from an audit that found nothing. Offline, like every check here.
+    """
+    from pathlib import Path
+
+    from ai_autopilot.services.loop_scheduler import _trigger
+
+    loops = list(config.scheduled_loops or [])
+    if not loops:
+        return []
+
+    # The workspace is where the agents live and where a report file can be written.
+    agents_dir = Path(config.workspace_directory or ".") / ".claude" / "agents"
+    try:
+        known = {p.stem for p in agents_dir.glob("*.md")}
+    except OSError:
+        known = set()
+
+    out: list[Finding] = []
+    for loop in loops:
+        if not loop.enabled:
+            continue
+        if _trigger(loop) is None:
+            out.append(Finding(
+                ERROR, f"Loop '{loop.name}' has no valid cadence",
+                "Its cron does not parse and no interval is set, so the scheduler skips "
+                "it at startup with a warning nobody reads afterwards — the loop is "
+                "enabled and will never run.",
+                "Give it a 5-field cron or an interval at /dashboard/loops.",
+            ))
+        scoped = config.scoped_for_project(loop.project)
+        if not (loop.repo_path or scoped.repo_working_directory):
+            out.append(Finding(
+                WARN, f"Loop '{loop.name}' has no repo",
+                "Neither the loop nor its workspace names a repository, so every run "
+                "stops before it starts.",
+                "Set the loop's repo path, or repo_working_directory on its workspace.",
+            ))
+        missing = [a for a in (loop.agents or []) if a and a not in known]
+        if missing:
+            out.append(Finding(
+                WARN, f"Loop '{loop.name}' names sub-agents that do not exist",
+                f"{', '.join(missing)} — not found in {agents_dir}. The run still "
+                "happens; it just does the whole job itself, which is not what the "
+                "loop was set up to do.",
+                "Fix the names at /dashboard/loops, or add the agent definitions.",
+            ))
+        if loop.is_report and loop.report_html and not scoped.workspace_directory:
+            out.append(Finding(
+                WARN, f"Loop '{loop.name}' cannot write its HTML report",
+                "It is set to save an HTML file, but its workspace is blank — there is "
+                "nowhere to put one. The report is still stored and shown on the "
+                "Reports page.",
+                "Set workspace_directory, or switch the HTML file off for this loop.",
+            ))
+    if out:
+        return out
+    report_loops = sum(1 for le in loops if le.enabled and le.is_report)
+    return [Finding(
+        OK,
+        f"Scheduled loops: {sum(1 for le in loops if le.enabled)} enabled "
+        f"({report_loops} report)",
+    )]
+
+
 CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
@@ -1141,7 +1210,7 @@ CHECKS = (
     check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
     check_board_processes,
-    check_assignee_scoping,
+    check_assignee_scoping, check_scheduled_loops,
 )
 
 

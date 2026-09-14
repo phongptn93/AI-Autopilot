@@ -1579,7 +1579,9 @@ class ClaudeExecutor:
         ``read_only`` (advisory commands like /review) skips the checkout/worktree lifecycle
         entirely — the agent inspects ``origin/<branch>`` and comments, changing nothing.
         ``pr_id`` names the PR the run belongs to; it keys the read-only run's activity
-        feed, which a work-item id cannot do (see ``activity.pr_key``)."""
+        feed, which a work-item id cannot do (see ``activity.pr_key``). ``feed_key``
+        overrides that outright, for a run that belongs to neither — a scheduled audit,
+        whose item id is 0 and would otherwise share one feed with every other loop."""
         repo_path, base_branch = self._revise_repo(item, repo)
         if read_only:
             return await self._run_read_only(item.id, repo_path, branch, prompt, pr_id=pr_id)
@@ -1605,7 +1607,8 @@ class ClaudeExecutor:
         )
 
     async def _run_read_only(
-        self, item_id: int, repo: str, branch: str, prompt: str, pr_id: int = 0
+        self, item_id: int, repo: str, branch: str, prompt: str, pr_id: int = 0,
+        feed_key: str = "", fresh: bool = False,
     ) -> ExecutionResult:
         """Run an advisory command (e.g. /review) with no checkout at all.
 
@@ -1639,7 +1642,7 @@ class ClaudeExecutor:
         claude_cwd = self._config.workspace_directory or repo
         dirty_before = await self._git("status --porcelain", repo, check=False)
         workspace = self._config.workspace_directory
-        feed = activity.pr_key(pr_id) if pr_id else item_id
+        feed = feed_key or (activity.pr_key(pr_id) if pr_id else item_id)
         self._log.info(
             "running claude (read-only, no checkout)", id=item_id, branch=branch,
             cwd=claude_cwd, pr=pr_id or None,
@@ -1651,13 +1654,21 @@ class ClaudeExecutor:
             + (f" · PR !{pr_id}" if pr_id else ""),
         )
         try:
-            resume = await self._resume_for(repo, branch)
+            # A recurring audit must start from nothing. Sessions are keyed by
+            # (repo, branch), and an audit's branch is the BASE branch — so with
+            # ``reuse_claude_session`` on, tonight's review would resume last night's
+            # conversation and answer it ("nothing new since my last pass"), quietly
+            # dropping findings; and storing its own session would overwrite whatever
+            # else that pair belongs to. A review of the last 24 hours has to be a
+            # first look every time.
+            resume = None if fresh else await self._resume_for(repo, branch)
             claude_run = await self._run_claude(
                 prompt, claude_cwd, repo=repo, resume=resume,
                 disallowed_tools=list(_READ_ONLY_DENY),
                 on_event=lambda line: activity.append(workspace, feed, line),
             )
-            await self._save_session(repo, branch, claude_run)
+            if not fresh:
+                await self._save_session(repo, branch, claude_run)
             activity.append(workspace, feed, "✅ read-only run finished")
             result = ExecutionResult.ok(item_id, prompt, claude_run.text)
             apply_usage(result, claude_run)
@@ -1701,6 +1712,31 @@ class ClaudeExecutor:
                 draft_pr=draft_pr,
                 existing_branch=False,
                 create_pr=True,
+            )
+
+    async def run_audit(
+        self, name: str, prompt: str, repo: str, base_branch: str, project: str = "",
+    ) -> ExecutionResult:
+        """Run a scheduled REPORT loop: inspect the repo, change nothing, answer in text.
+
+        The build pipeline cannot express this. It judges a run by the diff it produced,
+        so an audit — whose correct output is prose and whose correct diff is empty —
+        came back as "No file changes produced" and was then asked to open an empty PR.
+
+        So this takes the read-only path instead, for the reason its own docstring gives:
+        with no worktree to throw away, "changes nothing" has to be enforced in the TOOL
+        SURFACE rather than asked for in the prompt — and this is a path that runs
+        unattended, on a schedule, against a working repo. It also skips the worktree
+        add/remove that an audit has no use for.
+
+        ``origin/<base_branch>`` is fetched first so the agent can diff against the real
+        base; without it a nightly review would be reviewing whatever the checkout was
+        left on.
+        """
+        with self.workspace_scope(project):
+            return await self._run_read_only(
+                0, repo, base_branch, prompt,
+                feed_key=activity.loop_key(name), fresh=True,
             )
 
     # ── shared core ─────────────────────────────────────────────────────────

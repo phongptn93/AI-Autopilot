@@ -504,3 +504,48 @@ class ExecutionRecord(Base):
     # Lessons the learning loop injected into this run's brief. NULL on rows written
     # before the column existed → rendered as "no badge", never as a zero claim.
     lessons_injected: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+
+
+class LoopReport(Base):
+    """One run of a scheduled REPORT loop — an audit, not a build.
+
+    Kept apart from ``executions`` on purpose. An execution row answers "did this run
+    succeed, and what did it change"; the answer is a status, a branch and a PR, and its
+    ``output`` is a ``String(5000)`` summary because that is all a diff needs saying
+    about it. A report has no diff: the text IS the deliverable, it is routinely longer
+    than that column, and it is read months later by someone asking what we knew back
+    then. Findings also need counting by severity, which a prose column cannot do.
+    """
+
+    __tablename__ = "loop_reports"
+    __table_args__ = (
+        Index("ix_loop_reports_loop_name", "loop_name"),
+        Index("ix_loop_reports_started_at", "started_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    loop_name: Mapped[str] = mapped_column(String(200), default="")
+    project: Mapped[str] = mapped_column(String(200), default="")
+    repo: Mapped[str] = mapped_column(String(500), default="")
+    # "success" | "failed" — a failed audit is still a row: "the nightly review did not
+    # run" is exactly the kind of silence an operator needs to see on the page.
+    status: Mapped[str] = mapped_column(String(20), default="success")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    # The agent's answer, whole and untruncated. Text, not String(n) — see the docstring.
+    body_md: Mapped[str] = mapped_column(Text, default="")
+    findings_json: Mapped[str] = mapped_column(Text, default="[]")
+    agents: Mapped[str] = mapped_column(String(500), default="")   # comma-separated
+    # Counts are stored rather than derived so the LIST page can render severity chips
+    # without parsing every report's JSON — the list is the page that is loaded most.
+    critical_count: Mapped[int] = mapped_column(Integer, default=0)
+    high_count: Mapped[int] = mapped_column(Integer, default=0)
+    medium_count: Mapped[int] = mapped_column(Integer, default=0)
+    low_count: Mapped[int] = mapped_column(Integer, default=0)
+    info_count: Mapped[int] = mapped_column(Integer, default=0)
+    html_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

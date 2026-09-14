@@ -9,6 +9,7 @@ operator can watch the agent work in real time instead of staring at a silent
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,18 @@ def pr_key(pr_id: int) -> str:
     or later overwrite the feed of somebody's work item with the same number.
     """
     return f"pr-{pr_id}"
+
+
+def loop_key(name: str) -> str:
+    """Feed key for a scheduled loop's run.
+
+    A loop has no work item, so every loop run reported itself as item ``0`` — one
+    shared feed that each loop overwrote in turn, which is the same collision
+    ``pr_key`` exists to prevent. Keyed by name, a nightly audit and a dependency
+    sweeper can run in the same hour and each still be watchable.
+    """
+    slug = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", (name or "").lower())).strip("-")
+    return f"loop-{slug or 'unnamed'}"
 
 
 def _path(workspace: str, item_id: int | str) -> Path | None:

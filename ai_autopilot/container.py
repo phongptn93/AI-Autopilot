@@ -20,6 +20,7 @@ from ai_autopilot.data import (
     ClaudeSessionRepository,
     Database,
     ExecutionRepository,
+    LoopReportRepository,
     NotificationHoldRepository,
     PlannedRunRepository,
     PrCommandRepository,
@@ -83,6 +84,9 @@ class Container:
         self.pr_reviewer_repo = PrReviewerRepository(self.database)
         self.claude_session_repo = ClaudeSessionRepository(self.database)
         self.audit_repo = AuditRepository(self.database)
+        # Scheduled audits. Their own table: a report's deliverable is its text, which
+        # does not fit an execution row's summary column — see ``LoopReport``.
+        self.loop_report_repo = LoopReportRepository(self.database)
         # The append-only table, wrapped by the funnel that also feeds the learning
         # loop — every call site records through the funnel, never the bare repo.
         self.quality_events = QualityRepository(self.database)

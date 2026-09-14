@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import re
@@ -30,6 +31,9 @@ from ai_autopilot import (
     lenses as lenses_mod,
 )
 from ai_autopilot import (
+    reports as reports_mod,
+)
+from ai_autopilot import (
     workspaces as workspaces_mod,
 )
 from ai_autopilot.board import (
@@ -42,9 +46,14 @@ from ai_autopilot.board import (
     latest_records,
     parse_drop_map,
 )
-from ai_autopilot.config import SdlcRole, config_file_path, matches_any_user
+from ai_autopilot.config import (
+    ScheduledLoop,
+    SdlcRole,
+    config_file_path,
+    matches_any_user,
+)
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import settings_form
+from ai_autopilot.dashboard import loop_presets, settings_form
 from ai_autopilot.data.entities import PipelineState, QualityKind
 from ai_autopilot.execution import sdlc_plan
 from ai_autopilot.lenses import (
@@ -57,6 +66,7 @@ from ai_autopilot.lenses import (
 )
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.services import delivery_report, planning_analyzer
+from ai_autopilot.services import loop_scheduler as loop_scheduler_mod
 from ai_autopilot.services.pr_feedback import parse_work_item_id
 from ai_autopilot.services.spec_guard import SpecGuard
 from ai_autopilot.services.task_room import TaskRoomService
@@ -127,6 +137,17 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                             "vẫn được giữ."),
     "roles_saved": ("green", "✅ Đã lưu vai trò (stage · cửa vào · cửa ra) và áp dụng ngay."),
     "roles_cleared": ("green", "↩ Đã gỡ toàn bộ vai trò — máy quay về dùng Trigger states."),
+    "loops_saved": ("green", "✅ Đã lưu lịch chạy và áp dụng ngay (không cần khởi động lại)."),
+    "loop_deleted": ("green", "🗑 Đã xoá lịch chạy."),
+    "loop_started": ("green", "▶ Đã chạy ngay — bấm <b>xem trực tiếp</b> ở dòng tương ứng để "
+                              "theo dõi; báo cáo sẽ hiện ở "
+                              "<a href='/dashboard/reports'>Reports</a> khi xong."),
+    "loop_busy": ("red", "⏳ Lịch chạy này đang chạy dở — lần bấm này được bỏ qua để không "
+                         "có hai agent cùng làm một việc trên cùng repo."),
+    "err_loop_name": ("red", "⚠️ Chưa lưu — mỗi lịch chạy cần một tên riêng (không trùng)."),
+    "err_loop_cadence": ("red", "⚠️ Chưa lưu — cron không hợp lệ và cũng không có "
+                                "interval (phút). Lịch sẽ không bao giờ chạy."),
+    "err_loop_missing": ("red", "⚠️ Không tìm thấy lịch chạy đó (có thể vừa bị xoá)."),
     "ws_saved": ("green", "✅ Đã lưu workspace và áp dụng ngay (không cần khởi động lại)."),
     "ws_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                           "vẫn được giữ."),
@@ -170,6 +191,62 @@ def _flash(url: str, code: str) -> RedirectResponse:
 def _take_flash(request: Request) -> tuple[str, str] | None:
     """``(colour, message)`` for this request's flash, or None. Caller must clear it."""
     return FLASH_MESSAGES.get(request.cookies.get(_FLASH_COOKIE) or "")
+
+
+# A loop started from the page outlives its request by minutes. Held so the task is not
+# garbage-collected mid-run — asyncio keeps only a weak reference to a bare create_task,
+# and a collected task is a cancelled audit with no error anywhere.
+_BACKGROUND_RUNS: set[asyncio.Task] = set()
+
+
+def _int_or_zero(value: object) -> int:
+    """Form field → non-negative int. Anything unparseable is 0, i.e. "no interval"."""
+    try:
+        return max(0, int(str(value or "").strip() or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _workspace_agents(cfg) -> list[str]:
+    """Sub-agent names defined in the workspace's ``.claude/agents``, sorted.
+
+    Read from disk rather than kept in a list here: these are the user's own agents, and
+    a page offering a name the workspace does not define would schedule a loop that
+    delegates to nothing.
+    """
+    workspace = getattr(cfg, "workspace_directory", "") or ""
+    root = Path(workspace or ".") / ".claude" / "agents"
+    try:
+        return sorted(p.stem for p in root.glob("*.md") if p.stem.lower() != "readme")
+    except OSError:
+        return []
+
+
+def _next_run(scheduler, name: str) -> str:
+    """When APScheduler will next fire this loop, as text; "" when it has no job.
+
+    An empty answer on an enabled loop is the interesting case — it means the job never
+    registered — so the page shows it rather than an optimistic guess from the cron.
+    """
+    if scheduler is None:
+        return ""
+    try:
+        job = scheduler._scheduler.get_job(name)  # noqa: SLF001 — same package's service
+        return job.next_run_time.strftime("%Y-%m-%d %H:%M") if job and job.next_run_time else ""
+    except Exception:  # noqa: BLE001 — a schedule readout must never 500 the page
+        return ""
+
+
+def _reschedule(request: Request) -> int:
+    """Apply the saved schedule to the running service; returns how many jobs are live."""
+    scheduler = getattr(request.app.state, "loop_scheduler", None)
+    if scheduler is None:
+        return 0
+    try:
+        return int(scheduler.reload())
+    except Exception as exc:  # noqa: BLE001 — the config is saved either way
+        _log.error("loop reschedule failed — restart to apply", error=describe_exc(exc))
+        return 0
 
 
 # A rejected Flow save has to carry two things back to the GET: the reasons (free text,
@@ -434,16 +511,20 @@ def work_item_link_base(cfg) -> str:
 _REVIEWS_CACHE: dict = {"at": 0.0, "data": None}
 _REVIEWS_TTL = 30.0
 
-_FEED_KEY_RE = re.compile(r"^(?:pr-)?[0-9]+$")
+# The three shapes we mint: a work-item id, ``pr-<id>``, and ``loop-<slug>`` for a
+# scheduled agent (see ``activity.loop_key``). The slug charset is deliberately narrow —
+# this string is interpolated into a path, and the guard exists so a key can never be
+# anything but one of these.
+_FEED_KEY_RE = re.compile(r"^(?:pr-[0-9]+|loop-[a-z0-9-]+|[0-9]+)$")
 
 
 def _feed_key(raw: str) -> str:
     """Validate an activity-feed key from the URL before it reaches the filesystem.
 
-    The key is a string now (PR runs are keyed ``pr-<id>``) and it is interpolated
-    straight into a path, so it is held to exactly the two shapes we mint: ``<id>``
-    and ``pr-<id>``. Anything else yields "", which reads an empty feed rather than
-    whatever ``../..`` pointed at.
+    The key is a string now (PR runs are keyed ``pr-<id>``, scheduled agents
+    ``loop-<slug>``) and it is interpolated straight into a path, so it is held to
+    exactly the shapes we mint. Anything else yields "", which reads an empty feed
+    rather than whatever ``../..`` pointed at.
     """
     return raw if _FEED_KEY_RE.match(raw) else ""
 
@@ -1284,6 +1365,172 @@ def create_dashboard_router() -> APIRouter:
             )[:300],
         )
         return _flash("/dashboard/roles", "roles_saved")
+
+    # ── Scheduled loops & their reports ──────────────────────────────────────
+
+    @router.get("/loops", response_class=HTMLResponse)
+    async def loops_page(request: Request):
+        """Agents that run on a clock: what they do, how often, and with which sub-agents.
+
+        These existed only in ``config.yaml``. Editing a schedule therefore meant a file
+        on the server and a restart, which is why the four audits this page ships as
+        presets had never been set up: the cost of trying one was a deploy.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        scheduler = getattr(request.app.state, "loop_scheduler", None)
+        flash = _take_flash(request)
+        rows = []
+        for loop in cfg.scheduled_loops or []:
+            rows.append({
+                "name": loop.name, "prompt": loop.prompt, "cron": loop.cron,
+                "interval_minutes": loop.interval_minutes, "mode": loop.mode,
+                "agents": list(loop.agents or []), "project": loop.project,
+                "repo_path": loop.repo_path, "base_branch": loop.base_branch,
+                "draft_pr": loop.draft_pr, "enabled": loop.enabled,
+                "report_html": loop.report_html,
+                # A cadence that does not parse is the failure mode with no symptom:
+                # the loop is "configured", listed, enabled — and never fires.
+                "cadence_ok": loop_scheduler_mod._trigger(loop) is not None,
+                "next_run": _next_run(scheduler, loop.name),
+                # Its own live feed — an audit is minutes of silence otherwise, and the
+                # only other place its progress appears is a log file on the server.
+                "feed": activity.loop_key(loop.name),
+                "running": bool(scheduler and scheduler.is_running(loop.name)),
+            })
+        response = _TEMPLATES.TemplateResponse(
+            request, "loops.html",
+            _ctx(request, "loops", rows=rows, flash=flash,
+                 known_agents=_workspace_agents(cfg),
+                 presets=loop_presets.PRESETS,
+                 projects=sorted({
+                     p for w in workspaces_mod.resolve(cfg) for p in (w.projects or []) if p
+                 }),
+                 scheduler_live=scheduler is not None),
+        )
+        if flash:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/loops")
+    async def loops_save(request: Request):
+        """Save every row on the page, then reschedule the running service."""
+        c: Container = request.app.state.container
+        form = await request.form()
+
+        loops: list[dict] = []
+        for key in form:
+            if not key.startswith("loop_") or not key.endswith("_name"):
+                continue
+            idx = key[len("loop_"):-len("_name")]
+            name = str(form.get(f"loop_{idx}_name", "")).strip()
+            if not name:
+                continue        # a blank name is how a row is deleted from the form
+            loops.append({
+                "name": name,
+                "prompt": str(form.get(f"loop_{idx}_prompt", "")).strip(),
+                "cron": str(form.get(f"loop_{idx}_cron", "")).strip(),
+                "interval_minutes": _int_or_zero(form.get(f"loop_{idx}_interval")),
+                "mode": "report" if form.get(f"loop_{idx}_mode") == "report" else "pr",
+                "agents": [a for a in form.getlist(f"loop_{idx}_agents") if a],
+                "project": str(form.get(f"loop_{idx}_project", "")).strip(),
+                "repo_path": str(form.get(f"loop_{idx}_repo", "")).strip(),
+                "base_branch": str(form.get(f"loop_{idx}_base", "")).strip(),
+                "draft_pr": bool(form.get(f"loop_{idx}_draft")),
+                "report_html": bool(form.get(f"loop_{idx}_html")),
+                "enabled": bool(form.get(f"loop_{idx}_enabled")),
+            })
+
+        names = [row["name"] for row in loops]
+        if len(names) != len(set(names)):
+            # The name is the APScheduler job id, so a duplicate does not produce two
+            # loops — the second silently REPLACES the first, and one of the two rows
+            # on this page would simply never run.
+            _log.error("loops rejected: duplicate name", names=sorted(names))
+            return _flash("/dashboard/loops", "err_loop_name")
+
+        models = [ScheduledLoop(**row) for row in loops]
+        bad = [m.name for m in models if m.enabled and loop_scheduler_mod._trigger(m) is None]
+        if bad:
+            _log.error("loops rejected: no valid cadence", loops=bad)
+            return _flash("/dashboard/loops", "err_loop_cadence")
+
+        settings_form.save_to_yaml(config_file_path(), {"scheduled_loops": loops})
+        # YAML takes plain dicts; the live config needs validated models, or the
+        # scheduler reads a raw dict where it expects a ScheduledLoop.
+        settings_form.apply_to_config(c.config, {"scheduled_loops": models})
+        live = _reschedule(request)
+        _log.info("loops updated via dashboard", count=len(models), scheduled=live)
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.loops_updated",
+            target=", ".join(f"{m.name}({m.mode})" for m in models)[:300],
+        )
+        return _flash("/dashboard/loops", "loops_saved")
+
+    @router.post("/loops/delete")
+    async def loops_delete(request: Request, name: str = Form(...)):
+        c: Container = request.app.state.container
+        remaining = [le for le in (c.config.scheduled_loops or []) if le.name != name]
+        if len(remaining) == len(c.config.scheduled_loops or []):
+            return _flash("/dashboard/loops", "err_loop_missing")
+        settings_form.save_to_yaml(
+            config_file_path(),
+            {"scheduled_loops": [le.model_dump() for le in remaining]},
+        )
+        settings_form.apply_to_config(c.config, {"scheduled_loops": remaining})
+        _reschedule(request)
+        _log.info("loop deleted via dashboard", name=name)
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.loop_deleted", target=name,
+        )
+        return _flash("/dashboard/loops", "loop_deleted")
+
+    @router.post("/loops/run")
+    async def loops_run(request: Request, name: str = Form(...)):
+        """Run one loop now, off-schedule — the only way to try a weekly audit today."""
+        scheduler = getattr(request.app.state, "loop_scheduler", None)
+        if scheduler is None:
+            return _flash("/dashboard/loops", "err_loop_missing")
+        if scheduler.is_running(name):
+            # Saying "started" here would be a lie the page then cannot walk back: the
+            # run is skipped, no second report appears, and the operator is left waiting
+            # for one.
+            return _flash("/dashboard/loops", "loop_busy")
+        # Detached: an audit takes minutes, and the operator should get the page back
+        # rather than hold a request open until the agent is done.
+        task = asyncio.create_task(scheduler.run_now(name))
+        _BACKGROUND_RUNS.add(task)
+        task.add_done_callback(_BACKGROUND_RUNS.discard)
+        _log.info("loop run requested from dashboard", name=name)
+        return _flash("/dashboard/loops", "loop_started")
+
+    @router.get("/reports", response_class=HTMLResponse)
+    async def reports_page(request: Request, loop: str = ""):
+        """Every audit a report loop has produced, newest first."""
+        c: Container = request.app.state.container
+        rows = await c.loop_report_repo.recent(limit=100, loop_name=loop)
+        return _TEMPLATES.TemplateResponse(
+            request, "reports.html",
+            _ctx(request, "reports", rows=rows, loops=await c.loop_report_repo.loop_names(),
+                 selected=loop, severities=reports_mod.SEVERITIES),
+        )
+
+    @router.get("/reports/{report_id}", response_class=HTMLResponse)
+    async def report_detail(request: Request, report_id: int):
+        c: Container = request.app.state.container
+        row = await c.loop_report_repo.get(report_id)
+        if row is None:
+            return RedirectResponse("/dashboard/reports", status_code=303)
+        try:
+            findings = json.loads(row.findings_json or "[]")
+        except (ValueError, TypeError):
+            findings = []       # a malformed row must still render its text
+        return _TEMPLATES.TemplateResponse(
+            request, "report_detail.html",
+            _ctx(request, "reports", row=row, findings=findings,
+                 body=reports_mod.strip_findings_block(row.body_md or ""),
+                 severities=reports_mod.SEVERITIES),
+        )
 
     @router.get("/reviews", response_class=HTMLResponse)
     async def reviews(request: Request):

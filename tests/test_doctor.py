@@ -541,3 +541,72 @@ def test_a_chain_that_ends_somewhere_is_fine():
         "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing", done="Ready for UAT"),
     })
     assert check_role_chain_cycle(cfg) == []
+
+
+def test_a_scheduled_loop_with_no_valid_cadence_is_an_error(tmp_path):
+    """Enabled, listed, looks configured — and never fires. The scheduler says so once
+    at startup, in a log line nobody reads a week later."""
+    from ai_autopilot.config import ScheduledLoop
+    from ai_autopilot.doctor import check_scheduled_loops
+
+    cfg = Settings(
+        workspace_directory=str(tmp_path),
+        scheduled_loops=[ScheduledLoop(name="audit", prompt="p", cron="not a cron")],
+    )
+    found = [f for f in check_scheduled_loops(cfg) if f.level == doctor.ERROR]
+    assert len(found) == 1 and "no valid cadence" in found[0].title
+
+
+def test_a_loop_delegating_to_an_agent_that_does_not_exist_is_flagged(tmp_path):
+    """The run still happens; it just does the whole job itself, which is not what the
+    loop was set up to do."""
+    from ai_autopilot.config import ScheduledLoop
+    from ai_autopilot.doctor import check_scheduled_loops
+
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "agent-pr-reviewer.md").write_text("x", encoding="utf-8")
+
+    cfg = Settings(
+        workspace_directory=str(tmp_path),
+        repo_working_directory=str(tmp_path),
+        scheduled_loops=[ScheduledLoop(
+            name="audit", prompt="p", cron="7 18 * * *", mode="report",
+            agents=["agent-pr-reviewer", "agent-that-left"],
+        )],
+    )
+    found = [f for f in check_scheduled_loops(cfg) if f.level == doctor.WARN]
+    assert len(found) == 1
+    assert "agent-that-left" in found[0].detail
+    assert "agent-pr-reviewer" not in found[0].detail   # the one that exists is not named
+
+
+def test_a_loop_with_no_repo_anywhere_is_flagged(tmp_path):
+    from ai_autopilot.config import ScheduledLoop
+    from ai_autopilot.doctor import check_scheduled_loops
+
+    cfg = Settings(
+        workspace_directory=str(tmp_path),
+        scheduled_loops=[ScheduledLoop(name="audit", prompt="p", cron="7 18 * * *")],
+    )
+    found = [f for f in check_scheduled_loops(cfg) if "no repo" in f.title]
+    assert len(found) == 1 and found[0].level == doctor.WARN
+
+
+def test_a_disabled_loop_is_not_diagnosed(tmp_path):
+    """Switching a loop off is how you park it — it must not then be nagged about."""
+    from ai_autopilot.config import ScheduledLoop
+    from ai_autopilot.doctor import check_scheduled_loops
+
+    cfg = Settings(
+        workspace_directory=str(tmp_path),
+        scheduled_loops=[ScheduledLoop(name="audit", prompt="p", cron="bad", enabled=False)],
+    )
+    assert [f.level for f in check_scheduled_loops(cfg)] == [doctor.OK]
+
+
+def test_no_loops_at_all_says_nothing(tmp_path):
+    """An install that uses no scheduled agents must not gain a line about them."""
+    from ai_autopilot.doctor import check_scheduled_loops
+
+    assert check_scheduled_loops(Settings(workspace_directory=str(tmp_path))) == []

@@ -1,0 +1,270 @@
+"""The Scheduled agents page: defining a loop without editing a file on the server.
+
+These loops existed only in ``config.yaml``, so trying one cost a file edit and a
+restart — which is why the four audits the page ships as presets had never been set up.
+The page is tested for saving a whole loop in one row, and for refusing the two
+mistakes that produce a loop which looks configured and never fires.
+"""
+
+from __future__ import annotations
+
+import yaml
+from starlette.testclient import TestClient
+
+from ai_autopilot.app import create_app
+from ai_autopilot.config import ScheduledLoop, Settings
+
+
+def _client(tmp_path, **overrides):
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}", **overrides
+    )
+    return TestClient(create_app(settings))
+
+
+def _agents(tmp_path, *names):
+    """Write sub-agent definitions where the page looks for them."""
+    agents_dir = tmp_path / ".claude" / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (agents_dir / f"{name}.md").write_text(f"# {name}", encoding="utf-8")
+    return str(tmp_path)
+
+
+def test_the_page_shows_each_loop_with_its_mode_cadence_and_agents(tmp_path):
+    workspace = _agents(tmp_path, "agent-pr-reviewer", "agent-security-reviewer")
+    with _client(
+        tmp_path,
+        workspace_directory=workspace,
+        scheduled_loops=[
+            ScheduledLoop(name="code-review-daily", prompt="Review today",
+                          cron="7 18 * * 1-5", mode="report",
+                          agents=["agent-pr-reviewer"]),
+        ],
+    ) as client:
+        page = client.get("/dashboard/loops").text
+
+        assert "code-review-daily" in page and "7 18 * * 1-5" in page
+        assert "loop_0_mode" in page and "loop_0_agents" in page
+        # The workspace's agents are offered, not typed from memory.
+        assert "agent-security-reviewer" in page
+        # Presets are on the page — that is the point of it existing.
+        assert "security-audit-weekly" in page
+
+
+def test_saving_writes_the_loop_and_applies_it_live(tmp_path, monkeypatch):
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    workspace = _agents(tmp_path, "agent-pr-reviewer")
+    with _client(tmp_path, workspace_directory=workspace) as client:
+        r = client.post("/dashboard/loops", data={
+            "loop_0_name": "code-review-daily",
+            "loop_0_prompt": "Review yesterday's commits.",
+            "loop_0_cron": "7 18 * * 1-5",
+            "loop_0_interval": "",
+            "loop_0_mode": "report",
+            "loop_0_agents": ["agent-pr-reviewer"],
+            "loop_0_project": "",
+            "loop_0_repo": "/srv/repo",
+            "loop_0_base": "main",
+            "loop_0_enabled": "on",
+            "loop_0_html": "on",
+        }, follow_redirects=False)
+        assert r.status_code in (302, 303)
+
+        loops = client.app.state.container.config.scheduled_loops
+        assert len(loops) == 1
+        saved_loop = loops[0]
+        # Applied live as a MODEL, not a dict — the scheduler reads attributes.
+        assert isinstance(saved_loop, ScheduledLoop)
+        assert saved_loop.is_report is True
+        assert saved_loop.agents == ["agent-pr-reviewer"]
+        assert saved_loop.repo_path == "/srv/repo"
+
+        saved = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+        assert saved["scheduled_loops"][0]["cron"] == "7 18 * * 1-5"
+        assert saved["scheduled_loops"][0]["mode"] == "report"
+
+
+def test_a_loop_with_no_valid_cadence_is_refused_rather_than_saved(tmp_path, monkeypatch):
+    """The failure with no symptom: enabled, listed, looks configured, never fires.
+    The scheduler only warns about it once at startup."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    with _client(tmp_path) as client:
+        r = client.post("/dashboard/loops", data={
+            "loop_0_name": "broken",
+            "loop_0_prompt": "Audit",
+            "loop_0_cron": "not a cron",
+            "loop_0_interval": "0",
+            "loop_0_mode": "report",
+            "loop_0_enabled": "on",
+        }, follow_redirects=False)
+
+        assert r.status_code in (302, 303)
+        assert client.app.state.container.config.scheduled_loops == []
+
+
+def test_a_disabled_loop_may_keep_a_blank_cadence(tmp_path, monkeypatch):
+    """Refusing this would make "switch it off while I work out the schedule"
+    impossible — and an off loop cannot fail to fire."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    with _client(tmp_path) as client:
+        client.post("/dashboard/loops", data={
+            "loop_0_name": "draft",
+            "loop_0_prompt": "Audit",
+            "loop_0_cron": "",
+            "loop_0_interval": "0",
+            "loop_0_mode": "report",
+        }, follow_redirects=False)
+
+        loops = client.app.state.container.config.scheduled_loops
+        assert len(loops) == 1 and loops[0].enabled is False
+
+
+def test_two_loops_of_one_name_are_refused(tmp_path, monkeypatch):
+    """The name is the scheduler's job id, so a duplicate does not make two loops — the
+    second replaces the first, and one row on the page silently never runs."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    with _client(tmp_path) as client:
+        r = client.post("/dashboard/loops", data={
+            "loop_0_name": "audit", "loop_0_prompt": "a", "loop_0_cron": "7 18 * * *",
+            "loop_0_mode": "report", "loop_0_enabled": "on",
+            "loop_1_name": "audit", "loop_1_prompt": "b", "loop_1_cron": "9 18 * * *",
+            "loop_1_mode": "report", "loop_1_enabled": "on",
+        }, follow_redirects=False)
+
+        assert r.status_code in (302, 303)
+        assert client.app.state.container.config.scheduled_loops == []
+
+
+def test_a_blank_name_drops_the_row(tmp_path, monkeypatch):
+    """How a loop is removed without a separate delete for every row."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    with _client(
+        tmp_path,
+        scheduled_loops=[ScheduledLoop(name="old", prompt="p", cron="7 18 * * *")],
+    ) as client:
+        client.post("/dashboard/loops", data={
+            "loop_0_name": "",           # cleared → dropped
+            "loop_1_name": "kept", "loop_1_prompt": "p", "loop_1_cron": "9 18 * * *",
+            "loop_1_mode": "report", "loop_1_enabled": "on",
+        }, follow_redirects=False)
+
+        names = [le.name for le in client.app.state.container.config.scheduled_loops]
+        assert names == ["kept"]
+
+
+def test_delete_removes_one_loop_and_leaves_the_rest(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    with _client(
+        tmp_path,
+        scheduled_loops=[
+            ScheduledLoop(name="a", prompt="p", cron="7 18 * * *"),
+            ScheduledLoop(name="b", prompt="p", cron="9 18 * * *"),
+        ],
+    ) as client:
+        client.post("/dashboard/loops/delete", data={"name": "a"}, follow_redirects=False)
+
+        names = [le.name for le in client.app.state.container.config.scheduled_loops]
+        assert names == ["b"]
+
+
+def test_an_agent_the_workspace_does_not_define_is_flagged_on_the_page(tmp_path):
+    """A loop delegating to a name that does not exist still runs — it just does the
+    whole job itself, which is not what it was set up to do."""
+    workspace = _agents(tmp_path, "agent-pr-reviewer")
+    with _client(
+        tmp_path,
+        workspace_directory=workspace,
+        scheduled_loops=[
+            ScheduledLoop(name="audit", prompt="p", cron="7 18 * * *", mode="report",
+                          agents=["agent-pr-reviewer", "agent-that-left"]),
+        ],
+    ) as client:
+        page = client.get("/dashboard/loops").text
+        assert "agent-that-left" in page
+        assert "not in this workspace" in page
+
+
+def test_the_reports_page_says_where_to_start_when_empty(tmp_path):
+    with _client(tmp_path) as client:
+        page = client.get("/dashboard/reports").text
+        assert "No audits yet" in page
+        assert "/dashboard/loops" in page
+
+
+def test_a_stored_report_renders_on_both_the_list_and_the_detail_page(tmp_path):
+    """End to end through the real repository: parse → store → list → detail."""
+    from ai_autopilot import reports
+
+    with _client(tmp_path) as client:
+        container = client.app.state.container
+        summary, findings = reports.parse_findings(
+            'Checked yesterday.\n\n```json\n{"summary": "one critical",'
+            ' "findings": [{"severity": "critical", "title": "Missing auth check",'
+            ' "file": "api/users.py", "line": 88, "detail": "anyone can read",'
+            ' "agent": "agent-security-reviewer"}]}\n```'
+        )
+        report = reports.Report(
+            loop="code-review-daily", summary=summary, findings=findings,
+            body_md="Checked yesterday.", agents=["agent-security-reviewer"],
+            duration_seconds=42.0,
+        )
+        report_id = _save(container, report)
+
+        listing = client.get("/dashboard/reports").text
+        assert "code-review-daily" in listing
+        assert "one critical" in listing
+        assert "critical 1" in listing
+
+        detail = client.get(f"/dashboard/reports/{report_id}").text
+        assert "Missing auth check" in detail
+        assert "api/users.py:88" in detail
+        assert "agent-security-reviewer" in detail
+        # The machine-readable half is not shown twice.
+        assert "```json" not in detail
+
+
+def _save(container, report) -> int:
+    """Run the async save from a sync test, on its own loop."""
+    import asyncio
+
+    return asyncio.run(container.loop_report_repo.save(report, html_path=""))
+
+
+def test_a_loops_live_feed_key_is_accepted_by_the_activity_guard(tmp_path):
+    """The guard holds feed keys to the shapes we mint, and this one was new: the
+    executor wrote `loop-<slug>.activity.log` and the page read "" back from it."""
+    from ai_autopilot.dashboard import _feed_key
+
+    assert _feed_key("loop-code-review-daily") == "loop-code-review-daily"
+    assert _feed_key("pr-2470") == "pr-2470" and _feed_key("8965") == "8965"
+    # Still a path guard first: the charset is what makes it one.
+    assert _feed_key("loop-../../etc/passwd") == ""
+    assert _feed_key("../../secrets") == ""
+
+
+def test_the_page_links_each_loop_to_its_own_live_feed(tmp_path):
+    with _client(
+        tmp_path,
+        scheduled_loops=[ScheduledLoop(name="Code Review Daily", prompt="p",
+                                       cron="7 18 * * *", mode="report")],
+    ) as client:
+        page = client.get("/dashboard/loops").text
+        assert "/dashboard/activity/loop-code-review-daily" in page
+
+
+def test_running_a_loop_that_is_already_running_says_so_instead_of_starting_it(tmp_path):
+    with _client(
+        tmp_path,
+        scheduled_loops=[ScheduledLoop(name="busy", prompt="p", cron="7 18 * * *",
+                                       mode="report")],
+    ) as client:
+        scheduler = client.app.state.loop_scheduler
+        scheduler._running.add("busy")
+
+        r = client.post("/dashboard/loops/run", data={"name": "busy"},
+                        follow_redirects=False)
+
+        assert r.status_code in (302, 303)
+        assert r.cookies.get("autopilot_flash") == "loop_busy"

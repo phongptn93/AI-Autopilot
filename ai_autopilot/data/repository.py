@@ -19,6 +19,7 @@ from ai_autopilot.data.entities import (
     ExecutionStatus,
     HandledPrComment,
     HeldNotification,
+    LoopReport,
     MergedPr,
     PipelineState,
     PlannedRun,
@@ -1324,6 +1325,68 @@ class SpecDriftRepository:
             if found:
                 await session.commit()
         return len(found)
+
+
+class LoopReportRepository:
+    """Where a scheduled report loop's audits are kept.
+
+    A report is written once and read many times, so the write stores everything the
+    LIST needs — severity counts included — rather than making every page load reparse
+    each report's JSON to draw a chip.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def save(self, report, html_path: str = "", error: str = "") -> int:
+        """Persist one run (:class:`ai_autopilot.reports.Report`); returns its id."""
+        from ai_autopilot.reports import SEVERITIES
+
+        counts = report.counts
+        row = LoopReport(
+            loop_name=(report.loop or "")[:200],
+            project=(report.project or "")[:200],
+            repo=(report.repo or "")[:500],
+            status=(report.status or "success")[:20],
+            summary=report.summary or "",
+            body_md=report.body_md or "",
+            findings_json=json.dumps(
+                [f.as_dict() for f in report.findings], ensure_ascii=False
+            ),
+            agents=", ".join(report.agents or [])[:500],
+            **{f"{sev}_count": counts[sev] for sev in SEVERITIES},
+            html_path=html_path or None,
+            error=(error or None) and error[:2000],
+            duration_seconds=report.duration_seconds or 0.0,
+            started_at=report.started_at or datetime.now(UTC),
+            finished_at=report.finished_at or datetime.now(UTC),
+        )
+        async with self._db.session() as session:
+            session.add(row)
+            await session.commit()
+            return int(row.id)
+
+    async def recent(self, limit: int = 50, loop_name: str = "") -> list[LoopReport]:
+        """Newest runs first, optionally just one loop's."""
+        async with self._db.session() as session:
+            query = select(LoopReport).order_by(LoopReport.started_at.desc()).limit(limit)
+            if loop_name:
+                query = query.where(LoopReport.loop_name == loop_name)
+            rows = await session.execute(query)
+            return list(rows.scalars().all())
+
+    async def get(self, report_id: int) -> LoopReport | None:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(LoopReport).where(LoopReport.id == report_id)
+            )
+            return rows.scalars().first()
+
+    async def loop_names(self) -> list[str]:
+        """Loops that have ever reported — the list page's filter, in sorted order."""
+        async with self._db.session() as session:
+            rows = await session.execute(select(LoopReport.loop_name).distinct())
+            return sorted({str(r) for (r,) in rows.all() if r})
 
 
 class PrCommandRepository:

@@ -166,6 +166,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     app.state.pr_monitor = svc  # webhook fast-path targets it directly
                 if isinstance(svc, AdoPollerService):
                     app.state.poller = svc      # the board asks it about live sessions
+                if isinstance(svc, LoopScheduler):
+                    # The Loops page edits this service's schedule and runs its loops
+                    # on demand, so it needs the instance, not another copy: a second
+                    # scheduler would double-fire every job it registered.
+                    app.state.loop_scheduler = svc
 
             teams_bot = build_teams_agent(config, container, reviewer_tracker)
             if teams_bot is not None:

@@ -761,6 +761,14 @@ class ScheduledLoop(BaseModel):
     Runs ``prompt`` (a skill command) against a repo on a cadence — e.g. a
     dependency sweeper, changelog drafter, or CI sweeper — opening a PR with any
     resulting changes. Either ``interval_minutes`` or ``cron`` sets the cadence.
+
+    ``mode`` is the split between the two things a scheduled agent can be for. The
+    original one BUILDS: it changes files and the run is judged by the PR it opens, so
+    a run that changed nothing is a failure. A review or audit agent is the opposite —
+    it is judged by what it FOUND, and changing a file would be the defect — yet it had
+    to be expressed in the build-shaped loop, where it was recorded as
+    "No file changes produced" and then asked to open an empty PR. Two contracts, so
+    two modes, rather than a flag that quietly inverts what success means.
     """
 
     name: str
@@ -775,6 +783,24 @@ class ScheduledLoop(BaseModel):
     branch_prefix: str = "autopilot/loop"
     draft_pr: bool = True
     enabled: bool = True
+    # "pr" = build something and open a PR (the original, and still the default, so
+    # every loop written before this reads back unchanged). "report" = inspect and
+    # report: read-only, no branch, no PR, findings stored and rendered instead.
+    mode: str = "pr"
+    # Sub-agents from ``<workspace>/.claude/agents`` this loop delegates to. They are
+    # already REACHABLE — the executor runs Claude in the workspace with its settings
+    # loaded — but nothing said which ones a given loop is about, so the choice lived
+    # in whatever the prompt happened to spell out. Named here, the page can show it,
+    # doctor can check the agents exist, and the prompt is assembled from it.
+    agents: list[str] = []
+    # Also write the report as a standalone HTML file under the workspace. On by
+    # default because a report that exists only in a database cannot be forwarded.
+    report_html: bool = True
+
+    @property
+    def is_report(self) -> bool:
+        """True when this loop reports rather than builds."""
+        return (self.mode or "pr").strip().lower() == "report"
 
 
 def _yaml_path() -> Path:

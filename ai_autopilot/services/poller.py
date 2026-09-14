@@ -24,7 +24,9 @@ from ai_autopilot.execution.sdlc_plan import (
     handoff_state,
     handoff_tag,
     profile_for_state,
+    profile_pins,
     profile_stages,
+    profile_tag,
     resolve_profile_name,
     resolve_stages,
     working_state_for,
@@ -673,13 +675,46 @@ class AdoPollerService:
             if hit is None or item.id in self._live or item.id in self._processed:
                 continue
             await c.ado.remove_tag(item.id, held[hit])   # one-shot: consumed on pickup
+            item.tags = [t for t in item.tags if t != held[hit]]
+            # A role's OWN run-now tag names the role — that is the only reason to give a
+            # role one rather than use the shared tag. The map was built and then used for
+            # nothing but matching, so the role it named was dropped on the floor and the
+            # run fell back to whatever the item's STATE resolved to: on a state no role
+            # waits in, that is `sdlc_default_profile`, i.e. tagging one role's run-now tag
+            # ran the WHOLE pipeline. The shared tag keeps its documented meaning — it is
+            # the state that picks the role — and pins nothing.
+            role = per_stage.get(hit, "")
+            if role:
+                await self._pin_profile(item, role)
             await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
             self._processed[item.id] = datetime.now(UTC)  # block same-cycle re-pick
             self._log.info(
-                "stage entry released", id=item.id, state=item.state,
-                tag=held[hit], profile=profile_for_state(item.state or "", cfg) or "(default)",
+                "stage entry released", id=item.id, state=item.state, tag=held[hit],
+                profile=role or profile_for_state(item.state or "", cfg) or "(default)",
+                pinned=bool(role),
             )
             asyncio.create_task(self._process(item))
+
+    async def _pin_profile(self, item: WorkItemInfo, role: str) -> None:
+        """Stamp which role this run is, exclusively — the same act as the board's ▶ Run.
+
+        Written to ADO so the answer survives a restart mid-run, and mirrored into the
+        in-memory item because the dispatch that follows reads ``item.tags`` and would
+        otherwise need a re-fetch to see a tag this process just added. Only ONE may
+        stick: two pins would let the engine run whichever it saw first.
+        """
+        cfg = self._config
+        wanted = profile_tag(role, cfg)
+        for stale in profile_pins(item.tags, cfg):
+            if stale.strip().lower() == wanted.lower():
+                continue
+            with contextlib.suppress(Exception):   # best-effort: the new pin still lands
+                await self._c.ado.remove_tag(item.id, stale)
+            item.tags = [t for t in item.tags if t != stale]
+        if any(t.strip().lower() == wanted.lower() for t in item.tags):
+            return
+        await self._c.ado.add_tag(item.id, wanted)
+        item.tags = [*item.tags, wanted]
 
     def _is_my_user(self, email: str | None, name: str | None) -> bool:
         """True if the identity is one THIS machine acts for — its owner, or anyone listed
@@ -1110,8 +1145,19 @@ class AdoPollerService:
             # The tag is what a board lane claims, so the next role sees the item in
             # its own queue rather than having to know which state means "mine".
             await self._c.ado.add_tag(item.id, tag)
+        # The role pin is spent: it said which role THIS run was, and that run has just
+        # handed the item on. Nothing ever cleared it, so one press of ▶ Run (or a
+        # per-role run-now tag) silently outranked the item's STATE for the rest of its
+        # life — the item would land on the next role's door and be picked up as the OLD
+        # role again, forever. That is the #8526 shape with a tag in place of a state,
+        # and it is invisible: the board shows the right column either way.
+        spent = profile_pins(item.tags, cfg)
+        for pin in spent:
+            with contextlib.suppress(Exception):     # best-effort; the hand-off stands
+                await self._c.ado.remove_tag(item.id, pin)
+        item.tags = [t for t in item.tags if t not in spent]
         self._log.info("sdlc handoff", id=item.id, profile=name, state=state, tag=tag,
-                       to=next_role or "(nobody waits — parked)")
+                       to=next_role or "(nobody waits — parked)", released=spent or None)
 
     async def _dispatch_interactive(self, item: WorkItemInfo) -> None:
         """Launch a Remote-Control session for the item; finalise later from its result."""

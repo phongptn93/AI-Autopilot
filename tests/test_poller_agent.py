@@ -1360,3 +1360,121 @@ async def test_four_stranded_items_produce_one_line_not_four():
     await svc._finalize_orphan_sessions()
     assert len(said) == 1 and said[0]["count"] == 4
     assert said[0]["ids"] == [7463, 7695, 8470, 9012]
+
+
+class _NullStateRepo:
+    """The run-now path records a QUEUED state; nothing here asserts on it."""
+
+    async def set(self, *_a, **_kw):
+        return None
+
+
+async def _run_reconcile(svc) -> list[int]:
+    """Run one reconcile pass and return the ids it dispatched.
+
+    ``_reconcile_stage_entries`` fires the run through ``asyncio.create_task``, so the
+    dispatch has not happened yet when it returns — one yield lets those tasks start.
+    """
+    started: list[int] = []
+
+    async def _fake_process(item):
+        started.append(item.id)
+
+    svc._process = _fake_process
+    await svc._reconcile_stage_entries()
+    await asyncio.sleep(0)
+    return started
+
+
+async def test_a_roles_own_run_now_tag_runs_that_role_not_the_default_pipeline():
+    """#8965: `vm-autopilot-run` on an item in "Ready for UAT" ran the FULL pipeline.
+
+    `entry_tags()` maps tag -> role and `entry_tag_for()` promises the tag "starts this
+    role regardless of the item's state", but the map was only ever used to MATCH, so
+    the role it named was dropped and `resolve_profile_name` fell through state (nobody
+    waits in Ready for UAT) to `sdlc_default_profile`. A role's own tag now pins it.
+    """
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.execution.sdlc_plan import resolve_profile_name
+
+    cfg = Settings(
+        sdlc_default_profile="full",
+        stage_entry_tag="vm-autopilot-run",
+        sdlc_roles={
+            "full": SdlcRole(stages=["analyze", "implement", "pr"]),
+            "qc": SdlcRole(stages=["test"], entry_tag="vm-autopilot-run-qc"),
+        },
+    )
+    ado = _FakeAdo()
+    item = WorkItemInfo(id=8965, title="t", work_item_type="Requirement",
+                        state="Ready for UAT", tags=["vm-autopilot-run-qc", "TLLA"])
+    ado.tagged_items = [item]
+
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._c = SimpleNamespace(ado=ado, state_repo=_NullStateRepo())
+    svc._live, svc._processed = {}, {}
+    svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
+
+    assert await _run_reconcile(svc) == [8965]
+    assert (8965, "vm-autopilot-run-qc") in ado.removed   # one-shot, consumed on pickup
+    assert (8965, "sdlc:qc") in ado.tags                  # ...and the role is pinned
+    # The pin is what the engine reads, so QC runs -- not the default profile.
+    assert resolve_profile_name(item.tags, "Requirement", cfg, state="Ready for UAT") == "qc"
+
+
+async def test_the_shared_run_now_tag_still_lets_the_state_pick_the_role():
+    """The shared tag means "start where it stands" -- it names no role, so it must not
+    pin one. Only the state may decide, exactly as documented."""
+    from ai_autopilot.config import SdlcRole
+
+    cfg = Settings(
+        stage_entry_tag="vm-autopilot-run",
+        sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing")},
+    )
+    ado = _FakeAdo()
+    item = WorkItemInfo(id=41, title="t", work_item_type="Requirement",
+                        state="Ready for Testing", tags=["vm-autopilot-run"])
+    ado.tagged_items = [item]
+
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._c = SimpleNamespace(ado=ado, state_repo=_NullStateRepo())
+    svc._live, svc._processed = {}, {}
+    svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
+
+    assert await _run_reconcile(svc) == [41]
+    assert (41, "vm-autopilot-run") in ado.removed
+    assert [t for (_i, t) in ado.tags if t.startswith("sdlc:")] == []
+
+
+async def test_a_handoff_releases_the_role_pin_so_the_next_leg_is_not_the_old_role():
+    """A pin that outlives its run owns the item forever: the tag beats the state in
+    `resolve_profile_name`, so an item handed to the next role's door would be picked up
+    as the OLD role again, every leg, invisibly."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.execution.sdlc_plan import resolve_profile_name
+
+    cfg = Settings(
+        processed_tag="autopilot-done",
+        sdlc_roles={
+            "dev": SdlcRole(stages=["implement"], waits_in="Ready for Development",
+                            done="Ready for Testing"),
+            "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing"),
+        },
+    )
+    ado = _FakeAdo()
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._c = SimpleNamespace(ado=ado)
+    svc._log = type("L", (), {"info": lambda *a, **k: None, "error": lambda *a, **k: None})()
+    item = WorkItemInfo(id=9, title="t", work_item_type="Requirement",
+                        state="Ready for Development", tags=["sdlc:dev", "autopilot-done"])
+
+    await svc._apply_sdlc_handoff(item, ExecutionResult.ok(9, "dev", "done"), "dev")
+
+    assert (9, "Ready for Testing") in ado.states
+    assert (9, "sdlc:dev") in ado.removed
+    # With the pin gone the door decides again, which is the whole point of the relay.
+    survived = [t for t in item.tags if (9, t) not in ado.removed]
+    assert resolve_profile_name(survived, "Requirement", cfg, state="Ready for Testing") == "qc"

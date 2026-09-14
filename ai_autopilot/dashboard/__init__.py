@@ -1720,12 +1720,13 @@ def create_dashboard_router() -> APIRouter:
         # run fell back to whatever the item's state happened to resolve to. A person
         # pressing a role's Run button IS the statement of which role is due.
         if profile:
-            prefix = (c.config.sdlc_profile_tag_prefix or "sdlc:").strip()
-            wanted = f"{prefix}{profile}"
-            for tag in (item.tags if item else []):
-                low = tag.lower()
-                if low.startswith(prefix.lower()) and low != wanted.lower():
-                    await c.ado.remove_tag(item_id, tag)
+            # One definition of the pin, shared with the poller's run-now path — and
+            # released by the hand-off, so pressing Run names the role for THIS leg
+            # rather than owning the item for every leg after it.
+            wanted = sdlc_plan.profile_tag(profile, c.config)
+            for stale in sdlc_plan.profile_pins(item.tags if item else [], c.config):
+                if stale.strip().lower() != wanted.lower():
+                    await c.ado.remove_tag(item_id, stale)
             await c.ado.add_tag(item_id, wanted)
 
         started = await planning_analyzer.start_items(c, [item_id])

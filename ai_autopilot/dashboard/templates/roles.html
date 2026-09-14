@@ -176,7 +176,7 @@
           <label>Run-now tag</label>
           <input type="text" class="rl-in mono" name="role_{{ r.name }}_tag" value="{{ r.entry_tag }}"
                  placeholder="falls back to {{ entry_tag or 'nothing' }}">
-<span class="rl-hint">Starts it where it stands, whatever the state. Removed on pickup.{% if entry_tag %} Blank uses the shared <b>{{ entry_tag }}</b> (<a href="/dashboard/settings#Tags%20%26%20Trigger">change it</a>).{% else %} No shared fallback is set — blank means this role has no run-now tag.{% endif %}</span>
+<span class="rl-hint">Starts <b>this role</b> where the item stands, whatever the state — the tag names the role, so it runs even with no door wired. Removed on pickup, and again when the role hands off.{% if entry_tag %} Blank uses the shared <b>{{ entry_tag }}</b> (<a href="/dashboard/settings#Tags%20%26%20Trigger">change it</a>), which names no role: the state picks, and on a state nobody waits in that is the default profile.{% else %} No shared fallback is set — blank means this role has no run-now tag.{% endif %}</span>
         </div>
 
         <div class="rl-f">

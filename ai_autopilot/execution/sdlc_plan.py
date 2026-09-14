@@ -283,6 +283,29 @@ def entry_tags(cfg: Settings) -> dict[str, str]:
     return out
 
 
+def profile_tag(profile_name: str, cfg: Settings) -> str:
+    """The tag that PINS a role onto an item — "this run is <role>".
+
+    An intention outranks an inference, so this tag beats the item's state in
+    :func:`resolve_profile_name`. It is one-shot by design: the hand-off releases it
+    again, because "which role is running now" is not "who owns this item forever".
+    """
+    prefix = (cfg.sdlc_profile_tag_prefix or "sdlc:").strip()
+    return f"{prefix}{profile_name}"
+
+
+def profile_pins(tags: list[str], cfg: Settings) -> list[str]:
+    """Every role-pin tag an item carries, in the casing ADO holds them in.
+
+    Returned rather than matched in place because clearing a pin needs the original
+    string: ADO's tag delete is case-sensitive on the way out.
+    """
+    prefix = (cfg.sdlc_profile_tag_prefix or "sdlc:").strip().lower()
+    if not prefix:
+        return []
+    return [t for t in (tags or []) if (t or "").strip().lower().startswith(prefix)]
+
+
 def working_state_for(profile_name: str, cfg: Settings) -> str:
     """ADO state to show while this role runs. Blank → the global one.
 

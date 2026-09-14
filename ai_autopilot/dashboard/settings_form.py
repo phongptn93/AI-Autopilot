@@ -91,9 +91,10 @@ FIELDS: tuple[Field, ...] = (
     Field("stage_entry_tag", "▶ Run-now tag (shared fallback)", "text", "Tags & Trigger",
           "Tag an item with this to start the role its CURRENT state names, right where "
           "it stands — the way to run a role whose door is deliberately not in the poll "
-          "query. Consumed on pickup. Every role on the Roles page falls back to this "
-          "one unless it names its own; that page could show the fallback but gave you "
-          "nowhere to change it. Blank = no shared tag (per-role tags still work)."),
+          "query. Consumed on pickup. It names no role itself, so on a state NO role "
+          "waits in it falls through to the default profile — often the whole pipeline. "
+          "To start one named role from any state, give that role its own run-now tag on "
+          "the Roles page. Blank = no shared tag (per-role tags still work)."),
     Field("poll_interval_seconds", "Poll interval (seconds)", "int", "Tags & Trigger"),
     # ── Outcomes → tag + state ──
     # The policy table: for each outcome, the ADO tag to add and the ADO state to

@@ -29,6 +29,7 @@ from ai_autopilot.execution.sdlc_plan import (
     profile_tag,
     resolve_profile_name,
     resolve_stages,
+    role_opens_pr,
     working_state_for,
 )
 from ai_autopilot.logging_config import describe_exc, get_logger
@@ -1191,7 +1192,11 @@ class AdoPollerService:
             profile = profile_for_state(item.state or "", cfg)
             stages = profile_stages(profile, cfg) if profile else None
         launched, session, run_dir = await c.executor.dispatch_interactive(
-            item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft, stages=stages
+            item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft, stages=stages,
+            # Whether this role opens a PR at all. Its stages already said so — only the
+            # `pr` stage produces one — but nothing read that, so a QC run was briefed to
+            # open a pull request and duly did.
+            opens_pr=role_opens_pr(profile, cfg) if profile else True,
         )
         if not launched:
             await self._handle_agent_result(
@@ -1523,6 +1528,43 @@ class AdoPollerService:
         )
         return attempt
 
+    async def _file_test_cases(self, item: WorkItemInfo, result: ExecutionResult) -> int:
+        """File each test case the run wrote as an ADO Test Case item; returns how many.
+
+        A QC run's test cases lived in a repo, reachable only through the pull request
+        that carried them — so on the work item itself, where QC looks, there was
+        nothing. Filed here rather than by the agent because it is a fact about the
+        item, and because "did QC produce cases" should not depend on which MCP tools
+        that session happened to have.
+
+        Best-effort per case: a template that refuses the Test Case type or the Tests
+        link must cost the run nothing — the work is done either way.
+        """
+        cfg = self._config
+        cases = list(result.test_cases or [])
+        if not cases or not cfg.qc_create_test_case_items or cfg.dry_run:
+            return 0
+        filed = 0
+        for case in cases:
+            try:
+                new_id = await self._c.ado.create_test_case(
+                    title=getattr(case, "title", "") or "",
+                    steps=list(getattr(case, "steps", []) or []),
+                    expected=getattr(case, "expected", "") or "",
+                    preconditions=getattr(case, "preconditions", "") or "",
+                    tests_item_id=item.id,
+                    tag=cfg.processed_tag or "",
+                    project=item.project or "",
+                )
+            except Exception as exc:  # noqa: BLE001 — bookkeeping must not sink the run
+                self._log.warning(
+                    "test case not filed", id=item.id, error=describe_exc(exc)
+                )
+                continue
+            filed += 1 if new_id else 0
+        self._log.info("test cases filed", id=item.id, filed=filed, offered=len(cases))
+        return filed
+
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config
         # Stamp the role before anything reports this run. Every notification and comment
@@ -1572,6 +1614,12 @@ class AdoPollerService:
                 # Traceability first: the link must exist before anyone is told the PR
                 # is ready, or the reviewer opens a PR that names no ticket.
                 await self._spec_guard.ensure_pr_links(item, result)
+            filed = await self._file_test_cases(item, result)
+            if filed:
+                badge += (
+                    f"<div><b>🧪 {filed} test case</b> đã được tạo trên work item này "
+                    "(tab <i>Related Work</i> → <i>Tests</i>).</div>"
+                )
             drifts = await self._spec_guard.report_drift(item, result, result.deviations)
             if drifts:
                 badge += (

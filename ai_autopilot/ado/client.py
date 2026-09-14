@@ -8,6 +8,7 @@ Code, so it does not use MCP). Auth headers are injected per-request via
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import re
 import time
@@ -730,6 +731,65 @@ class AdoClient:
         )
         if resp.status_code >= 400:
             self._log.warning("create_work_item failed", status=resp.status_code, body=resp.text)
+            return 0
+        return int(resp.json().get("id", 0))
+
+    async def create_test_case(
+        self, title: str, steps: list[str], expected: str, tests_item_id: int,
+        preconditions: str = "", tag: str = "", project: str = "",
+    ) -> int:
+        """File one Test Case work item, linked to the item it tests. 0 on failure.
+
+        Linked with ``Microsoft.VSTS.Common.TestedBy-Reverse`` ("Tests"), NOT as a child:
+        a Test Case is not part of a requirement's breakdown, and most process templates
+        refuse the hierarchy link between those two types outright. Steps go in
+        ``Microsoft.VSTS.TCM.Steps``, the field the Test tab actually renders — written
+        anywhere else they are invisible in the only place QC reads them.
+        """
+        if not title.strip():
+            return 0
+        if not project.strip():
+            project = await self._project_for(tests_item_id)
+        rows = "".join(
+            f'<step id="{i}" type="ActionStep">'
+            f"<parameterizedString isformatted=\"true\">{html.escape(step)}</parameterizedString>"
+            f"<parameterizedString isformatted=\"true\">"
+            f"{html.escape(expected if i == len(steps) else '')}</parameterizedString>"
+            "<description/></step>"
+            for i, step in enumerate(steps or [], start=1)
+        )
+        patch: list[dict[str, Any]] = [
+            {"op": "add", "path": "/fields/System.Title", "value": title[:255]},
+        ]
+        if rows:
+            patch.append({
+                "op": "add", "path": "/fields/Microsoft.VSTS.TCM.Steps",
+                "value": f'<steps id="0" last="{len(steps)}">{rows}</steps>',
+            })
+        if preconditions.strip():
+            patch.append({
+                "op": "add", "path": "/fields/Microsoft.VSTS.TCM.LocalDataSource",
+                "value": preconditions,
+            })
+        if tag.strip():
+            patch.append({"op": "add", "path": "/fields/System.Tags", "value": tag})
+        patch.append({
+            "op": "add", "path": "/relations/-",
+            "value": {
+                "rel": "Microsoft.VSTS.Common.TestedBy-Reverse",
+                "url": f"{self._base}/_apis/wit/workitems/{tests_item_id}",
+            },
+        })
+        resp = await self._http.post(
+            self._url(f"wit/workitems/$Test%20Case?{_API}", project),
+            content=_json(patch),
+            headers=await self._headers("application/json-patch+json"),
+        )
+        if resp.status_code >= 400:
+            self._log.warning(
+                "create_test_case failed", status=resp.status_code, body=resp.text[:400],
+                tests=tests_item_id,
+            )
             return 0
         return int(resp.json().get("id", 0))
 

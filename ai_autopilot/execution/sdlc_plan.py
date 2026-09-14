@@ -283,6 +283,27 @@ def entry_tags(cfg: Settings) -> dict[str, str]:
     return out
 
 
+def role_opens_pr(profile_name: str, cfg: Settings) -> bool:
+    """Does this role open a pull request?
+
+    The role's STAGES already answer it — only the `pr` stage is marked ``produces_pr``
+    — but nothing read that answer, so every run was briefed to open a PR regardless.
+    A QC role of ["test"] therefore filed a pull request of test-case files, which is
+    not what a QC pass is for and not what anybody asked it to do.
+
+    An unwired machine (no role at all) keeps opening PRs: that is every install that
+    predates the relay, and the rule there is the whole item, not one role's steps.
+    """
+    role = effective_roles(cfg).get(profile_name)
+    if role is None:
+        return True
+    override = getattr(role, "opens_pr", None)
+    if override is not None:
+        return bool(override)
+    cat = _catalog(cfg)
+    return any(getattr(cat.get(s), "produces_pr", False) for s in (role.stages or []))
+
+
 def profile_tag(profile_name: str, cfg: Settings) -> str:
     """The tag that PINS a role onto an item — "this run is <role>".
 

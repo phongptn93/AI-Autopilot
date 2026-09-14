@@ -77,9 +77,12 @@ class _FakeExec:
         self.released: list[str | None] = []
         self.closed: list[tuple[int, str | None]] = []
 
-    async def dispatch_interactive(self, item, *, autonomy, draft_pr, stages=None):
+    async def dispatch_interactive(self, item, *, autonomy, draft_pr, stages=None,
+                                   opens_pr=True):
         launched, session = self._dispatch
         self.briefed_stages = [st.name for st in stages] if stages else None
+        # Whether the role this run is for opens a PR at all — a QC role's stages say no.
+        self.briefed_opens_pr = opens_pr
         return launched, session, "/ws/scratch"
 
     def finalize_interactive(self, item, run_dir):
@@ -1579,3 +1582,64 @@ async def test_the_role_a_run_was_dispatched_as_wins_over_re_deriving_it():
     await svc._handle_agent_result(item, result)
 
     assert result.profile == "qc"
+
+
+async def test_a_qc_run_files_its_test_cases_onto_the_work_item():
+    """#9004: QC wrote twenty test cases into a repo and opened a PR for them, so on the
+    work item — where QC actually looks — there was nothing to see."""
+    svc, c = _poller()
+    created: list[dict] = []
+
+    async def _create_test_case(**kw):
+        created.append(kw)
+        return 9100 + len(created)
+
+    c.ado.create_test_case = _create_test_case
+    item = WorkItemInfo(id=9004, title="Export excel", work_item_type="Requirement",
+                        project="TLCL-DxFac")
+    result = ExecutionResult.ok(9004, "agent", "done")
+    result.test_cases = [
+        SimpleNamespace(title="Export with no rows", steps=["Open", "Export"],
+                        expected="A file with headers only", preconditions="Logged in"),
+        SimpleNamespace(title="Export 10k rows", steps=["Export"], expected="No timeout",
+                        preconditions=""),
+    ]
+
+    filed = await svc._file_test_cases(item, result)
+
+    assert filed == 2
+    assert [k["title"] for k in created] == ["Export with no rows", "Export 10k rows"]
+    assert created[0]["tests_item_id"] == 9004     # linked to the item it tests
+    assert created[0]["project"] == "TLCL-DxFac"   # a Test Case lands in the item's project
+
+
+async def test_test_cases_are_not_filed_when_the_feature_is_off():
+    svc, c = _poller(qc_create_test_case_items=False)
+    c.ado.create_test_case = lambda **kw: (_ for _ in ()).throw(AssertionError("called"))
+    result = ExecutionResult.ok(1, "agent", "done")
+    result.test_cases = [SimpleNamespace(title="x", steps=[], expected="", preconditions="")]
+
+    assert await svc._file_test_cases(WorkItemInfo(id=1, title="t"), result) == 0
+
+
+async def test_one_refused_test_case_does_not_sink_the_run():
+    """A process template that refuses the type or the link must cost the run nothing —
+    the work is done either way."""
+    svc, c = _poller()
+    calls: list[str] = []
+
+    async def _create_test_case(**kw):
+        calls.append(kw["title"])
+        if kw["title"] == "boom":
+            raise RuntimeError("template refuses Test Case")
+        return 1
+
+    c.ado.create_test_case = _create_test_case
+    result = ExecutionResult.ok(2, "agent", "done")
+    result.test_cases = [
+        SimpleNamespace(title="boom", steps=[], expected="", preconditions=""),
+        SimpleNamespace(title="fine", steps=[], expected="", preconditions=""),
+    ]
+
+    assert await svc._file_test_cases(WorkItemInfo(id=2, title="t"), result) == 1
+    assert calls == ["boom", "fine"]              # it kept going

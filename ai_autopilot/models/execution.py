@@ -51,6 +51,9 @@ class ExecutionResult:
     # ``ai_autopilot.spec_drift``). Typed loosely to keep this model free of the
     # execution package it would otherwise import.
     deviations: list[Any] = field(default_factory=list)
+    # Test cases a QC run wrote, carried so the control plane can file each as an ADO
+    # Test Case work item. Typed loosely for the same reason as ``deviations``.
+    test_cases: list[Any] = field(default_factory=list)
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod

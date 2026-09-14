@@ -173,3 +173,44 @@ def test_stage_score_input_maps_fields():
     si = stage_score_input(sig)
     assert si.completed and si.has_pr and si.files_changed == 4
     assert si.review_passed and si.ci_passed
+
+
+def test_a_role_opens_a_pr_only_when_its_stages_say_so():
+    """#9004: the `qc` role is ["test"] — no `pr` stage — and it opened a pull request
+    of test-case files anyway, because the brief told every run to open one."""
+    from ai_autopilot.config import SdlcRole, Settings
+    from ai_autopilot.execution.sdlc_plan import role_opens_pr
+
+    cfg = Settings(sdlc_roles={
+        "qc": SdlcRole(stages=["test"]),
+        "ba": SdlcRole(stages=["analyze"]),
+        "dev": SdlcRole(stages=["implement", "review", "pr"]),
+        "full": SdlcRole(stages=["analyze", "design", "implement", "test", "review", "pr"]),
+    })
+
+    assert role_opens_pr("qc", cfg) is False
+    assert role_opens_pr("ba", cfg) is False
+    assert role_opens_pr("dev", cfg) is True
+    assert role_opens_pr("full", cfg) is True
+
+
+def test_an_unwired_machine_still_opens_prs():
+    """Every install that predates the relay runs the whole item, not one role's steps —
+    turning PRs off for them would be a silent stop, not a fix."""
+    from ai_autopilot.config import Settings
+    from ai_autopilot.execution.sdlc_plan import role_opens_pr
+
+    assert role_opens_pr("", Settings()) is True
+    assert role_opens_pr("nosuchrole", Settings()) is True
+
+
+def test_a_role_may_override_what_its_stages_imply():
+    from ai_autopilot.config import SdlcRole, Settings
+    from ai_autopilot.execution.sdlc_plan import role_opens_pr
+
+    cfg = Settings(sdlc_roles={
+        "qc": SdlcRole(stages=["test"], opens_pr=True),        # QC that does commit fixes
+        "dev": SdlcRole(stages=["implement", "pr"], opens_pr=False),
+    })
+    assert role_opens_pr("qc", cfg) is True
+    assert role_opens_pr("dev", cfg) is False

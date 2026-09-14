@@ -83,6 +83,20 @@ class Deviation:
 
 
 @dataclass
+class TestCase:
+    """One test case a QC run wrote, on its way to becoming an ADO Test Case item."""
+
+    title: str = ""
+    steps: list[str] = field(default_factory=list)
+    expected: str = ""
+    preconditions: str = ""
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.title.strip()
+
+
+@dataclass
 class AgentResult:
     status: str = "failed"  # "completed" | "failed" | "needs_human"
     summary: str = ""
@@ -90,6 +104,10 @@ class AgentResult:
     needs_human: bool = False
     reason: str = ""
     deviations: list[Deviation] = field(default_factory=list)
+    # Test cases a QC run produced. They are filed as ADO Test Case work items by the
+    # control plane, because a file in a repo is not visible from the work item — which
+    # is where QC actually looks for them.
+    test_cases: list[TestCase] = field(default_factory=list)
 
     @property
     def pr_url(self) -> str | None:
@@ -172,7 +190,39 @@ def _parse(data: object) -> AgentResult | None:
         needs_human=needs_human,
         reason=str(data.get("reason", "")),
         deviations=_parse_deviations(data.get("deviations")),
+        test_cases=_parse_test_cases(data.get("test_cases")),
     )
+
+
+def _parse_test_cases(raw: object) -> list[TestCase]:
+    """Tolerant read of ``test_cases`` — same reasoning as ``deviations``.
+
+    A bare string is a title, which is a usable test case on its own; steps written as
+    one blob instead of a list are split on newlines. Losing a case because it arrived
+    in the wrong shape would defeat the point, and a title with no steps still tells QC
+    what to check.
+    """
+    out: list[TestCase] = []
+    for entry in raw or []:
+        if isinstance(entry, str):
+            case = TestCase(title=entry.strip())
+        elif isinstance(entry, dict):
+            steps_raw = entry.get("steps")
+            if isinstance(steps_raw, str):
+                steps = [ln.strip() for ln in steps_raw.splitlines() if ln.strip()]
+            else:
+                steps = [str(x).strip() for x in (steps_raw or []) if str(x).strip()]
+            case = TestCase(
+                title=str(entry.get("title", "")).strip(),
+                steps=steps,
+                expected=str(entry.get("expected", "")).strip(),
+                preconditions=str(entry.get("preconditions", "")).strip(),
+            )
+        else:
+            continue
+        if not case.is_empty:
+            out.append(case)
+    return out
 
 
 def _parse_deviations(raw: object) -> list[Deviation]:

@@ -942,7 +942,7 @@ class ClaudeExecutor:
     @_scoped
     async def dispatch_interactive(
         self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool,
-        stages: list | None = None,
+        stages: list | None = None, opens_pr: bool = True,
     ) -> tuple[bool, str, str]:
         """Launch a real, Remote-Control-enabled Claude Code session for this item.
 
@@ -973,7 +973,8 @@ class ClaudeExecutor:
         # Write the full brief to a file and seed the session with a short prompt
         # (avoids passing a long, multi-line prompt through the shell).
         brief = self._build_brief(
-            item, repos, autonomy=autonomy, draft_pr=draft_pr, stages=stages
+            item, repos, autonomy=autonomy, draft_pr=draft_pr, stages=stages,
+            opens_pr=opens_pr,
         )
         brief_rel = f".autopilot/runs/{item.id}.brief.md"
         brief_path = Path(run_dir) / brief_rel
@@ -1357,6 +1358,7 @@ class ClaudeExecutor:
         if agent.is_completed:
             result = ExecutionResult.ok(item.id, "agent", agent.summary)
             result.deviations = list(agent.deviations)
+            result.test_cases = list(agent.test_cases)
             result.pr_urls = [a.pr_url for a in agent.artifacts if a.pr_url]
             result.pr_url = result.pr_urls[0] if result.pr_urls else None
             if agent.artifacts:
@@ -1368,7 +1370,7 @@ class ClaudeExecutor:
 
     def _build_brief(
         self, item: WorkItemInfo, repos: list[str], *, autonomy: str, draft_pr: bool,
-        stages: list | None = None,
+        stages: list | None = None, opens_pr: bool = True,
     ) -> str:
         """High-level brief: let Claude reason, pick repo(s) + skill(s), implement,
         open the PR(s), and report back via the structured result file.
@@ -1500,6 +1502,64 @@ class ClaudeExecutor:
                 "and will pick the item up from its own board. If a step is already "
                 "done, say so and move to the next rather than redoing it."
             )
+
+        # Where test cases go. Left to the agent, each run picked a new place — which is
+        # the same as having none, because the next person cannot find the last one.
+        qc_rules: list[str] = []
+        if any(getattr(st, "name", "") == "test" for st in (stages or [])):
+            path = (self._config.qc_test_case_path or "").strip()
+            if path:
+                where = path.replace("{id}", str(item.id))
+                qc_rules.append(
+                    f"- Write the test cases you produce to `{where}/` inside the repo under "
+                    "test, one Markdown file per area, each case with: id, title, "
+                    "preconditions, steps, expected result. Create the folder if it is not "
+                    "there."
+                )
+            if self._config.qc_create_test_case_items:
+                qc_rules.append(
+                    "- ALSO list every case in the result file's `test_cases` (see below). "
+                    "The control plane files each one as a Test Case work item linked to "
+                    f"#{item.id} — that is where QC reads them, and a file in a repo is not "
+                    "visible from the work item at all."
+                )
+
+        # "Completed means a PR was opened" is false for a role that must not open one —
+        # left in, it tells a QC run its successful pass was a failure.
+        completion_rule = (
+            "List EVERY PR you opened in artifacts. Set status=completed only if at least one "
+            "PR was opened (or, in report mode, the plan was commented). Use needs_human=true "
+            "with a clear reason when you need a human."
+            if opens_pr else
+            "Leave artifacts EMPTY — this role opens no PR. Set status=completed when you "
+            "finished the steps above and wrote down what you found. Use needs_human=true with "
+            "a clear reason when you need a human."
+        )
+
+        # A role that does not run the `pr` stage must not open one. The brief used to
+        # tell EVERY run to "open a pull request with the pr-create skill", so a QC pass
+        # filed a PR of test-case files — work no reviewer asked for, on a branch the
+        # next role then had to reconcile.
+        if opens_pr:
+            pr_rules = [
+                "- For EACH repo you change: start from a clean base branch, create a feature "
+                "branch, commit, push, and open a pull request with the pr-create skill.",
+                *branch_rule,
+                f"- The PR MUST be linked to work item #{item.id} (the pr-create skill does "
+                "this; branch names starting with the item id let ADO do it too). The control "
+                "plane verifies the link afterwards and attaches it if it is missing.",
+                "- Run a self-review (e.g. security-review / review-pr skill) before opening "
+                "the PR.",
+            ]
+        else:
+            pr_rules = [
+                "- **Do NOT open a pull request, and do NOT push a branch.** This role's steps "
+                "do not include the `pr` stage: its output is what you FOUND and what you "
+                "WROTE DOWN, not a change for somebody to merge. A later role opens the PR.",
+                "- If the work genuinely requires changing code, say so in `deviations` and "
+                "stop — do not do it anyway.",
+            ]
+
         lines += [
             "",
             "# Repositories you may edit (subfolders of this workspace)",
@@ -1517,14 +1577,9 @@ class ClaudeExecutor:
             "to cp1252) and do NOT spawn a sub-agent just to look the item up.",
             "- On Windows use PowerShell for shell commands; the Git Bash here is stripped-down "
             "(no `head`/`grep`/`find`/`printenv`), so don't retry the same command across shells.",
-            "- For EACH repo you change: start from a clean base branch, create a feature branch, "
-            "commit, push, and open a pull request with the pr-create skill.",
-            *branch_rule,
-            f"- The PR MUST be linked to work item #{item.id} (the pr-create skill does this; "
-            "branch names starting with the item id let ADO do it too). The control plane "
-            "verifies the link afterwards and attaches it if it is missing.",
+            *pr_rules,
+            *qc_rules,
             f"- {action}",
-            "- Run a self-review (e.g. security-review / review-pr skill) before opening the PR.",
             ambiguity,
             f"- {BOT_COMMENT_INSTRUCTION}",
             AGENT_CONDUCT_INSTRUCTION,
@@ -1540,10 +1595,11 @@ class ClaudeExecutor:
             '   "needs_human":false,"reason":"<why, if failed/needs_human>",',
             '   "deviations":[{"kind":"spec_unclear|logic_differs|spec_gap|out_of_scope|assumption",',
             '                  "summary":"<one line: what differs from the item>",',
-            '                  "detail":"<why you chose this>","where":"<AC id / file / endpoint>"}]}',
-            "List EVERY PR you opened in artifacts. Set status=completed only if at least one PR "
-            "was opened (or, in report mode, the plan was commented). Use needs_human=true with a "
-            "clear reason when you need a human.",
+            '                  "detail":"<why you chose this>","where":"<AC id / file / endpoint>"}],',
+            '   "test_cases":[{"title":"<short, specific>","steps":["<step>","<step>"],',
+            '                  "expected":"<what must be true afterwards>",',
+            '                  "preconditions":"<state needed first, or empty>"}]}',
+            completion_rule,
             "",
             "## deviations — REQUIRED whenever you decided something the item did not settle",
             "You were told above to decide instead of asking. Every such decision is a place "

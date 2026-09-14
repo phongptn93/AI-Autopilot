@@ -753,6 +753,12 @@ class SdlcRole(BaseModel):
     done: str = ""             # state when it finishes (blank → stop, wait for a person)
     done_tag: str = ""         # tag added when it finishes (blank → none)
     auto: bool = False         # may the poller start it with nobody pressing Run?
+    # Does this role open a pull request? ``None`` = decide from its STAGES, which is
+    # the answer that was always implied and never enforced: `qc` is ["test"] and `ba`
+    # is ["analyze"] — neither contains the `pr` stage — yet the brief told every run to
+    # open one, so a QC pass filed a PR of test-case files nobody asked for. Set True or
+    # False to override a role whose stages do not say what you want.
+    opens_pr: bool | None = None
 
 
 class ScheduledLoop(BaseModel):
@@ -1449,6 +1455,17 @@ class Settings(BaseSettings):
     # very thing that says which role is due. A tag is found regardless of state, and
     # is consumed on pickup. A stage may name its own via ``entry_tag``.
     stage_entry_tag: str = "autopilot-run"
+    # Where a QC run writes the test cases it wrote, inside the repo it is working in.
+    # ``{id}`` is the work item's id. A default rather than a blank, because the choice
+    # only matters if it is the SAME every time — test cases scattered by whatever each
+    # run decided are test cases nobody can find again. Blank = say nothing, and the
+    # agent picks (which is what produced `feature/9004-qc-test-cases-…` by hand).
+    qc_test_case_path: str = "qc/{id}"
+    # Also file each test case as a Test Case work item in ADO, linked to the item it
+    # tests. The file in the repo is reviewable next to the code; the work item is what
+    # QC actually works from, and "I cannot see the test cases on the work item" is the
+    # complaint that says the file alone is not enough.
+    qc_create_test_case_items: bool = True
     # DEPRECATED — superseded by sdlc_roles.stages.
     # Extra / overriding profiles merged over the built-ins (name → ordered stage names).
     sdlc_profiles: dict[str, list[str]] = Field(default_factory=dict)

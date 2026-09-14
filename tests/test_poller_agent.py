@@ -19,6 +19,7 @@ class _FakeAdo:
         self.states: list[tuple[int, str]] = []
         self.removed: list[tuple[int, str]] = []
         self.tagged_items: list = []
+        self.tagged_any_queries: list[list[str]] = []
         self.comments_by_item: dict[int, list[dict]] = {}
         self.reviewers: list[tuple[str, int, str, bool]] = []
         # States ADO should refuse (None = accept everything), to reproduce "this state
@@ -43,6 +44,16 @@ class _FakeAdo:
 
     async def get_all_tagged_work_items(self):
         return self.tagged_items
+
+    async def get_work_items_tagged_any(self, tags):
+        # Records what the run-now sweep asked for: the whole bug was that it asked the
+        # wrong question (trigger tags) and so never saw the items it was meant to find.
+        self.tagged_any_queries.append(list(tags))
+        wanted = {(t or "").strip().lower() for t in tags}
+        return [
+            i for i in self.tagged_items
+            if wanted & {(t or "").strip().lower() for t in i.tags}
+        ]
 
     async def get_work_item(self, work_item_id):
         return WorkItemInfo(id=work_item_id, title="t", work_item_type="Task")
@@ -1478,3 +1489,59 @@ async def test_a_handoff_releases_the_role_pin_so_the_next_leg_is_not_the_old_ro
     # With the pin gone the door decides again, which is the whole point of the relay.
     survived = [t for t in item.tags if (9, t) not in ado.removed]
     assert resolve_profile_name(survived, "Requirement", cfg, state="Ready for Testing") == "qc"
+
+
+async def test_the_run_now_tag_works_on_an_item_the_autopilot_is_not_already_holding():
+    """#9004: tagging an item with the run-now tag did nothing — no pickup, no error,
+    nothing in the log.
+
+    The sweep read the TRIGGER-tag query, so only items the autopilot already owned were
+    ever in the result set. An item carrying just the run-now tag — which is exactly what
+    a person reaches for the tag for — was never looked at.
+    """
+    from ai_autopilot.config import SdlcRole
+
+    cfg = Settings(
+        trigger_tags=["vm-autopilot"],
+        stage_entry_tag="vm-autopilot-run",
+        sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing")},
+    )
+    ado = _FakeAdo()
+    # No trigger tag. Just the run-now tag, the way a person adds it on the board.
+    item = WorkItemInfo(id=9004, title="t", work_item_type="Requirement",
+                        state="Ready for Testing", tags=["vm-autopilot-run", "TLLA"])
+    ado.tagged_items = [item]
+
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._c = SimpleNamespace(ado=ado, state_repo=_NullStateRepo())
+    svc._live, svc._processed = {}, {}
+    svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
+
+    assert await _run_reconcile(svc) == [9004]
+    assert (9004, "vm-autopilot-run") in ado.removed      # consumed on pickup
+    # It asked by run-now tag, not by trigger tag — that is the fix.
+    assert ado.tagged_any_queries == [["vm-autopilot-run"]]
+
+
+async def test_every_run_now_tag_is_queried_not_just_the_shared_one():
+    """A role's own tag has to be in the query too, or that role is unreachable by tag
+    on any item the autopilot is not already holding."""
+    from ai_autopilot.config import SdlcRole
+
+    cfg = Settings(
+        stage_entry_tag="vm-autopilot-run",
+        sdlc_roles={"qc": SdlcRole(stages=["test"], entry_tag="vm-autopilot-run-qc")},
+    )
+    ado = _FakeAdo()
+    ado.tagged_items = []
+
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._c = SimpleNamespace(ado=ado, state_repo=_NullStateRepo())
+    svc._live, svc._processed = {}, {}
+    svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
+
+    await _run_reconcile(svc)
+
+    assert sorted(ado.tagged_any_queries[0]) == ["vm-autopilot-run", "vm-autopilot-run-qc"]

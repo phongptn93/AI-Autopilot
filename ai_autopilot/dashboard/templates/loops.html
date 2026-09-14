@@ -121,7 +121,11 @@
       <span>Clear the <b>name</b> to drop a loop on save. A disabled loop keeps its settings and never fires.</span>
     </div>
 
-    {% for r in rows %}
+    {# `row` is captured HERE because Jinja's `loop` always names the INNERMOST loop:
+       inside the sub-agent picker below, `loop.index0` counts AGENTS, not rows. That
+       made every chip post under `loop_<agentIndex>_agents`, so a row read back
+       whichever agent happened to sit at its own index — and the picks vanished. #}
+    {% for r in rows %}{% set row = loop.index0 %}
     <div class="lp-loop {{ '' if r.enabled else 'off' }}">
       <div class="lp-loop-hd">
         <b>{{ r.name }}</b>
@@ -142,13 +146,13 @@
       <div class="lp-fields">
         <div class="lp-f">
           <label>Name</label>
-          <input type="text" class="lp-in mono" name="loop_{{ loop.index0 }}_name" value="{{ r.name }}">
+          <input type="text" class="lp-in mono" name="loop_{{ row }}_name" value="{{ r.name }}">
           <span class="lp-hint">Also the job id — must be unique. Blank on save = delete.</span>
         </div>
 
         <div class="lp-f">
           <label>What it does</label>
-          <select class="lp-in" name="loop_{{ loop.index0 }}_mode">
+          <select class="lp-in" name="loop_{{ row }}_mode">
             <option value="report" {% if r.mode == 'report' %}selected{% endif %}>report — inspect, change nothing</option>
             <option value="pr" {% if r.mode != 'report' %}selected{% endif %}>pr — change files, open a PR</option>
           </select>
@@ -157,35 +161,35 @@
 
         <div class="lp-f">
           <label>Cron</label>
-          <input type="text" class="lp-in mono" name="loop_{{ loop.index0 }}_cron"
+          <input type="text" class="lp-in mono" name="loop_{{ row }}_cron"
                  value="{{ r.cron }}" placeholder="7 18 * * 1-5">
           <span class="lp-hint">5-field cron, server time. Avoid :00 — that is when everything else fires.</span>
         </div>
 
         <div class="lp-f">
           <label>…or every N minutes</label>
-          <input type="number" min="0" class="lp-in" name="loop_{{ loop.index0 }}_interval"
+          <input type="number" min="0" class="lp-in" name="loop_{{ row }}_interval"
                  value="{{ r.interval_minutes or '' }}" placeholder="0 = off">
           <span class="lp-hint">Used only when cron is blank. Neither one set = the loop never runs.</span>
         </div>
 
         <div class="lp-f">
           <label>Project (workspace)</label>
-          <input type="text" class="lp-in" name="loop_{{ loop.index0 }}_project"
+          <input type="text" class="lp-in" name="loop_{{ row }}_project"
                  value="{{ r.project }}" list="lp-projects" placeholder="blank = root workspace">
           <span class="lp-hint">Picks the workspace, and with it the default repo and base branch.</span>
         </div>
 
         <div class="lp-f">
           <label>Repo path</label>
-          <input type="text" class="lp-in mono" name="loop_{{ loop.index0 }}_repo"
+          <input type="text" class="lp-in mono" name="loop_{{ row }}_repo"
                  value="{{ r.repo_path }}" placeholder="blank = workspace's repo">
           <span class="lp-hint">Without a repo — here or on the workspace — the loop logs a warning and stops.</span>
         </div>
 
         <div class="lp-f">
           <label>Base branch</label>
-          <input type="text" class="lp-in mono" name="loop_{{ loop.index0 }}_base"
+          <input type="text" class="lp-in mono" name="loop_{{ row }}_base"
                  value="{{ r.base_branch }}" placeholder="blank = workspace's base">
           <span class="lp-hint">Fetched before an audit so the agent diffs against the real base.</span>
         </div>
@@ -194,13 +198,13 @@
           <label>Options</label>
           <div style="display:flex;flex-wrap:wrap;gap:6px">
             <label class="lp-toggle {{ 'on' if r.enabled else '' }}">
-              <input type="checkbox" name="loop_{{ loop.index0 }}_enabled"
+              <input type="checkbox" name="loop_{{ row }}_enabled"
                      {% if r.enabled %}checked{% endif %}>enabled</label>
             <label class="lp-toggle {{ 'on' if r.report_html else '' }}">
-              <input type="checkbox" name="loop_{{ loop.index0 }}_html"
+              <input type="checkbox" name="loop_{{ row }}_html"
                      {% if r.report_html %}checked{% endif %}>html file</label>
             <label class="lp-toggle {{ 'on' if r.draft_pr else '' }}">
-              <input type="checkbox" name="loop_{{ loop.index0 }}_draft"
+              <input type="checkbox" name="loop_{{ row }}_draft"
                      {% if r.draft_pr %}checked{% endif %}>draft pr</label>
           </div>
           <span class="lp-hint">“html file” writes the report under <code>&lt;workspace&gt;/reports</code>. “draft pr” applies to pr mode only.</span>
@@ -211,7 +215,7 @@
           <div class="lp-agents">
             {% for a in known_agents %}
             <label class="lp-ag {{ 'on' if a in r.agents else '' }}">
-              <input type="checkbox" name="loop_{{ loop.index0 }}_agents" value="{{ a }}"
+              <input type="checkbox" name="loop_{{ row }}_agents" value="{{ a }}"
                      {% if a in r.agents %}checked{% endif %}>{{ a }}
             </label>
             {% endfor %}
@@ -226,7 +230,7 @@
 
         <div class="lp-f wide">
           <label>Prompt</label>
-          <textarea class="lp-in" name="loop_{{ loop.index0 }}_prompt"
+          <textarea class="lp-in" name="loop_{{ row }}_prompt"
                     placeholder="What this agent should look at, and what counts as a finding.">{{ r.prompt }}</textarea>
           <span class="lp-hint">A report loop's prompt is wrapped with its sub-agent list and the findings
             format before it runs — write the ask, not the scaffolding.</span>

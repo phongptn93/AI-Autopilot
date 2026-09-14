@@ -370,6 +370,46 @@ class AdoClient:
         ids = [r["id"] for r in (resp.json().get("workItems") or [])]
         return await self.get_work_items_by_ids(ids)
 
+    async def get_work_items_tagged_any(self, tags: list[str]) -> list[WorkItemInfo]:
+        """Every work item carrying ANY of ``tags``, in any state, trigger tag or not.
+
+        The run-now sweep needs this and ``get_all_tagged_work_items`` cannot give it:
+        that one filters on the TRIGGER tag, so an item carrying only the run-now tag was
+        never in the result set and the sweep had nothing to find. The tag then did
+        nothing at all, silently, on exactly the items a person reaches for it
+        for — ones the autopilot is not already holding.
+
+        Claiming such an item is deliberate: the run-now tag is this machine's own
+        configuration (``stage_entry_tag``, or a role's), so putting it on an item is a
+        person naming this machine. It is consumed on pickup. The project filter still
+        applies — this widens which TAGS are matched, never which projects.
+        """
+        wanted = [t.strip() for t in (tags or []) if t and t.strip()]
+        if not wanted:
+            return []
+        ors = " OR ".join(f"[System.Tags] CONTAINS '{_wiql_lit(t)}'" for t in wanted)
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems "
+            f"WHERE ({ors}) "
+            f"AND {self._project_clause()} "
+            "ORDER BY [System.ChangedDate] DESC"
+        )
+        try:
+            resp = await self._http.post(
+                self._org_url(f"wit/wiql?{_API}"),
+                json={"query": wiql},
+                headers=await self._headers(),
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("run-now WIQL request error", error=describe_exc(exc))
+            return []
+        text = resp.text.lstrip()
+        if resp.status_code >= 400 or not text.startswith("{"):
+            self._log.warning("run-now WIQL failed", status=resp.status_code)
+            return []
+        ids = [r["id"] for r in (resp.json().get("workItems") or [])]
+        return await self.get_work_items_by_ids(ids)
+
     async def get_all_active_work_items(self, top: int = 300) -> list[WorkItemInfo]:
         """Every work item in the project (ANY tag, ANY assignee), most-recently
         changed first — unlike ``get_pending_work_items``/``get_all_tagged_work_items``

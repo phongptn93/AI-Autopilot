@@ -8,6 +8,8 @@ mistakes that produce a loop which looks configured and never fires.
 
 from __future__ import annotations
 
+import re
+
 import yaml
 from starlette.testclient import TestClient
 
@@ -31,6 +33,16 @@ def _agents(tmp_path, *names):
     return str(tmp_path)
 
 
+def _agent_fields(page: str, row: int) -> list[str]:
+    """Sub-agent checkbox values posted under ROW ``row``'s field name."""
+    return re.findall(rf'name="loop_{row}_agents" value="([^"]+)"', page)
+
+
+def _checked_agents(page: str, row: int) -> list[str]:
+    """Which of row ``row``'s sub-agents render as ticked."""
+    return re.findall(rf'name="loop_{row}_agents" value="([^"]+)"\s*checked>', page)
+
+
 def test_the_page_shows_each_loop_with_its_mode_cadence_and_agents(tmp_path):
     workspace = _agents(tmp_path, "agent-pr-reviewer", "agent-security-reviewer")
     with _client(
@@ -46,8 +58,11 @@ def test_the_page_shows_each_loop_with_its_mode_cadence_and_agents(tmp_path):
 
         assert "code-review-daily" in page and "7 18 * * 1-5" in page
         assert "loop_0_mode" in page and "loop_0_agents" in page
-        # The workspace's agents are offered, not typed from memory.
-        assert "agent-security-reviewer" in page
+        # The workspace's agents are offered, not typed from memory. Asserted by NAME
+        # and CHECKED state, not by the string appearing somewhere: every agent's name
+        # is on this page anyway — in the chip list and again in the presets — so
+        # "agent-pr-reviewer" in page was true even when nothing was picked.
+        assert _checked_agents(page, 0) == ["agent-pr-reviewer"]
         # Presets are on the page — that is the point of it existing.
         assert "security-audit-weekly" in page
 
@@ -268,3 +283,60 @@ def test_running_a_loop_that_is_already_running_says_so_instead_of_starting_it(t
 
         assert r.status_code in (302, 303)
         assert r.cookies.get("autopilot_flash") == "loop_busy"
+
+
+def test_each_row_posts_its_sub_agents_under_its_own_row_index(tmp_path):
+    """The bug this exists for: Jinja's `loop` names the INNERMOST loop, so inside the
+    sub-agent picker `loop.index0` counted AGENTS, not rows. Every chip in every row was
+    posted as `loop_<agentIndex>_agents`, so on save a row read back whichever agent sat
+    at its own index — usually none — and the picks disappeared. Two rows and three
+    agents is the smallest shape that tells the two numberings apart."""
+    workspace = _agents(tmp_path, "agent-pr-reviewer", "agent-security-reviewer",
+                        "agent-test-writer")
+    with _client(
+        tmp_path,
+        workspace_directory=workspace,
+        scheduled_loops=[
+            ScheduledLoop(name="review", prompt="p", cron="7 18 * * *", mode="report",
+                          agents=["agent-pr-reviewer"]),
+            ScheduledLoop(name="security", prompt="p", cron="23 2 * * 6", mode="report",
+                          agents=["agent-security-reviewer", "agent-test-writer"]),
+        ],
+    ) as client:
+        page = client.get("/dashboard/loops").text
+
+        # Every row offers every agent, under ITS OWN name — three chips each, not one
+        # chip per agent index spread across the rows.
+        assert _agent_fields(page, 0) == [
+            "agent-pr-reviewer", "agent-security-reviewer", "agent-test-writer"]
+        assert _agent_fields(page, 1) == _agent_fields(page, 0)
+        # The blank row is index 2 and offers them too.
+        assert _agent_fields(page, 2) == _agent_fields(page, 0)
+
+        # …and each row ticks only its own.
+        assert _checked_agents(page, 0) == ["agent-pr-reviewer"]
+        assert _checked_agents(page, 1) == [
+            "agent-security-reviewer", "agent-test-writer"]
+        assert _checked_agents(page, 2) == []
+
+
+def test_sub_agents_survive_a_save_and_come_back_ticked(tmp_path, monkeypatch):
+    """The round trip a person actually performs: tick, save, look. Storing them was
+    already tested; that the PAGE shows them again was not, which is how the mismatch
+    between what the form emitted and what the handler read stayed invisible."""
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    workspace = _agents(tmp_path, "agent-pr-reviewer", "agent-security-reviewer")
+    with _client(tmp_path, workspace_directory=workspace) as client:
+        client.post("/dashboard/loops", data={
+            "loop_0_name": "code-review-daily",
+            "loop_0_prompt": "Review today",
+            "loop_0_cron": "7 18 * * 1-5",
+            "loop_0_mode": "report",
+            "loop_0_agents": ["agent-pr-reviewer", "agent-security-reviewer"],
+            "loop_0_enabled": "on",
+        }, follow_redirects=False)
+
+        page = client.get("/dashboard/loops").text
+        assert _checked_agents(page, 0) == [
+            "agent-pr-reviewer", "agent-security-reviewer"]
+        assert "None picked" not in page.split('name="loop_1_name"')[0]

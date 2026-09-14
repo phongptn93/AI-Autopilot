@@ -664,8 +664,14 @@ class AdoPollerService:
         shared = (cfg.stage_entry_tag or "").strip().lower()
         if not per_stage and not shared:
             return
+        # Query by the RUN-NOW tags themselves. This used to read the trigger-tag query,
+        # which quietly halved what the tag means: an item the autopilot was not already
+        # holding never appeared in the result set, so tagging it did nothing at all —
+        # no pickup, no error, nothing in the log. And an item nobody is holding is
+        # precisely what a person reaches for this tag for (#9004).
+        lookup = [*per_stage] + ([shared] if shared else [])
         try:
-            tagged = await c.ado.get_all_tagged_work_items()
+            tagged = await c.ado.get_work_items_tagged_any(lookup)
         except Exception as exc:  # noqa: BLE001
             self._log.warning("stage entry reconcile: fetch failed", error=describe_exc(exc))
             return

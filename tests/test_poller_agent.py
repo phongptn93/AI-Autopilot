@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from ai_autopilot.config import Settings
 from ai_autopilot.data import PipelineState
+from ai_autopilot.execution.result_contract import CaseOutcome
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 from ai_autopilot.outcomes import apply_outcome, outcome_policy
 from ai_autopilot.services.poller import AdoPollerService
@@ -1643,3 +1644,125 @@ async def test_one_refused_test_case_does_not_sink_the_run():
 
     assert await svc._file_test_cases(WorkItemInfo(id=2, title="t"), result) == 1
     assert calls == ["boom", "fine"]              # it kept going
+
+
+async def test_a_qc_run_reports_what_it_executed_onto_the_work_item():
+    """#8965: a run executed twenty cases and reported 19 pass / 1 fail onto the item
+    because that session happened to hold an MCP tool that could. The next run did the
+    same work invisibly. Whether QC's verdict is visible must not depend on that."""
+    svc, c = _poller()
+    item = WorkItemInfo(id=9083, title="WO form list", project="TLCL-DxFac")
+    result = ExecutionResult.ok(9083, "agent", "done")
+    result.test_results = [
+        CaseOutcome(title="Filter by schedule", outcome="pass"),
+        CaseOutcome(title="Export 10k rows", outcome="fail", note="timeout after 30s"),
+        CaseOutcome(title="Bulk delete", outcome="blocked", note="no permission on demo"),
+    ]
+
+    total = await svc._report_test_results(item, result)
+
+    assert total == 3
+    body = c.ado.comments[-1][1]
+    assert c.ado.comments[-1][0] == 9083
+    assert "1/3 không đạt" in body                     # the verdict leads
+    assert "timeout after 30s" in body                 # the note is what makes it actionable
+    # Failures first: a reader who stops after one row has seen the one that decides.
+    assert body.index("Export 10k rows") < body.index("Filter by schedule")
+
+
+async def test_the_qc_report_does_not_wait_for_a_pull_request():
+    """The complaint that started this: a `full` run's QC outcome was reachable only
+    through the completion badge, which is only posted when a PR exists — and a run
+    with no PR is the normal shape of QC."""
+    svc, c = _poller()
+    item = WorkItemInfo(id=9083, title="t")
+    result = ExecutionResult.ok(9083, "agent", "done")          # no pr_url anywhere
+    result.test_results = [CaseOutcome(title="Case A", outcome="pass")]
+
+    await svc._handle_agent_result(item, result)
+
+    assert any("QC — Kết quả thực thi" in body for _, body in c.ado.comments)
+
+
+async def test_a_report_mode_run_no_longer_swallows_its_badge():
+    """The no-PR branch built the badge and then returned without posting it, so a run
+    that filed test cases but opened no PR filed them in silence."""
+    svc, c = _poller(pr_scoring_enabled=False)
+    created: list[dict] = []
+
+    async def _create_test_case(**kw):
+        created.append(kw)
+        return 9100 + len(created)
+
+    c.ado.create_test_case = _create_test_case
+    item = WorkItemInfo(id=9083, title="t")
+    result = ExecutionResult.ok(9083, "agent", "done")           # no PR
+    result.test_cases = [
+        SimpleNamespace(title="Case A", steps=[], expected="", preconditions=""),
+    ]
+
+    await svc._handle_agent_result(item, result)
+
+    assert created                                               # the case WAS filed
+    assert any("1 test case" in body for _, body in c.ado.comments), (
+        "the badge saying so must be posted even with no PR"
+    )
+
+
+async def test_a_comment_that_fails_to_post_does_not_sink_a_finished_run():
+    svc, c = _poller()
+
+    async def _boom(*a, **kw):
+        raise RuntimeError("ADO down")
+
+    c.ado.add_comment = _boom
+    result = ExecutionResult.ok(3, "agent", "done")
+    result.test_results = [CaseOutcome(title="Case A", outcome="fail", note="x")]
+
+    assert await svc._report_test_results(WorkItemInfo(id=3, title="t"), result) == 0
+
+
+async def test_nothing_is_posted_when_the_run_executed_nothing():
+    """A run that only WROTE cases has no verdict to report, and an empty table would
+    read as one."""
+    svc, c = _poller()
+    result = ExecutionResult.ok(4, "agent", "done")
+    result.test_cases = [SimpleNamespace(title="x", steps=[], expected="", preconditions="")]
+
+    assert await svc._report_test_results(WorkItemInfo(id=4, title="t"), result) == 0
+    assert c.ado.comments == []
+
+
+async def test_the_verdict_survives_an_escalation():
+    """A QC run that escalates BECAUSE a case failed is exactly the run whose results
+    someone needs to read — and needs_human returns before every reporting branch."""
+    svc, c = _poller()
+    item = WorkItemInfo(id=9083, title="t")
+    result = ExecutionResult.fail(9083, "agent", "one case failed")
+    result.needs_human = True
+    result.test_results = [CaseOutcome(title="Export 10k", outcome="fail", note="timeout")]
+
+    await svc._handle_agent_result(item, result)
+
+    bodies = [body for _, body in c.ado.comments]
+    assert any("QC — Kết quả thực thi" in b for b in bodies)
+    assert any("Needs human input" in b for b in bodies)
+
+
+async def test_the_verdict_survives_a_failed_run():
+    svc, c = _poller(exhausted=True)
+    result = ExecutionResult.fail(9083, "agent", "boom")
+    result.test_results = [CaseOutcome(title="Case A", outcome="blocked", note="env down")]
+
+    await svc._handle_agent_result(WorkItemInfo(id=9083, title="t"), result)
+
+    assert any("QC — Kết quả thực thi" in body for _, body in c.ado.comments)
+
+
+async def test_dry_run_reports_nothing():
+    svc, c = _poller(dry_run=True)
+    result = ExecutionResult.ok(5, "agent", "done")
+    result.test_results = [CaseOutcome(title="Case A", outcome="pass")]
+
+    assert await svc._report_test_results(WorkItemInfo(id=5, title="t"), result) == 0
+    assert c.ado.comments == []

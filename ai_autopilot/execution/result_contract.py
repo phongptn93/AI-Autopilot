@@ -96,6 +96,44 @@ class TestCase:
         return not self.title.strip()
 
 
+TEST_OUTCOMES = ("pass", "fail", "blocked")
+# An outcome nobody can read is NOT a pass. Reading it as one would hide exactly the
+# case a reader is looking for, and the cost of the other direction is a reader
+# glancing at a row that turns out to be fine.
+_DEFAULT_OUTCOME = "blocked"
+# What models actually write when asked for one of three words.
+_OUTCOME_SYNONYMS = {
+    "pass": "pass", "passed": "pass", "ok": "pass", "success": "pass",
+    "succeeded": "pass", "green": "pass", "đạt": "pass",
+    "fail": "fail", "failed": "fail", "failure": "fail", "error": "fail",
+    "red": "fail", "không đạt": "fail",
+    "blocked": "blocked", "block": "blocked", "skip": "blocked", "skipped": "blocked",
+    "n/a": "blocked", "na": "blocked", "not run": "blocked", "untested": "blocked",
+}
+
+
+@dataclass
+class CaseOutcome:
+    """The outcome of running one test case.
+
+    Separate from :class:`TestCase` because writing a case and running it are different
+    acts by different roles at different times — a BA-authored case executed three days
+    later by QC is one case and one result, not two cases.
+    """
+
+    title: str = ""
+    outcome: str = _DEFAULT_OUTCOME   # one of TEST_OUTCOMES
+    note: str = ""                    # what happened — required reading when not a pass
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.title.strip()
+
+    @property
+    def is_pass(self) -> bool:
+        return self.outcome == "pass"
+
+
 @dataclass
 class AgentResult:
     status: str = "failed"  # "completed" | "failed" | "needs_human"
@@ -108,6 +146,11 @@ class AgentResult:
     # control plane, because a file in a repo is not visible from the work item — which
     # is where QC actually looks for them.
     test_cases: list[TestCase] = field(default_factory=list)
+    # Outcomes of cases this run EXECUTED. Reported by the control plane for the same
+    # reason the cases are filed by it: on #8965 a QC run executed twenty cases and
+    # reported 19 pass / 1 fail — onto the work item, because that session happened to
+    # have an MCP tool that could. A run without that tool did the same work in silence.
+    test_results: list[CaseOutcome] = field(default_factory=list)
 
     @property
     def pr_url(self) -> str | None:
@@ -191,7 +234,48 @@ def _parse(data: object) -> AgentResult | None:
         reason=str(data.get("reason", "")),
         deviations=_parse_deviations(data.get("deviations")),
         test_cases=_parse_test_cases(data.get("test_cases")),
+        test_results=_parse_case_outcomes(data.get("test_results")),
     )
+
+
+def _parse_case_outcomes(raw: object) -> list[CaseOutcome]:
+    """Tolerant read of ``test_results`` — same reasoning as ``test_cases``.
+
+    The outcome is the field worth being generous about: asked for one of three words a
+    model writes "passed", "OK", "skipped" or "N/A" about as often as the exact token,
+    and dropping those rows would report a green run that was not one. Anything still
+    unreadable becomes ``blocked``, never ``pass``.
+    """
+    out: list[CaseOutcome] = []
+    for entry in raw or []:
+        if isinstance(entry, str):
+            res = CaseOutcome(title=entry.strip())
+        elif isinstance(entry, dict):
+            # `result`/`status` are what gets written when the field is named from
+            # memory instead of from the schema.
+            raw_outcome = (
+                entry.get("outcome") or entry.get("result") or entry.get("status") or ""
+            )
+            res = CaseOutcome(
+                title=str(entry.get("title", "") or entry.get("case", "")).strip(),
+                outcome=_normalise_outcome(raw_outcome),
+                note=str(entry.get("note", "") or entry.get("detail", "")).strip(),
+            )
+        else:
+            continue
+        if not res.is_empty:
+            out.append(res)
+    return out
+
+
+def _normalise_outcome(raw: object) -> str:
+    text = str(raw or "").strip().lower()
+    if text in _OUTCOME_SYNONYMS:
+        return _OUTCOME_SYNONYMS[text]
+    # "PASS ✅", "fail - timeout": the verdict is the first word often enough to be
+    # worth reading, and a wrong guess here still cannot invent a pass (below).
+    head = text.split()[0].strip(":-–—") if text.split() else ""
+    return _OUTCOME_SYNONYMS.get(head, _DEFAULT_OUTCOME)
 
 
 def _parse_test_cases(raw: object) -> list[TestCase]:

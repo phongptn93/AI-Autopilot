@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
 
-from ai_autopilot import metrics
+from ai_autopilot import metrics, test_report
 from ai_autopilot.board import handoff_states
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
 from ai_autopilot.container import Container
@@ -1565,6 +1565,35 @@ class AdoPollerService:
         self._log.info("test cases filed", id=item.id, filed=filed, offered=len(cases))
         return filed
 
+    async def _report_test_results(self, item: WorkItemInfo, result: ExecutionResult) -> int:
+        """Comment the outcomes of the cases this run executed; returns how many.
+
+        Its OWN comment, not a line appended to the completion badge: twenty rows do not
+        belong inside "PR created (draft)", and more to the point the badge is tied to
+        whether a PR exists — which is exactly the condition a QC verdict must not
+        depend on. A run that opens no PR is the normal shape of QC.
+
+        Best-effort: a comment that fails to post must not sink a run whose work is done.
+        """
+        results = list(result.test_results or [])
+        if not results or self._config.dry_run:
+            return 0
+        report = test_report.render_comment(
+            results, dashboard_url=self._config.dashboard_public_url or ""
+        )
+        if report.is_empty:
+            return 0
+        try:
+            await self._c.ado.add_comment(item.id, report.html)
+        except Exception as exc:  # noqa: BLE001 — reporting must not sink the run
+            self._log.warning("test results not posted", id=item.id, error=describe_exc(exc))
+            return 0
+        self._log.info(
+            "test results posted", id=item.id, total=report.total,
+            passed=report.passed, failed=report.failed, blocked=report.blocked,
+        )
+        return report.total
+
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config
         # Stamp the role before anything reports this run. Every notification and comment
@@ -1576,6 +1605,11 @@ class AdoPollerService:
                 item.tags, item.work_item_type, cfg, state=item.state or ""
             )
         self._warn_unowned_branch(item, result)
+        # Before every branch below, because each of them is a way OUT of this method and
+        # three of them (needs_human, score-gate escalate, failed) would drop the verdict
+        # entirely — and a QC run that escalates BECAUSE a case failed is precisely the
+        # run whose results someone needs to read.
+        await self._report_test_results(item, result)
         if result.needs_human:
             c.retry_policy.record_success(item.id)  # escalated — not a retryable failure
             await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=result.error or "")
@@ -1654,6 +1688,13 @@ class AdoPollerService:
                 # report mode: the agent commented a plan, no PR.
                 await c.state_repo.set(item.id, PipelineState.DONE)
                 await self._apply_outcome(item, "report")
+                # The badge was DROPPED here, which made the two branches above the only
+                # ones that could tell you anything — so a run that filed test cases but
+                # opened no PR (the normal shape of QC) filed them in silence, and the
+                # score of a report-mode run was never shown at all. The badge does not
+                # belong to the PR; it belongs to the run.
+                if badge:
+                    await c.ado.add_comment(item.id, badge)
                 await c.notifier.notify_completed(item, result)
             return
 

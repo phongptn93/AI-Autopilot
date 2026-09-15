@@ -1359,6 +1359,7 @@ class ClaudeExecutor:
             result = ExecutionResult.ok(item.id, "agent", agent.summary)
             result.deviations = list(agent.deviations)
             result.test_cases = list(agent.test_cases)
+            result.test_results = list(agent.test_results)
             result.pr_urls = [a.pr_url for a in agent.artifacts if a.pr_url]
             result.pr_url = result.pr_urls[0] if result.pr_urls else None
             if agent.artifacts:
@@ -1523,6 +1524,18 @@ class ClaudeExecutor:
                     f"#{item.id} — that is where QC reads them, and a file in a repo is not "
                     "visible from the work item at all."
                 )
+            # Executing cases and reporting the outcome are different acts, and the second
+            # one was left to whichever MCP tools a session happened to have: on #8965 a run
+            # executed twenty cases and wrote 19 pass / 1 fail onto the item because it
+            # could, and the next run did the same work invisibly because it could not.
+            qc_rules.append(
+                "- If you EXECUTE any case, put one entry per case in the result file's "
+                "`test_results` with `outcome` = pass | fail | blocked, and a `note` saying "
+                "what happened for anything that is not a pass. The control plane renders "
+                f"them as a table onto #{item.id} — do NOT write that comment yourself, and "
+                "do NOT report outcomes in `summary` instead: a summary is prose nobody can "
+                "count. Cases you only WROTE and did not run belong in `test_cases` alone."
+            )
 
         # "Completed means a PR was opened" is false for a role that must not open one —
         # left in, it tells a QC run its successful pass was a failure.
@@ -1598,7 +1611,9 @@ class ClaudeExecutor:
             '                  "detail":"<why you chose this>","where":"<AC id / file / endpoint>"}],',
             '   "test_cases":[{"title":"<short, specific>","steps":["<step>","<step>"],',
             '                  "expected":"<what must be true afterwards>",',
-            '                  "preconditions":"<state needed first, or empty>"}]}',
+            '                  "preconditions":"<state needed first, or empty>"}],',
+            '   "test_results":[{"title":"<the case you ran>","outcome":"pass|fail|blocked",',
+            '                    "note":"<what happened — REQUIRED unless pass>"}]}',
             completion_rule,
             "",
             "## deviations — REQUIRED whenever you decided something the item did not settle",

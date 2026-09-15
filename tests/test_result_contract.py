@@ -105,3 +105,66 @@ def test_parse_result_text_ignores_unrelated_json():
     assert rc.parse_result_text('config: {"repo": "x", "branch": "y"}') is None
     assert rc.parse_result_text("no json at all") is None
     assert rc.parse_result_text("") is None
+
+
+def test_case_outcomes_are_read_from_the_result_file(tmp_path: Path):
+    _write(tmp_path, 10, {
+        "status": "completed", "summary": "ran them",
+        "test_results": [
+            {"title": "Filter by schedule", "outcome": "pass"},
+            {"title": "Export 10k", "outcome": "fail", "note": "timeout"},
+        ],
+    })
+    res = rc.read_result(str(tmp_path), 10)
+    assert [(r.title, r.outcome, r.note) for r in res.test_results] == [
+        ("Filter by schedule", "pass", ""),
+        ("Export 10k", "fail", "timeout"),
+    ]
+
+
+def test_an_outcome_written_the_way_a_model_writes_it_is_still_read(tmp_path: Path):
+    """Asked for one of three words, a model writes "passed", "OK" or "N/A" about as
+    often as the exact token. Dropping those rows would report a green run that was
+    not one."""
+    _write(tmp_path, 11, {
+        "status": "completed", "summary": "s",
+        "test_results": [
+            {"title": "a", "outcome": "Passed"},
+            {"title": "b", "outcome": "FAILED"},
+            {"title": "c", "outcome": "N/A"},
+            {"title": "d", "result": "ok"},            # field named from memory
+            {"case": "e", "status": "fail - timeout"},  # verdict is the first word
+        ],
+    })
+    res = rc.read_result(str(tmp_path), 11)
+    assert [r.outcome for r in res.test_results] == ["pass", "fail", "blocked", "pass", "fail"]
+    assert res.test_results[-1].title == "e"
+
+
+def test_an_unreadable_outcome_is_blocked_and_never_a_pass(tmp_path: Path):
+    """The asymmetry is the point: read as a pass, an outcome nobody can parse hides
+    exactly the case a reader is looking for."""
+    _write(tmp_path, 12, {
+        "status": "completed", "summary": "s",
+        "test_results": [
+            {"title": "a", "outcome": "???"},
+            {"title": "b"},                 # no outcome at all
+            "c",                            # a bare string is a title
+        ],
+    })
+    res = rc.read_result(str(tmp_path), 12)
+    assert [r.outcome for r in res.test_results] == ["blocked", "blocked", "blocked"]
+
+
+def test_an_outcome_with_no_title_is_dropped(tmp_path: Path):
+    """A row that names no case cannot be read by anyone."""
+    _write(tmp_path, 13, {
+        "status": "completed", "summary": "s",
+        "test_results": [{"outcome": "fail", "note": "something broke"}, {"title": "real"}],
+    })
+    assert [r.title for r in rc.read_result(str(tmp_path), 13).test_results] == ["real"]
+
+
+def test_a_result_file_with_no_outcomes_reads_as_none(tmp_path: Path):
+    _write(tmp_path, 14, {"status": "completed", "summary": "s"})
+    assert rc.read_result(str(tmp_path), 14).test_results == []

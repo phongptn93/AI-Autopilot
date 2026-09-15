@@ -54,6 +54,7 @@ class ExecutionResult:
     # Test cases a QC run wrote, carried so the control plane can file each as an ADO
     # Test Case work item. Typed loosely for the same reason as ``deviations``.
     test_cases: list[Any] = field(default_factory=list)
+    test_results: list[Any] = field(default_factory=list)
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod

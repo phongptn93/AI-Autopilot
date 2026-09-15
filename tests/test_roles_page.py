@@ -342,3 +342,79 @@ def test_two_roles_clashing_on_the_second_door_is_still_caught(tmp_path):
         "qc": SdlcRole(stages=["test"], waits_in="Rework Required"),
     })
     assert sdlc_plan.profile_for_state("Rework Required", cfg) == ""   # refused, not guessed
+
+
+def test_the_pr_dial_is_on_the_row_and_says_what_the_stages_already_answer(tmp_path):
+    """`opens_pr` shipped with no control, so the only way to override the inference
+    was a text editor on the server — and the inference is exactly the thing an
+    operator wants to see before deciding to override it."""
+    with _client(
+        tmp_path,
+        sdlc_roles={
+            "dev": SdlcRole(stages=["implement", "pr"], waits_in="Ready for Development"),
+            "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing"),
+        },
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        assert "role_dev_pr" in page and "role_qc_pr" in page
+        # The derived answer is shown per role, not just the three choices.
+        assert "Its stages include one that produces a PR" in page
+        assert "No stage of it produces a PR" in page
+
+
+def test_an_explicit_pr_override_survives_a_save_of_the_roles_page(tmp_path, monkeypatch):
+    """The page replaces `sdlc_roles` wholesale, so any field it did not render was a
+    field it silently cleared: an operator who set `opens_pr: false` in config.yaml lost
+    it by editing an unrelated box. The control is what makes the round-trip whole."""
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    with _client(
+        tmp_path,
+        sdlc_roles={"dev": SdlcRole(stages=["implement", "pr"],
+                                    waits_in="Ready for Development", opens_pr=False)},
+    ) as client:
+        page = client.get("/dashboard/roles").text
+        assert '<option value="no" selected>Never open one</option>' in page
+
+        client.post("/dashboard/roles", data={
+            "role_dev_stages": ["implement", "pr"],
+            "role_dev_waits": "Ready for Development",
+            "role_dev_pr": "no",          # what the rendered form posts back
+        }, follow_redirects=False)
+
+        cfg = client.app.state.container.config
+        assert cfg.sdlc_roles["dev"].opens_pr is False
+        assert sdlc_plan.role_opens_pr("dev", cfg) is False   # override beats the `pr` stage
+        assert yaml.safe_load(cfg_file.read_text(encoding="utf-8"))[
+            "sdlc_roles"]["dev"]["opens_pr"] is False
+
+
+def test_choosing_from_its_stages_removes_the_override_rather_than_writing_null(tmp_path,
+                                                                                monkeypatch):
+    """"Follow the stages" is the ABSENCE of a setting, and writing it as an explicit
+    null would leave config.yaml claiming a decision nobody made."""
+    cfg_file = tmp_path / "config.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(cfg_file))
+    with _client(tmp_path,
+                 sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing",
+                                            opens_pr=True)}) as client:
+        client.post("/dashboard/roles", data={
+            "role_qc_stages": ["test"],
+            "role_qc_waits": "Ready for Testing",
+            "role_qc_pr": "",
+        }, follow_redirects=False)
+
+        cfg = client.app.state.container.config
+        assert cfg.sdlc_roles["qc"].opens_pr is None
+        # And the inference takes over: a QC role of ["test"] files no PR.
+        assert sdlc_plan.role_opens_pr("qc", cfg) is False
+        assert "opens_pr" not in yaml.safe_load(
+            cfg_file.read_text(encoding="utf-8"))["sdlc_roles"]["qc"]
+
+
+def test_forcing_a_pr_on_a_role_whose_stages_produce_none_is_flagged_as_an_override(tmp_path):
+    with _client(tmp_path,
+                 sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing",
+                                            opens_pr=True)}) as client:
+        page = client.get("/dashboard/roles").text
+        assert "overrides</b> its stages, which produce none" in page

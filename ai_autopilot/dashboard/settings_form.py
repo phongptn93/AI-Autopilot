@@ -443,6 +443,21 @@ FIELDS: tuple[Field, ...] = (
     # that does not gate it — it applies with the loop OFF. It now lives beside the
     # door it feeds, on /dashboard/roles, because one role's way out IS the next
     # role's way in and no page ever showed those two facts together.
+    # ── 🧪 QC test cases ──
+    # A QC run's two outputs: a file in the repo, and a work item in ADO. Both existed
+    # only in config.yaml, which is how the two complaints that produced them — test
+    # cases scattered somewhere new every run, and "I cannot see the test cases on the
+    # work item" — were unanswerable from a screen.
+    Field("qc_test_case_path", "Test cases → path in the repo", "text", "🧪 QC test cases",
+          "Where a QC run writes the test cases it wrote, inside the repo it is working in. "
+          "'{id}' is the work item's id. The choice only helps if it is the SAME every time — "
+          "blank says nothing and lets the agent pick, which is what scattered them. "
+          "Default 'qc/{id}'."),
+    Field("qc_create_test_case_items", "Also file each as a Test Case work item", "bool",
+          "🧪 QC test cases",
+          "One ADO Test Case per case, linked to the item it tests, steps on the Test tab. "
+          "The repo file is reviewable next to the code; the work item is what QC actually "
+          "works from. Off = the repo file alone."),
     # ── Planning workbench ──
     Field("planning_ai_analysis", "AI conflict analysis", "bool", "Planning workbench",
           "The Analyze action runs bounded Claude judges over keyword-overlapping pairs "

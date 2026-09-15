@@ -347,3 +347,38 @@ def test_float_field_ignores_a_blank_or_broken_value():
     assert "process_health_adhoc_threshold_pct" not in settings_form.parse_form(
         {"process_health_adhoc_threshold_pct": "thirty"}
     )
+
+
+def test_the_qc_outputs_are_editable_from_the_settings_page():
+    """Both existed in config.yaml only, so the two complaints that produced them —
+    test cases scattered somewhere new every run, and "I cannot see the test cases on
+    the work item" — could not be answered without editing a file on the server."""
+    keys = {f.key: f for f in settings_form.FIELDS}
+    assert keys["qc_test_case_path"].kind == "text"
+    assert keys["qc_create_test_case_items"].kind == "bool"
+    assert keys["qc_test_case_path"].section == keys["qc_create_test_case_items"].section
+
+    updates = settings_form.parse_form({
+        "qc_test_case_path": "  tests/cases/{id}  ",
+        "qc_create_test_case_items": "on",
+    })
+    assert updates["qc_test_case_path"] == "tests/cases/{id}"
+    assert updates["qc_create_test_case_items"] is True
+
+    config = Settings()
+    settings_form.apply_to_config(config, updates)
+    assert config.qc_test_case_path == "tests/cases/{id}"
+    # An unticked checkbox is absent from the form, and that has to mean off.
+    settings_form.apply_to_config(config, settings_form.parse_form({}))
+    assert config.qc_create_test_case_items is False
+
+
+def test_every_editable_field_names_a_real_setting():
+    """A Field whose key does not exist on Settings renders a box that saves nothing —
+    silently, because the page reads it with a getattr default."""
+    config = Settings()
+    unknown = [
+        f.key for f in settings_form.FIELDS
+        if not hasattr(config, f.key) and f.key not in settings_form.SECRET_KEYS
+    ]
+    assert unknown == []

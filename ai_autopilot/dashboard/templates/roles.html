@@ -49,6 +49,9 @@
     min-width:0; }
   .rl-in:focus { outline:none; border-color:var(--accent); }
   .rl-in.mono { font-family:var(--mono); font-size:11.5px; }
+  /* Base already paints selects; only the dense sizing of this page is repeated,
+     and the native arrow is kept — it is what says "this one is a choice, not text". */
+  select.rl-in { cursor:pointer; padding:6px 8px; }
   .rl-hint { font-size:10.5px; color:var(--text-dim); line-height:1.45; }
   .rl-hint.warn { color:var(--amber); }
   .rl-hint.bad { color:var(--red); }
@@ -222,6 +225,27 @@
             {% endif %}
           </span>
           {% endif %}
+        </div>
+
+        <div class="rl-f">
+          <label>Opens a PR</label>
+          <select class="rl-in" name="role_{{ r.name }}_pr">
+            <option value="" {% if r.pr_choice == '' %}selected{% endif %}>
+              From its stages — {{ 'yes' if r.derived_pr else 'no' }}
+            </option>
+            <option value="yes" {% if r.pr_choice == 'yes' %}selected{% endif %}>Always open one</option>
+            <option value="no" {% if r.pr_choice == 'no' %}selected{% endif %}>Never open one</option>
+          </select>
+          <span class="rl-hint {{ 'warn' if r.pr_choice and (r.pr_choice == 'yes') != r.derived_pr else '' }}">
+            {% if not r.pr_choice %}
+              {% if r.derived_pr %}Its stages include one that produces a PR.
+              {% else %}No stage of it produces a PR — it reports on the work item instead.{% endif %}
+            {% elif r.pr_choice == 'yes' %}
+              Always opens one{% if not r.derived_pr %} — <b>overrides</b> its stages, which produce none.{% endif %}
+            {% else %}
+              Never opens one{% if r.derived_pr %} — <b>overrides</b> the PR-producing stage it runs.{% endif %}
+            {% endif %}
+          </span>
         </div>
       </div>
     </div>

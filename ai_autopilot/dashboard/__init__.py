@@ -1258,6 +1258,16 @@ def create_dashboard_router() -> APIRouter:
                 "stages": list(role.stages),
                 "waits_in": role.waits_in, "shows": role.shows, "entry_tag": role.entry_tag,
                 "done": role.done, "done_tag": role.done_tag, "auto": role.auto,
+                # Does it open a PR? Two facts, because the control is an override of an
+                # inference and showing only one of them is what let a QC role file a PR
+                # of test-case files: what the STAGES say, and whether this role overrides
+                # it. Blank choice = follow the stages, which is the default.
+                "derived_pr": any(
+                    getattr(catalog.get(s), "produces_pr", False) for s in role.stages
+                ),
+                "pr_choice": (
+                    "" if role.opens_pr is None else ("yes" if role.opens_pr else "no")
+                ),
                 # The state the runtime will really set — role.done, or the fallback.
                 "effective_done": out_state,
                 # What each stage is for, so picking a stage set is not guesswork.
@@ -1346,6 +1356,14 @@ def create_dashboard_router() -> APIRouter:
                 "done_tag": str(form.get(f"role_{name}_done_tag", "")).strip(),
                 "auto": bool(form.get(f"role_{name}_auto")),
             }
+            # Tri-state, and the third state is absence: a row saved without the key
+            # means "follow the stages", so it is LEFT OUT rather than written as null.
+            # This save replaces `sdlc_roles` wholesale, so a field the form did not
+            # round-trip was a field this page silently cleared — which is what it did
+            # to `opens_pr` until it appeared here.
+            pr_choice = str(form.get(f"role_{name}_pr", "")).strip()
+            if pr_choice in ("yes", "no"):
+                roles[name]["opens_pr"] = pr_choice == "yes"
         # Same destructive collision as the shared tag, reachable through a different
         # page: a role's run-now tag equal to a trigger tag makes the sweep strip
         # ownership off every item. Settings refuses it; this door has to as well.

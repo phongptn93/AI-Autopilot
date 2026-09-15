@@ -1512,10 +1512,13 @@ class ClaudeExecutor:
             if path:
                 where = path.replace("{id}", str(item.id))
                 qc_rules.append(
-                    f"- Write the test cases you produce to `{where}/` inside the repo under "
-                    "test, one Markdown file per area, each case with: id, title, "
-                    "preconditions, steps, expected result. Create the folder if it is not "
-                    "there."
+                    f"- Write the test cases you produce to `{where}/` **relative to the "
+                    "WORKSPACE ROOT, NOT inside a repo folder** — like the result file below, "
+                    "this is an allowed exception to 'do not edit anything outside these "
+                    "repos'. Never commit them and never include them in a pull request: they "
+                    "are QC's own record, not a change for somebody to merge. One Markdown "
+                    "file per area, each case with: id, title, preconditions, steps, expected "
+                    "result. Create the folder if it is not there."
                 )
             if self._config.qc_create_test_case_items:
                 qc_rules.append(
@@ -1599,10 +1602,11 @@ class ClaudeExecutor:
             "",
             "# Required output (the control plane reads ONLY this — you MUST write it)",
             f"When finished, write a JSON file at `{result_rel}` (relative to this workspace):",
-            "This one file is the EXCEPTION to 'do not edit anything outside these repos': it "
-            "belongs at the WORKSPACE ROOT, NOT inside a repo folder, and must never be "
-            "committed. Write it even if the task failed or you are blocked — a missing file "
-            "loses the whole run.",
+            "This file is an EXCEPTION to 'do not edit anything outside these repos' (the QC "
+            "test-case folder above, when you were given one, is the other): it belongs at "
+            "the WORKSPACE ROOT, NOT inside a repo folder, and must never be committed. Write "
+            "it even if the task failed or you are blocked — a missing file loses the whole "
+            "run.",
             '  {"status":"completed|failed|needs_human","summary":"<what you did>",',
             '   "artifacts":[{"repo":"<name>","branch":"<branch>","pr_url":"<url>"}],',
             '   "needs_human":false,"reason":"<why, if failed/needs_human>",',

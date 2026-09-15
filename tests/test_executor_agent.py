@@ -212,3 +212,54 @@ async def test_the_scratch_does_not_duplicate_the_workspace_rules(tmp_path):
     assert (dest / "settings.json").exists(), "settings must travel with the scratch"
     assert (dest / "skills").exists(), "skills must travel with the scratch"
     assert not (dest / "rules").exists(), "rules must NOT be duplicated into the scratch"
+
+
+def _stage(name):
+    from ai_autopilot.execution.sdlc_plan import stage_catalog
+    return stage_catalog(Settings())[name]
+
+
+def test_qc_test_cases_are_written_under_the_workspace_not_into_a_repo():
+    """They landed inside the repo first, which put QC's own notes into the code review:
+    PR !4002 carried a component change plus a folder of test-case Markdown for a
+    reviewer who asked for neither."""
+    brief = _executor()._build_brief(
+        _item(), ["Micro-Frontend"], autonomy="assisted", draft_pr=True,
+        stages=[_stage("test")],
+    )
+    assert "`qc/7/`" in brief
+    assert "WORKSPACE ROOT, NOT inside a repo folder" in brief
+    assert "never commit" in brief.lower()
+
+
+def test_the_brief_does_not_forbid_the_folder_it_just_asked_for():
+    """The brief says "Do NOT edit anything outside these repos" in the same breath, so
+    a workspace-root folder has to be named as an allowed exception or the two rules
+    contradict each other and the agent is right either way."""
+    brief = _executor()._build_brief(
+        _item(), ["Micro-Frontend"], autonomy="assisted", draft_pr=True,
+        stages=[_stage("test")],
+    )
+    assert "Do NOT edit anything outside these repos" in brief
+    exception_line = next(
+        ln for ln in brief.splitlines() if "EXCEPTION" in ln and "test-case" in ln
+    )
+    assert "the other" in exception_line          # names BOTH, not just the result file
+
+
+def test_a_run_with_no_test_stage_is_told_nothing_about_test_cases():
+    brief = _executor()._build_brief(
+        _item(), ["Micro-Frontend"], autonomy="assisted", draft_pr=True,
+        stages=[_stage("implement")],
+    )
+    assert "qc/7" not in brief
+
+
+def test_a_blank_path_leaves_the_choice_to_the_agent():
+    brief = _executor(qc_test_case_path="")._build_brief(
+        _item(), ["Micro-Frontend"], autonomy="assisted", draft_pr=True,
+        stages=[_stage("test")],
+    )
+    # The result-file paragraph names the workspace root too, so the marker has to be
+    # the QC rule itself, not the phrase they share.
+    assert "test cases you produce" not in brief

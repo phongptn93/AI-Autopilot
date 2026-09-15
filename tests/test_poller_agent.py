@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from ai_autopilot.config import Settings
+from ai_autopilot.config import SdlcRole, Settings
 from ai_autopilot.data import PipelineState
 from ai_autopilot.execution.result_contract import CaseOutcome
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
@@ -1766,3 +1766,67 @@ async def test_dry_run_reports_nothing():
 
     assert await svc._report_test_results(WorkItemInfo(id=5, title="t"), result) == 0
     assert c.ado.comments == []
+
+
+async def test_a_qc_role_run_is_no_longer_held_for_a_human_for_doing_its_job():
+    """End to end through the poller: a `qc` role opens no PR and produces no diff, and
+    the score gate held it for a human on exactly those two facts."""
+    svc, c = _poller(
+        sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing")},
+    )
+    item = WorkItemInfo(id=9083, title="t", state="Ready for Testing")
+    result = ExecutionResult.ok(9083, "agent", "20 cases run")
+    result.profile = "qc"
+
+    await svc._handle_agent_result(item, result)
+
+    assert PipelineState.NEEDS_HUMAN not in [st for _, st in c.state_repo.calls]
+    assert not any("Held for human" in body for _, body in c.ado.comments)
+
+
+async def test_a_dev_role_with_no_pr_is_still_held():
+    """The waiver is the ROLE's, not a blanket one: a dev run that opened no PR is the
+    case the gate exists for."""
+    svc, c = _poller(
+        sdlc_roles={"dev": SdlcRole(stages=["implement", "pr"], waits_in="Ready for Dev")},
+    )
+    result = ExecutionResult.ok(9084, "agent", "done")
+    result.profile = "dev"
+
+    await svc._handle_agent_result(WorkItemInfo(id=9084, title="t"), result)
+
+    assert any("Held for human" in body for _, body in c.ado.comments)
+
+
+async def test_an_escalated_run_still_files_the_cases_it_wrote():
+    """needs_human is TERMINAL — nobody re-runs the item, so cases left unfiled there
+    are lost for good."""
+    svc, c = _poller()
+    created: list[dict] = []
+
+    async def _create_test_case(**kw):
+        created.append(kw)
+        return 1
+
+    c.ado.create_test_case = _create_test_case
+    result = ExecutionResult.fail(9083, "agent", "blocked on env")
+    result.needs_human = True
+    result.test_cases = [
+        SimpleNamespace(title="Case A", steps=[], expected="", preconditions=""),
+    ]
+
+    await svc._handle_agent_result(WorkItemInfo(id=9083, title="t"), result)
+
+    assert [k["title"] for k in created] == ["Case A"]
+
+
+async def test_a_retryable_failure_does_not_file_cases_twice():
+    """That run comes back. Duplicated Test Case items are worse than late ones."""
+    svc, c = _poller()
+    c.ado.create_test_case = lambda **kw: (_ for _ in ()).throw(AssertionError("filed"))
+    result = ExecutionResult.fail(9083, "agent", "boom")          # retryable, not escalated
+    result.test_cases = [
+        SimpleNamespace(title="Case A", steps=[], expected="", preconditions=""),
+    ]
+
+    await svc._handle_agent_result(WorkItemInfo(id=9083, title="t"), result)

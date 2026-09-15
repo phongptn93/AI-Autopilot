@@ -33,6 +33,13 @@ class ScoreInput:
     files_changed: int
     needs_human: bool = False
     had_error: bool = False
+    # Was this run supposed to produce a pull request at all? The rubric was written when
+    # every run was a dev run, so "delivered" meant "opened a PR" and "did something"
+    # meant "changed files". A QC or BA role satisfies neither by design — it scored
+    # 48/100 for doing its job exactly right, which is below `review_min` and therefore
+    # HELD FOR A HUMAN every single time. Not-applicable is not the same as unmeasured:
+    # we are not missing the evidence, we know there is none to have.
+    expected_pr: bool = True
     # Richer signals — None means "not measured this run".
     review_passed: bool | None = None
     review_critical: int = 0
@@ -71,6 +78,9 @@ def score_run(inp: ScoreInput, *, auto_min: int = 85, review_min: int = 60) -> R
         why.append("không hoàn tất / có lỗi")
     elif inp.has_pr:
         comp["delivery"] = 35
+    elif not inp.expected_pr:
+        comp["delivery"] = 35
+        why.append("role này không mở PR — tính là đã giao đủ")
     else:
         comp["delivery"] = 20
         why.append("hoàn tất nhưng không mở PR (report)")
@@ -98,9 +108,16 @@ def score_run(inp: ScoreInput, *, auto_min: int = 85, review_min: int = 60) -> R
         why.append("CI đỏ")
 
     # ── scope (15) ──
-    sc = 15 if inp.files_changed > 0 else 0
-    if inp.files_changed == 0:
-        why.append("không có file nào thay đổi")
+    # "Changed no files" is a defect for a role that delivers a diff and a description
+    # of the job for one that does not: a QC pass is cases and a verdict, a BA pass is a
+    # written item. Penalising it there marks the role down for being itself.
+    if inp.files_changed == 0 and not inp.expected_pr:
+        sc = 15
+        why.append("role này không tạo diff — không tính thiếu file")
+    else:
+        sc = 15 if inp.files_changed > 0 else 0
+        if inp.files_changed == 0:
+            why.append("không có file nào thay đổi")
     penalty = min(inp.unresolved_threads * 2, 6)
     if penalty:
         why.append(f"{inp.unresolved_threads} thread review chưa giải quyết")

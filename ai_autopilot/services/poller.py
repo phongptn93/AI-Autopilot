@@ -1466,6 +1466,12 @@ class AdoPollerService:
             needs_human=result.needs_human,
             had_error=bool(result.error),
             ci_passed=result.tests_passed,  # auto-test-gate result (None = not run)
+            # The role's own stages say whether a PR was ever on the table. Without this
+            # the rubric asks a QC run the dev question and holds it for a human when the
+            # answer is no — which it always is. `result.profile` is stamped at the top of
+            # _handle_agent_result, before this runs; an unwired install has none and
+            # keeps the old whole-item assumption.
+            expected_pr=role_opens_pr(result.profile, cfg) if result.profile else True,
         )
         return score_run(
             inp, auto_min=cfg.pr_score_auto_min, review_min=cfg.pr_score_review_min
@@ -1611,6 +1617,12 @@ class AdoPollerService:
         # run whose results someone needs to read.
         await self._report_test_results(item, result)
         if result.needs_human:
+            # The cases exist whether or not the run could finish, and this exit is
+            # TERMINAL — the item is held, nobody re-runs it, so leaving them unfiled
+            # loses them for good. Not done on the retryable failure below: that run
+            # comes back and would file the same cases again, and duplicated Test Case
+            # items are worse than late ones.
+            await self._file_test_cases(item, result)
             c.retry_policy.record_success(item.id)  # escalated — not a retryable failure
             await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=result.error or "")
             # Hold the item (tag) + set state so the poller skips it until a human steps in.
@@ -1630,6 +1642,8 @@ class AdoPollerService:
             # than silently going to review/done. Skipped in report mode (L1, no PR
             # is expected) and when scoring is disabled.
             if score and score.gate == "escalate" and cfg.autonomy_level != "report":
+                # Terminal too — same reasoning as the needs_human exit above.
+                await self._file_test_cases(item, result)
                 await c.state_repo.set(
                     item.id, PipelineState.NEEDS_HUMAN, detail=f"run score {score.score}/100"
                 )

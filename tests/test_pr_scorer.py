@@ -71,3 +71,36 @@ def test_badge_html_shows_score_grade_and_gate():
     s = score_run(ScoreInput(completed=True, has_pr=True, files_changed=3))
     html = score_badge_html(s)
     assert "78/100 (C)" in html and "review" in html and "Run score" in html
+
+
+def test_a_role_that_opens_no_pr_is_not_marked_down_for_not_opening_one():
+    """The rubric was written when every run was a dev run: "delivered" meant a PR and
+    "did something" meant a diff. A QC or BA role satisfies neither BY DESIGN and scored
+    48 — below review_min, so a correct run was held for a human every single time."""
+    dev_shaped = score_run(ScoreInput(completed=True, has_pr=False, files_changed=0))
+    assert dev_shaped.score == 48 and dev_shaped.gate == "escalate"   # the old answer
+
+    qc_shaped = score_run(ScoreInput(
+        completed=True, has_pr=False, files_changed=0, expected_pr=False,
+    ))
+    assert qc_shaped.components["delivery"] == 35     # it delivered what its role delivers
+    assert qc_shaped.components["scope"] == 15        # no diff is the job, not a defect
+    assert qc_shaped.score == 78 and qc_shaped.gate == "review"
+
+
+def test_not_expecting_a_pr_still_cannot_reach_auto_without_evidence():
+    """Not-applicable buys back the two components that asked the wrong question. It must
+    not buy back the two that asked the right one and got no answer."""
+    s = score_run(ScoreInput(
+        completed=True, has_pr=False, files_changed=0, expected_pr=False,
+    ))
+    assert s.gate != "auto"
+    assert s.components["review"] == 18 and s.components["ci"] == 10
+
+
+def test_a_role_that_opens_no_pr_still_fails_when_the_run_failed():
+    """Only the PR-shaped questions are waived — finishing is not one of them."""
+    s = score_run(ScoreInput(
+        completed=False, has_pr=False, files_changed=0, expected_pr=False, had_error=True,
+    ))
+    assert s.components["delivery"] == 0 and s.gate == "escalate"

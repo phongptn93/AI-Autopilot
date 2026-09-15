@@ -448,16 +448,20 @@ FIELDS: tuple[Field, ...] = (
     # only in config.yaml, which is how the two complaints that produced them — test
     # cases scattered somewhere new every run, and "I cannot see the test cases on the
     # work item" — were unanswerable from a screen.
-    Field("qc_test_case_path", "Test cases → path in the repo", "text", "🧪 QC test cases",
-          "Where a QC run writes the test cases it wrote, inside the repo it is working in. "
-          "'{id}' is the work item's id. The choice only helps if it is the SAME every time — "
-          "blank says nothing and lets the agent pick, which is what scattered them. "
-          "Default 'qc/{id}'."),
+    Field("qc_test_case_path", "Test cases → path under the workspace", "text",
+          "🧪 QC test cases",
+          "Where a QC run writes the test cases it wrote, relative to the WORKSPACE root — "
+          "NOT inside a repo, so they never land in a pull request. '{id}' is the work item's "
+          "id. The choice only helps if it is the SAME every time — blank says nothing and "
+          "lets the agent pick, which is what scattered them. Default 'qc/{id}'. "
+          "⚠️ Files here are outside git and live on this machine only: keep the setting "
+          "below ON, or nobody but this server ever sees the cases."),
     Field("qc_create_test_case_items", "Also file each as a Test Case work item", "bool",
           "🧪 QC test cases",
           "One ADO Test Case per case, linked to the item it tests, steps on the Test tab. "
-          "The repo file is reviewable next to the code; the work item is what QC actually "
-          "works from. Off = the repo file alone."),
+          "This is what QC actually works from — and with the path above pointing outside "
+          "every repo, it is the ONLY copy that leaves this machine. Off = the workspace "
+          "file alone."),
     # ── Planning workbench ──
     Field("planning_ai_analysis", "AI conflict analysis", "bool", "Planning workbench",
           "The Analyze action runs bounded Claude judges over keyword-overlapping pairs "

@@ -1455,16 +1455,23 @@ class Settings(BaseSettings):
     # very thing that says which role is due. A tag is found regardless of state, and
     # is consumed on pickup. A stage may name its own via ``entry_tag``.
     stage_entry_tag: str = "autopilot-run"
-    # Where a QC run writes the test cases it wrote, inside the repo it is working in.
-    # ``{id}`` is the work item's id. A default rather than a blank, because the choice
-    # only matters if it is the SAME every time — test cases scattered by whatever each
-    # run decided are test cases nobody can find again. Blank = say nothing, and the
-    # agent picks (which is what produced `feature/9004-qc-test-cases-…` by hand).
+    # Where a QC run writes the test cases it wrote, relative to the WORKSPACE ROOT —
+    # NOT inside a repo. ``{id}`` is the work item's id. A default rather than a blank,
+    # because the choice only matters if it is the SAME every time — test cases
+    # scattered by whatever each run decided are test cases nobody can find again.
+    # Blank = say nothing, and the agent picks (which is what produced
+    # `feature/9004-qc-test-cases-…` by hand).
+    #
+    # It landed inside the repo first, and that put QC's own notes into the code review:
+    # PR !4002 carried a component change and a folder of test-case Markdown for a
+    # reviewer who asked for neither. At the workspace root they are out of every diff —
+    # at the cost of being out of git as well, which is why the setting below stops
+    # being optional: the Test Case work items become the only copy anyone else can see.
     qc_test_case_path: str = "qc/{id}"
     # Also file each test case as a Test Case work item in ADO, linked to the item it
-    # tests. The file in the repo is reviewable next to the code; the work item is what
-    # QC actually works from, and "I cannot see the test cases on the work item" is the
-    # complaint that says the file alone is not enough.
+    # tests. The work item is what QC actually works from, and "I cannot see the test
+    # cases on the work item" is the complaint that says a file alone is not enough —
+    # doubly so now the file lives at the workspace root, on one machine, uncommitted.
     qc_create_test_case_items: bool = True
     # DEPRECATED — superseded by sdlc_roles.stages.
     # Extra / overriding profiles merged over the built-ins (name → ordered stage names).

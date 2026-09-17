@@ -581,6 +581,10 @@ FIELDS: tuple[Field, ...] = (
           '🔔 Cảnh báo',
           "Flag an in-progress item whose STATE has not changed in this long. Edits and "
           "comments do not count as movement — that is the whole point."),
+    Field("delivery_max_age_days", "Ngưỡng: bỏ qua việc chờ quá lâu (ngày)", "int",
+          '🔔 Cảnh báo',
+          "Việc đã chờ lâu hơn bấy nhiêu ngày coi như tồn đọng, không nêu trong digest nữa "
+          "— chỉ hiện số lượng đã ẩn. 0 = liệt kê hết, dù cũ tới đâu."),
     Field("alert_dedup_enabled", "Không lặp lại cảnh báo đã báo", "bool", '🔔 Cảnh báo',
           "Một việc đã báo sẽ chỉ nhắc lại khi NẶNG THÊM (thời gian chờ tăng gấp đôi) hoặc "
           "sau số giờ dưới đây. Tắt = mọi việc quá ngưỡng đều xuất hiện lại trong từng digest."),

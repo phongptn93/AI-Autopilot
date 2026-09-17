@@ -786,6 +786,16 @@ def build_digest(
         parts.append(
             f"**⚠️ Cần xử lý ({count})**\n{_format_actions(rows, cfg)}"
         )
+    aged_out = getattr(report, "actions_aged_out", 0)
+    if aged_out:
+        # Name the tail that was cut. The cap exists so an abandoned backlog cannot
+        # crowd out today's work, but a reader who cannot see that anything was cut
+        # would read the short list as "that is everything" — which it is not.
+        parts.append(
+            f"_🗄️ {aged_out} việc tồn đọng quá "
+            f"{report.thresholds.max_age_days} ngày — không nêu ở đây "
+            "(đổi ngưỡng ở Settings → Cảnh báo)._"
+        )
     if suppressed:
         # Say what was withheld. Silence a reader cannot account for is indistinguishable
         # from a broken integration, and that suspicion is what kills trust in a digest.

@@ -186,7 +186,7 @@ def test_actions_are_ordered_by_urgency_then_by_age():
         _pr(id=2, work_item_id=2, pending=1, created_at=NOW - timedelta(days=9)),
         _pr(id=3, work_item_id=3, blocked=1),
     ]
-    report = _report(prs=prs)
+    report = _report(prs=prs, thresholds=Thresholds(max_age_days=0))
     assert [a.kind for a in report.actions] == [
         KIND_BLOCKED_PR, KIND_MERGE_READY, KIND_REVIEW_WAITING
     ]
@@ -209,7 +209,7 @@ def test_stale_uses_the_recorded_transition_when_there_is_one():
     changes = [_change(1, "Active", 10)]                # …but state unchanged for 10 days
     baseline = NOW - timedelta(days=20)
     report = _report(items=[item], changes=changes, history_since=baseline,
-                     thresholds=Thresholds(stale_days=3))
+                     thresholds=Thresholds(stale_days=3, max_age_days=0))
     assert [a.kind for a in report.actions] == [KIND_STALE]
     assert report.actions[0].age_hours > 200
 
@@ -222,8 +222,26 @@ def test_baseline_row_defers_to_an_older_changed_date():
     item = _item(1, "Active", changed_days_ago=9)
     changes = [_change(1, "Active", 1)]                  # == the baseline snapshot
     report = _report(items=[item], changes=changes, history_since=baseline,
-                     thresholds=Thresholds(stale_days=3))
+                     thresholds=Thresholds(stale_days=3, max_age_days=0))
     assert [a.kind for a in report.actions] == [KIND_STALE]
+
+
+def test_waits_older_than_the_ceiling_are_counted_but_not_listed():
+    # An abandoned wait is not an alert: listing it every day is what pushed the items
+    # a nudge could still save off the bottom of the digest. It is counted, not lost.
+    prs = [
+        _pr(id=1, work_item_id=1, blocked=1, created_at=NOW - timedelta(days=116)),
+        _pr(id=2, work_item_id=2, blocked=1, created_at=NOW - timedelta(days=2)),
+    ]
+    report = _report(prs=prs, thresholds=Thresholds(max_age_days=7))
+    assert [a.pr_id for a in report.actions] == [2]
+    assert report.actions_aged_out == 1
+
+
+def test_a_zero_ceiling_lists_every_wait_however_old():
+    pr = _pr(id=1, work_item_id=1, blocked=1, created_at=NOW - timedelta(days=116))
+    report = _report(prs=[pr], thresholds=Thresholds(max_age_days=0))
+    assert len(report.actions) == 1 and report.actions_aged_out == 0
 
 
 def test_recently_moved_item_is_not_stale():

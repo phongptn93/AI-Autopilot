@@ -77,6 +77,12 @@ class Thresholds:
     merge_hours: int = 24      # approved, nothing blocking, still not merged
     review_hours: int = 24     # PR open with nobody having voted
     stale_days: int = 3        # in progress, no state change
+    # Ceiling on how old a wait can be and still be RAISED. Past this, the item is not
+    # late any more — it is abandoned, and listing it every day crowds out the ones a
+    # nudge would still save (a digest led by 116-day rows is a digest nobody reads).
+    # The count of what was dropped is kept (``actions_aged_out``) so the backlog is
+    # hidden, never silently lost. 0 = no ceiling.
+    max_age_days: int = 7
 
 
 @dataclass(frozen=True)
@@ -228,6 +234,8 @@ class DeliveryReport:
     thresholds: Thresholds
     kpis: list[Kpi] = field(default_factory=list)
     actions: list[ActionItem] = field(default_factory=list)
+    # How many actions were past ``Thresholds.max_age_days`` and left out of ``actions``.
+    actions_aged_out: int = 0
     people: list[PersonStat] = field(default_factory=list)
     projects: list[ProjectStat] = field(default_factory=list)
     # (YYYY-MM-DD, {category: count}) per day, oldest → newest.
@@ -521,6 +529,12 @@ def compute_delivery(
             ),
             detail=(getattr(record, "error", "") or "Run thất bại")[:180],
         ))
+    # Drop the abandoned tail before ranking — see ``Thresholds.max_age_days``.
+    if thresholds.max_age_days > 0:
+        ceiling = thresholds.max_age_days * 24
+        fresh = [a for a in actions if a.age_hours <= ceiling]
+        report.actions_aged_out = len(actions) - len(fresh)
+        actions = fresh
     actions.sort(key=lambda a: (_KIND_ORDER.get(a.kind, 99), -a.age_hours))
     report.actions = actions
 

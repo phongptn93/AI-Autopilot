@@ -1117,6 +1117,9 @@ class Settings(BaseSettings):
     delivery_merge_hours: int = 24    # approved, unblocked, still not merged
     delivery_review_hours: int = 24   # PR open, nobody has voted
     delivery_stale_days: int = 3      # in progress, no state change
+    # Waits older than this are treated as abandoned and left out of the alert list
+    # (their number is still reported). 0 = list everything, however old.
+    delivery_max_age_days: int = 7
 
     # ── Multi-workspace (one connection, several projects) ──
     # What to call the workspace backed by the global fields above (its directory, base

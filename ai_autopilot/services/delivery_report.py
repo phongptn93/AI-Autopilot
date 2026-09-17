@@ -214,6 +214,7 @@ async def gather(
             merge_hours=config.delivery_merge_hours,
             review_hours=config.delivery_review_hours,
             stale_days=config.delivery_stale_days,
+            max_age_days=config.delivery_max_age_days,
         ),
     )
     return report, error

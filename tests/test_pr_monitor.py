@@ -636,3 +636,57 @@ async def test_the_publish_stage_stays_off_when_nothing_configures_it():
     pr["isDraft"] = False
     await svc._inspect_pr("repo", "R", pr)
     assert applied == []
+
+
+async def test_a_session_that_cannot_be_released_is_reported_once_not_every_scan():
+    """Observed live: one session whose scratch could not be released wrote the same
+    warning every 20 seconds for hours, until the log held nothing else and the poll
+    lines it was meant to sit beside were unfindable."""
+    warnings: list[str] = []
+
+    class _Stuck(_FakeSessionExec):
+        async def release_scratch(self, run_dir):
+            raise NotADirectoryError("[WinError 267] The directory name is invalid")
+
+    svc = _sweep_service({9083: "/ws/agent-9083"}, finished={9083})
+    svc._c.executor = _Stuck({9083: "/ws/agent-9083"}, {9083})
+    svc._log = SimpleNamespace(
+        warning=lambda msg, **kw: warnings.append(msg),
+        info=lambda *a, **k: None, error=lambda *a, **k: None, debug=lambda *a, **k: None,
+    )
+
+    for _ in range(5):
+        await svc._close_finished_sessions(active_items=set())
+
+    assert len(warnings) == 1
+    # The retry itself continues — it is the NOISE that is capped, not the cleanup.
+    assert svc._c.executor.closed == [9083] * 5
+
+
+async def test_a_session_that_recovers_can_warn_again_later():
+    """Muting for the life of the process would hide a second, unrelated failure."""
+    warnings: list[str] = []
+
+    class _Flaky(_FakeSessionExec):
+        fail = True
+
+        async def release_scratch(self, run_dir):
+            if self.fail:
+                raise OSError("locked")
+            self.released.append(run_dir)
+
+    ex = _Flaky({9083: "/ws/agent-9083"}, {9083})
+    svc = _sweep_service({9083: "/ws/agent-9083"}, finished={9083})
+    svc._c.executor = ex
+    svc._log = SimpleNamespace(
+        warning=lambda msg, **kw: warnings.append(msg),
+        info=lambda *a, **k: None, error=lambda *a, **k: None, debug=lambda *a, **k: None,
+    )
+
+    await svc._close_finished_sessions(active_items=set())
+    ex.fail = False
+    await svc._close_finished_sessions(active_items=set())      # succeeds → forget it
+    ex.fail = True
+    await svc._close_finished_sessions(active_items=set())      # fails again → say so
+
+    assert len(warnings) == 2

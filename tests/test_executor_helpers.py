@@ -268,3 +268,51 @@ def test_quiet_is_unknown_when_no_session_was_ever_launched_here(tmp_path, monke
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
     ex = _rework_exec(tmp_path)
     assert ex.interactive_quiet_seconds(str(tmp_path / "nowhere"), 99) is None
+
+
+async def test_git_refuses_a_working_directory_that_is_gone(tmp_path):
+    """A cwd that is not a directory fails the SPAWN, not git — on Windows with
+    NotADirectoryError [WinError 267], an OSError no caller expects from "a git
+    command". The best-effort callers documented themselves as never raising and got an
+    exception anyway; one of them then retried the same dead path every 20 seconds for
+    hours until the log contained nothing else (observed live, item #9083)."""
+    ex = ClaudeExecutor(Settings(), None)
+    assert await ex._git(["worktree", "prune"], str(tmp_path / "gone"), check=False) == ""
+
+
+async def test_git_raises_a_git_error_for_a_missing_cwd_when_checked(tmp_path):
+    """A checked call must still fail — just as the error its callers already handle."""
+    from ai_autopilot.execution.claude_executor import GitError
+
+    ex = ClaudeExecutor(Settings(), None)
+    try:
+        await ex._git(["status"], str(tmp_path / "gone"), check=True)
+    except GitError:
+        return
+    raise AssertionError("expected GitError")
+
+
+async def test_releasing_a_scratch_whose_source_repo_vanished_does_not_raise(tmp_path):
+    """The scratch outlives its source repo when the workspace moves or a repo folder is
+    renamed. There is nothing to unregister then — the leftover directory just goes."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    scratch = tmp_path / "scratch" / "agent-9083"
+    (scratch / "Backend-Fresh").mkdir(parents=True)      # no such repo in the workspace
+    ex = ClaudeExecutor(Settings(workspace_directory=str(workspace)), None)
+
+    await ex.release_scratch(str(scratch))
+
+    assert not scratch.exists()
+
+
+async def test_releasing_a_path_that_is_a_file_is_a_no_op(tmp_path):
+    """exists() is true for a file, and iterdir() then raises NotADirectoryError out of
+    a method whose contract is "never raises"."""
+    stray = tmp_path / "agent-1"
+    stray.write_text("not a directory", encoding="utf-8")
+    ex = ClaudeExecutor(Settings(workspace_directory=str(tmp_path / "ws")), None)
+
+    await ex.release_scratch(str(stray))   # must not raise
+
+    assert stray.is_file()                 # and must not delete what it did not recognise

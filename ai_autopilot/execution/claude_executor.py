@@ -856,11 +856,20 @@ class ClaudeExecutor:
         repos are derived from the scratch's subfolders (``<workspace>/<name>``).
         """
         workspace = self._config.workspace_directory
-        if not run_dir or run_dir == workspace or not Path(run_dir).exists():
+        # is_dir, not exists: a path that is a FILE passes exists() and then raises
+        # NotADirectoryError on iterdir() — out of a method whose contract is "never
+        # raises", into a sweep that retried it forever.
+        if not run_dir or run_dir == workspace or not Path(run_dir).is_dir():
             return
         for sub in Path(run_dir).iterdir():
             if sub.is_dir() and not sub.name.startswith("."):
                 src_repo = str(Path(workspace) / sub.name)
+                # The scratch outlives its source repo when the workspace moves or a
+                # repo folder is renamed. Nothing to unregister then — just delete the
+                # leftover worktree directory.
+                if not Path(src_repo).is_dir():  # noqa: ASYNC240 - local stat
+                    await _force_rmtree(sub)
+                    continue
                 async with self._repo_lock(src_repo):  # don't race a concurrent worktree add
                     await self._git(
                         ["worktree", "remove", "--force", str(sub)], src_repo, check=False
@@ -2316,6 +2325,17 @@ class ClaudeExecutor:
 
     async def _git(self, args: str | list[str], work_dir: str, check: bool = True) -> str:
         argv = args.split() if isinstance(args, str) else args
+        # A cwd that is not a directory makes the SPAWN fail, not git — on Windows with
+        # `NotADirectoryError: [WinError 267] The directory name is invalid`, which is an
+        # OSError no caller expects from a "git command". `check=False` callers documented
+        # themselves as best-effort and got an exception anyway; one of them
+        # (release_scratch, via the PR-close sweep) then retried the same dead path every
+        # 20 seconds for hours, writing a warning each time until the log was nothing else.
+        if not Path(work_dir or "").is_dir():  # noqa: ASYNC240 - one local stat, before a spawn
+            self._log.warning("git skipped — working directory is gone", dir=work_dir, args=argv)
+            if check:
+                raise GitError(f"git {' '.join(argv)} skipped: {work_dir} is not a directory")
+            return ""
         proc = await asyncio.create_subprocess_exec(
             "git",
             *argv,

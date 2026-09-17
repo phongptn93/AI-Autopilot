@@ -48,6 +48,9 @@ class PrMonitorService:
         # ADO comment id only counts within its thread (see ``HandledPrComment``).
         self._handled: dict[int, set[tuple[int, int]]] = {}
         self._task: asyncio.Task | None = None
+        # Sessions whose cleanup failed, so the warning is written once rather than on
+        # every scan. Cleared when a later sweep succeeds — the retry itself continues.
+        self._close_failures: set[int] = set()
         # Command handling runs as bounded background tasks so a slow revise never blocks the
         # scan loop (other PRs keep getting picked up). Same-repo revises are still serialised
         # by the executor's per-repo git lock.
@@ -295,8 +298,19 @@ class PrMonitorService:
             try:
                 await c.executor.close_interactive(run_dir, item_id)
                 await c.executor.release_scratch(run_dir)
+                self._close_failures.discard(item_id)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("could not close session", id=item_id, error=describe_exc(exc))
+                # Say it ONCE per session. The sweep runs on every scan, so a session
+                # that cannot be released — a scratch on a disconnected drive, a handle
+                # an AV scanner will not let go — wrote the same warning every 20
+                # seconds until the log contained nothing else and the poll lines it
+                # was meant to sit beside were unfindable.
+                if item_id not in self._close_failures:
+                    self._close_failures.add(item_id)
+                    self._log.warning(
+                        "could not close session — will retry quietly",
+                        id=item_id, error=describe_exc(exc), dir=run_dir,
+                    )
                 continue
             self._log.info("interactive session closed — PR no longer open", id=item_id)
 

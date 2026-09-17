@@ -1381,6 +1381,11 @@ async def test_four_stranded_items_produce_one_line_not_four():
     assert said[0]["ids"] == [7463, 7695, 8470, 9012]
 
 
+async def _anoop(*a, **k):
+    """A stand-in for a collaborator whose return value this test does not read."""
+    return None
+
+
 class _NullStateRepo:
     """The run-now path records a QUEUED state; nothing here asserts on it."""
 
@@ -1830,3 +1835,91 @@ async def test_a_retryable_failure_does_not_file_cases_twice():
     ]
 
     await svc._handle_agent_result(WorkItemInfo(id=9083, title="t"), result)
+
+
+async def test_the_engine_runs_the_role_the_door_named_not_the_default():
+    """The stages are chosen where the run HAPPENS, and that call did not pass the
+    item's state — so tag > machine-pin > STATE > type > default silently lost its
+    middle term: an item in QC's door ran the default pipeline. Worse, the poller
+    resolved WITH the state for the record and the Teams card, so the card said "qc"
+    about a run that was never qc.
+
+    The door state is also gone by then: the item is moved to the working state before
+    the engine starts, and no role waits in "Active" — so the role has to be decided
+    before that move and carried, which is what ``profile=`` does.
+    """
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.execution.sdlc_loop import SdlcLoopEngine
+
+    cfg = Settings(
+        sdlc_loop_enabled=True, sdlc_default_profile="full",
+        sdlc_roles={
+            "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing"),
+            "full": SdlcRole(stages=["implement", "test", "review", "pr"]),
+        },
+    )
+    loop = SdlcLoopEngine.__new__(SdlcLoopEngine)
+    loop._config = cfg
+    item = WorkItemInfo(id=77, title="t", work_item_type="Requirement",
+                        state="Ready for Testing")
+
+    # Resolved from the state alone (the door is still there) …
+    from ai_autopilot.execution.sdlc_plan import resolve_profile_name
+    assert resolve_profile_name(item.tags, item.work_item_type, cfg,
+                                state=item.state or "") == "qc"
+    # … and the loop honours a profile handed to it, even once the item has moved on.
+    item.state = "Active"
+    assert [s.name for s in (loop._stages_for("qc") or [])] == ["test"]
+    assert resolve_profile_name(item.tags, item.work_item_type, cfg,
+                                state=item.state or "") == "full"     # the door is gone
+
+
+async def test_the_sdlc_run_decides_the_role_before_the_item_leaves_its_door():
+    """``_apply_outcome(in_progress)`` moves the item to the working state. Resolving
+    the role after that reads "Active", which no role waits in — the default profile."""
+    from ai_autopilot.config import SdlcRole
+
+    cfg = Settings(
+        sdlc_loop_enabled=True, sdlc_default_profile="full", state_in_progress="Active",
+        sdlc_roles={
+            "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing"),
+            "full": SdlcRole(stages=["implement", "test", "review", "pr"]),
+        },
+    )
+    seen: dict = {}
+
+    class _Engine:
+        async def run(self, item, profile=""):
+            seen["profile"] = profile
+            seen["state_at_run"] = item.state
+            return ExecutionResult.ok(item.id, "sdlc", "done")
+
+    class _ExecRepo:
+        async def start_execution(self, item, kind, trigger_tag=None, profile=""):
+            seen["recorded"] = profile
+            return 1
+
+        async def complete_execution(self, *a, **k):
+            return None
+
+    svc = AdoPollerService.__new__(AdoPollerService)
+    svc._config = cfg
+    svc._live_profiles = {}
+    svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
+    svc._c = SimpleNamespace(
+        ado=_FakeAdo(), state_repo=_NullStateRepo(), sdlc_engine=_Engine(),
+        execution_repo=_ExecRepo(), cost_tracker=None,
+        notifier=SimpleNamespace(notify_started=_anoop),
+        plugins=SimpleNamespace(run_post_processors=_anoop),
+    )
+    svc._handle_agent_result = _anoop
+    svc._apply_sdlc_handoff = _anoop
+    svc._matched_tag = lambda item: ""
+
+    item = WorkItemInfo(id=78, title="t", work_item_type="Requirement",
+                        state="Ready for Testing")
+    await svc._process_sdlc(item, item)
+
+    assert seen["profile"] == "qc"          # the door decided, not the default
+    assert seen["recorded"] == "qc"         # …and the record says the same thing
+    assert seen["state_at_run"] == "Active"  # even though the door is already gone

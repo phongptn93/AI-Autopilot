@@ -68,14 +68,26 @@ class SdlcLoopEngine:
         with contextlib.suppress(Exception):
             await self._quality.record(work_item_id=item_id, kind=kind, **kw)
 
-    async def run(self, item: WorkItemInfo) -> ExecutionResult:  # noqa: C901 - a bounded state loop
+    async def run(  # noqa: C901 - a bounded state loop
+        self, item: WorkItemInfo, profile: str = ""
+    ) -> ExecutionResult:
         cfg = self._config
         started = time.monotonic()
         workspace = cfg.workspace_directory
         repos = self._exec._allowed_repos(workspace)
 
-        profile = resolve_profile_name(item.tags, item.work_item_type, cfg)
-        stages = resolve_stages(item.tags, item.work_item_type, cfg)
+        # ``profile`` comes from the caller, which resolved it while the item was still
+        # in its door state. Resolving here as well is the fallback — and it must pass
+        # the STATE: without it the role the board wiring assigns (tag > pin > STATE >
+        # type > default) is skipped in the one place that actually runs the stages, so
+        # an item sitting in QC's door ran the default pipeline while every record and
+        # every Teams card said "qc".
+        profile = profile or resolve_profile_name(
+            item.tags, item.work_item_type, cfg, state=item.state or ""
+        )
+        stages = self._stages_for(profile) or resolve_stages(
+            item.tags, item.work_item_type, cfg, state=item.state or ""
+        )
         if not stages:
             return ExecutionResult.fail(item.id, "sdlc", "no SDLC stages resolved")
 

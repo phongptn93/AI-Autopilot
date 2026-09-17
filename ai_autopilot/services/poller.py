@@ -34,7 +34,7 @@ from ai_autopilot.execution.sdlc_plan import (
 )
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
-from ai_autopilot.outcomes import all_outcome_tags, apply_outcome
+from ai_autopilot.outcomes import all_outcome_tags, apply_outcome, outcome_policy
 from ai_autopilot.routing import plan_schedule, sort_by_priority
 from ai_autopilot.routing.planning_groups import group_by_links
 from ai_autopilot.services.planning_analyzer import run_due_plans
@@ -523,11 +523,18 @@ class AdoPollerService:
         Returns False when ADO refused the state — the item is still tagged (that tag is
         what stops a second run) but it has NOT moved, so the board shows it where it was.
         """
-        return await apply_outcome(
-            self._c.ado,
-            self._config.scoped_for_project(item.project),
-            item.id, outcome, item.work_item_type, log=self._log,
+        cfg = self._config.scoped_for_project(item.project)
+        moved = await apply_outcome(
+            self._c.ado, cfg, item.id, outcome, item.work_item_type, log=self._log,
         )
+        # Keep the in-memory item in step with the board. Everything downstream of a
+        # stage — above all the Teams card — reads ``item.state``, which was whatever
+        # the poll saw BEFORE the run, so a finished item was still announced as "New".
+        if moved and not cfg.dry_run:
+            _, state = outcome_policy(cfg, outcome, item.work_item_type)
+            if state:
+                item.state = state
+        return moved
 
     async def _reconcile_reopened(self) -> None:
         """Reopen items a human dragged back to a trigger state: clear their skip
@@ -1053,17 +1060,24 @@ class AdoPollerService:
         the NEXT machine's role (its ``trigger_states``) picks the item up."""
         c = self._c
 
+        # Decide the ROLE first, while the item is still standing in its door state.
+        # The very next line moves it to the working state ("Active"), and a state no
+        # role waits in resolves to the default profile — so resolving any later meant
+        # the door was already gone: QC's item ran the default pipeline while every
+        # record said "qc". Resolved once, carried everywhere below.
+        profile = resolve_profile_name(
+            item.tags, item.work_item_type, self._config, state=item.state or ""
+        )
+        self._live_profiles[item.id] = profile
+
         await c.state_repo.set(item.id, PipelineState.IN_PROGRESS, title=item.title)
         await self._apply_outcome(item, "in_progress")
         await c.notifier.notify_started(item, "sdlc")
         record_id = await c.execution_repo.start_execution(
-            item, "sdlc", trigger_tag=self._matched_tag(item),
-            profile=resolve_profile_name(
-                item.tags, item.work_item_type, self._config, state=item.state or ""
-            ),
+            item, "sdlc", trigger_tag=self._matched_tag(item), profile=profile,
         )
 
-        result = await c.sdlc_engine.run(item)
+        result = await c.sdlc_engine.run(item, profile=profile)
 
         await c.execution_repo.complete_execution(record_id, result)
         if result.cost_tokens:
@@ -1071,7 +1085,7 @@ class AdoPollerService:
             metrics.record_cost(result.cost_tokens)
 
         await self._handle_agent_result(item, result)
-        await self._apply_sdlc_handoff(item, result)
+        await self._apply_sdlc_handoff(item, result, self._live_profiles.pop(item.id, profile))
         await c.plugins.run_post_processors(item, result)
 
         status = (

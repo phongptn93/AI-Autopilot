@@ -42,21 +42,42 @@ class TeamsNotifier(NotificationChannel):
         targets = self._interested(message)
         if not targets:
             return
-        payload = self._payload(message)  # built once — identical for every channel
-        results = await asyncio.gather(
-            *(self._post(target, payload) for target in targets), return_exceptions=True
-        )
-        sent = sum(1 for r in results if r is True)
+        results = await self._deliver(targets, message)
+        sent = sum(1 for _label, ok in results if ok)
         if sent != len(targets):
             # Name the channels that failed. "2 of 3 delivered" left you to guess which,
             # and every Workflows URL shares the same host, so the host was no help.
-            failed = [t.label for t, r in zip(targets, results, strict=False) if r is not True]
+            failed = [label for label, ok in results if not ok]
             self._log.warning(
                 "teams notification partially delivered",
                 sent=sent, total=len(targets), failed=failed, title=message.title,
             )
         else:
             self._log.debug("teams notification sent", title=message.title, channels=sent)
+
+    async def _deliver(
+        self, targets: list[WebhookTarget], message: NotificationMessage
+    ) -> list[tuple[str, bool]]:
+        """Post to every target concurrently. ``(channel label, accepted)`` per target."""
+        payload = self._payload(message)  # built once — identical for every channel
+        results = await asyncio.gather(
+            *(self._post(target, payload) for target in targets), return_exceptions=True
+        )
+        return [
+            (t.label, r is True) for t, r in zip(targets, results, strict=False)
+        ]
+
+    async def probe(self, message: NotificationMessage) -> list[tuple[str, bool]]:
+        """Send to EVERY configured channel and report what each one did.
+
+        Exists because a Teams failure is invisible from the outside: ``send`` swallows
+        a revoked Workflows URL into a log line, so an operator whose cards stopped
+        arriving had no way to tell a dead webhook from a muted alert policy without
+        reading the log of a machine they may not have. This bypasses per-channel
+        routing on purpose — the question it answers is "can this channel be reached
+        at all", not "would this notice have gone there".
+        """
+        return await self._deliver(self._config.teams_webhook_targets, message)
 
     def _interested(self, message: NotificationMessage) -> list[WebhookTarget]:
         """The channels that asked for THIS notice.

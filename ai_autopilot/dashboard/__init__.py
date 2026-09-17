@@ -2765,6 +2765,10 @@ def create_dashboard_router() -> APIRouter:
             ]
 
         flash = _take_flash(request)
+        # One-shot: shown once after the button was pressed, then cleared, so a stale
+        # result cannot be mistaken for the state of the channels right now.
+        probe = getattr(request.app.state, "notify_probe", None)
+        request.app.state.notify_probe = None
         response = _TEMPLATES.TemplateResponse(
             request,
             "settings.html",
@@ -2778,6 +2782,7 @@ def create_dashboard_router() -> APIRouter:
                 restart_keys=settings_form.RESTART_REQUIRED,
                 flash=flash,
                 webhook_channels=channels,
+                notify_probe=probe,
                 webhook_active_count=len(cfg.teams_webhook_targets),
                 muted_channels=cfg.muted_teams_channels,
                 config_path=str(config_file_path()),
@@ -3008,6 +3013,27 @@ def create_dashboard_router() -> APIRouter:
         c.ado.refresh()  # re-read org URL if it changed
         _log.info("config reloaded from file via dashboard", changed=changed)
         return _flash("/dashboard/settings", "reloaded")
+
+    @router.post("/settings/test-notification")
+    async def test_notification(request: Request):
+        """Send a probe card to every chat channel and show what each one did.
+
+        The question "why did the notifications stop" had no answer short of reading
+        the log of the machine the autopilot runs on — which an operator often cannot
+        reach — because every failure mode is silent by design: a revoked Workflows URL
+        is a log line, a switched-off event is a log line, quiet hours is a log line.
+        """
+        c: Container = request.app.state.container
+        result = await c.notifier.send_test()
+        # Held in app state rather than a flash cookie: the answer is a table, and the
+        # flash mechanism carries a fixed message code by design.
+        request.app.state.notify_probe = result
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="notification.tested",
+            detail=f"{sum(1 for ch in result['channels'] if ch['ok'])} of "
+                   f"{len(result['channels'])} channel(s) accepted",
+        )
+        return RedirectResponse("/dashboard/settings", status_code=303)
 
     @router.get("/settings/export")
     async def export_config(request: Request):

@@ -197,3 +197,26 @@ async def test_a_genuine_connection_drop_is_still_retried(monkeypatch):
         await cc.run_claude("do a thing", ".", timeout_seconds=5)
 
     assert attempts["n"] == cc._TRANSIENT_RETRIES + 1
+
+
+async def test_a_thrashing_run_is_stopped_instead_of_burning_its_timeout(monkeypatch):
+    """Observed live: "Autocompact is thrashing" at 11 minutes and still going. The run
+    compacts, the next turns refill the context, it compacts again — paying for every
+    lap and finishing nothing until the task timeout kills it."""
+    attempts = {"n": 0}
+
+    async def fake_query(*, prompt, options):
+        attempts["n"] += 1
+        yield AssistantMessage(
+            content=[TextBlock(text="Autocompact is thrashing: the context refilled to "
+                                    "the limit within 3 turns of the previous compact")],
+            model="x",
+        )
+        # It would keep going for another ten minutes; the drive loop must not let it.
+        yield AssistantMessage(content=[TextBlock(text="reading another file")], model="x")
+
+    monkeypatch.setattr(cc, "query", fake_query)
+    with pytest.raises(RuntimeError, match="Context thrashing"):
+        await cc.run_claude("audit everything", ".", timeout_seconds=5)
+
+    assert attempts["n"] == 1      # not retried: the next lap reads the same thing

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import httpx
+import pytest
+
 from ai_autopilot.ado.client import AdoClient
 from ai_autopilot.config import Settings
 
@@ -252,3 +255,38 @@ async def test_a_failed_link_lookup_is_not_memoised():
     assert await c.get_pull_request_work_items("r1", 7) == []
     assert await c.get_pull_request_work_items("r1", 7) == []
     assert len(calls) == 2                       # retried, not served from a cached blank
+
+
+def _http_client(handler, **over) -> AdoClient:
+    """A client whose HTTP goes to ``handler`` — for the retry behaviour, not URLs."""
+    cfg = Settings(ado_organization="https://dev.azure.com/org", **over)
+    http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return AdoClient(http=http, auth=None, config=cfg)
+
+
+async def test_a_dropped_read_is_retried_rather_than_escaping_the_client():
+    """One ReadError used to take down a whole PR-babysitter cycle — every PR in it,
+    not just the call that failed — turning a network blip into a missed pass."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ReadError("connection dropped")
+        return httpx.Response(200, json={"value": []})
+
+    client = _http_client(handler)
+    resp = await client._send("GET", "https://dev.azure.com/o/_apis/wit/x", retries=2)
+
+    assert resp.status_code == 200 and calls["n"] == 2
+
+
+async def test_a_read_that_never_comes_back_still_raises():
+    """Bounded, not infinite: a site that is genuinely down must surface, not hang the
+    poll cycle behind retries."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("still down")
+
+    client = _http_client(handler)
+    with pytest.raises(httpx.TransportError):
+        await client._send("GET", "https://dev.azure.com/o/_apis/wit/x", retries=1)

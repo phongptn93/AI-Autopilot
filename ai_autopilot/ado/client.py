@@ -125,8 +125,15 @@ class AdoClient:
 
         Use ONLY for idempotent reads (GET, WIQL queries) — NEVER for mutations,
         which must not be replayed. Without this a single 429 surfaces as an empty
-        result and the caller acts on a false 'nothing to do' (mis-scheduling)."""
-        resp = await self._http.request(method, url, **kwargs)
+        result and the caller acts on a false 'nothing to do' (mis-scheduling).
+
+        Transport failures are retried on the same terms. A dropped read is the same
+        kind of nothing as a 503 — but it arrives as an EXCEPTION, so it used to escape
+        this method entirely: one ``ReadError`` took down a whole PR-babysitter cycle
+        (every PR in it, not just the call that failed) and turned a blip into a missed
+        pass over the board.
+        """
+        resp = await self._attempt(method, url, retries=retries, **kwargs)
         for attempt in range(retries):
             if resp.status_code not in (429, 502, 503, 504):
                 return resp
@@ -137,8 +144,33 @@ class AdoClient:
                 status=resp.status_code, attempt=attempt + 1, delay=delay,
             )
             await asyncio.sleep(delay)
-            resp = await self._http.request(method, url, **kwargs)
+            resp = await self._attempt(method, url, retries=retries, **kwargs)
         return resp
+
+    async def _attempt(
+        self, method: str, url: str, *, retries: int = 2, **kwargs
+    ) -> httpx.Response:
+        """One request, retrying a TRANSPORT failure (dropped read, reset connection).
+
+        Separate from the status-code backoff above because the two failures arrive
+        differently — one as a response, one as an exception — and only the caller of a
+        read may replay either.
+        """
+        last: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                return await self._http.request(method, url, **kwargs)
+            except httpx.TransportError as exc:
+                last = exc
+                if attempt >= retries:
+                    break
+                delay = min(2**attempt, 8)
+                self._log.warning(
+                    "ADO connection failed — retrying",
+                    attempt=attempt + 1, delay=delay, error=describe_exc(exc),
+                )
+                await asyncio.sleep(delay)
+        raise last if last is not None else RuntimeError("unreachable")
 
     def _url(self, path: str, project: str = "") -> str:
         """Work-item API URL scoped to a project — ``project`` when given, else the

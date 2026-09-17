@@ -11,6 +11,8 @@ import asyncio
 import contextlib
 import time
 
+import httpx
+
 from ai_autopilot import flows as flows_mod
 from ai_autopilot.config import (
     describe_users,
@@ -217,7 +219,17 @@ class PrMonitorService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
-                self._log.error("PR babysitter cycle failed", error=describe_exc(exc))
+                # A whole cycle lost to one failure is a whole pass over the board
+                # missed. Network blips are named as such rather than logged as if the
+                # babysitter itself had broken — they are expected, and they resolve.
+                if isinstance(exc, httpx.TransportError):
+                    self._log.warning(
+                        "PR babysitter cycle cut short by a connection failure — "
+                        "retrying next cycle",
+                        error=describe_exc(exc),
+                    )
+                else:
+                    self._log.error("PR babysitter cycle failed", error=describe_exc(exc))
 
     async def _scan(self) -> None:
         c = self._c

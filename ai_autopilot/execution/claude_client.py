@@ -107,6 +107,12 @@ _TRANSIENT_MARKERS = (
 # error message for a problem that is about size. Observed on a code-review loop whose
 # first command was `git log --all` over a busy monorepo.
 _OVERFLOW_MARKERS = ("prompt is too long", "context length", "too many tokens")
+# Autocompact thrashing is the same illness before it is fatal: the run compacts, the
+# next two turns refill the context, it compacts again. Claude Code says so itself, and
+# left alone the run burns its whole timeout — observed at 14 minutes and climbing —
+# making no progress and paying for every lap. Treated as a stop, for the same reason:
+# nothing about re-running it changes what the agent is trying to read.
+_THRASH_MARKER = "autocompact is thrashing"
 _TRANSIENT_RETRIES = 2  # extra FRESH attempts after the first
 _TRANSIENT_BACKOFF = 3.0  # seconds, doubled per retry (3s, 6s)
 
@@ -338,9 +344,12 @@ async def run_claude(
         text = line.strip()
         if not text:
             return
-        if any(marker in text.lower() for marker in _OVERFLOW_MARKERS):
+        lowered = text.lower()
+        if any(marker in lowered for marker in _OVERFLOW_MARKERS):
             # Remembered, because the exception that follows says nothing about size.
             overflow["hit"] = text[:200]
+        elif _THRASH_MARKER in lowered:
+            overflow["thrash"] = text[:200]
         pulse["last"] = text[:140]
         pulse["at"] = time.monotonic()
         pulse["events"] += 1
@@ -368,6 +377,11 @@ async def run_claude(
 
         async def _drive() -> None:
             async for message in query(prompt=prompt, options=options):
+                if overflow.get("thrash"):
+                    # Stop the lap it is on. Left alone this runs until the task
+                    # timeout, compacting and refilling, paying for every turn and
+                    # finishing nothing.
+                    raise RuntimeError(overflow["thrash"])
                 if isinstance(message, AssistantMessage):
                     for block in message.content:
                         if isinstance(block, TextBlock) and block.text:
@@ -435,6 +449,18 @@ async def run_claude(
                     resume_id = None
                     continue
                 _attach_stderr(exc, stderr_tail)
+                if overflow.get("thrash") and not overflow.get("hit"):
+                    _log.error(
+                        "run was thrashing the context — stopped",
+                        detail=overflow["thrash"],
+                        hint="the agent is re-reading more than fits; narrow what the "
+                             "prompt asks it to open (fewer files, a range, --oneline)",
+                    )
+                    raise RuntimeError(
+                        "Context thrashing: the run kept refilling its context right "
+                        f"after compacting ({overflow['thrash']}). Narrow what it is "
+                        "asked to read — it cannot finish by re-reading more than fits."
+                    ) from exc
                 if overflow.get("hit"):
                     # Deterministic: the same commands produce the same flood. Say what
                     # actually happened, once, instead of retrying it twice and then

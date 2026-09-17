@@ -1314,3 +1314,42 @@ def test_the_probe_result_is_shown_once(client):
     showing nothing."""
     client.post("/dashboard/settings/test-notification", follow_redirects=True)
     assert 'class="wh-probe-row"' not in client.get("/dashboard/settings").text
+
+
+def test_fleet_fields_that_do_nothing_here_are_marked_not_removed(tmp_path):
+    """A central was shown four worker-only fields as if they were things to fill in.
+    Dimmed and labelled — never removed, because a value already set must stay visible
+    on the page that is supposed to show the configuration."""
+    settings = Settings(dry_run=True, fleet_role="central",
+                        database_url=f"sqlite+aiosqlite:///{tmp_path / 'c.db'}")
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings").text
+    # The worker-only field is present…
+    assert 'data-k="fleet_central_url"' in page
+    # …and carried into the page as inapplicable, with the reason on it.
+    row = page.split('data-k="fleet_central_url"')[0].rsplit('<div class="field', 1)[1]
+    assert "na" in row
+    assert "fleet_offline_after_minutes" in page      # the central's own field is there
+
+
+def test_the_shared_token_can_be_generated_and_revealed(tmp_path):
+    """A shared secret nobody should invent by hand, and one you cannot read back is one
+    you cannot check you typed right."""
+    settings = Settings(dry_run=True, fleet_role="central",
+                        database_url=f"sqlite+aiosqlite:///{tmp_path / 'c.db'}")
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings").text
+    assert 'data-pw-gen="fleet_token"' in page
+    assert 'data-pw-toggle="fleet_token"' in page
+
+
+def test_the_settings_page_says_what_fleet_will_and_will_not_overwrite(tmp_path):
+    """The first question anyone asks about a central config is which of their settings
+    it is about to overwrite."""
+    settings = Settings(dry_run=True, fleet_role="worker", fleet_local_keys=["sdlc_profile"],
+                        database_url=f"sqlite+aiosqlite:///{tmp_path / 'w.db'}")
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings").text
+    assert "Đồng bộ những gì" in page
+    assert "sdlc_profile" in page                  # what THIS machine holds back
+    assert "database_url" in page                  # what is always held back

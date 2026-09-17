@@ -28,6 +28,17 @@ class Field:
     # ("ba => Ready for Dev"), so the tag map and the type map both told you to type
     # a state — the fields that are hardest to tell apart were the ones lying.
     placeholder: str = ""
+    # "Only relevant when <key> is one of <values>". A setting that does nothing on
+    # THIS machine still had to be read and dismissed by everyone configuring it — and
+    # the fleet block showed four worker-only fields to a central, which reads as "fill
+    # these in". Rendered dimmed with the reason, and re-evaluated live when the
+    # controlling field changes, rather than hidden: a value already set must never
+    # vanish from the page that is supposed to show the configuration.
+    show_when_key: str = ""
+    show_when_values: tuple[str, ...] = field(default_factory=tuple)
+    # Offers a "generate" button next to the input (password kinds). For a shared secret
+    # nobody should be inventing by hand.
+    generate: bool = False
 
 
 # Order here is the order rendered on the page. Sections group consecutive fields.
@@ -691,24 +702,35 @@ FIELDS: tuple[Field, ...] = (
           "Blank = máy độc lập (mặc định, không đổi gì). 'central' = VM trung tâm giữ cấu hình "
           "chung và theo dõi máy trạm. 'worker' = máy trạm, kéo cấu hình từ trung tâm và gửi "
           "heartbeat về.", ("", "central", "worker")),
-    Field("fleet_central_url", "↳ URL trung tâm (worker)", "text", "🛰 Fleet",
+    Field("fleet_central_url", "↳ URL trung tâm", "text", "🛰 Fleet",
           "Địa chỉ VM trung tâm, vd http://vm-autopilot:8080. Chỉ máy trạm gọi đi — trung tâm "
-          "KHÔNG cần gọi ngược về, nên máy sau NAT/VPN vẫn tham gia được."),
+          "KHÔNG cần gọi ngược về, nên máy sau NAT/VPN vẫn tham gia được. Để trống trên máy "
+          "trạm = không bao giờ gọi về: máy vẫn chạy với cấu hình sẵn có và không xuất hiện "
+          "trên trang Fleet.",
+          show_when_key="fleet_role", show_when_values=("worker",)),
     Field("fleet_token", "↳ Token chung", "password", "🛰 Fleet",
-          "Bí mật chung của cả đội, phải khớp ở 2 phía. Trung tâm KHÔNG bật API fleet khi token "
-          "rỗng — một endpoint mở sẽ phát toàn bộ cấu hình chung cho bất kỳ ai gọi tới."),
+          "Bí mật chung của cả đội, phải khớp ở 2 phía. Bấm ✨ để sinh ngẫu nhiên trên trung tâm "
+          "rồi phát cho từng máy trạm (nên đặt qua biến môi trường AUTOPILOT_FLEET_TOKEN). "
+          "Trung tâm KHÔNG bật API fleet khi token rỗng — một endpoint mở sẽ phát toàn bộ cấu "
+          "hình chung cho bất kỳ ai gọi tới.",
+          show_when_key="fleet_role", show_when_values=("central", "worker"), generate=True),
     Field("fleet_worker_name", "↳ Tên máy trạm", "text", "🛰 Fleet",
           "Tên hiển thị trên trang Fleet. Blank = hostname. Giữ nguyên qua các lần khởi động "
-          "lại thì lịch sử của máy mới gom về một dòng."),
+          "lại thì lịch sử của máy mới gom về một dòng.",
+          show_when_key="fleet_role", show_when_values=("worker",)),
     Field("fleet_local_keys", "↳ Khoá máy trạm tự giữ", "list", "🛰 Fleet",
-          "Mỗi dòng một tên setting mà trung tâm KHÔNG được ghi đè (vd 'sdlc_profile'). "
-          "Secrets, trigger_tag, workspaces, repos và database_url đã luôn được giữ lại sẵn — "
-          "danh sách này là phần RIÊNG mà máy trạm tự khai thêm.",
-          placeholder="sdlc_profile"),
+          "Mỗi dòng một tên setting mà trung tâm KHÔNG được ghi đè trên MÁY NÀY — dùng khi máy "
+          "cần giữ riêng một thiết lập (vd 'sdlc_profile' để máy này luôn chạy vai qc dù đội "
+          "để dev). Secrets, trigger_tag, workspaces, repos, database_url và toàn bộ fleet_* đã "
+          "luôn được giữ sẵn — không cần khai lại.",
+          placeholder="sdlc_profile",
+          show_when_key="fleet_role", show_when_values=("worker",)),
     Field("fleet_sync_interval_minutes", "↳ Chu kỳ đồng bộ (phút)", "int", "🛰 Fleet",
-          "Máy trạm gọi về mỗi bấy nhiêu phút. Tối thiểu 1 phút."),
+          "Máy trạm gọi về mỗi bấy nhiêu phút. Tối thiểu 1 phút.",
+          show_when_key="fleet_role", show_when_values=("worker",)),
     Field("fleet_offline_after_minutes", "↳ Coi là offline sau (phút)", "int", "🛰 Fleet",
-          "Trung tâm: máy im lặng lâu hơn mức này sẽ hiện đỏ trên trang Fleet."),
+          "Trung tâm: máy im lặng lâu hơn mức này sẽ hiện đỏ trên trang Fleet.",
+          show_when_key="fleet_role", show_when_values=("central",)),
     # ── Web / Security ──
     Field("dashboard_auth_password", "Dashboard password", "password", "Web / Security",
           "Password to access this dashboard (HTTP Basic — any username). Stored as a "

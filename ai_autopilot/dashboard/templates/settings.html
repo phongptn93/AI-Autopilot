@@ -126,6 +126,23 @@
                 border-bottom:1px solid var(--border)}
   .wh-probe-ico{width:16px;flex:none}
   .wh-probe-note{padding:8px 12px;font-size:12px;color:var(--text-muted);background:var(--bg)}
+  /* A setting that does nothing on THIS machine: dimmed and labelled, never removed —
+     a value already set must stay visible on the page that shows the configuration. */
+  .field.na{opacity:.45}
+  .field.na:focus-within{opacity:1}
+  .na-badge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:20px;margin-left:6px;
+            background:var(--bg);border:1px solid var(--border);color:var(--text-dim);
+            text-transform:none;letter-spacing:0}
+  .pw-wrap{display:flex;align-items:center;gap:6px}
+  .pw-wrap input{flex:1;min-width:0}
+  .pw-btn{flex:none;background:var(--bg);border:1px solid var(--border);border-radius:7px;
+          padding:5px 8px;font-size:13px;cursor:pointer;line-height:1}
+  .pw-btn:hover{border-color:var(--accent)}
+  .fleet-block{padding:14px 20px 4px;border-bottom:1px solid var(--border-soft)}
+  .fleet-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 18px;margin-top:8px}
+  .fleet-col b{font-size:12px}
+  .fleet-col ul{margin:5px 0 0;padding-left:18px;font-size:12px;color:var(--text-muted);line-height:1.6}
+  .fleet-col code{font-family:var(--mono,monospace);font-size:11px}
 </style>
 
 <div class="set-head">
@@ -277,6 +294,52 @@
       {% endif %}
     </div>
 
+    {# "What actually travels" belongs next to the fleet switches, not in a doc nobody
+       opens: the first question anyone asks about a central config is which of their
+       settings it is about to overwrite. #}
+    {% if section == '🛰 Fleet' %}
+    <div class="fleet-block">
+      <div class="wh-title">
+        <b>🔄 Đồng bộ những gì</b>
+        <span class="form-help" style="margin:0">
+          {% if fleet.role == 'central' %}Máy này <b>phát</b> {{ fleet.shared_count }} thiết lập chung cho máy trạm.
+          {% elif fleet.role == 'worker' %}Máy này <b>nhận</b> thiết lập chung từ trung tâm mỗi {{ fleet.interval }} phút.
+          {% else %}Chưa bật — chọn vai ở trên để dùng.{% endif %}
+        </span>
+      </div>
+      <div class="fleet-cols">
+        <div class="fleet-col">
+          <b>✅ Được đồng bộ</b>
+          <ul>
+            <li>Trigger states, tag, outcome → state</li>
+            <li>Roles / relay, board, ngưỡng cảnh báo</li>
+            <li>Mọi setting khác không nằm ở cột bên</li>
+          </ul>
+        </div>
+        <div class="fleet-col">
+          <b>🔒 Luôn giữ theo máy</b>
+          <ul>
+            <li>Secrets: PAT, SMTP/Zalo, mật khẩu dashboard</li>
+            <li><code>trigger_tag</code>, <code>workspaces</code>, <code>repos</code>, <code>database_url</code>, cổng</li>
+            <li>Toàn bộ <code>fleet_*</code> (vai, URL, token)</li>
+          </ul>
+        </div>
+        <div class="fleet-col">
+          <b>🧷 Máy này tự giữ thêm</b>
+          <ul>
+            {% for k in fleet.local_keys %}<li><code>{{ k }}</code></li>{% else %}
+            <li>— chưa khai gì (điền ở “Khoá máy trạm tự giữ”)</li>{% endfor %}
+          </ul>
+        </div>
+      </div>
+      <div class="form-help" style="margin-top:10px">
+        Lọc <b>hai đầu</b>: trung tâm không gửi cột giữa, và máy trạm cũng loại chúng lần nữa khi nhận —
+        nên một trung tâm bị chiếm vẫn không ghi được PAT hay đường dẫn lên máy trạm.
+        {% if fleet.role == 'central' %} Theo dõi đội máy ở <a href="/dashboard/fleet" style="color:var(--accent-hover)">🛰 Fleet</a>.{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
     {# The Teams channel list renders INSIDE Notifications, above that section's fields.
        It used to be a card of its own near the top of the page while a single "MS Teams
        webhook URL" field stayed down here — two controls for one setting, in two places,
@@ -358,9 +421,17 @@
     <div class="field-grid">
       {% for f in fields %}
       {% set wide = f.kind in ('list','map','stateset') %}
-      <div class="field {{ 'wide' if wide else '' }} {{ 'bool' if f.kind=='bool' else '' }}"
-           data-k="{{ f.key }}">
-        <label for="{{ f.key }}">{{ f.label }}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}</label>
+      {# "Only relevant when X is Y": dimmed with the reason, never removed. A value
+         already set must not vanish from the page that is supposed to show the
+         configuration — it just stops looking like something to fill in. #}
+      {% set off = f.show_when_key and (current.get(f.show_when_key) or '') not in f.show_when_values %}
+      <div class="field {{ 'wide' if wide else '' }} {{ 'bool' if f.kind=='bool' else '' }} {{ 'na' if off else '' }}"
+           data-k="{{ f.key }}"
+           {% if f.show_when_key %}data-when-key="{{ f.show_when_key }}"
+           data-when-vals="{{ f.show_when_values|join(',') }}"{% endif %}>
+        <label for="{{ f.key }}">{{ f.label }}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}
+          {% if f.show_when_key %}<span class="na-badge">chỉ dùng khi {{ f.show_when_key.replace('_', ' ') }} = {{ f.show_when_values|join(' / ') }}</span>{% endif %}
+        </label>
         <div class="form-input">
           {% if f.kind == 'bool' %}
             <input type="checkbox" id="{{ f.key }}" name="{{ f.key }}" {% if current.get(f.key) %}checked{% endif %} />
@@ -369,8 +440,18 @@
               {% for opt in f.options %}<option value="{{ opt }}" {% if current.get(f.key) == opt %}selected{% endif %}>{{ opt if opt else '— blank (fall through to default) —' }}</option>{% endfor %}
             </select>
           {% elif f.kind == 'password' %}
-            <input type="password" id="{{ f.key }}" name="{{ f.key }}"
-                   placeholder="{{ '•••••• set — leave blank to keep' if secrets_set.get(f.key) else 'not set' }}" autocomplete="off" />
+            {# A secret you cannot read back is a secret you cannot verify you typed
+               right, and one nobody should be inventing by hand gets a generator. #}
+            <span class="pw-wrap">
+              <input type="password" id="{{ f.key }}" name="{{ f.key }}"
+                     placeholder="{{ '•••••• set — leave blank to keep' if secrets_set.get(f.key) else 'not set' }}" autocomplete="off" />
+              <button type="button" class="pw-btn" data-pw-toggle="{{ f.key }}"
+                      title="Hiện / ẩn">👁</button>
+              {% if f.generate %}
+              <button type="button" class="pw-btn" data-pw-gen="{{ f.key }}"
+                      title="Sinh token ngẫu nhiên (32 byte) và hiện ra để copy">✨</button>
+              {% endif %}
+            </span>
           {% elif f.kind == 'int' %}
             <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
           {% elif f.kind == 'float' %}
@@ -428,6 +509,64 @@
 {# Target of the "Gửi thử thông báo" button up in the Channels card. Empty and outside
    the settings form on purpose: a test must never save the page. #}
 <form id="probe-form" method="post" action="/dashboard/settings/test-notification"></form>
+
+<script>
+  // ── Secrets: reveal, and generate ─────────────────────────────────────────
+  // A secret you cannot read back is a secret you cannot check you typed correctly,
+  // and a shared token nobody should be inventing by hand needs a generator that is
+  // one click rather than a python one-liner in a chat message.
+  (function () {
+    document.querySelectorAll('[data-pw-toggle]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var input = document.getElementById(btn.dataset.pwToggle);
+        if (!input) return;
+        var shown = input.type === 'text';
+        input.type = shown ? 'password' : 'text';
+        btn.textContent = shown ? '👁' : '🙈';
+      });
+    });
+    document.querySelectorAll('[data-pw-gen]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var input = document.getElementById(btn.dataset.pwGen);
+        if (!input) return;
+        // Generated in the browser with the platform CSPRNG: the value never travels
+        // anywhere until the page is saved, and it is shown so it can be copied to the
+        // worker machines — an unreadable shared secret is useless.
+        var raw = new Uint8Array(24);
+        crypto.getRandomValues(raw);
+        input.value = btoa(String.fromCharCode.apply(null, raw))
+          .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        input.type = 'text';
+        input.focus();
+        input.select();
+      });
+    });
+  })();
+
+  // ── Fields that do nothing on THIS machine ────────────────────────────────
+  // Re-evaluated as the controlling field changes, so picking "worker" lights up the
+  // worker fields immediately instead of after a save-and-reload.
+  (function () {
+    var conditional = Array.prototype.slice.call(document.querySelectorAll('[data-when-key]'));
+    if (!conditional.length) return;
+    function apply() {
+      conditional.forEach(function (el) {
+        var ctl = document.getElementById(el.dataset.whenKey);
+        if (!ctl) return;
+        var vals = (el.dataset.whenVals || '').split(',');
+        el.classList.toggle('na', vals.indexOf(ctl.value || '') === -1);
+      });
+    }
+    conditional.forEach(function (el) {
+      var ctl = document.getElementById(el.dataset.whenKey);
+      if (ctl && !ctl.dataset.whenBound) {
+        ctl.dataset.whenBound = '1';
+        ctl.addEventListener('change', apply);
+      }
+    });
+    apply();
+  })();
+</script>
 
 <script>
   // ── Find a setting ──────────────────────────────────────────────────────────

@@ -151,6 +151,8 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "err_loop_name": ("red", "⚠️ Chưa lưu — mỗi lịch chạy cần một tên riêng (không trùng)."),
     "err_loop_cadence": ("red", "⚠️ Chưa lưu — cron không hợp lệ và cũng không có "
                                 "interval (phút). Lịch sẽ không bao giờ chạy."),
+    "err_loop_blocked": ("red", "⛔ Lịch chạy này chưa chạy được — xem dòng đỏ ngay dưới tên nó "
+                          "(thiếu repo hoặc cron không hợp lệ). Sửa xong bấm lại."),
     "err_loop_missing": ("red", "⚠️ Không tìm thấy lịch chạy đó (có thể vừa bị xoá)."),
     "ws_saved": ("green", "✅ Đã lưu workspace và áp dụng ngay (không cần khởi động lại)."),
     "ws_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
@@ -1425,6 +1427,11 @@ def create_dashboard_router() -> APIRouter:
                 # A cadence that does not parse is the failure mode with no symptom:
                 # the loop is "configured", listed, enabled — and never fires.
                 "cadence_ok": loop_scheduler_mod._trigger(loop) is not None,
+                # Why this one cannot run, from the SAME rule the scheduler applies.
+                # The page used to state the rule in help text under the repo box and
+                # leave the reader to apply it — so a loop that stops on its first line
+                # every night looked identical to one that works.
+                "blockers": loop_scheduler_mod.loop_blockers(loop, cfg),
                 "next_run": _next_run(scheduler, loop.name),
                 # Its own live feed — an audit is minutes of silence otherwise, and the
                 # only other place its progress appears is a log file on the server.
@@ -1521,14 +1528,21 @@ def create_dashboard_router() -> APIRouter:
     @router.post("/loops/run")
     async def loops_run(request: Request, name: str = Form(...)):
         """Run one loop now, off-schedule — the only way to try a weekly audit today."""
+        c: Container = request.app.state.container
         scheduler = getattr(request.app.state, "loop_scheduler", None)
         if scheduler is None:
             return _flash("/dashboard/loops", "err_loop_missing")
         if scheduler.is_running(name):
             # Saying "started" here would be a lie the page then cannot walk back: the
             # run is skipped, no second report appears, and the operator is left waiting
-            # for one.
+            # for one. Checked FIRST: "it is running right now" is a fact about this
+            # moment and outranks anything the current config would refuse.
             return _flash("/dashboard/loops", "loop_busy")
+        loop = next((le for le in (c.config.scheduled_loops or []) if le.name == name), None)
+        if loop is not None and loop_scheduler_mod.loop_blockers(loop, c.config):
+            # Saying "started" and then stopping on the first line is the behaviour that
+            # made this feature look broken rather than unconfigured.
+            return _flash("/dashboard/loops", "err_loop_blocked")
         # Detached: an audit takes minutes, and the operator should get the page back
         # rather than hold a request open until the agent is done.
         task = asyncio.create_task(scheduler.run_now(name))
@@ -2783,6 +2797,15 @@ def create_dashboard_router() -> APIRouter:
                 flash=flash,
                 webhook_channels=channels,
                 notify_probe=probe,
+                # What the fleet block states about THIS machine. Counted from the real
+                # export filter rather than written out by hand, so the number cannot
+                # drift from what the central actually serves.
+                fleet={
+                    "role": cfg.fleet_role or "",
+                    "shared_count": len(settings_form.export_settings(cfg)),
+                    "interval": cfg.fleet_sync_interval_minutes,
+                    "local_keys": [str(k) for k in (cfg.fleet_local_keys or []) if str(k).strip()],
+                },
                 webhook_active_count=len(cfg.teams_webhook_targets),
                 muted_channels=cfg.muted_teams_channels,
                 config_path=str(config_file_path()),

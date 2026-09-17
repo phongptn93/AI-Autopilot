@@ -249,6 +249,23 @@ def _trigger(loop: ScheduledLoop):
     return None
 
 
+def loop_blockers(loop: ScheduledLoop, config) -> list[str]:
+    """Why this loop cannot run right now, in the reader's words. Empty = it can.
+
+    The same two conditions ``_dispatch`` enforces, read from one place so the page
+    cannot promise a run the scheduler will refuse. Both failures are silent by nature:
+    the loop is listed, enabled, looks configured — and either never fires or stops on
+    its first line with one warning in a log on the server.
+    """
+    out: list[str] = []
+    if _trigger(loop) is None:
+        out.append("cron/interval không hợp lệ — không bao giờ tới giờ chạy")
+    scoped = config.scoped_for_project(loop.project)
+    if not (loop.repo_path or scoped.repo_working_directory):
+        out.append("chưa có repo — mọi lần chạy dừng trước khi bắt đầu")
+    return out
+
+
 def _slug(name: str) -> str:
     """A loop name as a path/branch segment. Shared so the branch a build loop pushes
     and the directory an audit writes into are named the same way."""

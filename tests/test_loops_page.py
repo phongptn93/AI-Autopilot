@@ -381,3 +381,48 @@ def test_a_run_with_no_role_says_so_rather_than_leaving_a_blank(tmp_path):
 
         page = client.get("/dashboard/now").text
         assert "cả work item" in page
+
+
+def test_a_loop_that_cannot_run_says_so_on_its_own_row(tmp_path, monkeypatch):
+    """The rule was in help text under the repo box, left for the reader to apply to
+    their own row — so a loop that stops on its first line every night looked exactly
+    like one that works."""
+    from ai_autopilot.config import ScheduledLoop
+
+    with _client(
+        tmp_path,
+        repo_working_directory="",
+        scheduled_loops=[ScheduledLoop(name="code-review-daily", prompt="p", cron="7 18 * * *")],
+    ) as client:
+        page = client.get("/dashboard/loops").text
+    assert "Chưa chạy được" in page
+    assert "chưa có repo" in page
+
+
+def test_a_working_loop_carries_no_blocker_banner(tmp_path, monkeypatch):
+    from ai_autopilot.config import ScheduledLoop
+
+    with _client(
+        tmp_path,
+        scheduled_loops=[ScheduledLoop(name="ok-loop", prompt="p", cron="7 18 * * *",
+                                       repo_path=str(tmp_path))],
+    ) as client:
+        page = client.get("/dashboard/loops").text
+    assert "Chưa chạy được" not in page
+
+
+def test_run_now_refuses_a_loop_that_would_stop_on_its_first_line(tmp_path, monkeypatch):
+    """Saying "started" and then stopping is what made this look broken rather than
+    unconfigured."""
+    from ai_autopilot.config import ScheduledLoop
+
+    with _client(
+        tmp_path,
+        repo_working_directory="",
+        scheduled_loops=[ScheduledLoop(name="code-review-daily", prompt="p", cron="7 18 * * *")],
+    ) as client:
+        page = client.post(
+            "/dashboard/loops/run", data={"name": "code-review-daily"}, follow_redirects=True
+        ).text
+    assert "chưa chạy được" in page.lower()
+    assert "Đã chạy ngay" not in page

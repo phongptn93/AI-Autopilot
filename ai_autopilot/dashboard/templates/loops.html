@@ -49,6 +49,10 @@
   .lp-hint { font-size:10.5px; color:var(--text-dim); line-height:1.45; }
   .lp-hint.warn { color:var(--amber); }
   .lp-hint.bad { color:var(--red); }
+  /* Loud on purpose: this row does nothing at all until it is fixed. */
+  .lp-blocked { margin:0 16px 10px; padding:7px 12px; border-radius:8px; font-size:12.5px;
+                color:var(--red); background:rgba(229,72,77,.09);
+                border:1px solid rgba(229,72,77,.3); }
 
   .lp-agents { display:flex; flex-wrap:wrap; gap:5px; }
   .lp-ag { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-family:var(--mono);
@@ -132,7 +136,7 @@
         <span class="lp-pill {{ 'ok' if r.mode == 'report' else 'mute' }}">{{ r.mode }}</span>
         {% if r.running %}<span class="lp-pill ok">running now</span>
         {% elif not r.enabled %}<span class="lp-pill mute">disabled</span>
-        {% elif not r.cadence_ok %}<span class="lp-pill bad">no valid cadence — never fires</span>
+        {% elif r.blockers %}<span class="lp-pill bad">⛔ chưa chạy được</span>
         {% elif r.next_run %}<span class="lp-pill">next {{ r.next_run }}</span>
         {% else %}<span class="lp-pill mute">not scheduled</span>{% endif %}
         <span class="lp-row-actions">
@@ -142,6 +146,17 @@
                   onclick="return confirm('Delete the loop “{{ r.name }}”?')">🗑 Delete</button>
         </span>
       </div>
+
+      {# The reason, spelled out, right under the name. The rule was stated in help text
+         under the repo box and left for the reader to apply to their own row — so a
+         loop that stops on its first line every night looked exactly like one that
+         works, and "▶ Run now" said "started" either way. #}
+      {% if r.enabled and r.blockers %}
+      <div class="lp-blocked">
+        ⛔ <b>Chưa chạy được:</b>
+        {% for b in r.blockers %}{{ b }}{% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% endif %}
 
       <div class="lp-fields">
         <div class="lp-f">

@@ -22,6 +22,7 @@ from ai_autopilot.container import Container
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import WorkItemInfo
 from ai_autopilot.notifications.base import NotificationMessage, NotificationType
+from ai_autopilot.workspace import discover_repos
 
 
 class LoopScheduler:
@@ -124,7 +125,7 @@ class LoopScheduler:
         # A loop bound to a project runs in THAT project's workspace, so its repo and
         # base branch default to the workspace's rather than the root config's.
         scoped = cfg.scoped_for_project(loop.project)
-        repo = loop.repo_path or scoped.repo_working_directory
+        repo = loop_repo(loop, cfg)
         base = loop.base_branch or scoped.base_branch
         if not repo:
             self._log.warning("scheduled loop has no repo configured", name=loop.name)
@@ -249,6 +250,34 @@ def _trigger(loop: ScheduledLoop):
     return None
 
 
+def loop_repo(loop: ScheduledLoop, config) -> str:
+    """The directory this loop actually runs git in, or "" when it has none.
+
+    Three ways to name it, in the order a reader would expect:
+
+    * the loop's own ``repo_path`` — absolute, or a repo NAME inside the workspace,
+      which is what the field's own placeholder ("workspace's repo") promises and what
+      anyone types first. Passing a bare name straight to git resolved it against the
+      service's process directory instead, which is nobody's intention;
+    * ``repo_working_directory`` — the single-repo setting that predates workspaces;
+    * the workspace itself, when it holds exactly ONE repo. With several there is a
+      real choice to make and guessing it would be worse than saying so.
+    """
+    scoped = config.scoped_for_project(loop.project)
+    workspace = (scoped.workspace_directory or "").strip()
+    named = (loop.repo_path or "").strip()
+    if named:
+        if workspace and not Path(named).is_absolute():
+            inside = Path(workspace) / named
+            if inside.is_dir():
+                return str(inside)
+        return named
+    if (scoped.repo_working_directory or "").strip():
+        return scoped.repo_working_directory.strip()
+    repos = discover_repos(workspace)
+    return str(Path(workspace) / repos[0]) if len(repos) == 1 else ""
+
+
 def loop_blockers(loop: ScheduledLoop, config) -> list[str]:
     """Why this loop cannot run right now, in the reader's words. Empty = it can.
 
@@ -260,9 +289,18 @@ def loop_blockers(loop: ScheduledLoop, config) -> list[str]:
     out: list[str] = []
     if _trigger(loop) is None:
         out.append("cron/interval không hợp lệ — không bao giờ tới giờ chạy")
-    scoped = config.scoped_for_project(loop.project)
-    if not (loop.repo_path or scoped.repo_working_directory):
-        out.append("chưa có repo — mọi lần chạy dừng trước khi bắt đầu")
+    if not loop_repo(loop, config):
+        scoped = config.scoped_for_project(loop.project)
+        repos = discover_repos((scoped.workspace_directory or "").strip())
+        if len(repos) > 1:
+            # Naming them turns "fill in a path" into "pick one of these" — the field
+            # takes a repo name, and the reader should not have to go and find it.
+            out.append(
+                "workspace có " + str(len(repos)) + " repo (" + ", ".join(repos[:4])
+                + ") — điền tên một repo vào ô Repo path"
+            )
+        else:
+            out.append("chưa có repo — mọi lần chạy dừng trước khi bắt đầu")
     return out
 
 

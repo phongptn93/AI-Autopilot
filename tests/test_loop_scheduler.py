@@ -264,3 +264,65 @@ def test_a_loops_feed_key_is_its_own():
 
     assert activity.loop_key("Code Review Daily") == "loop-code-review-daily"
     assert activity.loop_key("sec") != activity.loop_key("perf")
+
+
+def _repo(root, name):
+    """A workspace subfolder that looks like a git repo to discover_repos."""
+    path = root / name
+    (path / ".git").mkdir(parents=True)
+    return path
+
+
+def test_a_bare_repo_name_resolves_inside_the_workspace(tmp_path):
+    """The field's placeholder promised "the workspace's repo", and a bare name typed
+    into it went to git as a path relative to the SERVICE's process directory — which is
+    nobody's intention and fails somewhere else entirely."""
+    from ai_autopilot.config import ScheduledLoop, Settings
+    from ai_autopilot.services.loop_scheduler import loop_repo
+
+    ws = tmp_path / "ws"
+    _repo(ws, "Backend-Fresh")
+    cfg = Settings(workspace_directory=str(ws))
+    loop = ScheduledLoop(name="l", prompt="p", cron="7 18 * * *", repo_path="Backend-Fresh")
+
+    assert loop_repo(loop, cfg) == str(ws / "Backend-Fresh")
+
+
+def test_an_absolute_repo_path_is_left_alone(tmp_path):
+    from ai_autopilot.config import ScheduledLoop, Settings
+    from ai_autopilot.services.loop_scheduler import loop_repo
+
+    loop = ScheduledLoop(name="l", prompt="p", cron="7 18 * * *", repo_path=str(tmp_path))
+    assert loop_repo(loop, Settings(workspace_directory=str(tmp_path / "ws"))) == str(tmp_path)
+
+
+def test_a_workspace_with_one_repo_needs_no_repo_field(tmp_path):
+    """"Blank = the workspace's repo" is a promise the code can actually keep when there
+    is exactly one — which is the common single-repo workspace."""
+    from ai_autopilot.config import ScheduledLoop, Settings
+    from ai_autopilot.services.loop_scheduler import loop_blockers, loop_repo
+
+    ws = tmp_path / "ws"
+    _repo(ws, "OnlyRepo")
+    cfg = Settings(workspace_directory=str(ws))
+    loop = ScheduledLoop(name="l", prompt="p", cron="7 18 * * *")
+
+    assert loop_repo(loop, cfg) == str(ws / "OnlyRepo")
+    assert loop_blockers(loop, cfg) == []
+
+
+def test_several_repos_ask_which_one_and_name_them(tmp_path):
+    """Guessing would be worse than saying so — and "fill in a path" is not an
+    instruction anyone can act on without going to look the names up."""
+    from ai_autopilot.config import ScheduledLoop, Settings
+    from ai_autopilot.services.loop_scheduler import loop_blockers, loop_repo
+
+    ws = tmp_path / "ws"
+    _repo(ws, "Backend-Fresh")
+    _repo(ws, "Micro-Frontend")
+    cfg = Settings(workspace_directory=str(ws))
+    loop = ScheduledLoop(name="l", prompt="p", cron="7 18 * * *")
+
+    assert loop_repo(loop, cfg) == ""
+    blocker = loop_blockers(loop, cfg)[0]
+    assert "2 repo" in blocker and "Backend-Fresh" in blocker and "Micro-Frontend" in blocker

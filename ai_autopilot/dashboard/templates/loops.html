@@ -198,8 +198,9 @@
         <div class="lp-f">
           <label>Repo path</label>
           <input type="text" class="lp-in mono" name="loop_{{ row }}_repo"
-                 value="{{ r.repo_path }}" placeholder="blank = workspace's repo">
-          <span class="lp-hint">Without a repo — here or on the workspace — the loop logs a warning and stops.</span>
+                 value="{{ r.repo_path }}" placeholder="{{ repo_placeholder }}">
+          <span class="lp-hint">Tên repo trong workspace (vd <code>{{ repo_example }}</code>) hoặc đường dẫn tuyệt đối.
+            Để trống chỉ chạy được khi workspace có đúng MỘT repo — nhiều repo thì phải chọn.</span>
         </div>
 
         <div class="lp-f">

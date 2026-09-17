@@ -228,6 +228,13 @@ def _workspace_agents(cfg) -> list[str]:
         return []
 
 
+def _workspace_repos(cfg) -> list[str]:
+    """Repo names in the workspace — what the loop's Repo field expects to be given."""
+    from ai_autopilot.workspace import discover_repos
+
+    return discover_repos(getattr(cfg, "workspace_directory", "") or "")
+
+
 def _next_run(scheduler, name: str) -> str:
     """When APScheduler will next fire this loop, as text; "" when it has no job.
 
@@ -1442,6 +1449,14 @@ def create_dashboard_router() -> APIRouter:
             request, "loops.html",
             _ctx(request, "loops", rows=rows, flash=flash,
                  known_agents=_workspace_agents(cfg),
+                 # The field takes a repo NAME; show one this workspace actually has,
+                 # so nobody has to go and look it up to fill in the box.
+                 repo_example=(_workspace_repos(cfg) or ["Backend-Fresh"])[0],
+                 repo_placeholder=(
+                     "blank = repo duy nhất của workspace"
+                     if len(_workspace_repos(cfg)) == 1
+                     else "tên repo trong workspace"
+                 ),
                  presets=loop_presets.PRESETS,
                  projects=sorted({
                      p for w in workspaces_mod.resolve(cfg) for p in (w.projects or []) if p

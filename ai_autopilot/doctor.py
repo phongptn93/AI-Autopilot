@@ -266,6 +266,79 @@ def check_role_chain_cycle(config: Settings) -> list[Finding]:
     return out
 
 
+def check_relay_hands_over(config: Settings) -> list[Finding]:
+    """Several roles are wired, and not one of them hands to another.
+
+    A role's "when done" is what makes a relay a relay. Left blank it falls back to
+    ``resolved_state`` — a state no role waits in — so every leg ends the same way: the
+    item is marked done and parks. The board LOOKS wired (qc has a door, a working
+    state, its own stages) while qc is never reached by anything except a person moving
+    the item there by hand, and nothing anywhere says so. Each row on /dashboard/roles
+    admits it alone ("→ stops"); no page says the relay as a whole never connects.
+
+    Only fires when there is a relay to break: two or more wired roles. One role that
+    finishes and parks is a perfectly good one-role setup.
+
+    Offline: doors and hand-offs are entirely config.
+    """
+    from ai_autopilot.execution import sdlc_plan
+
+    roles = sdlc_plan.effective_roles(config)
+    wired = {
+        name: role for name, role in roles.items() if sdlc_plan.role_doors(role)
+    }
+    if len(wired) < 2:
+        return []
+    handed = [
+        name for name in wired
+        if (target := sdlc_plan.handoff_state(name, config).strip())
+        and (landed := sdlc_plan.profile_for_state(target, config))
+        and landed != name
+    ]
+    if handed:
+        return [Finding(OK, f"The relay connects: {len(handed)} role(s) hand over")]
+    names = ", ".join(f"'{n}'" for n in sorted(wired))
+    return [Finding(
+        WARN, "No role hands over — the relay never connects",
+        f"{len(wired)} roles have doors ({names}) but none of their 'when done' states "
+        "is another role's door, so every run ends by parking the item. The later roles "
+        "only ever run if somebody moves the item to their door by hand.",
+        "At /dashboard/roles, set each role's 'when done →' to the NEXT role's door "
+        "(e.g. dev → the state qc waits in).",
+    )]
+
+
+def check_default_profile_is_not_a_doorway(config: Settings) -> list[Finding]:
+    """The catch-all profile is also a role with a door of its own.
+
+    ``sdlc_default_profile`` is what runs when nothing else resolves — an item in a
+    state no role waits in, on a work-item type with no mapping. Pointing it at a role
+    that has a door makes that role two things at once: the specialist behind its door,
+    and the fallback for every item that belongs nowhere. A narrow role in that seat
+    (dev = implement + review + PR) then codes items that were never analysed or
+    tested, and the log still reads "dev", so it looks intentional.
+
+    Offline: both sides are config.
+    """
+    from ai_autopilot.execution import sdlc_plan
+
+    default = (config.sdlc_default_profile or "").strip()
+    if not default:
+        return []
+    role = sdlc_plan.effective_roles(config).get(default)
+    doors = sdlc_plan.role_doors(role) if role is not None else []
+    if not doors:
+        return []
+    return [Finding(
+        WARN, f"Default profile '{default}' is also a doorway role",
+        f"'{default}' waits in {', '.join(doors)} AND is the fallback for every item "
+        "no role claims — so items arriving from anywhere else run its stages "
+        f"({', '.join(role.stages) or 'none'}), whatever they needed.",
+        "Point 'Profile: default' at a full pipeline (or a triage role) at "
+        "/dashboard/settings, and leave the doorway role to its door.",
+    )]
+
+
 def check_deploy_stage(config: Settings) -> list[Finding]:
     """The 🚀 Deployed stage only fires under conditions nothing on the page states.
 
@@ -1203,6 +1276,7 @@ def check_scheduled_loops(config: Settings) -> list[Finding]:
 CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
+    check_relay_hands_over, check_default_profile_is_not_a_doorway,
     check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,

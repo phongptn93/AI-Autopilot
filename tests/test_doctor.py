@@ -610,3 +610,63 @@ def test_no_loops_at_all_says_nothing(tmp_path):
     from ai_autopilot.doctor import check_scheduled_loops
 
     assert check_scheduled_loops(Settings(workspace_directory=str(tmp_path))) == []
+
+
+def _relay_cfg(**over):
+    from ai_autopilot.config import SdlcRole
+
+    roles = {
+        "dev": SdlcRole(stages=["implement", "review", "pr"],
+                        waits_in="Ready for Development", shows="Active"),
+        "qc": SdlcRole(stages=["test"], waits_in="Ready for Testing", shows="In Testing"),
+    }
+    roles.update(over.pop("sdlc_roles", {}))
+    return Settings(sdlc_roles=roles, resolved_state="Resolved", **over)
+
+
+def test_a_relay_where_nobody_hands_over_is_flagged():
+    """Each row admits "→ stops" alone; no page said the relay as a whole never
+    connects, so qc sat there wired and unreachable, looking configured."""
+    from ai_autopilot.doctor import check_relay_hands_over
+
+    found = check_relay_hands_over(_relay_cfg())
+    assert [f.level for f in found] == [doctor.WARN]
+    assert "never connects" in found[0].title
+
+
+def test_one_hand_over_is_enough_to_call_the_relay_connected():
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.doctor import check_relay_hands_over
+
+    cfg = _relay_cfg(sdlc_roles={
+        "dev": SdlcRole(stages=["implement"], waits_in="Ready for Development",
+                        done="Ready for Testing"),
+    })
+    assert [f.level for f in check_relay_hands_over(cfg)] == [doctor.OK]
+
+
+def test_a_single_wired_role_is_not_a_broken_relay():
+    """One role that finishes and parks the item is a complete setup, not a fault."""
+    from ai_autopilot.config import SdlcRole
+    from ai_autopilot.doctor import check_relay_hands_over
+
+    cfg = Settings(sdlc_roles={
+        "dev": SdlcRole(stages=["implement"], waits_in="Ready for Development"),
+    })
+    assert check_relay_hands_over(cfg) == []
+
+
+def test_a_doorway_role_used_as_the_default_profile_is_flagged():
+    """dev is both the specialist behind its door and the fallback for everything else,
+    so items that were never analysed get coded and the log still reads "dev"."""
+    from ai_autopilot.doctor import check_default_profile_is_not_a_doorway
+
+    found = check_default_profile_is_not_a_doorway(_relay_cfg(sdlc_default_profile="dev"))
+    assert [f.level for f in found] == [doctor.WARN]
+    assert "doorway role" in found[0].title
+
+
+def test_a_doorless_default_profile_says_nothing():
+    from ai_autopilot.doctor import check_default_profile_is_not_a_doorway
+
+    assert check_default_profile_is_not_a_doorway(_relay_cfg(sdlc_default_profile="full")) == []

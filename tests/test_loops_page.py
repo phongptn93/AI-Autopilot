@@ -426,3 +426,24 @@ def test_run_now_refuses_a_loop_that_would_stop_on_its_first_line(tmp_path, monk
         ).text
     assert "chưa chạy được" in page.lower()
     assert "Đã chạy ngay" not in page
+
+
+def test_each_row_offers_the_repos_of_its_own_workspace(tmp_path):
+    """A loop bound to another project runs in THAT project's workspace, so offering the
+    default workspace's repo names would name repos it cannot reach."""
+    from ai_autopilot.config import ScheduledLoop, WorkspaceConfig
+
+    root, other = tmp_path / "root", tmp_path / "other"
+    for ws, repo in ((root, "RootRepo"), (other, "OtherRepo")):
+        (ws / repo / ".git").mkdir(parents=True)
+    with _client(
+        tmp_path,
+        workspace_directory=str(root),
+        workspaces=[WorkspaceConfig(name="B", ado_projects=["ProjB"],
+                                    workspace_directory=str(other))],
+        scheduled_loops=[ScheduledLoop(name="l-b", prompt="p", cron="7 18 * * *",
+                                       project="ProjB")],
+    ) as client:
+        page = client.get("/dashboard/loops").text
+    assert "OtherRepo" in page          # its own workspace's repo is offered…
+    assert "blank = OtherRepo" in page  # …and a single repo means the field can stay blank

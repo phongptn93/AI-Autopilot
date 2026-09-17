@@ -198,9 +198,17 @@
         <div class="lp-f">
           <label>Repo path</label>
           <input type="text" class="lp-in mono" name="loop_{{ row }}_repo"
-                 value="{{ r.repo_path }}" placeholder="{{ repo_placeholder }}">
-          <span class="lp-hint">Tên repo trong workspace (vd <code>{{ repo_example }}</code>) hoặc đường dẫn tuyệt đối.
-            Để trống chỉ chạy được khi workspace có đúng MỘT repo — nhiều repo thì phải chọn.</span>
+                 value="{{ r.repo_path }}" list="lp-repos-{{ row }}"
+                 placeholder="{{ 'blank = ' ~ r.repos[0] if r.repos|length == 1 else 'tên repo trong workspace' }}">
+          {# The names come from THIS loop's workspace, so a loop bound to another
+             project is never offered a repo it cannot reach. #}
+          <datalist id="lp-repos-{{ row }}">
+            {% for name in r.repos %}<option value="{{ name }}">{% endfor %}
+          </datalist>
+          <span class="lp-hint">
+            {% if r.repos %}Repo của workspace này: {% for name in r.repos %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+            {% else %}Tên repo trong workspace, hoặc đường dẫn tuyệt đối.{% endif %}
+            Để trống chỉ chạy được khi workspace có đúng MỘT repo.</span>
         </div>
 
         <div class="lp-f">
@@ -285,7 +293,11 @@
         </div>
         <div class="lp-f">
           <label>Repo path</label>
-          <input type="text" class="lp-in mono" name="loop_{{ blank }}_repo">
+          <input type="text" class="lp-in mono" name="loop_{{ blank }}_repo" list="lp-repos-new"
+                 placeholder="{{ 'blank = ' ~ root_repos[0] if root_repos|length == 1 else 'tên repo' }}">
+          <datalist id="lp-repos-new">
+            {% for name in root_repos %}<option value="{{ name }}">{% endfor %}
+          </datalist>
         </div>
         <div class="lp-f">
           <label>Base branch</label>

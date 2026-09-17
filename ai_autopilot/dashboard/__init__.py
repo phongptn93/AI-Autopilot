@@ -1439,6 +1439,10 @@ def create_dashboard_router() -> APIRouter:
                 # leave the reader to apply it — so a loop that stops on its first line
                 # every night looked identical to one that works.
                 "blockers": loop_scheduler_mod.loop_blockers(loop, cfg),
+                # Scoped to THIS loop's workspace, not the root one: a loop bound to
+                # another project runs in that project's workspace, so offering the
+                # default workspace's repo names would name repos it cannot reach.
+                "repos": _workspace_repos(cfg.scoped_for_project(loop.project)),
                 "next_run": _next_run(scheduler, loop.name),
                 # Its own live feed — an audit is minutes of silence otherwise, and the
                 # only other place its progress appears is a log file on the server.
@@ -1449,14 +1453,9 @@ def create_dashboard_router() -> APIRouter:
             request, "loops.html",
             _ctx(request, "loops", rows=rows, flash=flash,
                  known_agents=_workspace_agents(cfg),
-                 # The field takes a repo NAME; show one this workspace actually has,
-                 # so nobody has to go and look it up to fill in the box.
-                 repo_example=(_workspace_repos(cfg) or ["Backend-Fresh"])[0],
-                 repo_placeholder=(
-                     "blank = repo duy nhất của workspace"
-                     if len(_workspace_repos(cfg)) == 1
-                     else "tên repo trong workspace"
-                 ),
+                 # The blank "add a loop" row has no workspace of its own yet, so it
+                 # shows the default one's repos.
+                 root_repos=_workspace_repos(cfg),
                  presets=loop_presets.PRESETS,
                  projects=sorted({
                      p for w in workspaces_mod.resolve(cfg) for p in (w.projects or []) if p

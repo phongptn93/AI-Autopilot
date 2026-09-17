@@ -112,6 +112,9 @@ class AdoPollerService:
         # time the session finishes its queue state is gone and the state can no
         # longer say which role just ran.
         self._live_profiles: dict[int, str] = {}
+        # item id → its project, so a later id-only path (finalising a live session,
+        # dropping the live tag) can still reach the tracker the item came from.
+        self._item_projects: dict[int, str] = {}
         # Items wearing the live tag that this process cannot account for. Announced
         # once each: a session whose console outlived a restart is normal and will
         # finish, but one whose process died never writes a result — and the poller
@@ -292,7 +295,7 @@ class AdoPollerService:
         await self._reconcile_stage_entries()
 
         self._log.debug("polling ADO for pending work items")
-        items = await c.ado.get_pending_work_items()
+        items = await self._from_every_provider("get_pending_work_items")
 
         skip_tags = {
             cfg.processed_tag.lower(), cfg.review_tag.lower(),
@@ -414,7 +417,9 @@ class AdoPollerService:
                 continue
             self._deferred_notified.add(item_id)
             with contextlib.suppress(Exception):
-                await c.ado.add_comment(item_id, f"<div>⏸️ <b>Autopilot hoãn:</b> {reason}.</div>")
+                await self._provider(item.project).add_comment(
+                    item_id, f"<div>⏸️ <b>Autopilot hoãn:</b> {reason}.</div>"
+                )
 
         return plan.ready
 
@@ -499,6 +504,50 @@ class AdoPollerService:
             return
         await self._process(item)
 
+    def _provider(self, project: str = ""):
+        """The tracker for this project, tolerating a container that has none.
+
+        The registry lives on the real container; a caller that hands this service a
+        smaller object (a test double, a plugin) still gets the single ADO client —
+        which is exactly what "no second tracker is configured" means.
+        """
+        resolve = getattr(self._c, "provider_for", None)
+        return resolve(project) if resolve is not None else self._c.ado
+
+    def _provider_for_id(self, item_id: int):
+        """The tracker that owns this id — remembered from when the item was picked up.
+
+        Some paths only ever have an id (a live session being finalised, a tag being
+        dropped). Falling back to ADO is right for every install that has no second
+        tracker, and for the rest the memo is written the moment the item is processed.
+        """
+        return self._provider(self._item_projects.get(item_id, ""))
+
+    async def _from_every_provider(self, method: str, *args) -> list[WorkItemInfo]:
+        """Run one discovery query on ADO and on every other tracker, then concatenate.
+
+        A machine can serve an ADO project and a Jira project at once — an item's
+        tracker is a property of its workspace, not of the machine — so "what is
+        waiting for me" has to be asked of each. One tracker being unreachable costs
+        its own items for this cycle and nothing else, which is why each call is
+        isolated rather than gathered into one failure.
+        """
+        c = self._c
+        out: list[WorkItemInfo] = []
+        seen: set[int] = set()
+        for provider in [c.ado, *dict.fromkeys((getattr(c, "providers", None) or {}).values())]:
+            try:
+                for item in await getattr(provider, method)(*args):
+                    if item.id not in seen:
+                        seen.add(item.id)
+                        out.append(item)
+            except Exception as exc:  # noqa: BLE001 — one tracker must not blind the rest
+                self._log.warning(
+                    "work-item query failed", provider=type(provider).__name__,
+                    query=method, error=describe_exc(exc),
+                )
+        return out
+
     def _matched_tag(self, item: WorkItemInfo) -> str | None:
         """The first effective trigger tag this item carries (for dashboard filtering)."""
         item_tags = {t.lower() for t in item.tags}
@@ -525,7 +574,8 @@ class AdoPollerService:
         """
         cfg = self._config.scoped_for_project(item.project)
         moved = await apply_outcome(
-            self._c.ado, cfg, item.id, outcome, item.work_item_type, log=self._log,
+            self._provider(item.project), cfg, item.id, outcome,
+            item.work_item_type, log=self._log,
         )
         # Keep the in-memory item in step with the board. Everything downstream of a
         # stage — above all the Teams card — reads ``item.state``, which was whatever
@@ -571,7 +621,7 @@ class AdoPollerService:
         if not reopen_states or not skip_tags:
             return
         try:
-            tagged = await c.ado.get_all_tagged_work_items()
+            tagged = await self._from_every_provider("get_all_tagged_work_items")
         except Exception as exc:  # noqa: BLE001
             self._log.warning("reopen reconcile: fetch failed", error=describe_exc(exc))
             return
@@ -580,7 +630,7 @@ class AdoPollerService:
             if (item.state or "").lower() not in reopen_states or not held:
                 continue
             for tag in held:
-                await c.ado.remove_tag(item.id, tag)
+                await self._provider(item.project).remove_tag(item.id, tag)
             await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
             # Record BEFORE clearing: record_success wipes the in-memory attempt count,
             # and a reopen is the strongest rework signal there is — a human looked at
@@ -591,7 +641,7 @@ class AdoPollerService:
             )
             c.retry_policy.record_success(item.id)  # fresh retries on reopen
             self._processed.pop(item.id, None)
-            await c.ado.add_comment(
+            await self._provider(item.project).add_comment(
                 item.id,
                 "<div><b>🔄 Reopened</b> — moved back to a trigger state; cleared "
                 "autopilot tags and will reprocess.</div>",
@@ -617,7 +667,7 @@ class AdoPollerService:
         if cfg.dry_run or not tag:
             return
         try:
-            tagged = await c.ado.get_all_tagged_work_items()
+            tagged = await self._from_every_provider("get_all_tagged_work_items")
         except Exception as exc:  # noqa: BLE001
             self._log.warning("restart reconcile: fetch failed", error=describe_exc(exc))
             return
@@ -628,9 +678,9 @@ class AdoPollerService:
         for item in tagged:
             if tag_l not in {t.lower() for t in item.tags} or item.id in self._live:
                 continue  # not requested, or a live session — don't yank it
-            await c.ado.remove_tag(item.id, tag)
+            await self._provider(item.project).remove_tag(item.id, tag)
             for held in [t for t in item.tags if t.lower() in skip_tags]:
-                await c.ado.remove_tag(item.id, held)
+                await self._provider(item.project).remove_tag(item.id, held)
             # Wipe SDLC progress → a true restart, not a resume. Best-effort: a
             # missing/absent row (non-SDLC item) is fine.
             with contextlib.suppress(Exception):
@@ -638,7 +688,7 @@ class AdoPollerService:
             c.retry_policy.record_success(item.id)  # fresh retry budget
             await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
             self._processed[item.id] = datetime.now(UTC)  # block same-cycle re-pick
-            await c.ado.add_comment(
+            await self._provider(item.project).add_comment(
                 item.id,
                 "<div><b>♻️ Restart requested</b> — cleared SDLC progress; reprocessing "
                 "from scratch using your latest comments.</div>",
@@ -679,7 +729,7 @@ class AdoPollerService:
         # precisely what a person reaches for this tag for (#9004).
         lookup = [*per_stage] + ([shared] if shared else [])
         try:
-            tagged = await c.ado.get_work_items_tagged_any(lookup)
+            tagged = await self._from_every_provider("get_work_items_tagged_any", lookup)
         except Exception as exc:  # noqa: BLE001
             self._log.warning("stage entry reconcile: fetch failed", error=describe_exc(exc))
             return
@@ -688,7 +738,8 @@ class AdoPollerService:
             hit = next((t for t in held if t in per_stage or (shared and t == shared)), None)
             if hit is None or item.id in self._live or item.id in self._processed:
                 continue
-            await c.ado.remove_tag(item.id, held[hit])   # one-shot: consumed on pickup
+            # one-shot: the run-now tag is consumed on pickup
+            await self._provider(item.project).remove_tag(item.id, held[hit])
             item.tags = [t for t in item.tags if t != held[hit]]
             # A role's OWN run-now tag names the role — that is the only reason to give a
             # role one rather than use the shared tag. The map was built and then used for
@@ -723,11 +774,11 @@ class AdoPollerService:
             if stale.strip().lower() == wanted.lower():
                 continue
             with contextlib.suppress(Exception):   # best-effort: the new pin still lands
-                await self._c.ado.remove_tag(item.id, stale)
+                await self._provider(item.project).remove_tag(item.id, stale)
             item.tags = [t for t in item.tags if t != stale]
         if any(t.strip().lower() == wanted.lower() for t in item.tags):
             return
-        await self._c.ado.add_tag(item.id, wanted)
+        await self._provider(item.project).add_tag(item.id, wanted)
         item.tags = [*item.tags, wanted]
 
     def _is_my_user(self, email: str | None, name: str | None) -> bool:
@@ -785,7 +836,7 @@ class AdoPollerService:
         if cfg.dry_run or not cfg.comment_reprocess_enabled or not cfg.comment_commands:
             return
         try:
-            tagged = await c.ado.get_all_tagged_work_items()
+            tagged = await self._from_every_provider("get_all_tagged_work_items")
         except Exception as exc:  # noqa: BLE001
             self._log.warning("comment reconcile: fetch failed", error=describe_exc(exc))
             return
@@ -796,7 +847,7 @@ class AdoPollerService:
             if item.id in self._live or not self._owns_item(item):
                 continue  # not this machine's stream — or a live session steers it directly
             try:
-                comments = await c.ado.get_work_item_comments(item.id)
+                comments = await self._provider(item.project).get_work_item_comments(item.id)
             except Exception as exc:  # noqa: BLE001
                 self._log.warning(
                     "comment reconcile: comments fetch failed", id=item.id, error=describe_exc(exc)
@@ -844,7 +895,7 @@ class AdoPollerService:
                 if item.id not in self._comment_capped and cfg.restart_tag:
                     self._comment_capped.add(item.id)
                     with contextlib.suppress(Exception):
-                        await c.ado.add_comment(
+                        await self._provider(item.project).add_comment(
                             item.id,
                             f"<div>⏸️ <b>Autopilot đã đạt {cfg.max_comment_rounds} vòng xử lý "
                             f"lệnh</b> cho item này. Gắn tag <code>{cfg.restart_tag}</code> để "
@@ -869,7 +920,7 @@ class AdoPollerService:
             cfg.processed_tag, cfg.review_tag, cfg.escalation_tag, cfg.failed_tag,
         ) if t}
         for held in [t for t in item.tags if t.lower() in skip_tags]:
-            await c.ado.remove_tag(item.id, held)
+            await self._provider(item.project).remove_tag(item.id, held)
         item.tags = [t for t in item.tags if t.lower() not in skip_tags]
         c.retry_policy.record_success(item.id)  # fresh retry budget for the follow-up
         await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
@@ -879,7 +930,7 @@ class AdoPollerService:
         # state is "Active"). _process overwrites this stamp when it starts.
         self._processed[item.id] = datetime.now(UTC)
         item.pending_comment = comment
-        await c.ado.add_comment(
+        await self._provider(item.project).add_comment(
             item.id,
             "<div><b>💬 Got your comment</b> — reprocessing with your latest guidance.</div>",
         )
@@ -888,6 +939,8 @@ class AdoPollerService:
 
     async def _process(self, item: WorkItemInfo) -> None:
         c, cfg = self._c, self._config
+        if item.project:
+            self._item_projects[item.id] = item.project
         if item.id in self._inflight:
             return  # already running — guard against a concurrent dispatch (double-run)
         self._inflight.add(item.id)
@@ -1147,7 +1200,7 @@ class AdoPollerService:
         # state that never moved hands the item on in name only — the lane claims it,
         # the board still shows it where it was, and the role it was handed to is looking
         # at a column it is not in.
-        if state and not await self._c.ado.update_state(item.id, state):
+        if state and not await self._provider(item.project).update_state(item.id, state):
             self._log.error(
                 "sdlc handoff state refused — item not handed on", id=item.id,
                 profile=name, state=state, type=item.work_item_type,
@@ -1164,11 +1217,11 @@ class AdoPollerService:
         next_role = profile_for_state(state, cfg) if state else ""
         if next_role and next_role != name:
             for stale in all_outcome_tags(cfg):
-                await self._c.ado.remove_tag(item.id, stale)
+                await self._provider(item.project).remove_tag(item.id, stale)
         if tag:
             # The tag is what a board lane claims, so the next role sees the item in
             # its own queue rather than having to know which state means "mine".
-            await self._c.ado.add_tag(item.id, tag)
+            await self._provider(item.project).add_tag(item.id, tag)
         # The role pin is spent: it said which role THIS run was, and that run has just
         # handed the item on. Nothing ever cleared it, so one press of ▶ Run (or a
         # per-role run-now tag) silently outranked the item's STATE for the rest of its
@@ -1178,7 +1231,7 @@ class AdoPollerService:
         spent = profile_pins(item.tags, cfg)
         for pin in spent:
             with contextlib.suppress(Exception):     # best-effort; the hand-off stands
-                await self._c.ado.remove_tag(item.id, pin)
+                await self._provider(item.project).remove_tag(item.id, pin)
         item.tags = [t for t in item.tags if t not in spent]
         self._log.info("sdlc handoff", id=item.id, profile=name, state=state, tag=tag,
                        to=next_role or "(nobody waits — parked)", released=spent or None)
@@ -1220,7 +1273,7 @@ class AdoPollerService:
         self._live_dirs[item.id] = run_dir
         # Mark it live so a restart doesn't re-dispatch (and re-open) a duplicate session.
         if cfg.live_tag and not cfg.dry_run:
-            await c.ado.add_tag(item.id, cfg.live_tag)
+            await self._provider(item.project).add_tag(item.id, cfg.live_tag)
         await c.state_repo.set(
             item.id, PipelineState.IN_PROGRESS, title=item.title, detail=f"live session: {session}"
         )
@@ -1230,7 +1283,7 @@ class AdoPollerService:
         # working state ("In Testing"), which is applied over the global one.
         working = working_state_for(profile, cfg) if profile else ""
         if working and not cfg.dry_run:
-            await c.ado.update_state(item.id, working)
+            await self._provider(item.project).update_state(item.id, working)
         record_id = await c.execution_repo.start_execution(
             item, f"interactive:{session}", trigger_tag=self._matched_tag(item),
             profile=profile,
@@ -1250,7 +1303,7 @@ class AdoPollerService:
                 "<br/><i>Only these steps — a later role picks the item up from its "
                 "own board.</i>"
             )
-        await c.ado.add_comment(
+        await self._provider(item.project).add_comment(
             item.id,
             "<div><b>🎮 Live session started</b><br/>Remote Control enabled — open claude.ai "
             f"and attach to session <code>{session}</code> to watch or steer it."
@@ -1272,7 +1325,7 @@ class AdoPollerService:
         c, cfg = self._c, self._config
         for item_id, record_id in list(self._live.items()):
             run_dir = self._live_dirs.get(item_id, cfg.workspace_directory)
-            item = await c.ado.get_work_item(item_id)
+            item = await self._provider_for_id(item_id).get_work_item(item_id)
             if item is None:
                 self._live.pop(item_id, None)
                 self._live_profiles.pop(item_id, None)
@@ -1412,7 +1465,7 @@ class AdoPollerService:
     async def _remove_live_tag(self, item_id: int) -> None:
         cfg = self._config
         if cfg.live_tag and not cfg.dry_run:
-            await self._c.ado.remove_tag(item_id, cfg.live_tag)
+            await self._provider_for_id(item_id).remove_tag(item_id, cfg.live_tag)
 
     async def _finalize_orphan_sessions(self) -> None:
         """Interactive sessions tagged live but not tracked in-memory (e.g. after a
@@ -1421,7 +1474,7 @@ class AdoPollerService:
         if not cfg.live_tag:
             return
         try:
-            tagged = await c.ado.get_all_tagged_work_items()
+            tagged = await self._from_every_provider("get_all_tagged_work_items")
         except Exception as exc:  # noqa: BLE001
             self._log.warning("orphan finalize: fetch failed", error=describe_exc(exc))
             return
@@ -1604,7 +1657,7 @@ class AdoPollerService:
         if report.is_empty:
             return 0
         try:
-            await self._c.ado.add_comment(item.id, report.html)
+            await self._provider(item.project).add_comment(item.id, report.html)
         except Exception as exc:  # noqa: BLE001 — reporting must not sink the run
             self._log.warning("test results not posted", id=item.id, error=describe_exc(exc))
             return 0
@@ -1641,7 +1694,7 @@ class AdoPollerService:
             await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=result.error or "")
             # Hold the item (tag) + set state so the poller skips it until a human steps in.
             await self._apply_outcome(item, "needs_human")
-            await c.ado.add_comment(
+            await self._provider(item.project).add_comment(
                 item.id,
                 "<div><b>🙋 ADO Autopilot — Needs human input</b><br/>"
                 f"<p>{result.error or result.output}</p></div>",
@@ -1662,7 +1715,7 @@ class AdoPollerService:
                     item.id, PipelineState.NEEDS_HUMAN, detail=f"run score {score.score}/100"
                 )
                 await self._apply_outcome(item, "needs_human")
-                await c.ado.add_comment(
+                await self._provider(item.project).add_comment(
                     item.id,
                     score_badge_html(score)
                     + "<div><b>🙋 Held for human</b> — điểm dưới ngưỡng review.</div>",
@@ -1699,7 +1752,7 @@ class AdoPollerService:
             if result.pr_url and cfg.pr_is_draft:
                 await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
                 await self._apply_outcome(item, "review")
-                await c.ado.add_comment(
+                await self._provider(item.project).add_comment(
                     item.id,
                     badge
                     + "<div><b>🔍 PR created (draft)</b>, awaiting human review.<br/>"
@@ -1710,7 +1763,7 @@ class AdoPollerService:
                 await c.state_repo.set(item.id, PipelineState.DONE, pr_url=result.pr_url)
                 await self._apply_outcome(item, "done")
                 if badge:
-                    await c.ado.add_comment(item.id, badge)
+                    await self._provider(item.project).add_comment(item.id, badge)
                 await c.notifier.notify_completed(item, result)
             else:
                 # report mode: the agent commented a plan, no PR.
@@ -1722,7 +1775,7 @@ class AdoPollerService:
                 # score of a report-mode run was never shown at all. The badge does not
                 # belong to the PR; it belongs to the run.
                 if badge:
-                    await c.ado.add_comment(item.id, badge)
+                    await self._provider(item.project).add_comment(item.id, badge)
                 await c.notifier.notify_completed(item, result)
             return
 
@@ -1733,7 +1786,7 @@ class AdoPollerService:
         if exhausted:
             await self._apply_outcome(item, "failed")
             self._log.error("gave up after retries", id=item.id, count=count)
-            await c.ado.add_comment(
+            await self._provider(item.project).add_comment(
                 item.id,
                 f"<b>⛔ Autopilot gave up after {count} retries.</b> Last error: {result.error}",
             )
@@ -1755,20 +1808,20 @@ class AdoPollerService:
 
         if classified.category == TaskCategory.REQUIREMENT and cfg.auto_decompose:
             await c.decomposer.decompose(classified)
-            await c.ado.add_tag(item.id, cfg.processed_tag)
+            await self._provider(item.project).add_tag(item.id, cfg.processed_tag)
             self._log.info("decomposed into child tasks", id=item.id)
             return
 
         # L1 (report): triage only — comment the plan, don't change code.
         if cfg.report_only:
             self._log.info("report-only triage", id=item.id, skill=skill)
-            await c.ado.add_comment(
+            await self._provider(item.project).add_comment(
                 item.id,
                 "<b>🧭 ADO Autopilot — Triage (report mode)</b><br/>"
                 f"Would route to <code>{skill}</code> "
                 f"(category: {classified.category}).",
             )
-            await c.ado.add_tag(item.id, cfg.processed_tag)
+            await self._provider(item.project).add_tag(item.id, cfg.processed_tag)
             return
 
         await c.notifier.notify_started(item, skill)
@@ -1817,7 +1870,7 @@ class AdoPollerService:
                 await self._add_reviewers(item, result)
             if cfg.pr_is_draft and result.pr_url:
                 await self._apply_outcome(item, "review")
-                await c.ado.add_comment(
+                await self._provider(item.project).add_comment(
                     item.id,
                     f'<b>🔍 PR created (draft)</b>, awaiting human review.<br/>'
                     f'PR: <a href="{result.pr_url}">{result.pr_url}</a>',
@@ -1833,7 +1886,7 @@ class AdoPollerService:
             if exhausted:
                 await self._apply_outcome(item, "failed")
                 self._log.error("gave up after retries", id=item.id, count=count)
-                await c.ado.add_comment(
+                await self._provider(item.project).add_comment(
                     item.id,
                     f"<b>⛔ Autopilot gave up after {count} retries.</b> "
                     f"Last error: {result.error}",

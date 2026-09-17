@@ -153,6 +153,42 @@
         <span class="hint">Tag này được gộp vào truy vấn poll chung, không thay thế tag gốc.</span>
       </div>
 
+      {# Tracker picker + its credentials. Only on non-default rows: the default
+         workspace is backed by the machine's own ADO connection, which is also what
+         every pull-request feature uses. #}
+      {% if not ws.is_default %}
+      <div class="ws-field">
+        <label>Nguồn work item</label>
+        <select class="ws-input" name="ws{{ loop.index0 }}_provider" data-provider>
+          <option value="ado" {% if ws.provider != 'jira' %}selected{% endif %}>Azure DevOps</option>
+          <option value="jira" {% if ws.provider == 'jira' %}selected{% endif %}>Jira</option>
+        </select>
+        <span class="hint">Chọn Jira thì work item đọc từ Jira. <b>PR vẫn chạy qua Azure DevOps</b>
+          — babysitter, auto-review, merge → state chưa áp dụng cho workspace Jira.</span>
+      </div>
+
+      <div class="ws-field ws-jira" {% if ws.provider != 'jira' %}hidden{% endif %}>
+        <label>Jira site</label>
+        <input class="ws-input" name="ws{{ loop.index0 }}_jira_url" value="{{ ws.jira_url }}"
+               placeholder="https://cong-ty.atlassian.net"/>
+      </div>
+      <div class="ws-field ws-jira" {% if ws.provider != 'jira' %}hidden{% endif %}>
+        <label>Jira email</label>
+        <input class="ws-input" name="ws{{ loop.index0 }}_jira_email" value="{{ ws.jira_email }}"
+               placeholder="bot@cong-ty.vn"/>
+        <span class="hint">Tài khoản mà API token thuộc về.</span>
+      </div>
+      <div class="ws-field ws-jira" {% if ws.provider != 'jira' %}hidden{% endif %}>
+        <label>Jira project key</label>
+        <input class="ws-input mono" name="ws{{ loop.index0 }}_jira_project"
+               value="{{ ws.jira_project }}" placeholder="DXF"/>
+        <span class="hint">
+          {% if ws.jira_token_set %}✅ API token đã lưu.{% else %}⚠️ Chưa có API token —
+          đặt <code>AUTOPILOT_WORKSPACES__{{ loop.index0 - 1 }}__JIRA_TOKEN</code> ở biến môi trường.{% endif %}
+        </span>
+      </div>
+      {% endif %}
+
       <div class="ws-field wide">
         <label>Mô tả repo (giúp agent chọn đúng repo)</label>
         <textarea class="ws-area" name="ws{{ loop.index0 }}_repo_descriptions"
@@ -264,5 +300,18 @@ Cấu hình của chúng sẽ bị gỡ khỏi config. Thư mục và repo trên
 
   form.querySelectorAll('.ws-card').forEach(paint);
 })();
+</script>
+<script>
+  // The credentials only mean anything for Jira; showing them under "Azure DevOps"
+  // reads as three more things to fill in.
+  document.querySelectorAll('[data-provider]').forEach(function (select) {
+    var card = select.closest('.ws-card');
+    if (!card) return;
+    select.addEventListener('change', function () {
+      card.querySelectorAll('.ws-jira').forEach(function (field) {
+        field.hidden = select.value !== 'jira';
+      });
+    });
+  });
 </script>
 {% endblock %}

@@ -60,6 +60,14 @@ class WorkspaceView:
     allowed_repos: list[str] = field(default_factory=list)
     repo_descriptions: list[str] = field(default_factory=list)
     trigger_tag: str = ""
+    # Which tracker owns this workspace's work items ("ado" | "jira"), and how to reach
+    # it. The default workspace is always ADO: it is backed by the machine's own
+    # connection, which is also what every pull-request feature uses.
+    provider: str = "ado"
+    jira_url: str = ""
+    jira_email: str = ""
+    jira_project: str = ""
+    jira_token_set: bool = False        # never the value — only whether one is stored
     enabled: bool = True
     is_default: bool = False
 
@@ -87,6 +95,13 @@ class WorkspaceView:
             "allowed_repos": list(self.allowed_repos),
             "repo_descriptions": list(self.repo_descriptions),
             "trigger_tag": self.trigger_tag,
+            "provider": self.provider,
+            "jira_url": self.jira_url,
+            "jira_email": self.jira_email,
+            "jira_project": self.jira_project,
+            # The token is deliberately NOT here: this dict is what the page writes
+            # back, and a blank field must mean "keep what is stored" rather than
+            # "erase the credential", exactly as the settings page treats a password.
         }
 
 
@@ -153,6 +168,11 @@ def _from_config(ws: Any, index: int, taken: set[str]) -> WorkspaceView:
         allowed_repos=[str(r) for r in (get("allowed_repos", None) or [])],
         repo_descriptions=[str(r) for r in (get("repo_descriptions", None) or [])],
         trigger_tag=str(get("trigger_tag", "") or ""),
+        provider=(str(get("provider", "") or "ado").strip().lower() or "ado"),
+        jira_url=str(get("jira_url", "") or ""),
+        jira_email=str(get("jira_email", "") or ""),
+        jira_project=str(get("jira_project", "") or ""),
+        jira_token_set=bool(str(get("jira_token", "") or "").strip()),
         enabled=bool(get("enabled", True)),
     )
     view.id = slugify(view.label, taken)
@@ -277,6 +297,13 @@ def parse_form(form: Mapping[str, Any]) -> tuple[list[WorkspaceView], list[str]]
                 if line.strip()
             ],
             trigger_tag=str(form.get(f"{prefix}trigger_tag", "") or "").strip(),
+            # The default workspace is always ADO: it is backed by the machine's own
+            # connection, which every pull-request feature also uses.
+            provider=("ado" if is_default
+                      else (str(form.get(f"{prefix}provider", "") or "ado").strip().lower())),
+            jira_url=str(form.get(f"{prefix}jira_url", "") or "").strip(),
+            jira_email=str(form.get(f"{prefix}jira_email", "") or "").strip(),
+            jira_project=str(form.get(f"{prefix}jira_project", "") or "").strip(),
             enabled=is_default or bool(form.get(f"{prefix}enabled")),
             is_default=is_default,
         )
@@ -291,6 +318,18 @@ def parse_form(form: Mapping[str, Any]) -> tuple[list[WorkspaceView], list[str]]
                 f"«{label}»: chưa gán ADO project nào — sẽ không có work item nào chạy "
                 "trong workspace này."
             )
+        if view.provider == "jira":
+            missing = [
+                label_ for label_, value in (
+                    ("URL", view.jira_url), ("email", view.jira_email),
+                    ("project key", view.jira_project),
+                ) if not value
+            ]
+            if missing:
+                errors.append(
+                    f"«{label}»: chọn Jira nhưng thiếu {', '.join(missing)} — mọi lần poll "
+                    "sẽ trả về rỗng, giống hệt 'không có việc nào'."
+                )
         if view.projects and not view.directory and not view.is_default:
             errors.append(
                 f"«{label}»: có project nhưng chưa có thư mục — item của nó sẽ chạy "
@@ -310,6 +349,42 @@ def parse_form(form: Mapping[str, Any]) -> tuple[list[WorkspaceView], list[str]]
     if not any(v.is_default for v in views):
         errors.append("Thiếu workspace mặc định — không thể lưu.")
     return views, errors
+
+
+def carry_secrets(updates: dict[str, Any], config: Any) -> dict[str, Any]:
+    """Copy stored credentials onto the rows the page just rebuilt.
+
+    The page never renders a token, so the form cannot send one back — and
+    ``to_settings_updates`` rewrites ``workspaces`` wholesale. Without this, saving the
+    Workspaces page for any reason at all would silently erase every Jira token on it,
+    and the only symptom would be polls that quietly return nothing. Matched by name,
+    falling back to the first project, which is what identifies a row to a reader.
+    """
+    def read(ws: Any, key: str, default: Any = "") -> Any:
+        """One field, whether the stored workspace is a model or a plain dict — both
+        shapes reach here (YAML load vs. a live dashboard apply)."""
+        return ws.get(key, default) if isinstance(ws, Mapping) else getattr(ws, key, default)
+
+    stored: dict[str, str] = {}
+    for ws in getattr(config, "workspaces", None) or []:
+        def get(key: str, default: Any = "", _ws: Any = ws) -> Any:
+            return read(_ws, key, default)
+
+        token = str(get("jira_token", "") or "")
+        if not token:
+            continue
+        for key in (str(get("name", "") or ""), *(get("ado_projects", None) or [])):
+            if str(key).strip():
+                stored[str(key).strip().lower()] = token
+    for row in updates.get("workspaces") or []:
+        if row.get("jira_token"):
+            continue
+        for key in (row.get("name", ""), *(row.get("ado_projects") or [])):
+            token = stored.get(str(key).strip().lower())
+            if token:
+                row["jira_token"] = token
+                break
+    return updates
 
 
 def to_settings_updates(views: list[WorkspaceView]) -> dict[str, Any]:

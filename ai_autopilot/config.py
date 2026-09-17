@@ -460,6 +460,17 @@ class WorkspaceConfig(BaseModel):
 
     name: str = ""                  # display label; blank → first project, else folder name
     enabled: bool = True
+    # Which tracker owns this workspace's WORK ITEMS. "ado" (default) or "jira" — the
+    # machine keeps one ADO connection for pull requests, repositories and builds
+    # whatever this says, because a Jira team's code lives somewhere else entirely and
+    # that is a separate provider.
+    provider: str = "ado"
+    jira_url: str = ""              # https://<site>.atlassian.net
+    jira_email: str = ""            # the account the API token belongs to
+    jira_project: str = ""          # project KEY, e.g. DXF
+    # Jira API token. Like every other credential here, prefer the environment
+    # (AUTOPILOT_WORKSPACES__0__JIRA_TOKEN) over the YAML file.
+    jira_token: str = ""
     # Work-item projects routed to this workspace. Matched case-insensitively against
     # System.TeamProject. Empty = the workspace is inert (nothing routes to it).
     ado_projects: list[str] = Field(default_factory=list)

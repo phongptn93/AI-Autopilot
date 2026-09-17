@@ -2599,9 +2599,13 @@ def create_dashboard_router() -> APIRouter:
             _log.info("workspace config rejected", count=len(errors))
             return _ws_reject(errors, views)
 
-        updates = workspaces_mod.to_settings_updates(views)
+        updates = workspaces_mod.carry_secrets(
+            workspaces_mod.to_settings_updates(views), c.config
+        )
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
+        # A workspace may have just switched tracker, or had its Jira details filled in.
+        c.build_providers()
         c.ado.refresh()   # the polled project set just changed
         _log.info(
             "workspaces updated via dashboard",

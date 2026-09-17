@@ -38,7 +38,6 @@ from ai_autopilot.config import (
 )
 from ai_autopilot.execution import transcript
 from ai_autopilot.execution.auto_reviewer import AutoReviewer
-from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.execution.claude_client import ClaudeRun, apply_usage, run_claude
 from ai_autopilot.execution.result_contract import (
     batch_key,
@@ -46,6 +45,7 @@ from ai_autopilot.execution.result_contract import (
     find_result,
     parse_result_text,
 )
+from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.workspace import discover_repos, parse_repo_descriptions
@@ -277,8 +277,12 @@ class ClaudeExecutor:
             return skill_command  # legacy: cwd is the repo, skill command is enough
 
         repo_name = _repo_name(repo, self._config.workspace_directory)
+        # Name the tracker and refer to the item the way ITS tracker does: a Jira agent
+        # told to look up "Azure DevOps work item #10042" is being given a number its
+        # own tools cannot resolve (the key, DXF-7, is what Jira answers to).
+        tracker = "Jira issue" if item.provider == "jira" else "Azure DevOps work item"
         parts = [
-            f"Azure DevOps work item #{item.id}: {item.title}",
+            f"{tracker} {item.ref}: {item.title}",
             f"Type: {item.work_item_type} | Category: {item.category}",
         ]
         if item.description:
@@ -289,7 +293,15 @@ class ClaudeExecutor:
             f"\nTarget repository: ./{repo_name}\n"
             f"Make ALL file changes INSIDE the ./{repo_name}/ subfolder of this workspace. "
             f"Follow the project's .claude rules and skills.\n"
-            f"You may use the Azure DevOps MCP to fetch more detail on #{item.id} if needed."
+            # Name the tracker this item actually came from. Telling a Jira team's agent
+            # to "use the Azure DevOps MCP" sends it to a server that is not configured
+            # in that workspace, and the failure looks like the item having no detail.
+            + (
+                f"You may use the Jira MCP to fetch more detail on {item.ref} if needed."
+                if item.provider == "jira"
+                else "You may use the Azure DevOps MCP to fetch more detail on "
+                     f"#{item.id} if needed."
+            )
         )
         if self._config.learning_loop_enabled:
             past = lessons.lessons_brief(

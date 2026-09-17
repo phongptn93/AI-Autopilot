@@ -178,3 +178,61 @@ def test_workspace_owns_its_projects_state_vocabulary():
         workspaces=[{"name": "X", "ado_projects": ["Other"], "workspace_directory": "C:/x"}],
     )
     assert resolve_state(plain.scoped_for_project("Other"), "review", "Bug") == "Ready to Review"
+
+
+def test_a_workspace_can_declare_jira_as_its_tracker(tmp_path, monkeypatch):
+    """The picker has to survive a round trip through the form, or the choice silently
+    reverts to ADO on the next save."""
+    from ai_autopilot import workspaces as ws_mod
+
+    views, errors = ws_mod.parse_form({
+        "ws_count": "2",
+        "ws0_is_default": "1", "ws0_name": "Mặc định", "ws0_projects": "TLCL-DxFac",
+        "ws0_directory": str(tmp_path),
+        "ws1_name": "Jira team", "ws1_projects": "DXF", "ws1_directory": str(tmp_path),
+        "ws1_enabled": "on", "ws1_provider": "jira",
+        "ws1_jira_url": "https://x.atlassian.net", "ws1_jira_email": "b@x.vn",
+        "ws1_jira_project": "DXF",
+    })
+    assert errors == []
+    updates = ws_mod.to_settings_updates(views)
+    assert updates["workspaces"][0]["provider"] == "jira"
+    assert updates["workspaces"][0]["jira_project"] == "DXF"
+
+
+def test_saving_the_page_does_not_erase_a_stored_jira_token(tmp_path):
+    """The page never renders a token, so the form cannot send one back — and the save
+    rewrites the whole list. Without carrying it over, saving for ANY reason would wipe
+    the credential and the only symptom would be polls returning nothing."""
+    from ai_autopilot import workspaces as ws_mod
+    from ai_autopilot.config import Settings, WorkspaceConfig
+
+    config = Settings(workspaces=[WorkspaceConfig(
+        name="Jira team", ado_projects=["DXF"], provider="jira",
+        jira_url="https://x.atlassian.net", jira_email="b@x.vn", jira_project="DXF",
+        jira_token="secret-token",
+    )])
+    views, _ = ws_mod.parse_form({
+        "ws_count": "2",
+        "ws0_is_default": "1", "ws0_name": "Mặc định", "ws0_projects": "TLCL-DxFac",
+        "ws1_name": "Jira team", "ws1_projects": "DXF", "ws1_directory": str(tmp_path),
+        "ws1_enabled": "on", "ws1_provider": "jira",
+        "ws1_jira_url": "https://x.atlassian.net", "ws1_jira_email": "b@x.vn",
+        "ws1_jira_project": "DXF",
+    })
+    updates = ws_mod.carry_secrets(ws_mod.to_settings_updates(views), config)
+    assert updates["workspaces"][0]["jira_token"] == "secret-token"
+
+
+def test_a_jira_workspace_with_no_way_in_is_refused_at_save(tmp_path):
+    """Same class of fault the page already blocks for: invisible at runtime, because a
+    poll that returns nothing looks exactly like no work waiting."""
+    from ai_autopilot import workspaces as ws_mod
+
+    _views, errors = ws_mod.parse_form({
+        "ws_count": "2",
+        "ws0_is_default": "1", "ws0_name": "Mặc định", "ws0_projects": "TLCL-DxFac",
+        "ws1_name": "Jira team", "ws1_projects": "DXF", "ws1_directory": str(tmp_path),
+        "ws1_enabled": "on", "ws1_provider": "jira",
+    })
+    assert any("Jira" in e for e in errors)

@@ -52,6 +52,7 @@ from ai_autopilot.notifications import (
     ZaloNotifier,
 )
 from ai_autopilot.plugins import PluginManager
+from ai_autopilot.providers import WorkItemProvider
 from ai_autopilot.routing import RequirementDecomposer, TaskRouter
 from ai_autopilot.scheduling import ScheduleGuard
 from ai_autopilot.security import RbacPolicy
@@ -101,6 +102,13 @@ class Container:
         # ADO.
         self.auth = AdoAuthService(config)
         self.ado = AdoClient(self.http, self.auth, config)
+        # Work-item providers, keyed by lower-cased ADO/Jira project. Empty on every
+        # install that has not declared one, and `provider_for` then answers `self.ado`
+        # for everything — so adding this changes no behaviour until a workspace asks
+        # for a different tracker. Only WORK ITEMS route here: pull requests, repos and
+        # builds stay on `self.ado`, because a Jira team's code lives somewhere else
+        # entirely and that is its own provider (and its own release).
+        self.providers: dict[str, WorkItemProvider] = {}
 
         # Notifications.
         self.channels: list[NotificationChannel] = [
@@ -185,7 +193,42 @@ class Container:
             claimed=self.config.command_user,
         )
 
+    def provider_for(self, project: str = "") -> WorkItemProvider:
+        """The tracker that owns this project's work items.
+
+        Answers ``self.ado`` unless a workspace declared another one, so an install that
+        has never heard of Jira behaves exactly as before — and a project nobody claimed
+        still lands on ADO rather than failing, which is the same fallback the rest of
+        the config uses.
+        """
+        return self.providers.get((project or "").strip().lower(), self.ado)
+
+    def build_providers(self) -> None:
+        """Instantiate a provider per workspace that asked for a non-ADO tracker.
+
+        Keyed by PROJECT rather than by workspace because that is what callers have: an
+        item carries its project, and every other per-workspace lookup in the codebase
+        (``scoped_for_project``) is keyed the same way.
+        """
+        from ai_autopilot.providers import PROVIDER_JIRA
+        from ai_autopilot.providers.jira import JiraClient
+
+        self.providers = {}
+        for ws in self.config.workspaces or []:
+            if (getattr(ws, "provider", "") or "").strip().lower() != PROVIDER_JIRA:
+                continue
+            scoped = self.config.scoped_for_project((ws.ado_projects or [""])[0])
+            client = JiraClient(self.http, scoped, ws)
+            for project in ws.ado_projects or []:
+                if project.strip():
+                    self.providers[project.strip().lower()] = client
+            self.log.info(
+                "jira provider registered", workspace=ws.name or "(unnamed)",
+                projects=list(ws.ado_projects or []), site=ws.jira_url,
+            )
+
     async def startup(self) -> None:
+        self.build_providers()
         await self.database.create_all()
         # Plugins run as fully-trusted code with Container access — load only when
         # explicitly enabled, so a file dropped into ./plugins can't silently run.

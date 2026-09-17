@@ -27,6 +27,16 @@ class WorkItemInfo:
     """A single Azure DevOps work item."""
 
     id: int
+    # The tracker's own human-facing id, when it differs from the numeric one: Jira
+    # issues are "DXF-123" while their API id is 10042. The numeric id stays the key
+    # everywhere (database, branch names, every dashboard page); this rides alongside
+    # for display, for the tracker's own API calls, and for branch names a Jira smart
+    # commit can link back to. Blank for ADO, where the number IS the name.
+    key: str = ""
+    # Which tracker this item came from ("ado" | "jira"). Set by the provider, read by
+    # anything that has to speak the tracker's language — the agent brief's "use the X
+    # MCP" line, a link back to the item, a page that wants to show where it lives.
+    provider: str = ""
     title: str = ""
     # ADO ``System.TeamProject`` — which work-item project this item lives in. One
     # autopilot connection can poll several projects, and an id alone does not say
@@ -66,5 +76,10 @@ class WorkItemInfo:
     # the top-priority instruction. None outside that path — not populated by _map.
     pending_comment: str | None = None
 
+    @property
+    def ref(self) -> str:
+        """How a human refers to this item: "DXF-123" on Jira, "#9083" on ADO."""
+        return self.key or f"#{self.id}"
+
     def __str__(self) -> str:
-        return f"#{self.id} [{self.work_item_type}] {self.title}"
+        return f"{self.ref} [{self.work_item_type}] {self.title}"

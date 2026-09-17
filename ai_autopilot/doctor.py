@@ -365,6 +365,61 @@ def check_sdlc_needs_headless(config: Settings) -> list[Finding]:
     )]
 
 
+def check_providers(config: Settings) -> list[Finding]:
+    """A workspace that says Jira but cannot reach it — or that expects ADO features there.
+
+    Both failures are quiet. Missing credentials make every poll return nothing, which
+    is indistinguishable from "no work is waiting"; and the PR-driven half of the
+    pipeline (the babysitter, auto-review, merge → state) reads pull requests through
+    the machine's ADO connection, so on a Jira workspace whose code is elsewhere those
+    switches are on and doing nothing.
+
+    Offline: every value is config.
+    """
+    from ai_autopilot.providers import PROVIDER_ADO, PROVIDER_JIRA
+
+    jira = [
+        ws for ws in (config.workspaces or [])
+        if (getattr(ws, "provider", "") or PROVIDER_ADO).strip().lower() == PROVIDER_JIRA
+    ]
+    if not jira:
+        return []
+    out: list[Finding] = []
+    for ws in jira:
+        label = ws.name or (ws.ado_projects or ["(unnamed)"])[0]
+        missing = [
+            name for name, value in (
+                ("jira_url", ws.jira_url), ("jira_email", ws.jira_email),
+                ("jira_token", ws.jira_token), ("jira_project", ws.jira_project),
+            ) if not (value or "").strip()
+        ]
+        if missing:
+            out.append(Finding(
+                ERROR, f"Workspace '{label}' is Jira but is missing {', '.join(missing)}",
+                "Every poll returns nothing, which reads exactly like "
+                "'no work is waiting' — there is no error anywhere.",
+                "Fill them in at /dashboard/workspaces (keep the token in the "
+                "environment: AUTOPILOT_WORKSPACES__<n>__JIRA_TOKEN).",
+            ))
+        if not (ws.ado_projects or []):
+            out.append(Finding(
+                WARN, f"Workspace '{label}' is Jira but claims no project",
+                "Nothing routes to it, so its tracker is never consulted.",
+                "Add the Jira project key to the workspace's projects.",
+            ))
+    if not out and config.feedback_loop_enabled:
+        out.append(Finding(
+            WARN, "Jira workspaces do not get the PR half of the pipeline",
+            "The babysitter, auto-review and merge → state read pull requests through "
+            "this machine's Azure DevOps connection. A Jira team's code lives elsewhere "
+            "(Bitbucket, GitHub), so for those workspaces the item is picked up, run, "
+            "commented and moved — and nothing watches the PR that comes out of it.",
+            "Nothing to fix today; it is the boundary of this release. The agent can "
+            "still open the PR itself through that workspace's own MCP server.",
+        ))
+    return out or [Finding(OK, f"Providers: {len(jira)} Jira workspace(s)")]
+
+
 def check_fleet(config: Settings) -> list[Finding]:
     """Fleet mode wired half-way — the failure mode is silence, on both sides.
 
@@ -1375,7 +1430,7 @@ CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
     check_relay_hands_over, check_default_profile_is_not_a_doorway,
-    check_sdlc_needs_headless, check_fleet, check_deploy_stage,
+    check_sdlc_needs_headless, check_fleet, check_providers, check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,

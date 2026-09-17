@@ -747,3 +747,33 @@ def test_interactive_without_the_loop_says_nothing():
     from ai_autopilot.doctor import check_sdlc_needs_headless
 
     assert check_sdlc_needs_headless(Settings(execution_mode="interactive")) == []
+
+
+def test_a_jira_workspace_missing_its_credentials_is_an_error():
+    """Every poll returns nothing, which reads exactly like "no work is waiting"."""
+    from ai_autopilot.config import WorkspaceConfig
+    from ai_autopilot.doctor import check_providers
+
+    found = check_providers(Settings(workspaces=[
+        WorkspaceConfig(name="J", ado_projects=["DXF"], provider="jira"),
+    ]))
+    assert [f.level for f in found] == [doctor.ERROR]
+    assert "jira_url" in found[0].title
+
+
+def test_a_jira_workspace_is_told_the_pr_half_does_not_apply_to_it():
+    """The babysitter and auto-review read PRs through this machine's ADO connection —
+    on a Jira team's repo they are on and doing nothing."""
+    from ai_autopilot.config import WorkspaceConfig
+    from ai_autopilot.doctor import check_providers
+
+    ws = WorkspaceConfig(name="J", ado_projects=["DXF"], provider="jira", jira_url="u",
+                         jira_email="e", jira_token="t", jira_project="DXF")
+    found = check_providers(Settings(workspaces=[ws], feedback_loop_enabled=True))
+    assert [f.level for f in found] == [doctor.WARN]
+
+
+def test_an_install_with_no_jira_says_nothing_about_providers():
+    from ai_autopilot.doctor import check_providers
+
+    assert check_providers(Settings()) == []

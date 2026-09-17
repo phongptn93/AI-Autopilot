@@ -100,6 +100,13 @@ _TRANSIENT_MARKERS = (
     "server disconnected",
     "remote host",
 )
+# The one failure that LOOKS transient and is not. When a tool result floods the
+# context the API answers "Prompt is too long", the CLI exits with the same paradoxical
+# envelope as a dropped connection, and a fresh re-run does exactly the same thing again
+# — so the retries spend minutes reproducing the failure and then report the network's
+# error message for a problem that is about size. Observed on a code-review loop whose
+# first command was `git log --all` over a busy monorepo.
+_OVERFLOW_MARKERS = ("prompt is too long", "context length", "too many tokens")
 _TRANSIENT_RETRIES = 2  # extra FRESH attempts after the first
 _TRANSIENT_BACKOFF = 3.0  # seconds, doubled per retry (3s, 6s)
 
@@ -324,11 +331,16 @@ async def run_claude(
     # wait and see. `quiet_for` is the number that actually answers it: a run producing
     # events is working, a run that has produced none for minutes is not.
     pulse = {"last": "", "at": time.monotonic(), "events": 0}
+    # Set when the stream reports the context overflowing — see _OVERFLOW_MARKERS.
+    overflow: dict[str, str] = {}
 
     def _emit(line: str) -> None:
         text = line.strip()
         if not text:
             return
+        if any(marker in text.lower() for marker in _OVERFLOW_MARKERS):
+            # Remembered, because the exception that follows says nothing about size.
+            overflow["hit"] = text[:200]
         pulse["last"] = text[:140]
         pulse["at"] = time.monotonic()
         pulse["events"] += 1
@@ -423,6 +435,22 @@ async def run_claude(
                     resume_id = None
                     continue
                 _attach_stderr(exc, stderr_tail)
+                if overflow.get("hit"):
+                    # Deterministic: the same commands produce the same flood. Say what
+                    # actually happened, once, instead of retrying it twice and then
+                    # reporting a connection error.
+                    _log.error(
+                        "run exceeded the model's context — not retrying",
+                        detail=overflow["hit"],
+                        hint="the agent's own tool output is too large; bound it "
+                             "(pipe through head, drop --all, ask for fewer commits)",
+                    )
+                    raise RuntimeError(
+                        "Context overflow: the run's own tool output exceeded the "
+                        f"model's context ({overflow['hit']}). Bound the commands the "
+                        "prompt asks for — e.g. `git log --oneline | head -200` rather "
+                        "than a full log or diff."
+                    ) from exc
                 if attempt_no < _TRANSIENT_RETRIES and _is_transient(exc):
                     delay = _TRANSIENT_BACKOFF * (2**attempt_no)
                     _log.warning(

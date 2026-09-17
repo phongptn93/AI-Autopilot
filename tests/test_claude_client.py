@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+from claude_agent_sdk import AssistantMessage, TextBlock
+
 import ai_autopilot.execution.claude_client as cc
 from ai_autopilot.config import Settings
 
@@ -156,3 +159,41 @@ async def test_the_heartbeat_stops_when_the_run_does(monkeypatch):
     said.clear()
     await asyncio.sleep(0.06)
     assert "claude run in flight" not in said
+
+
+async def test_a_context_overflow_is_not_retried_and_says_what_happened(monkeypatch):
+    """Seen live on a code-review loop: the agent ran `git log --all`, the API answered
+    "Prompt is too long", and the CLI exited with the SAME paradoxical envelope a dropped
+    connection produces. So it was retried twice — reproducing the flood each time — and
+    then reported as a connection error, about a problem that is entirely about size."""
+    attempts = {"n": 0}
+
+    async def fake_query(*, prompt, options):
+        attempts["n"] += 1
+        # What the stream shows the operator just before it dies.
+        yield AssistantMessage(content=[TextBlock(text="Prompt is too long")], model="x")
+        raise Exception("Claude Code returned an error result: success")
+
+    monkeypatch.setattr(cc, "query", fake_query)
+    with pytest.raises(RuntimeError, match="Context overflow"):
+        await cc.run_claude("review the last 24h", ".", timeout_seconds=5)
+
+    assert attempts["n"] == 1      # …and exactly once, not three times
+
+
+async def test_a_genuine_connection_drop_is_still_retried(monkeypatch):
+    """The paradoxical envelope really is a dropped stream most of the time — absorbing
+    it is what stops one network blip re-running a 20-minute stage."""
+    attempts = {"n": 0}
+
+    async def fake_query(*, prompt, options):
+        attempts["n"] += 1
+        yield AssistantMessage(content=[TextBlock(text="working on it")], model="x")
+        raise Exception("Claude Code returned an error result: success")
+
+    monkeypatch.setattr(cc, "query", fake_query)
+    monkeypatch.setattr(cc, "_TRANSIENT_BACKOFF", 0.0)
+    with pytest.raises(Exception, match="error result"):
+        await cc.run_claude("do a thing", ".", timeout_seconds=5)
+
+    assert attempts["n"] == cc._TRANSIENT_RETRIES + 1

@@ -24,12 +24,14 @@ PRESETS: list[dict] = [
             "cron": "7 18 * * 1-5",
             "agents": ["agent-pr-reviewer", "agent-security-reviewer"],
             "prompt": (
-                "Review every commit made to this repository in the last 24 hours "
-                "(`git log --since=\"24 hours ago\"`, and the diff of those commits "
-                "against their parents). Judge only what those commits changed — do not "
-                "review the whole repository. Look for correctness bugs, missing error "
-                "handling, data-loss risks, and security problems in the changed lines. "
-                "Say what breaks and under which input, not what could be prettier."
+                "Review the commits made to this repository in the last 24 hours: "
+                "`git log --since=\"24 hours ago\" --oneline | head -100` for the list, "
+                "then read each one's diff with `git show --stat` first and only open "
+                "the files that matter. Judge only what those commits changed — do not "
+                "review the whole repository, and do not dump whole logs or diffs. "
+                "Look for correctness bugs, missing error handling, data-loss risks and "
+                "security problems in the changed lines. Say what breaks and under which "
+                "input, not what could be prettier."
             ),
         },
     },

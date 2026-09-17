@@ -2815,6 +2815,13 @@ def create_dashboard_router() -> APIRouter:
                 flash=flash,
                 webhook_channels=channels,
                 notify_probe=probe,
+                # Named on the ADO section so "where do I put Jira?" is answered on the
+                # page people look at first, not only on the one that owns the setting.
+                jira_workspaces=[
+                    (ws.name or (ws.ado_projects or ["(chưa đặt tên)"])[0])
+                    for ws in (cfg.workspaces or [])
+                    if (getattr(ws, "provider", "") or "").strip().lower() == "jira"
+                ],
                 # What the fleet block states about THIS machine. Counted from the real
                 # export filter rather than written out by hand, so the number cannot
                 # drift from what the central actually serves.

@@ -294,6 +294,37 @@
       {% endif %}
     </div>
 
+    {# What this connection is FOR. Someone configuring Jira comes looking here first —
+       it is the page that says "Azure DevOps" — and the answer is on another page. #}
+    {% if section == 'Azure DevOps Connection' %}
+    <div class="fleet-block">
+      <div class="wh-title">
+        <b>🔌 Kết nối này dùng cho</b>
+        <span class="form-help" style="margin:0">Một kết nối ADO cho cả máy.</span>
+      </div>
+      <div class="fleet-cols">
+        <div class="fleet-col">
+          <b>✅ Work item</b>
+          <ul><li>Của workspace dùng <b>Azure DevOps</b></li>
+              <li>Workspace dùng <b>Jira</b> đọc từ Jira, không qua đây</li></ul>
+        </div>
+        <div class="fleet-col">
+          <b>✅ PR · repo · build</b>
+          <ul><li><b>Mọi</b> workspace, kể cả workspace Jira</li>
+              <li>Babysitter, auto-review, merge → state</li></ul>
+        </div>
+        <div class="fleet-col">
+          <b>🎫 Nguồn work item</b>
+          <ul><li>Khai theo <b>từng workspace</b>, không phải ở đây</li>
+              <li><a href="/dashboard/workspaces" style="color:var(--accent-hover)">🗂 Workspaces →</a>
+                {% if jira_workspaces %}<br>Đang dùng Jira:
+                {% for name in jira_workspaces %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                {% else %}<br>Hiện chưa workspace nào dùng Jira.{% endif %}</li></ul>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     {# "What actually travels" belongs next to the fleet switches, not in a doc nobody
        opens: the first question anyone asks about a central config is which of their
        settings it is about to overwrite. #}

@@ -59,7 +59,9 @@ FIELDS: tuple[Field, ...] = (
           "e.g. https://dev.azure.com/your-org"),
     Field("ado_project", "Project (work items)", "text", "Azure DevOps Connection",
           "The DEFAULT work-item project — where new items are created and where anything "
-          "without a project of its own is assumed to live."),
+          "without a project of its own is assumed to live. This page configures the ADO "
+          "connection only; a workspace whose work items live in JIRA declares that on the "
+          "Workspaces page, per workspace — pull requests stay on this connection either way."),
     Field("ado_projects", "↳ More projects (work items)", "list", "Azure DevOps Connection",
           "Additional work-item projects polled on this SAME connection (one per line). All of "
           "them are covered by a single query, so adding projects costs no extra polling. Use "

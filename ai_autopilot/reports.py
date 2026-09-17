@@ -219,6 +219,19 @@ def audit_prompt(prompt: str, agents: list[str], repo: str = "") -> str:
         "This is a READ-ONLY audit: report what you find, change no files. The "
         "file-editing tools are disabled, so do not plan around using them."
     )
+    # A review's first instinct is `git log --all` or a full diff, and on a busy repo
+    # that one tool result ends the run: the API answers "Prompt is too long", every
+    # retry reproduces it, and the report never arrives. Cheaper to say the size rule
+    # here, once, than to have each loop's own prompt remember it.
+    parts.append(
+        "Keep every command's output SMALL — you are reading it into a limited context. "
+        "Bound anything that can grow: `| head -200`, `--oneline`, a date range, one "
+        "path at a time. Never dump a whole log, a whole diff, or an entire file when a "
+        "range will do, and do not pass `--all` to git. If something is too big to read "
+        "in one go, narrow it and read the parts you actually need. This workspace's "
+        "skills and sub-agents are already available to you — invoke them by name "
+        "rather than re-deriving what they do."
+    )
     parts.append(_CONTRACT)
     return "\n\n".join(p for p in parts if p)
 

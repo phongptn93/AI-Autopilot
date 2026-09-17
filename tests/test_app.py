@@ -1353,3 +1353,29 @@ def test_the_settings_page_says_what_fleet_will_and_will_not_overwrite(tmp_path)
     assert "Đồng bộ những gì" in page
     assert "sdlc_profile" in page                  # what THIS machine holds back
     assert "database_url" in page                  # what is always held back
+
+
+def test_the_settings_page_says_where_jira_is_configured(tmp_path):
+    """Someone setting up Jira looks here first — it is the page that says "Azure
+    DevOps" — and the setting lives on another page entirely."""
+    from ai_autopilot.config import WorkspaceConfig
+
+    settings = Settings(
+        dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 's.db'}",
+        workspaces=[WorkspaceConfig(name="Jira team", ado_projects=["DXF"],
+                                    provider="jira", jira_url="u", jira_email="e",
+                                    jira_token="t", jira_project="DXF")],
+    )
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings").text
+
+    assert "Kết nối này dùng cho" in page
+    assert "/dashboard/workspaces" in page
+    assert "Jira team" in page          # …and which workspaces already use it
+
+
+def test_the_settings_page_says_so_when_nothing_uses_jira(tmp_path):
+    settings = Settings(dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 's.db'}")
+    with TestClient(create_app(settings)) as client:
+        page = client.get("/dashboard/settings").text
+    assert "chưa workspace nào dùng Jira" in page

@@ -20,6 +20,7 @@ from ai_autopilot.data import (
     ClaudeSessionRepository,
     Database,
     ExecutionRepository,
+    FleetWorkerRepository,
     LoopReportRepository,
     NotificationHoldRepository,
     PlannedRunRepository,
@@ -84,6 +85,8 @@ class Container:
         self.pr_reviewer_repo = PrReviewerRepository(self.database)
         self.claude_session_repo = ClaudeSessionRepository(self.database)
         self.audit_repo = AuditRepository(self.database)
+        # Fleet: populated on a central by worker heartbeats; unused elsewhere.
+        self.fleet_repo = FleetWorkerRepository(self.database)
         # Scheduled audits. Their own table: a report's deliverable is its text, which
         # does not fit an execution row's summary column — see ``LoopReport``.
         self.loop_report_repo = LoopReportRepository(self.database)

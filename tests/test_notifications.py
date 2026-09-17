@@ -269,3 +269,80 @@ def test_no_log_call_shadows_structlogs_event_argument():
     assert not offenders, (
         "log call passes event= alongside a message: " + ", ".join(offenders)
     )
+
+
+async def test_the_probe_reports_each_channel_rather_than_swallowing_failures():
+    """A revoked Workflows URL used to be a log line on a machine the operator may not
+    be able to reach — so "the cards stopped" and "this one webhook is dead" looked the
+    same from the dashboard."""
+    posted: list[str] = []
+
+    class _Http:
+        async def post(self, url, **kwargs):
+            posted.append(url)
+
+            class _R:
+                status_code = 403 if "dead" in url else 200
+                text = ""
+
+            return _R()
+
+    cfg = Settings(teams_webhook_channels=[
+        {"name": "dev", "url": "https://hook/live", "active": True},
+        {"name": "pm", "url": "https://hook/dead", "active": True},
+    ])
+    notifier = TeamsNotifier(cfg, _Http())
+    msg = NotificationMessage(work_item=_item(), type=NotificationType.INFO,
+                              heading="probe", text="hi")
+    assert await notifier.probe(msg) == [("dev", True), ("pm", False)]
+    assert len(posted) == 2
+
+
+async def test_the_probe_ignores_per_channel_routing():
+    """The question is "can this channel be reached at all" — a channel narrowed to
+    failures only must still answer it, or the test proves nothing about it."""
+    class _Http:
+        async def post(self, url, **kwargs):
+            class _R:
+                status_code = 200
+                text = ""
+            return _R()
+
+    cfg = Settings(teams_webhook_channels=[
+        {"name": "failures-only", "url": "https://hook/x", "active": True, "events": "failed"},
+    ])
+    notifier = TeamsNotifier(cfg, _Http())
+    msg = NotificationMessage(work_item=_item(), type=NotificationType.INFO,
+                              heading="probe", text="hi")
+    assert [ok for _label, ok in await notifier.probe(msg)] == [True]
+
+
+async def test_the_test_send_says_what_the_policy_would_have_done():
+    """A healthy channel plus "completed is switched off" explains silence exactly as
+    well as a dead webhook does, so the probe reports both."""
+    from ai_autopilot.ado.notifier import AdoNotifier
+
+    cfg = Settings(alert_events="failed")         # completed deliberately off
+    notifier = AdoNotifier(ado=None, config=cfg, channels=[])
+    result = await notifier.send_test()
+    assert result["completed_allowed"] is False
+    assert result["started_allowed"] is False
+    assert result["channels"] == []               # nothing configured — said, not hidden
+
+
+async def test_the_test_send_survives_a_channel_that_raises():
+    """A probe that crashed would leave the operator with less information than before."""
+    from ai_autopilot.ado.notifier import AdoNotifier
+
+    class _Boom:
+        name = "broken"
+        is_enabled = True
+
+        async def send(self, message):
+            raise RuntimeError("nope")
+
+    result = await AdoNotifier(
+        ado=None, config=Settings(), channels=[_Boom()]
+    ).send_test()
+    assert result["channels"][0]["ok"] is False
+    assert "nope" in result["channels"][0]["detail"]

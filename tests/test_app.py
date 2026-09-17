@@ -1294,3 +1294,23 @@ def test_the_now_page_says_so_when_nothing_is_running(tmp_path):
     with TestClient(create_app(settings)) as client:
         page = client.get("/dashboard/now").text
         assert "Không có lượt chạy nào đang diễn ra" in page
+
+
+def test_the_settings_page_can_test_the_chat_channels(client):
+    """Pressing the button must answer on the page — the whole point is not having to
+    read the log of the machine the autopilot runs on."""
+    resp = client.post("/dashboard/settings/test-notification", follow_redirects=True)
+    assert resp.status_code == 200
+    page = resp.text
+    # Every channel says what it did — here: configured nowhere, which is an answer too.
+    assert page.count('class="wh-probe-row"') >= 3
+    assert "MS Teams" in page and "chưa cấu hình" in page
+    # …and the other half: what the alert policy would do to a real card right now.
+    assert "Hoàn tất" in page and "Bắt đầu" in page
+
+
+def test_the_probe_result_is_shown_once(client):
+    """A stale result read as the state of the channels right now would be worse than
+    showing nothing."""
+    client.post("/dashboard/settings/test-notification", follow_redirects=True)
+    assert 'class="wh-probe-row"' not in client.get("/dashboard/settings").text

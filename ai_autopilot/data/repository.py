@@ -17,6 +17,7 @@ from ai_autopilot.data.entities import (
     ClaudeSession,
     ExecutionRecord,
     ExecutionStatus,
+    FleetWorker,
     HandledPrComment,
     HeldNotification,
     LoopReport,
@@ -1736,3 +1737,75 @@ class SyncStateRepository:
             await session.execute(delete(MergedPr).where(MergedPr.pr_id.in_(stale)))
             await session.commit()
             return len(stale)
+
+
+class FleetWorkerRepository:
+    """What the central VM knows about each worker machine.
+
+    One row per machine, replaced in place on every heartbeat. Writes are total rather
+    than incremental — the worker restates its whole condition each beat — so a missed
+    beat leaves stale data that the next beat corrects, and never a half-updated row
+    that has to be reasoned about.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+        self._log = get_logger("data.fleet")
+
+    async def upsert(self, report, *, config_hash: str = "", now: datetime | None = None) -> None:
+        """Record one heartbeat. ``report`` is a ``fleet.WorkerReport``.
+
+        ``config_hash`` is what the CENTRAL is serving right now; the worker's own hash
+        comes from the report. Storing both is what lets the page say "this machine has
+        not caught up" without re-deriving the document per row.
+        """
+        stamp = _naive(now or datetime.now(UTC))
+        running = json.dumps(
+            [r.model_dump() if hasattr(r, "model_dump") else dict(r) for r in report.running],
+            ensure_ascii=False,
+        )
+        tags = json.dumps([str(t) for t in report.tags], ensure_ascii=False)
+        async with self._db.session() as session:
+            row = (await session.execute(
+                select(FleetWorker).where(FleetWorker.name == report.name)
+            )).scalar_one_or_none()
+            if row is None:
+                row = FleetWorker(name=report.name[:200], first_seen=stamp, last_seen=stamp)
+                session.add(row)
+            row.hostname = (report.hostname or "")[:200]
+            row.version = (report.version or "")[:40]
+            row.profile = (report.profile or "")[:80]
+            row.tags = tags
+            row.central_hash = config_hash
+            # Only move the "synced at" clock when the worker actually reports the hash
+            # the central is serving. Stamping it on every beat would make a machine that
+            # can talk but cannot apply look permanently up to date — the exact failure
+            # this page exists to catch.
+            if config_hash and report.config_hash == config_hash and row.config_hash != config_hash:
+                row.config_synced_at = stamp
+            row.config_hash = report.config_hash or ""
+            row.running = running
+            row.done_today = int(report.done_today or 0)
+            row.failed_today = int(report.failed_today or 0)
+            row.last_seen = stamp
+            await session.commit()
+
+    async def list_all(self) -> list[FleetWorker]:
+        """Every known worker, most recently seen first."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(FleetWorker).order_by(FleetWorker.last_seen.desc())
+            )
+            return list(rows.scalars().all())
+
+    async def forget(self, name: str) -> bool:
+        """Drop a machine that is gone for good (decommissioned, renamed).
+
+        Explicit rather than automatic: a machine that stops beating is the single most
+        important thing this table can tell you, so it must never age itself out of the
+        page — silence IS the finding.
+        """
+        async with self._db.session() as session:
+            result = await session.execute(delete(FleetWorker).where(FleetWorker.name == name))
+            await session.commit()
+            return bool(result.rowcount)

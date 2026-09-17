@@ -670,3 +670,80 @@ def test_a_doorless_default_profile_says_nothing():
     from ai_autopilot.doctor import check_default_profile_is_not_a_doorway
 
     assert check_default_profile_is_not_a_doorway(_relay_cfg(sdlc_default_profile="full")) == []
+
+
+def test_fleet_mode_without_a_token_is_an_error():
+    """The central refuses to mount the API without one, so every worker 401s forever
+    while the centre looks configured."""
+    from ai_autopilot.doctor import check_fleet
+
+    found = check_fleet(Settings(fleet_role="central"))
+    assert [f.level for f in found] == [doctor.ERROR]
+    assert "fleet_token" in found[0].title
+
+
+def test_a_worker_with_no_central_url_is_an_error():
+    from ai_autopilot.doctor import check_fleet
+
+    found = check_fleet(Settings(fleet_role="worker", fleet_token="t"))
+    assert [f.level for f in found] == [doctor.ERROR]
+    assert "fleet_central_url" in found[0].title
+
+
+def test_a_local_key_that_is_not_a_setting_is_flagged():
+    """A name that matches nothing protects nothing — and the setting it was meant to
+    protect is overwritten on the next sync while the list looks right."""
+    from ai_autopilot.doctor import check_fleet
+
+    found = check_fleet(Settings(
+        fleet_role="worker", fleet_token="t", fleet_central_url="http://vm",
+        fleet_local_keys=["sdlc_profile", "sdlc_profil"],
+    ))
+    assert [f.level for f in found] == [doctor.WARN]
+    assert "sdlc_profil" in found[0].detail
+
+
+def test_a_redundant_local_key_is_not_nagged_about():
+    """trigger_tag is already unshareable; saying so would teach people to ignore the
+    doctor on the one list that protects their machine."""
+    from ai_autopilot.doctor import check_fleet
+
+    found = check_fleet(Settings(
+        fleet_role="worker", fleet_token="t", fleet_central_url="http://vm",
+        fleet_local_keys=["trigger_tag"],
+    ))
+    assert [f.level for f in found] == [doctor.OK]
+
+
+def test_standalone_says_nothing_about_fleet():
+    """The default install must not grow a line about a mode it does not use."""
+    from ai_autopilot.doctor import check_fleet
+
+    assert check_fleet(Settings()) == []
+
+
+def test_the_sdlc_loop_with_interactive_execution_is_flagged():
+    """Interactive dispatches a session and stops — the gate, the revise budget, the
+    escalation and the hand-off never happen, and the runs still look correct."""
+    from ai_autopilot.doctor import check_sdlc_needs_headless
+
+    found = check_sdlc_needs_headless(
+        Settings(sdlc_loop_enabled=True, execution_mode="interactive")
+    )
+    assert [f.level for f in found] == [doctor.WARN]
+    assert "never runs" in found[0].title
+
+
+def test_headless_with_the_loop_on_says_nothing():
+    from ai_autopilot.doctor import check_sdlc_needs_headless
+
+    assert check_sdlc_needs_headless(
+        Settings(sdlc_loop_enabled=True, execution_mode="headless")
+    ) == []
+
+
+def test_interactive_without_the_loop_says_nothing():
+    """Choosing to steer every run is a valid setup, not a misconfiguration."""
+    from ai_autopilot.doctor import check_sdlc_needs_headless
+
+    assert check_sdlc_needs_headless(Settings(execution_mode="interactive")) == []

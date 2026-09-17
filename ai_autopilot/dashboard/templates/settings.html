@@ -120,6 +120,12 @@
   .danger-btn{color:var(--red);border-color:rgba(240,82,106,.35)}
   .danger-btn:hover{background:var(--red-bg)}
   .is-disabled{opacity:.42;pointer-events:none}
+  .wh-probe-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+  .wh-probe{margin-top:10px;border:1px solid var(--border);border-radius:9px;overflow:hidden}
+  .wh-probe-row{display:flex;align-items:baseline;gap:9px;padding:7px 12px;font-size:13px;
+                border-bottom:1px solid var(--border)}
+  .wh-probe-ico{width:16px;flex:none}
+  .wh-probe-note{padding:8px 12px;font-size:12px;color:var(--text-muted);background:var(--bg)}
 </style>
 
 <div class="set-head">
@@ -306,6 +312,39 @@
         {% else %}<span></span>{% endif %}
       </div>
       {% endfor %}
+      {# The button lives outside the settings <form> (HTML5 form= attribute) — nesting a
+         form would be invalid markup, and pressing "test" must not save the page. #}
+      <div class="wh-probe-bar">
+        <button type="submit" form="probe-form" class="btn-ghost">🔔 Gửi thử thông báo</button>
+        <span class="form-help" style="margin:0">Gửi ngay một card tới <b>mọi</b> kênh —
+          bỏ qua bộ lọc sự kiện và giờ im lặng, rồi báo lại kênh nào nhận được.</span>
+      </div>
+
+      {% if notify_probe %}
+      <div class="wh-probe">
+        {% for ch in notify_probe.channels %}
+        <div class="wh-probe-row">
+          <span class="wh-probe-ico">{{ '✅' if ch.ok else ('—' if ch.ok is none else '❌') }}</span>
+          <b>{{ ch.name }}</b>
+          {% if ch.detail %}<span class="form-help" style="margin:0">{{ ch.detail }}</span>{% endif %}
+        </div>
+        {% else %}
+        <div class="wh-probe-row"><span class="wh-probe-ico">—</span>
+          <b>Chưa có kênh nào được cấu hình.</b></div>
+        {% endfor %}
+        {# The other half of the answer: a healthy channel plus "completed is switched
+           off" explains silence exactly as well as a dead webhook does. #}
+        <div class="wh-probe-note">
+          Card <b>✅ Hoàn tất</b>: {{ 'sẽ được gửi' if notify_probe.completed_allowed
+            else 'ĐANG BỊ TẮT trong Alert events' }} ·
+          Card <b>▶️ Bắt đầu</b>: {{ 'sẽ được gửi' if notify_probe.started_allowed
+            else 'ĐANG TẮT (mặc định) — thêm "started" vào Alert events nếu muốn' }}
+          {%- if notify_probe.quiet_now %} · ⏸ <b>Đang trong giờ im lặng</b> — thông báo
+          thật sẽ bị giữ lại và gửi gộp khi mở cửa sổ{% endif %}.
+        </div>
+      </div>
+      {% endif %}
+
       <div class="form-help" style="margin-top:10px">
         Teams Workflows → <i>"Post to a channel when a webhook request is received"</i>.
         Unticking <b>Active</b> mutes a channel but keeps its URL — a Workflows URL cannot be
@@ -385,6 +424,10 @@
     <button type="submit" class="btn-save">💾 Save settings</button>
   </div>
 </form>
+
+{# Target of the "Gửi thử thông báo" button up in the Channels card. Empty and outside
+   the settings form on purpose: a test must never save the page. #}
+<form id="probe-form" method="post" action="/dashboard/settings/test-notification"></form>
 
 <script>
   // ── Find a setting ──────────────────────────────────────────────────────────

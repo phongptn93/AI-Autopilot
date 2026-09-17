@@ -14,7 +14,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from ai_autopilot import health, security
+from ai_autopilot import fleet, health, security
 from ai_autopilot.config import Settings, load_settings
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import create_dashboard_router
@@ -22,6 +22,7 @@ from ai_autopilot.logging_config import configure_logging, get_logger
 from ai_autopilot.services import (
     AdoPollerService,
     DeliveryTrackerService,
+    FleetAgentService,
     LoopScheduler,
     PrMonitorService,
     ProcessHealthService,
@@ -159,6 +160,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 reviewer_tracker,
                 LoopScheduler(container),
                 ProcessHealthService(container),
+                # Worker machines only: report in and pull the shared config. A central
+                # or standalone install starts nothing, so this is inert by default.
+                *(
+                    (FleetAgentService(container),)
+                    if config.fleet_role == fleet.ROLE_WORKER else ()
+                ),
             ):
                 svc.start()
                 started.append(svc)
@@ -339,6 +346,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         c.webhook_queue.enqueue(wid)
         log.info("webhook queued work item", id=wid)
         return {"queued": wid}
+
+    # The fleet API exists only on a central, and only once it has a token. Mounting
+    # it conditionally rather than guarding an always-present route means a worker or a
+    # standalone host presents no fleet surface at all to a scanner.
+    if config.fleet_role == fleet.ROLE_CENTRAL:
+        if config.fleet_token:
+            app.include_router(fleet.create_fleet_router())
+        else:
+            log.error(
+                "fleet_role=central but fleet_token is empty — the fleet API stays OFF. "
+                "An open endpoint would hand the whole shared configuration to anyone "
+                "who can reach this host."
+            )
 
     app.include_router(create_dashboard_router())
     return app

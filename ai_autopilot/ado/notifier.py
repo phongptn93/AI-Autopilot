@@ -161,6 +161,58 @@ class AdoNotifier:
         """
         await self._broadcast(message)
 
+    async def send_test(self) -> dict:
+        """Send a probe card to every channel NOW and report exactly what happened.
+
+        Deliberately bypasses the alert policy and the quiet window rather than
+        honouring them: when notices stop arriving, the policy is one of the suspects,
+        and a test that is itself silenced by the thing under test proves nothing. What
+        those two gates WOULD have done is reported alongside, so the operator sees the
+        difference between "the channel is dead" and "this event is switched off".
+        """
+        message = NotificationMessage(
+            work_item=WorkItemInfo(id=0, title="Kiểm tra kênh thông báo"),
+            type=NotificationType.INFO,
+            heading="🔔 Thử thông báo — AI Autopilot",
+            text=(
+                "Nếu bạn đọc được tin này, kênh đang hoạt động. "
+                f"Gửi lúc {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')} UTC."
+            ),
+        )
+        channels: list[dict] = []
+        for channel in self._channels:
+            if not channel.is_enabled:
+                channels.append({"name": channel.name, "ok": None, "detail": "chưa cấu hình"})
+                continue
+            probe = getattr(channel, "probe", None)
+            try:
+                if probe is not None:
+                    # A fan-out channel (Teams) knows about several webhooks and swallows
+                    # a per-URL failure into a log line — ask it for the detail instead.
+                    for label, ok in await probe(message):
+                        channels.append({
+                            "name": f"{channel.name} · {label}", "ok": ok,
+                            "detail": "" if ok else "webhook từ chối — xem log để biết status",
+                        })
+                else:
+                    await channel.send(message)
+                    channels.append({"name": channel.name, "ok": True, "detail": ""})
+            except Exception as exc:  # noqa: BLE001 — a probe reports failure, never raises
+                channels.append({
+                    "name": channel.name, "ok": False, "detail": describe_exc(exc),
+                })
+        cfg = self._config
+        return {
+            "channels": channels,
+            # What the two gates would do to a REAL completion card right now. This is
+            # the other half of the answer: a healthy channel plus "completed is off"
+            # explains silence just as well as a dead webhook does.
+            "completed_allowed": cfg.wants_alert("completed", 10),
+            "started_allowed": cfg.wants_alert("started", 10),
+            "quiet_now": self._quiet.is_quiet(),
+            "at": datetime.now(UTC),
+        }
+
     async def _broadcast(self, message: NotificationMessage) -> None:
         """Send to every enabled channel — unless we are outside notification hours.
 

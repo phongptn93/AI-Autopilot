@@ -339,6 +339,104 @@ def check_default_profile_is_not_a_doorway(config: Settings) -> list[Finding]:
     )]
 
 
+def check_sdlc_needs_headless(config: Settings) -> list[Finding]:
+    """The closed-loop engine is switched on, and the execution mode never calls it.
+
+    In interactive mode the poller dispatches a Remote-Control session and returns; the
+    engine that gates, revises, escalates and hands off is headless-only. The role's
+    stages still scope the session's brief, so runs look right — they are just one-shot.
+    Nothing says so at runtime, and the Settings checkbox says "Headless only" in help
+    text three lines below the tick, which is exactly where nobody reads it.
+
+    Offline: both values are config.
+    """
+    if not config.sdlc_loop_enabled:
+        return []
+    if (config.execution_mode or "").strip().lower() != "interactive":
+        return []
+    return [Finding(
+        WARN, "SDLC loop is on, but execution_mode is interactive — the engine never runs",
+        "Interactive dispatches a steerable session and stops there. The role still "
+        "scopes what the session is asked to do, so the run looks correct; what you do "
+        "not get is the closed loop — the quality gate, the revise budget, the escalation "
+        "to a human and the automatic hand-off to the next role.",
+        "Set execution_mode to headless if you want the loop, or untick the SDLC loop "
+        "and keep interactive if you prefer to steer each run yourself.",
+    )]
+
+
+def check_fleet(config: Settings) -> list[Finding]:
+    """Fleet mode wired half-way — the failure mode is silence, on both sides.
+
+    A worker with no central URL or no token never calls home: the machine keeps working
+    with the config it has, the fleet page never lists it, and nothing anywhere says why.
+    A central with no token refuses to mount the endpoint at all, so every worker gets a
+    401 forever while the centre looks configured.
+
+    ``fleet_local_keys`` is checked against the real Settings fields because a typo there
+    is the worst kind of wrong: the machine believes it is protecting a setting, and the
+    setting is overwritten on the next beat.
+
+    Offline: every value is config.
+    """
+    from ai_autopilot.dashboard.settings_form import EXPORT_EXCLUDE
+
+    role = (config.fleet_role or "").strip().lower()
+    if not role:
+        return []                       # standalone — the default, nothing to say
+    out: list[Finding] = []
+    if role not in ("central", "worker"):
+        return [Finding(
+            ERROR, f"fleet_role '{config.fleet_role}' is not a role",
+            "Only 'central' (holds the shared config) and 'worker' (pulls it) exist; "
+            "blank means standalone. Anything else is treated as standalone, so the "
+            "machine silently takes no part in the fleet.",
+            "Set fleet_role to central, worker, or blank at /dashboard/settings.",
+        )]
+    if not (config.fleet_token or "").strip():
+        out.append(Finding(
+            ERROR, "Fleet mode is on but fleet_token is empty",
+            "The central refuses to mount the fleet API without a token — an open "
+            "endpoint would hand the whole shared configuration to anyone who can reach "
+            "the host — so every worker gets 401 forever, and a worker without one never "
+            "calls home at all.",
+            "Set the same fleet_token on the central and on every worker.",
+        ))
+    if role == "worker" and not (config.fleet_central_url or "").strip():
+        out.append(Finding(
+            ERROR, "fleet_role is worker but fleet_central_url is empty",
+            "This machine will never call home: it keeps running on the config it "
+            "already has and never appears on the fleet page. Nothing logs this every "
+            "cycle, deliberately — it is said here instead.",
+            "Set fleet_central_url to the central VM's base URL (e.g. http://vm:8080).",
+        ))
+    unknown = [
+        k for k in (config.fleet_local_keys or [])
+        if str(k).strip() and str(k).strip() not in Settings.model_fields
+    ]
+    if unknown:
+        out.append(Finding(
+            WARN, f"fleet_local_keys names {len(unknown)} setting(s) that do not exist",
+            f"{', '.join(sorted(unknown))} — a name that matches nothing protects "
+            "nothing, and the setting it was meant to protect is overwritten on the next "
+            "sync while the list looks right.",
+            "Use the exact Settings key (e.g. 'sdlc_profile', 'stage_entry_tag').",
+        ))
+    # Deliberately NOT a finding: naming a key the export already excludes. It is
+    # redundant, not wrong, and telling someone off for belt-and-braces on the one list
+    # that protects their machine is how a check teaches people to ignore the doctor.
+    redundant = [
+        k for k in (config.fleet_local_keys or [])
+        if str(k).strip() in EXPORT_EXCLUDE
+    ]
+    if out:
+        return out
+    detail = f"{role}"
+    if redundant:
+        detail += f" · {len(redundant)} local key(s) already excluded from sharing"
+    return [Finding(OK, f"Fleet mode: {detail}")]
+
+
 def check_deploy_stage(config: Settings) -> list[Finding]:
     """The 🚀 Deployed stage only fires under conditions nothing on the page states.
 
@@ -1277,7 +1375,7 @@ CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
     check_relay_hands_over, check_default_profile_is_not_a_doorway,
-    check_deploy_stage,
+    check_sdlc_needs_headless, check_fleet, check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,

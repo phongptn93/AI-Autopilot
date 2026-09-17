@@ -253,6 +253,9 @@
         </nav>
         <div class="nav-section">Configure</div>
         <nav>
+{% if fleet_role == 'central' %}
+            <a class="nav-link {{ 'active' if active == 'fleet' else '' }}" href="/dashboard/fleet"><span class="ico">🛰</span> Fleet</a>
+{% endif %}
             <a class="nav-link {{ 'active' if active == 'workspaces' else '' }}" href="/dashboard/workspaces"><span class="ico">🗂</span> Workspaces</a>
             <a class="nav-link {{ 'active' if active == 'config' else '' }}" href="/dashboard/config"><span class="ico">⚙️</span> Configuration</a>
             <a class="nav-link {{ 'active' if active == 'settings' else '' }}" href="/dashboard/settings"><span class="ico">🛠️</span> Settings</a>

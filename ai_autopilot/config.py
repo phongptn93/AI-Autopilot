@@ -1121,6 +1121,28 @@ class Settings(BaseSettings):
     # (their number is still reported). 0 = list everything, however old.
     delivery_max_age_days: int = 7
 
+    # ── Fleet (one central VM, several worker machines) ──
+    # Every machine is already a full autopilot with its own trigger tag and role, but
+    # each was an island: shared config had to be edited by hand on every host, and the
+    # centre could not see which host was running what. Fleet mode makes the workers
+    # PULL the shared config and push a heartbeat, so connectivity is needed in one
+    # direction only (worker → central) and a machine behind NAT still takes part.
+    #
+    # "" (default) = standalone: no service starts, no endpoint opens, nothing changes.
+    fleet_role: str = ""                    # "" | "central" | "worker"
+    fleet_central_url: str = ""             # worker: base URL of the central VM
+    # Shared secret, both sides. The central REFUSES to serve the endpoint without one
+    # (an open endpoint hands out the whole configuration to anyone who can reach it).
+    fleet_token: str = ""
+    fleet_worker_name: str = ""             # blank → hostname
+    fleet_sync_interval_minutes: int = 10
+    # Keys the worker keeps for ITSELF — never overwritten by the central document, on
+    # top of what the export already excludes (secrets, trigger_tag, workspaces, repos).
+    # This is what lets a machine own its own tags and role while sharing everything else.
+    fleet_local_keys: list[str] = Field(default_factory=list)
+    # Central: a worker silent for longer than this is shown as offline.
+    fleet_offline_after_minutes: int = 30
+
     # ── Multi-workspace (one connection, several projects) ──
     # What to call the workspace backed by the global fields above (its directory, base
     # branch and default project). Shown first on the Workspaces page and in the

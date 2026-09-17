@@ -1,0 +1,401 @@
+"""Fleet mode: the central serves the shared config, workers pull it and report in.
+
+The tests that matter most here are the negative ones. Everything this feature does is
+invisible when it works — a config arrives, a row updates — so the failures worth pinning
+are the silent ones: a secret that travels, a machine-specific key that gets overwritten,
+an endpoint that answers without a token.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+
+import pytest
+from starlette.testclient import TestClient
+
+from ai_autopilot import fleet
+from ai_autopilot.app import create_app
+from ai_autopilot.config import Settings
+from ai_autopilot.data import Database, FleetWorkerRepository
+
+TOKEN = "s3cret-fleet"
+
+
+def _settings(tmp_path, **over) -> Settings:
+    return Settings(
+        dry_run=True,
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'fleet.db'}",
+        **over,
+    )
+
+
+def _report(**over) -> fleet.WorkerReport:
+    base = dict(
+        name="dev-01", hostname="dev-01", version="2.39.0", profile="dev",
+        tags=["dev-01-autopilot"], config_hash="", running=[], done_today=0, failed_today=0,
+    )
+    base.update(over)
+    return fleet.WorkerReport(**base)
+
+
+# ── what may travel ──────────────────────────────────────────────────────────
+
+
+def test_the_shared_document_carries_no_secrets():
+    """The document is served to every machine that knows the token. A PAT in it would
+    be a credential distributed by design, not by accident."""
+    cfg = Settings(ado_pat="PAT-12345", smtp_password="hunter2",
+                   dashboard_auth_password_hash="pbkdf2$x", teams_webhook_url="https://hook")
+    document, _ = fleet.config_document(cfg)
+    for leaked in ("ado_pat", "smtp_password", "dashboard_auth_password_hash",
+                   "teams_webhook_url", "tenants"):
+        assert leaked not in document
+    assert "trigger_states" in document      # …but the shared settings ARE there
+
+
+def test_the_document_never_carries_the_fleet_wiring_itself():
+    """A worker that applied fleet_role/fleet_central_url from the central would become a
+    second central pointed at itself, and the token would ride along with it."""
+    cfg = Settings(fleet_role="central", fleet_token=TOKEN, fleet_central_url="http://vm")
+    document, _ = fleet.config_document(cfg)
+    assert [k for k in document if k.startswith("fleet_")] == []
+
+
+def test_the_hash_ignores_key_order():
+    """Two saves of the same settings must fingerprint identically, or every worker
+    'resyncs' a document it already has, forever."""
+    a = fleet.config_hash({"a": 1, "b": [1, 2]})
+    b = fleet.config_hash({"b": [1, 2], "a": 1})
+    assert a == b and len(a) == 16
+
+
+def test_a_changed_setting_changes_the_hash():
+    assert fleet.config_hash({"a": 1}) != fleet.config_hash({"a": 2})
+
+
+# ── what a worker will accept ────────────────────────────────────────────────
+
+
+def test_the_worker_keeps_its_own_tag_even_if_the_central_sends_one():
+    """Filtering on the receiving side is the point: a central that is compromised or
+    simply misconfigured still cannot rewrite this machine's identity."""
+    kept = fleet.strip_local(
+        {"trigger_tag": "central-autopilot", "ado_pat": "PAT", "workspace_directory": "C:/x",
+         "alert_repeat_hours": 6},
+        local_keys=[],
+    )
+    assert kept == {"alert_repeat_hours": 6}
+
+
+def test_a_worker_declared_key_is_left_alone():
+    kept = fleet.strip_local(
+        {"sdlc_profile": "full", "stage_entry_tag": "run", "alert_repeat_hours": 6},
+        local_keys=["sdlc_profile", "stage_entry_tag"],
+    )
+    assert kept == {"alert_repeat_hours": 6}
+
+
+def test_an_unknown_key_is_dropped_rather_than_set():
+    """A document from a NEWER central will contain settings this build has never heard
+    of. Dropping them keeps an upgrade one-directional instead of crashing the worker."""
+    assert fleet.strip_local({"from_the_future": 1, "alert_repeat_hours": 6}) == {
+        "alert_repeat_hours": 6
+    }
+
+
+# ── the endpoint ─────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def central(tmp_path):
+    cfg = _settings(tmp_path, fleet_role="central", fleet_token=TOKEN)
+    with TestClient(create_app(cfg)) as client:
+        yield client
+
+
+def test_a_heartbeat_without_the_token_is_refused(central):
+    resp = central.post("/api/fleet/heartbeat", json=_report().model_dump(mode="json"))
+    assert resp.status_code == 401
+
+
+def test_a_heartbeat_with_the_wrong_token_is_refused(central):
+    resp = central.post(
+        "/api/fleet/heartbeat", json=_report().model_dump(mode="json"),
+        headers={fleet.TOKEN_HEADER: "not-it"},
+    )
+    assert resp.status_code == 401
+
+
+def test_a_good_heartbeat_is_answered_with_the_config(central):
+    resp = central.post(
+        "/api/fleet/heartbeat", json=_report().model_dump(mode="json"),
+        headers={fleet.TOKEN_HEADER: TOKEN},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["config_hash"] and body["config"] is not None
+    assert body["central_version"]
+
+
+def test_a_worker_already_in_sync_is_not_sent_the_document_again(central):
+    first = central.post(
+        "/api/fleet/heartbeat", json=_report().model_dump(mode="json"),
+        headers={fleet.TOKEN_HEADER: TOKEN},
+    ).json()
+    second = central.post(
+        "/api/fleet/heartbeat",
+        json=_report(config_hash=first["config_hash"]).model_dump(mode="json"),
+        headers={fleet.TOKEN_HEADER: TOKEN},
+    ).json()
+    assert second["config"] is None and second["config_hash"] == first["config_hash"]
+
+
+def test_a_nameless_worker_is_rejected(central):
+    """The name is the row's key: an unnamed machine would overwrite the last unnamed
+    machine, and the page would show one host standing for several."""
+    resp = central.post(
+        "/api/fleet/heartbeat", json=_report(name="").model_dump(mode="json"),
+        headers={fleet.TOKEN_HEADER: TOKEN},
+    )
+    assert resp.status_code == 422
+
+
+def test_a_standalone_host_presents_no_fleet_api(tmp_path):
+    """Not mounted rather than mounted-and-guarded: a route that answers 401 still tells
+    a scanner what this host is."""
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        assert client.post(
+            "/api/fleet/heartbeat", json=_report().model_dump(mode="json"),
+            headers={fleet.TOKEN_HEADER: TOKEN},
+        ).status_code == 404
+
+
+def test_a_central_without_a_token_does_not_serve_the_config(tmp_path):
+    """An open endpoint hands the whole shared configuration to anyone who can reach the
+    host, so the API stays off rather than starting unprotected."""
+    with TestClient(create_app(_settings(tmp_path, fleet_role="central"))) as client:
+        assert client.post(
+            "/api/fleet/heartbeat", json=_report().model_dump(mode="json"),
+        ).status_code == 404
+
+
+# ── the central's table ──────────────────────────────────────────────────────
+
+
+async def test_the_sync_clock_moves_only_when_the_worker_really_applied(tmp_path):
+    """A machine that can talk but cannot apply looked permanently up to date — the exact
+    failure the fleet page exists to catch."""
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'f.db'}")
+    await db.create_all()
+    repo = FleetWorkerRepository(db)
+
+    await repo.upsert(_report(config_hash="old"), config_hash="new")
+    row = (await repo.list_all())[0]
+    assert row.config_synced_at is None and row.config_hash == "old"
+
+    await repo.upsert(_report(config_hash="new"), config_hash="new")
+    row = (await repo.list_all())[0]
+    assert row.config_synced_at is not None
+
+
+async def test_a_second_heartbeat_updates_the_row_rather_than_adding_one(tmp_path):
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'f.db'}")
+    await db.create_all()
+    repo = FleetWorkerRepository(db)
+    await repo.upsert(_report(version="2.39.0"), config_hash="h")
+    await repo.upsert(_report(version="2.40.0"), config_hash="h")
+    rows = await repo.list_all()
+    assert len(rows) == 1 and rows[0].version == "2.40.0"
+
+
+async def test_a_machine_is_only_forgotten_when_asked(tmp_path):
+    """Silence is the finding — a worker that stops reporting must stay on the page."""
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'f.db'}")
+    await db.create_all()
+    repo = FleetWorkerRepository(db)
+    await repo.upsert(_report(), config_hash="h")
+    assert await repo.forget("dev-01") is True
+    assert await repo.list_all() == []
+    assert await repo.forget("dev-01") is False
+
+
+# ── the page ─────────────────────────────────────────────────────────────────
+
+
+async def test_the_fleet_page_marks_a_silent_machine_offline(tmp_path):
+    cfg = _settings(tmp_path, fleet_role="central", fleet_token=TOKEN,
+                    fleet_offline_after_minutes=30)
+    with TestClient(create_app(cfg)) as client:
+        container = client.app.state.container
+        await container.fleet_repo.upsert(_report(name="quiet-01"), config_hash="h")
+        # Backdate the beat past the threshold, the way an hour of silence would.
+        async with container.database.session() as session:
+            from ai_autopilot.data.entities import FleetWorker
+            row = await session.get(FleetWorker, "quiet-01")
+            row.last_seen = (datetime.now(UTC) - timedelta(hours=2)).replace(tzinfo=None)
+            await session.commit()
+        page = client.get("/dashboard/fleet").text
+        assert "quiet-01" in page and "is-offline" in page
+
+
+def test_the_fleet_page_is_absent_on_a_worker(tmp_path):
+    """Its table is empty by definition there; a link to an empty page reads as a bug."""
+    cfg = _settings(tmp_path, fleet_role="worker", fleet_token=TOKEN,
+                    fleet_central_url="http://central")
+    with TestClient(create_app(cfg)) as client:
+        assert client.get("/dashboard/fleet").status_code == 404
+        assert "/dashboard/fleet" not in client.get("/dashboard").text
+
+
+# ── the worker's agent ───────────────────────────────────────────────────────
+
+
+def _agent(cfg, *, http=None, audit=None):
+    from ai_autopilot.services.fleet_agent import FleetAgentService
+
+    svc = FleetAgentService.__new__(FleetAgentService)
+    svc._config = cfg
+    svc._log = SimpleNamespace(
+        info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None,
+    )
+    svc._task = None
+    svc._c = SimpleNamespace(http=http, audit_repo=audit, ado=SimpleNamespace(refresh=lambda: None))
+    return svc
+
+
+async def test_the_worker_applies_the_shared_config_but_keeps_its_own(tmp_path, monkeypatch):
+    path = tmp_path / "worker.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(path))
+    recorded: list[dict] = []
+    cfg = Settings(
+        fleet_role="worker", fleet_central_url="http://central", fleet_token=TOKEN,
+        fleet_local_keys=["sdlc_profile"], sdlc_profile="qc", alert_repeat_hours=24,
+    )
+    audit = SimpleNamespace(record=lambda **kw: recorded.append(kw) or _done())
+    svc = _agent(cfg, audit=audit)
+
+    await svc._apply({"config": {
+        "alert_repeat_hours": 6,        # shared → applied
+        "sdlc_profile": "full",         # this machine's own → kept
+        "ado_pat": "PAT",               # never accepted
+        "trigger_tag": "central-tag",   # machine identity → kept
+    }})
+
+    assert cfg.alert_repeat_hours == 6
+    assert cfg.sdlc_profile == "qc"
+    assert cfg.ado_pat == ""
+    import yaml
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert saved == {"alert_repeat_hours": 6}
+    assert recorded and recorded[0]["action"] == "config.synced"
+
+
+async def test_an_unchanged_document_writes_nothing(tmp_path, monkeypatch):
+    """Applying identical values every beat would rewrite config.yaml and fill the audit
+    trail with changes that changed nothing — which is how a real change gets lost."""
+    path = tmp_path / "worker.yaml"
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(path))
+    cfg = Settings(fleet_role="worker", alert_repeat_hours=6)
+    svc = _agent(cfg, audit=SimpleNamespace(record=lambda **kw: _done()))
+    await svc._apply({"config": {"alert_repeat_hours": 6}})
+    assert not path.exists()
+
+
+async def test_an_unreachable_central_does_not_raise(tmp_path):
+    """A network blip must not cost the machine its poller."""
+    import httpx
+
+    class _Http:
+        async def post(self, *a, **k):
+            raise httpx.ConnectError("no route")
+
+    cfg = Settings(fleet_role="worker", fleet_central_url="http://nope", fleet_token=TOKEN)
+    svc = _agent(cfg, http=_Http())
+    assert await svc.beat() is False
+
+
+async def test_a_rejected_token_does_not_raise(tmp_path):
+    class _Resp:
+        status_code = 401
+
+        def json(self):        # pragma: no cover — never reached on 401
+            return {}
+
+    class _Http:
+        async def post(self, *a, **k):
+            return _Resp()
+
+    cfg = Settings(fleet_role="worker", fleet_central_url="http://central", fleet_token="wrong",
+                   database_url=f"sqlite+aiosqlite:///{tmp_path / 'w.db'}")
+    svc = _agent(cfg, http=_Http())
+    svc._c.execution_repo = SimpleNamespace(search=_empty_search)
+    assert await svc.beat() is False
+
+
+async def test_a_worker_with_no_central_configured_stays_quiet(tmp_path):
+    """Doctor says this once, loudly; the log must not say it 144 times a day."""
+    svc = _agent(Settings(fleet_role="worker"))
+    assert await svc.beat() is False
+
+
+async def _empty_search(**kwargs):
+    return [], 0
+
+
+async def _done():
+    return None
+
+
+async def test_a_worker_and_a_central_complete_a_round_trip(tmp_path, monkeypatch):
+    """The whole loop over real HTTP: the agent builds its report, the central records it
+    and answers with the document, and the worker's own config.yaml comes out changed.
+
+    Worth its weight because every unit above stubs the piece next to it — this is the
+    only test where the payload the agent actually sends is the payload the endpoint
+    actually parses, and a field renamed on one side fails here.
+    """
+    import httpx
+
+    from ai_autopilot.services.fleet_agent import FleetAgentService
+
+    central_cfg = _settings(tmp_path, fleet_role="central", fleet_token=TOKEN)
+    central_cfg.alert_repeat_hours = 6            # what the centre wants everyone on
+    with TestClient(create_app(central_cfg)) as central_client:
+        worker_yaml = tmp_path / "worker.yaml"
+        monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(worker_yaml))
+        worker_cfg = Settings(
+            fleet_role="worker", fleet_central_url="http://central", fleet_token=TOKEN,
+            fleet_worker_name="tram-01", fleet_local_keys=["sdlc_profile"],
+            sdlc_profile="qc", alert_repeat_hours=24,
+            database_url=f"sqlite+aiosqlite:///{tmp_path / 'worker.db'}",
+        )
+        # Speak to the central's real ASGI app over httpx, so routing, JSON encoding and
+        # the token header are all exercised rather than assumed.
+        transport = httpx.ASGITransport(app=central_client.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://central") as http:
+            container = central_client.app.state.container
+            svc = FleetAgentService.__new__(FleetAgentService)
+            svc._config = worker_cfg
+            svc._log = SimpleNamespace(
+                info=lambda *a, **k: None, warning=lambda *a, **k: None,
+                error=lambda *a, **k: None,
+            )
+            svc._task = None
+            svc._c = SimpleNamespace(
+                http=http, audit_repo=container.audit_repo,
+                ado=SimpleNamespace(refresh=lambda: None),
+                execution_repo=SimpleNamespace(search=_empty_search),
+            )
+
+            assert await svc.beat() is True
+
+        # The centre now knows the machine…
+        rows = await container.fleet_repo.list_all()
+        assert [r.name for r in rows] == ["tram-01"]
+        # …and the machine took the shared setting while keeping its own role.
+        assert worker_cfg.alert_repeat_hours == 6
+        assert worker_cfg.sdlc_profile == "qc"
+        assert worker_cfg.fleet_role == "worker"      # identity never overwritten
+        import yaml
+        assert yaml.safe_load(worker_yaml.read_text(encoding="utf-8"))["alert_repeat_hours"] == 6

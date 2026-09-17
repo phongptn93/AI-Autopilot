@@ -455,3 +455,51 @@ async def test_the_reviewer_nudge_obeys_quiet_hours(repo):
     notifier._quiet = _Quiet()
     await notifier.notify(msg)
     assert sent == []                      # held, not delivered
+
+
+async def test_every_notice_carries_a_link_back_to_the_work_item():
+    """A card naming "#9083" made the reader go find the item by hand. The link is
+    attached in the ONE fan-out point, so no caller can ship a card without it."""
+    from ai_autopilot.ado.notifier import AdoNotifier
+
+    cfg = Settings(ado_organization="https://dev.azure.com/nois", ado_project="Khatoco",
+                   alert_events="started")
+    sent = []
+
+    class _Channel:
+        name = "t"
+        is_enabled = True
+
+        async def send(self, message):
+            sent.append(message)
+
+    notifier = AdoNotifier(ado=None, config=cfg, channels=[_Channel()])
+    await notifier.notify(NotificationMessage(
+        work_item=WorkItemInfo(id=9083, work_item_type="Requirement", project="Khatoco"),
+        type=NotificationType.STARTED,
+    ))
+    assert sent[0].work_item_url == "https://dev.azure.com/nois/Khatoco/_workitems/edit/9083"
+    assert sent[0].actions[-1][1] == sent[0].work_item_url
+
+
+async def test_a_pr_reminder_gets_no_work_item_link():
+    """Its "#" is a PR id, not a work item — linking it would send the reader to the
+    wrong page (or to one that does not exist)."""
+    from ai_autopilot.ado.notifier import AdoNotifier
+
+    cfg = Settings(ado_organization="https://dev.azure.com/nois", ado_project="Khatoco")
+    sent = []
+
+    class _Channel:
+        name = "t"
+        is_enabled = True
+
+        async def send(self, message):
+            sent.append(message)
+
+    notifier = AdoNotifier(ado=None, config=cfg, channels=[_Channel()])
+    await notifier.notify(NotificationMessage(
+        work_item=WorkItemInfo(id=1498, work_item_type="PullRequest"),
+        type=NotificationType.REMINDER,
+    ))
+    assert sent[0].work_item_url == ""

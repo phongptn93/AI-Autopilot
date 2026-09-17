@@ -103,6 +103,11 @@ class NotificationMessage:
     # ``work_item``, which such a notice has none of.
     heading: str = ""
     text: str = ""
+    # Browser URL of the work item. Filled by ``AdoNotifier._broadcast`` so every
+    # channel can link back to the item: a card naming "#9083" left the reader to
+    # search for it by hand, which on a phone is the difference between acting on
+    # the notice and ignoring it.
+    work_item_url: str = ""
 
     @property
     def event(self) -> str:
@@ -159,13 +164,27 @@ class NotificationMessage:
             or "unassigned"
 
     @property
+    def state_part(self) -> str:
+        """`` | State: Active`` — where the item sits on the board, or "" when unknown.
+
+        The card said what the autopilot did but never where the item ENDED UP, which
+        is the one thing that tells a reader whether it is now their turn."""
+        state = (self.work_item.state or "").strip()
+        return f" | State: {state}" if state else ""
+
+    @property
+    def link_line(self) -> str:
+        """A trailing line linking back to the work item, for text-only channels."""
+        return f"\nWork item: {self.work_item_url}" if self.work_item_url else ""
+
+    @property
     def summary(self) -> str:
         if self.text:
             return self.text
         item = self.work_item
         if self.type is NotificationType.STARTED:
             return (f"**{item.title}**\nSkill: `{self.skill}` | Category: {item.category}"
-                    f" | For: {self.assignee}")
+                    f" | For: {self.assignee}{self.state_part}{self.link_line}")
         if self.type is NotificationType.COMPLETED and self.result and self.result.success:
             r = self.result
             duration = _mmss(r.duration_seconds)
@@ -175,13 +194,14 @@ class NotificationMessage:
             if r.files_changed:
                 extra += f"\nFiles: {len(r.files_changed)} changed"
             return (f"**{item.title}**\nSkill: `{r.skill_used}` | Duration: {duration}"
-                    f" | For: {self.assignee}{extra}")
+                    f" | For: {self.assignee}{self.state_part}{extra}{self.link_line}")
         if self.type is NotificationType.COMPLETED:
             skill = self.result.skill_used if self.result else ""
             error = self.result.error if self.result else ""
-            return f"**{item.title}**\nSkill: `{skill}` | Error: {error}"
+            return (f"**{item.title}**\nSkill: `{skill}` | Error: {error}"
+                    f"{self.state_part}{self.link_line}")
         if self.type is NotificationType.ERROR:
-            return f"**{item.title}**\n{self.error}"
+            return f"**{item.title}**\n{self.error}{self.link_line}"
         return item.title
 
 

@@ -6,6 +6,7 @@ Ported from ``AdoNotifier``.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from urllib.parse import quote
 
 from ai_autopilot.ado.client import AdoClient
 from ai_autopilot.config import Settings
@@ -176,6 +177,7 @@ class AdoNotifier:
         outright rather than queued and then delivered in the morning summary — being
         held is for things you still want, just not now.
         """
+        self._attach_work_item_link(message)
         if not self._config.wants_alert(message.event, int(message.severity)):
             self._log.debug(
                 "notification suppressed by alert policy",
@@ -189,6 +191,29 @@ class AdoNotifier:
             return
         await self._flush_held()
         await self._send_now(message)
+
+    def _attach_work_item_link(self, message: NotificationMessage) -> None:
+        """Give the notice the item's browser URL + an "Open work item" button.
+
+        Done HERE, in the one funnel every notice passes through, rather than at each
+        caller: the link is wanted on every card and a rule applied at seven call sites
+        is a rule that will be missed at the eighth. Callers that set their own URL or
+        already carry a work-item button (the PR nudge, whose "#" is a PR id, not a work
+        item) are left alone.
+        """
+        item = message.work_item
+        if message.work_item_url or not getattr(item, "id", 0):
+            return
+        if (item.work_item_type or "").lower() in {"pullrequest", "pull request"}:
+            return
+        cfg = self._config
+        org = (cfg.ado_organization or "").rstrip("/")
+        if not org:
+            return
+        project = (item.project or cfg.ado_project or "").strip()
+        base = f"{org}/{quote(project, safe='')}" if project else org
+        message.work_item_url = f"{base}/_workitems/edit/{item.id}"
+        message.actions = [*message.actions, ("🔗 Mở work item", message.work_item_url)]
 
     async def _send_now(self, message: NotificationMessage) -> None:
         for channel in self._channels:

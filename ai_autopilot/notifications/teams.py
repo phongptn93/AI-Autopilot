@@ -109,11 +109,21 @@ class TeamsNotifier(NotificationChannel):
         color = color or "default"
 
         item = message.work_item
+        # The id as a LINK when we know the item's URL. A card naming "#9083" made the
+        # reader go find it by hand — on a phone, that is the difference between acting
+        # on the notice and ignoring it. (Adaptive Card fact values render markdown.)
+        label = f"#{item.id} {item.title}"
+        wi = f"[{label}]({message.work_item_url})" if message.work_item_url else label
         facts: list[dict[str, str]] = [
-            {"title": "Work Item", "value": f"#{item.id} {item.title}"},
+            {"title": "Work Item", "value": wi},
             {"title": "Type", "value": item.work_item_type},
             {"title": "Category", "value": str(item.category)},
         ]
+        # Where the item sits on the board NOW — the autopilot moves it as each stage
+        # lands, and the card reported the work without reporting the move, so nobody
+        # could tell from it whose turn the item had become.
+        if item.state:
+            facts.append({"title": "State", "value": item.state})
         # Who the item belongs to. On a shared channel the card said what was done and to
         # which item, but never for whom — so nobody reading it could tell whose work it was.
         facts.append({"title": "Assignee", "value": message.assignee})

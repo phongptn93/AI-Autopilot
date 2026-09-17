@@ -205,6 +205,37 @@ def test_the_assignee_falls_back_to_the_email_then_to_unassigned():
         == "unassigned"
 
 
+def test_the_card_reports_where_the_item_now_sits():
+    """The card said what the autopilot did but never where the item ENDED UP — which is
+    the one thing that tells a reader whether it is now their turn."""
+    msg = NotificationMessage(
+        work_item=_item(state="Ready for Testing"),
+        type=NotificationType.COMPLETED,
+        result=ExecutionResult.ok(42, "agent", "done"),
+    )
+    facts = TeamsNotifier._payload(msg)["attachments"][0]["content"]["body"][1]["facts"]
+    assert {"title": "State", "value": "Ready for Testing"} in facts
+    assert "State: Ready for Testing" in msg.summary     # the text-only channels too
+
+
+def test_an_unknown_state_is_left_off_the_card():
+    msg = NotificationMessage(work_item=_item(), type=NotificationType.STARTED)
+    facts = TeamsNotifier._payload(msg)["attachments"][0]["content"]["body"][1]["facts"]
+    assert not any(f["title"] == "State" for f in facts)
+
+
+def test_the_work_item_fact_links_back_when_the_url_is_known():
+    """"#9083" made the reader go find the item by hand."""
+    msg = NotificationMessage(
+        work_item=_item(id=9083), type=NotificationType.STARTED,
+        work_item_url="https://dev.azure.com/o/P/_workitems/edit/9083",
+    )
+    facts = TeamsNotifier._payload(msg)["attachments"][0]["content"]["body"][1]["facts"]
+    wi = next(f["value"] for f in facts if f["title"] == "Work Item")
+    assert wi == "[#9083 Thing](https://dev.azure.com/o/P/_workitems/edit/9083)"
+    assert "Work item: https://dev.azure.com/o/P/_workitems/edit/9083" in msg.summary
+
+
 def test_a_started_card_carries_no_duration():
     """There is nothing to measure yet, so the fact is absent rather than shown as 0:00."""
     msg = NotificationMessage(work_item=_item(), type=NotificationType.STARTED, skill="agent")

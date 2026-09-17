@@ -326,3 +326,60 @@ def test_several_repos_ask_which_one_and_name_them(tmp_path):
     assert loop_repo(loop, cfg) == ""
     blocker = loop_blockers(loop, cfg)[0]
     assert "2 repo" in blocker and "Backend-Fresh" in blocker and "Micro-Frontend" in blocker
+
+
+def test_the_audit_prompt_hands_the_change_set_over_already_computed():
+    """The run kept dying at 18 seconds: its first act was to discover what changed, and
+    the obvious command for that — a log WITH patches over a day of a busy repo — is
+    larger than the context. Telling it "don't run broad commands" only works if it does
+    not need to."""
+    from ai_autopilot.reports import audit_prompt
+
+    out = audit_prompt("review the last day", [], "C:/ws/Backend-Fresh",
+                       digest="Commits:\nabc123 fix(x): thing")
+    assert "ALREADY COMPUTED" in out
+    assert "abc123 fix(x): thing" in out
+    assert "do not re-run broad git" in out
+
+
+def test_a_repo_with_no_digest_still_gets_a_usable_prompt():
+    """A shallow clone, or nothing in the window: the prompt carries no digest rather
+    than a heading with nothing under it."""
+    from ai_autopilot.reports import audit_prompt
+
+    out = audit_prompt("review the last day", [], "C:/ws/Backend-Fresh", digest="")
+    assert "ALREADY COMPUTED" not in out
+    assert "review the last day" in out
+
+
+def test_the_digest_says_how_much_it_left_out():
+    """A digest that silently truncated would have the reviewer judge a change set that
+    is not the whole one, and report it as if it were."""
+    from ai_autopilot.services.loop_scheduler import _clip
+
+    clipped = _clip("\n".join(f"line {i}" for i in range(250)), 100)
+    assert clipped.count("\n") == 100        # 100 lines + the note
+    assert "+150" in clipped
+
+
+async def test_the_digest_is_computed_with_bounded_git_commands(tmp_path):
+    """Bounded HERE — the point is that the expensive command is never issued at all."""
+    from types import SimpleNamespace
+
+    from ai_autopilot.services.loop_scheduler import LoopScheduler
+
+    issued: list[list[str]] = []
+
+    async def fake_git(args, repo, check=True):
+        issued.append(list(args))
+        return "abc123 fix: thing" if args[0] == "log" else " src/a.py | 2 +-"
+
+    svc = LoopScheduler.__new__(LoopScheduler)
+    svc._c = SimpleNamespace(executor=SimpleNamespace(_git=fake_git))
+    svc._log = SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None)
+
+    digest = await svc._change_digest(str(tmp_path), "main")
+
+    assert "abc123 fix: thing" in digest and "src/a.py" in digest
+    assert all("-p" not in args and "--patch" not in args for args in issued)
+    assert ["log", "--since=24 hours ago", "--oneline", "-n", "100"] in issued

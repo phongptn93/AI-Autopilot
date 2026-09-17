@@ -203,7 +203,7 @@ def agents_block(agents: list[str]) -> str:
     )
 
 
-def audit_prompt(prompt: str, agents: list[str], repo: str = "") -> str:
+def audit_prompt(prompt: str, agents: list[str], repo: str = "", digest: str = "") -> str:
     """Assemble a report loop's prompt: the operator's ask, its agents, the contract.
 
     Assembled here, not stored, so a loop written before the contract existed (or edited
@@ -212,6 +212,16 @@ def audit_prompt(prompt: str, agents: list[str], repo: str = "") -> str:
     parts = [(prompt or "").strip()]
     if repo:
         parts.append(f"Repository under audit: {repo}")
+    if digest:
+        # Handed over ALREADY COMPUTED and already bounded. Asking the agent to discover
+        # the change set itself is what kept killing these runs: one `git log -p` over a
+        # day of a busy monorepo is larger than the context, and the run dies before it
+        # has reviewed a single line. Telling it not to re-run the broad commands only
+        # works if it does not need to.
+        parts.append(
+            "Changes in scope — ALREADY COMPUTED for you, do not re-run broad git "
+            "commands to rediscover them:\n" + digest
+        )
     block = agents_block(agents)
     if block:
         parts.append(block)

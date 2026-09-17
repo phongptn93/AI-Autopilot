@@ -777,3 +777,53 @@ def test_an_install_with_no_jira_says_nothing_about_providers():
     from ai_autopilot.doctor import check_providers
 
     assert check_providers(Settings()) == []
+
+
+def _workspace_with_rules(tmp_path, claude_md_kb: int, *rule_kb: int):
+    (tmp_path / "CLAUDE.md").write_text("x" * (claude_md_kb * 1024), encoding="utf-8")
+    rules = tmp_path / ".claude" / "rules"
+    rules.mkdir(parents=True)
+    for i, kb in enumerate(rule_kb):
+        (rules / f"rule-{i}.md").write_text("y" * (kb * 1024), encoding="utf-8")
+    return Settings(workspace_directory=str(tmp_path))
+
+
+def test_a_heavy_rule_set_is_named_as_the_cost_it_is(tmp_path):
+    """Claude Code loads CLAUDE.md and every .claude/rules file on EVERY run. A rule set
+    that grew file by file becomes a fixed tax, and the symptom is not "rules are big" —
+    it is runs dying on their first real tool result, which reads as a bug in the run."""
+    from ai_autopilot.doctor import check_workspace_context
+
+    cfg = _workspace_with_rules(tmp_path, 20, 50, 37, 29, 15)
+    found = check_workspace_context(cfg)
+
+    # 151 KB ≈ 38k tokens: worth saying, not yet the "runs will die" threshold.
+    assert [f.level for f in found] == [doctor.WARN]
+    assert "~38k tokens" in found[0].title
+    assert "rule-0.md" in found[0].detail            # the biggest one is named
+    assert ".claude/skills" in found[0].fix          # …and the lazy alternative offered
+
+
+def test_a_rule_set_big_enough_to_kill_runs_is_an_error(tmp_path):
+    """Measured on a real workspace: 24 rule files + CLAUDE.md = ~75k tokens gone before
+    the agent reads a line, on a run whose first git command then finished the job."""
+    from ai_autopilot.doctor import check_workspace_context
+
+    found = check_workspace_context(
+        _workspace_with_rules(tmp_path, 20, 50, 37, 29, 25, 15, 15, 15, 15, 40)
+    )
+    assert [f.level for f in found] == [doctor.ERROR]
+
+
+def test_a_modest_rule_set_is_reported_without_alarm(tmp_path):
+    from ai_autopilot.doctor import check_workspace_context
+
+    found = check_workspace_context(_workspace_with_rules(tmp_path, 4, 8))
+    assert [f.level for f in found] == [doctor.OK]
+
+
+def test_no_workspace_means_nothing_to_measure(tmp_path):
+    from ai_autopilot.doctor import check_workspace_context
+
+    assert check_workspace_context(Settings()) == []
+    assert check_workspace_context(Settings(workspace_directory=str(tmp_path))) == []

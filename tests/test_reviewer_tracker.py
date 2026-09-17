@@ -481,3 +481,42 @@ def test_a_genuinely_early_exit_still_says_so():
 
     said = _failure_reason("Command failed with exit code 1 (exit code: 1)", ran_seconds=3)
     assert "thoát sớm" in said
+
+
+def test_the_review_prompt_reads_the_diff_in_stages():
+    """One `git diff` of a large PR exceeds the context: the run dies and the PR gets an
+    apology instead of a review. Reading the shape first is also how a person reviews."""
+    from ai_autopilot.services.reviewer_tracker import _REVIEW_INSTRUCTION
+
+    assert "--stat" in _REVIEW_INSTRUCTION
+    assert "ONE AT A TIME" in _REVIEW_INSTRUCTION
+    assert "Never dump the whole diff" in _REVIEW_INSTRUCTION
+    # …and it must say what it skipped rather than pretending to have read everything.
+    assert "did not read" in _REVIEW_INSTRUCTION
+
+
+async def test_an_oversize_pr_is_told_in_words_a_reviewer_can_act_on():
+    """The engine's own message tells whoever owns the PROMPT to bound its commands —
+    which is not something the person reading the pull request can do."""
+    posted: list[str] = []
+
+    class _Ado:
+        async def add_pull_request_comment(self, repo_id, pr_id, text):
+            posted.append(text)
+            return True
+
+    from ai_autopilot.services import reviewer_tracker as rt
+
+    svc = rt.ReviewerTrackerService.__new__(rt.ReviewerTrackerService)
+    svc._log = SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None)
+    svc._c = SimpleNamespace(ado=_Ado())
+    result = SimpleNamespace(
+        success=False,
+        error="Context overflow: the run's own tool output exceeded the model's context",
+    )
+
+    await svc._post_review_failure("repo-1", 4096, result)
+
+    assert "quá lớn" in posted[0]
+    assert "Context overflow" not in posted[0]     # the internal string stays internal
+    assert "/review" in posted[0]                  # …and it says what to do instead

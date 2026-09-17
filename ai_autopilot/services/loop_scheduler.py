@@ -155,6 +155,38 @@ class LoopScheduler:
         )
         await self._notify(item, result)
 
+    async def _change_digest(self, repo: str, base: str, hours: int = 24) -> str:
+        """The recent change set, computed here and bounded here.
+
+        A review loop's first act is to discover what changed, and the obvious command
+        for that — a log WITH patches over a day of a busy repo — is larger than the
+        model's context. The run then dies before reviewing a single line, which is
+        exactly what kept happening. Computing it here costs two cheap git calls and
+        removes the reason to run the expensive one.
+
+        Best-effort: a repo that cannot answer (shallow clone, no history in the window)
+        returns nothing and the prompt simply carries no digest.
+        """
+        since = f"--since={hours} hours ago"
+        log = await self._git_text(repo, ["log", since, "--oneline", "-n", "100"])
+        stat = await self._git_text(repo, ["diff", "--stat", f"@{{{hours} hours ago}}", "--"])
+        parts = []
+        if log:
+            parts.append("Commits:\n" + _clip(log, 100))
+        if stat:
+            parts.append("Files touched (git diff --stat):\n" + _clip(stat, 200))
+        return "\n\n".join(parts)
+
+    async def _git_text(self, repo: str, args: list[str]) -> str:
+        """One read-only git command, or "" — never raises into the loop."""
+        try:
+            return (await self._c.executor._git(args, repo, check=False)).strip()
+        except Exception as exc:  # noqa: BLE001 — a digest is a convenience
+            self._log.warning(
+                "change digest unavailable", repo=repo, args=args, error=describe_exc(exc)
+            )
+            return ""
+
     async def _run_report(self, loop: ScheduledLoop, repo: str, base: str) -> None:
         """Run an audit loop: read-only pass, parse findings, store and render.
 
@@ -166,7 +198,9 @@ class LoopScheduler:
         started = datetime.now(UTC)
         self._log.info("running report loop", name=loop.name, repo=repo, agents=loop.agents)
 
-        prompt = reports.audit_prompt(loop.prompt, loop.agents, repo)
+        prompt = reports.audit_prompt(
+            loop.prompt, loop.agents, repo, digest=await self._change_digest(repo, base)
+        )
         item = WorkItemInfo(id=0, title=f"[audit] {loop.name}")
         record_id = await c.execution_repo.start_execution(
             item, f"audit:{loop.name}", profile=loop.name
@@ -248,6 +282,15 @@ def _trigger(loop: ScheduledLoop):
     if loop.interval_minutes > 0:
         return IntervalTrigger(minutes=loop.interval_minutes)
     return None
+
+
+def _clip(text: str, max_lines: int) -> str:
+    """First ``max_lines`` lines, saying how many were dropped — a digest that silently
+    truncates would have the reader review a change set that is not the whole one."""
+    lines = (text or "").splitlines()
+    if len(lines) <= max_lines:
+        return text
+    return "\n".join(lines[:max_lines]) + f"\n… (+{len(lines) - max_lines} dòng nữa)"
 
 
 def loop_repo(loop: ScheduledLoop, config) -> str:

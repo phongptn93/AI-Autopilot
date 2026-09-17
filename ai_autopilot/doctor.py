@@ -365,6 +365,55 @@ def check_sdlc_needs_headless(config: Settings) -> list[Finding]:
     )]
 
 
+def check_workspace_context(config: Settings) -> list[Finding]:
+    """How much of every run's context is spent before the agent does anything.
+
+    Claude Code loads ``CLAUDE.md`` and EVERY file in ``.claude/rules/`` as project
+    instructions on every single run — no import needed, no way to opt out per run. A
+    rule set that grew file by file therefore becomes a fixed tax on each run, and the
+    symptom is not "rules are big": it is runs dying on their first real tool result
+    with "Prompt is too long", which looks like a bug in the run.
+
+    Skills are the lazy alternative: only their name and one-line description are
+    indexed, and the body is read when the agent invokes them. A long procedure nobody
+    needs on most runs belongs there, not in rules.
+
+    Offline: it reads file sizes, nothing else.
+    """
+    workspace = (config.workspace_directory or "").strip()
+    if not workspace:
+        return []
+    root = Path(workspace)
+    try:
+        claude_md = (root / "CLAUDE.md").stat().st_size if (root / "CLAUDE.md").is_file() else 0
+        rules = sorted(
+            ((p.stat().st_size, p.name) for p in (root / ".claude" / "rules").glob("*.md")),
+            reverse=True,
+        )
+    except OSError:
+        return []
+    total = claude_md + sum(size for size, _ in rules)
+    if not total:
+        return []
+    # ~4 bytes per token is close enough to decide whether this is worth saying.
+    tokens = total // 4
+    biggest = ", ".join(f"{name} ({size // 1024} KB)" for size, name in rules[:3])
+    if tokens < 25_000:
+        return [Finding(OK, f"Workspace instructions: ~{tokens // 1000}k tokens per run")]
+    level = ERROR if tokens >= 60_000 else WARN
+    return [Finding(
+        level,
+        f"Every run starts ~{tokens // 1000}k tokens deep in workspace instructions",
+        f"CLAUDE.md plus {len(rules)} file(s) in .claude/rules are loaded on EVERY run, "
+        f"whether or not they apply to it. Largest: {biggest}. That much is spent before "
+        "the agent reads a line of code, and what it looks like when it runs out is a "
+        "run dying on its first big tool result — which reads as a bug in the run.",
+        "Move the long, situational ones into .claude/skills/: a skill is indexed by "
+        "name and description and only read when it is invoked. Keep .claude/rules for "
+        "short rules that are true on every run.",
+    )]
+
+
 def check_providers(config: Settings) -> list[Finding]:
     """A workspace that says Jira but cannot reach it — or that expects ADO features there.
 
@@ -1430,7 +1479,8 @@ CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
     check_relay_hands_over, check_default_profile_is_not_a_doorway,
-    check_sdlc_needs_headless, check_fleet, check_providers, check_deploy_stage,
+    check_sdlc_needs_headless, check_fleet, check_providers,
+    check_workspace_context, check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,
     check_autonomy, check_dashboard_security, check_notifications, check_alerts,

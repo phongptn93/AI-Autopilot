@@ -80,7 +80,17 @@ _REVIEW_INSTRUCTION = (
     "3. **✅ Checklist** — correctness, security, performance, tests, naming/style: "
     "one line each with a pass/fail/n-a verdict.\n"
     "4. **🎯 Verdict** — your overall recommendation.\n"
-    "Be specific and courteous; review the DIFF only, don't restyle the codebase. "
+    "Be specific and courteous; review the DIFF only, don't restyle the codebase.\n"
+    # A review's first move is one `git diff origin/base...origin/branch`, and on a large
+    # PR that single tool result exceeds the context: the run dies with "Prompt is too
+    # long" and the PR gets an apology instead of a review. Reading the shape first and
+    # then only the files that matter is also how a person reviews.
+    "READ IN STAGES — the diff may be far larger than you can hold. Start with "
+    "`git diff --stat` between the base and the PR branch to see its shape, then read "
+    "the files that matter ONE AT A TIME with `git diff … -- <path>`. Never dump the "
+    "whole diff, and do not read generated or vendored files (lock files, bundles, "
+    "snapshots) — name them as skipped. If the PR is too large to review in full, "
+    "review the riskiest files and SAY which ones you did not read.\n"
     "Then end your FINAL response (not the comment) with one line:\n"
     "VERDICT: approve | suggestions | wait\n"
     "(approve = mergeable as-is; suggestions = mergeable, minor points; wait = must "
@@ -464,6 +474,35 @@ class ReviewerTrackerService:
         return False
 
     # ── Scan loop ────────────────────────────────────────────────────────────
+
+    async def _post_review_failure(self, repo_id: str, pr_id: int, result) -> None:
+        """Tell the PR why there is no review, in words its reader can act on.
+
+        The engine's own message for an oversize run is advice for whoever owns the
+        PROMPT ("bound the commands it asks for") — the person reading the pull request
+        cannot act on that, and an internal error string pasted into a thread reads as
+        noise. So the one failure a reviewer CAN do something about gets its own wording.
+        """
+        reason = (getattr(result, "error", "") or "").strip()
+        oversize = any(
+            marker in reason.lower() for marker in ("context overflow", "thrashing")
+        )
+        detail = (
+            "PR này quá lớn để đọc trong một lượt — tôi không giữ đủ ngữ cảnh cho "
+            "toàn bộ diff."
+            if oversize else reason
+        )
+        hint = (
+            "Tách PR nhỏ hơn, hoặc reply <code>/review &lt;đường/dẫn&gt;</code> để tôi "
+            "review đúng phần bạn cần."
+            if oversize else
+            "Tôi sẽ tự thử lại khi có commit mới, hoặc reply <code>/review</code> để "
+            "tôi chạy lại ngay."
+        )
+        await self._c.ado.add_pull_request_comment(
+            repo_id, pr_id,
+            f"<div><b>⚠️ Chưa review được:</b> {detail}<br/><sub>{hint}</sub></div>",
+        )
 
     async def _scan(self) -> None:
         c = self._c
@@ -950,12 +989,7 @@ class ReviewerTrackerService:
                 metrics.record_auto_review("done")
                 self._log.info("auto-review done", pr=pr_id, vote=label)
             else:
-                await c.ado.add_pull_request_comment(
-                    repo_id, pr_id,
-                    f"<div><b>⚠️ Chưa review được:</b> {result.error}<br/>"
-                    "<sub>Tôi sẽ tự thử lại khi có commit mới, hoặc reply "
-                    "<code>/review</code> để tôi chạy lại ngay.</sub></div>",
-                )
+                await self._post_review_failure(repo_id, pr_id, result)
                 metrics.record_auto_review("failed")
                 self._log.warning("auto-review run failed", pr=pr_id, error=result.error)
             # Durable mark — success OR failure: this iteration was attempted, no

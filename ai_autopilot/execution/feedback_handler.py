@@ -101,7 +101,13 @@ def _guidance(command: str, item: WorkItemInfo, branch: str, feedback: str, base
             f"item #{wid}:\n\n{feedback}\n\nThe PR branch is NOT checked out locally. Inspect "
             f"it read-only via `git diff origin/{{base}}...origin/{branch}` (already fetched) "
             "or the Azure DevOps PR tools, then post your findings as a PR comment. Do NOT "
-            "modify files, check out branches, or push commits."
+            "modify files, check out branches, or push commits.\n"
+            # One `git diff` of a large PR is bigger than the context, and the run then
+            # dies with "Prompt is too long" — the reviewer gets an apology instead of a
+            # review. Read the shape first, then the files that matter.
+            "Read in stages: `--stat` first, then one file at a time; never dump the "
+            "whole diff, and skip generated or vendored files by name. If the reviewer "
+            "named a path, review THAT and say so."
         )
     # Fallback action.
     return (

@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 
 import yaml
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -23,6 +23,9 @@ from ai_autopilot import (
     delivery,
     security,
     spec_drift,
+)
+from ai_autopilot import (
+    fleet as fleet_mod,
 )
 from ai_autopilot import (
     flows as flows_mod,
@@ -674,6 +677,9 @@ def create_dashboard_router() -> APIRouter:
                 cfg and (cfg.dashboard_auth_password_hash or cfg.dashboard_auth_token)
             ),
             "version": request.app.version,  # single source of truth: FastAPI(version=...)
+            # The Fleet page only means anything on the central VM — a worker's own
+            # table is empty by definition, and a link to an empty page reads as a bug.
+            "fleet_role": getattr(cfg, "fleet_role", "") if cfg else "",
             "mmss": _mmss,
             "fmt_duration": _fmt_duration,
             "category_badge": _category_badge,
@@ -2452,6 +2458,71 @@ def create_dashboard_router() -> APIRouter:
             ),
         )
 
+    @router.get("/fleet", response_class=HTMLResponse)
+    async def fleet_page(request: Request):
+        """The worker machines: alive, on which version, running what, config in step.
+
+        Only reachable on a central. Everywhere else the table is empty by definition,
+        and an empty page with no explanation reads as a broken feature rather than as
+        a mode that is switched off.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        if (cfg.fleet_role or "") != "central":
+            raise HTTPException(status_code=404, detail="fleet mode is not enabled here")
+        _, central_hash = fleet_mod.config_document(cfg)
+        now = datetime.now(UTC)
+        offline_after = max(1, int(cfg.fleet_offline_after_minutes)) * 60
+        workers = []
+        for row in await c.fleet_repo.list_all():
+            seen = row.last_seen
+            if seen.tzinfo is None:
+                seen = seen.replace(tzinfo=UTC)
+            quiet = (now - seen).total_seconds()
+            synced = row.config_synced_at
+            if synced is not None and synced.tzinfo is None:
+                synced = synced.replace(tzinfo=UTC)
+            workers.append({
+                "name": row.name,
+                "hostname": row.hostname,
+                "version": row.version,
+                # A worker on an older build may not even understand the settings it is
+                # being sent, so the drift is worth showing next to the sync state.
+                "version_drift": bool(row.version and row.version != request.app.version),
+                "profile": row.profile,
+                "stages": [s.name for s in sdlc_plan.profile_stages(row.profile, cfg)]
+                          if row.profile else [],
+                "tags": _json_list(row.tags),
+                "in_sync": bool(row.config_hash) and row.config_hash == central_hash,
+                "synced_ago": int((now - synced).total_seconds()) if synced else None,
+                "online": quiet <= offline_after,
+                "quiet": int(quiet),
+                "running": _json_list(row.running),
+                "done_today": row.done_today,
+                "failed_today": row.failed_today,
+            })
+        return _TEMPLATES.TemplateResponse(
+            request, "fleet.html",
+            _ctx(request, "fleet", workers=workers, central_hash=central_hash,
+                 offline_after_minutes=cfg.fleet_offline_after_minutes),
+        )
+
+    @router.post("/fleet/forget")
+    async def fleet_forget(request: Request):
+        """Drop a machine that is gone for good. Never automatic: a machine that stops
+        reporting is the most important thing this page can tell you."""
+        c: Container = request.app.state.container
+        if (c.config.fleet_role or "") != "central":
+            raise HTTPException(status_code=404, detail="fleet mode is not enabled here")
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        if name:
+            await c.fleet_repo.forget(name)
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="fleet.forgotten", target=name,
+            )
+        return RedirectResponse("/dashboard/fleet", status_code=303)
+
     @router.get("/workspaces", response_class=HTMLResponse)
     async def workspaces_page(request: Request):
         """Manage the workspaces: which folder builds which ADO project(s), on which
@@ -3035,6 +3106,22 @@ def create_dashboard_router() -> APIRouter:
         return _flash("/dashboard/settings", "imported")
 
     return router
+
+
+def _json_list(raw: str | None) -> list:
+    """A JSON column back as a list — never an exception into a page render.
+
+    These columns are written by another machine, so a value this process cannot parse
+    is a real possibility (an older worker, a truncated write). The page showing one
+    machine's snapshot as empty is recoverable; the page failing to render is not.
+    """
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return value if isinstance(value, list) else []
 
 
 def files_changed_count(raw: str | None) -> int:

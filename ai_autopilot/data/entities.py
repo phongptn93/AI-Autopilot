@@ -409,6 +409,41 @@ class AuditEvent(Base):
     detail: Mapped[str] = mapped_column(String(2000), default="")
 
 
+class FleetWorker(Base):
+    """One worker machine, as last seen by the central VM.
+
+    The row is the machine's CURRENT state, updated in place on every heartbeat — not a
+    log of beats. The question the fleet page answers is "what is this machine doing and
+    is its configuration current", and a table of beats would answer "how often did it
+    call home" while making the useful query a group-by.
+
+    ``running`` is JSON rather than a child table for the same reason: it is a snapshot
+    that is replaced wholesale every beat and never queried across machines. The durable
+    record of what ran lives on the worker's own ``executions`` table.
+    """
+
+    __tablename__ = "fleet_workers"
+    __table_args__ = (Index("ix_fleet_workers_last_seen", "last_seen"),)
+
+    # The machine's own name (hostname by default) — natural key, so a machine that
+    # restarts or moves IP keeps its history rather than appearing as a second host.
+    name: Mapped[str] = mapped_column(String(200), primary_key=True)
+    hostname: Mapped[str] = mapped_column(String(200), default="")
+    version: Mapped[str] = mapped_column(String(40), default="")
+    profile: Mapped[str] = mapped_column(String(80), default="")      # the role it runs
+    tags: Mapped[str] = mapped_column(Text, default="[]")             # JSON: its own tags
+    # Hash of the central document the worker last applied, next to the hash the central
+    # served at that moment: equal = in sync, different = it has not caught up yet.
+    config_hash: Mapped[str] = mapped_column(String(64), default="")
+    central_hash: Mapped[str] = mapped_column(String(64), default="")
+    config_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime)
+    last_seen: Mapped[datetime] = mapped_column(DateTime)
+    running: Mapped[str] = mapped_column(Text, default="[]")          # JSON snapshot
+    done_today: Mapped[int] = mapped_column(Integer, default=0)
+    failed_today: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class QualityKind:
     """``QualityEvent.kind`` values. Plain strings, not an ``Enum`` column: this is an
     append-only analytics log that will outlive today's vocabulary, and a new kind must

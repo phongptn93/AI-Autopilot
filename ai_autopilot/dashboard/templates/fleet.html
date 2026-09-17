@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: 1240px; }
+  .fl-note { font-size:12px; color:var(--text-muted); background:var(--bg,#0d0d12);
+             border:1px solid var(--border,#23232b); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
+  .fl-note code { font-family:var(--mono,monospace); font-size:11px; }
+  .fl-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:12px;
+             margin-bottom:12px; overflow:hidden; }
+  /* Offline is the one state this page exists to make obvious, so it changes the whole
+     row rather than one badge: a machine nobody has heard from in a day should not look
+     like a machine that answered a minute ago with a small grey dot. */
+  .fl-card.is-offline { opacity:.62; border-style:dashed; }
+  .fl-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+             padding:11px 16px; border-bottom:1px solid var(--border,#23232b); background:var(--bg,#0d0d12); }
+  .fl-name { font-weight:600; font-size:14px; }
+  .fl-host { font-size:12px; color:var(--text-dim); font-family:var(--mono,monospace); }
+  .fl-spacer { flex:1; }
+  .fl-badge { font-size:11px; font-weight:600; padding:2px 9px; border-radius:20px; white-space:nowrap;
+              background:var(--accent-bg,rgba(99,102,241,.15)); color:var(--accent-hover,#818cf8); }
+  .fl-badge.ok { background:rgba(46,160,67,.16); color:#3fb950; }
+  .fl-badge.warn { background:rgba(210,153,34,.16); color:#d29922; }
+  .fl-badge.bad { background:rgba(229,72,77,.14); color:#e5484d; }
+  .fl-badge.mute { background:rgba(125,125,140,.14); color:var(--text-dim); }
+  .fl-body { padding:12px 16px; display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px 18px; }
+  .fl-f { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .fl-f label { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); }
+  .fl-f .val { font-size:13px; }
+  .fl-tags { display:flex; flex-wrap:wrap; gap:5px; }
+  .fl-tag { font-family:var(--mono,monospace); font-size:11px; padding:1px 7px; border-radius:6px;
+            background:var(--bg,#0d0d12); border:1px solid var(--border,#23232b); color:var(--text-dim); }
+  .fl-runs { grid-column:1 / -1; display:flex; flex-direction:column; gap:5px; }
+  .fl-run { font-size:12.5px; display:flex; gap:9px; align-items:baseline; flex-wrap:wrap; }
+  .fl-run .wid { font-family:var(--mono,monospace); color:var(--accent-hover,#818cf8); }
+  .fl-run .ttl { color:var(--text); }
+  .fl-run .meta { color:var(--text-dim); font-size:11.5px; }
+  .fl-foot { display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+             padding:8px 16px; border-top:1px solid var(--border,#23232b); font-size:12px; color:var(--text-muted); }
+  .fl-forget { background:none; border:none; color:var(--text-dim); font-size:12px; cursor:pointer; padding:0; }
+  .fl-forget:hover { color:var(--red,#e5484d); }
+  .fl-empty { text-align:center; padding:48px 20px; color:var(--text-muted); }
+  .fl-empty code { font-family:var(--mono,monospace); font-size:12px; color:var(--text-dim); }
+</style>
+
+<h1>🛰 Fleet</h1>
+
+<div class="fl-note">
+  Máy trạm tự gọi về đây mỗi chu kỳ: đẩy tình trạng, kéo cấu hình chung.
+  Bản cấu hình đang phát: <code>{{ central_hash }}</code> ·
+  im lặng quá <b>{{ offline_after_minutes }} phút</b> = offline.
+  Cấu hình riêng của từng máy (tag, workspace, repo, PAT) <b>không</b> bị ghi đè.
+</div>
+
+{% if not workers %}
+<div class="fl-card"><div class="fl-empty">
+  Chưa máy trạm nào gọi về.<br>
+  Trên máy trạm, đặt <code>fleet_role: worker</code>, <code>fleet_central_url</code> và
+  <code>fleet_token</code> khớp với máy này.
+</div></div>
+{% endif %}
+
+{% for w in workers %}
+<div class="fl-card {{ 'is-offline' if not w.online else '' }}">
+  <div class="fl-head">
+    <span class="fl-name">{{ '🟢' if w.online else '🔴' }} {{ w.name }}</span>
+    {% if w.hostname and w.hostname != w.name %}<span class="fl-host">{{ w.hostname }}</span>{% endif %}
+    <span class="fl-spacer"></span>
+    {% if w.version %}
+    <span class="fl-badge {{ 'warn' if w.version_drift else 'mute' }}"
+          title="{{ 'Khác version của máy trung tâm (' ~ version ~ ')' if w.version_drift else 'Cùng version với trung tâm' }}">
+      v{{ w.version }}
+    </span>
+    {% endif %}
+    {% if w.in_sync %}
+    <span class="fl-badge ok">✅ config đồng bộ</span>
+    {% else %}
+    <span class="fl-badge bad">⚠️ config lệch</span>
+    {% endif %}
+  </div>
+
+  <div class="fl-body">
+    <div class="fl-f">
+      <label>Vai (role)</label>
+      <div class="val">
+        {% if w.profile %}<b>{{ w.profile }}</b>
+          {% if w.stages %}<span class="meta" style="color:var(--text-dim);font-size:11.5px"> · {{ w.stages | join(' → ') }}</span>{% endif %}
+        {% else %}<span style="color:var(--text-dim)">—</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="fl-f">
+      <label>Tag riêng của máy</label>
+      <div class="fl-tags">
+        {% for t in w.tags %}<span class="fl-tag">{{ t }}</span>{% else %}
+        <span style="color:var(--text-dim);font-size:12px">—</span>{% endfor %}
+      </div>
+    </div>
+
+    <div class="fl-f">
+      <label>Đồng bộ lần cuối</label>
+      <div class="val">
+        {% if w.synced_ago is not none %}{{ fmt_duration(w.synced_ago) }} trước
+        {% else %}<span style="color:var(--text-dim)">chưa lần nào</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="fl-f">
+      <label>Hôm nay</label>
+      <div class="val">
+        ✅ {{ w.done_today }} xong
+        {% if w.failed_today %} · <span style="color:var(--red,#e5484d)">❌ {{ w.failed_today }} lỗi</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="fl-runs">
+      <label style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)">
+        Đang chạy ({{ w.running | length }})
+      </label>
+      {% for r in w.running %}
+      <div class="fl-run">
+        <span class="wid">#{{ r.id }}</span>
+        <span class="ttl">{{ r.title or '—' }}</span>
+        <span class="meta">{{ r.role or r.skill }} · {{ fmt_duration(r.elapsed) }}</span>
+      </div>
+      {% else %}
+      <div style="color:var(--text-dim);font-size:12.5px">Rảnh — không có run nào.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="fl-foot">
+    <span>Heartbeat cuối: {{ fmt_duration(w.quiet) }} trước</span>
+    <span class="fl-spacer"></span>
+    <form method="post" action="/dashboard/fleet/forget"
+          onsubmit="return confirm('Xoá máy {{ w.name }} khỏi danh sách? Máy vẫn tự xuất hiện lại nếu còn gọi về.')">
+      <input type="hidden" name="name" value="{{ w.name }}">
+      <button type="submit" class="fl-forget">Xoá khỏi danh sách</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

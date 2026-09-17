@@ -686,6 +686,29 @@ FIELDS: tuple[Field, ...] = (
           "Directory (tenant) ID the App registration lives in."),
     Field("teams_agent_app_secret", "↳ Agent app secret", "password", "💬 Teams bot (2-way chat)",
           "Client secret from Certificates & secrets on the App registration."),
+    # ── Fleet ──
+    Field("fleet_role", "Vai của máy này", "select", "🛰 Fleet",
+          "Blank = máy độc lập (mặc định, không đổi gì). 'central' = VM trung tâm giữ cấu hình "
+          "chung và theo dõi máy trạm. 'worker' = máy trạm, kéo cấu hình từ trung tâm và gửi "
+          "heartbeat về.", ("", "central", "worker")),
+    Field("fleet_central_url", "↳ URL trung tâm (worker)", "text", "🛰 Fleet",
+          "Địa chỉ VM trung tâm, vd http://vm-autopilot:8080. Chỉ máy trạm gọi đi — trung tâm "
+          "KHÔNG cần gọi ngược về, nên máy sau NAT/VPN vẫn tham gia được."),
+    Field("fleet_token", "↳ Token chung", "password", "🛰 Fleet",
+          "Bí mật chung của cả đội, phải khớp ở 2 phía. Trung tâm KHÔNG bật API fleet khi token "
+          "rỗng — một endpoint mở sẽ phát toàn bộ cấu hình chung cho bất kỳ ai gọi tới."),
+    Field("fleet_worker_name", "↳ Tên máy trạm", "text", "🛰 Fleet",
+          "Tên hiển thị trên trang Fleet. Blank = hostname. Giữ nguyên qua các lần khởi động "
+          "lại thì lịch sử của máy mới gom về một dòng."),
+    Field("fleet_local_keys", "↳ Khoá máy trạm tự giữ", "list", "🛰 Fleet",
+          "Mỗi dòng một tên setting mà trung tâm KHÔNG được ghi đè (vd 'sdlc_profile'). "
+          "Secrets, trigger_tag, workspaces, repos và database_url đã luôn được giữ lại sẵn — "
+          "danh sách này là phần RIÊNG mà máy trạm tự khai thêm.",
+          placeholder="sdlc_profile"),
+    Field("fleet_sync_interval_minutes", "↳ Chu kỳ đồng bộ (phút)", "int", "🛰 Fleet",
+          "Máy trạm gọi về mỗi bấy nhiêu phút. Tối thiểu 1 phút."),
+    Field("fleet_offline_after_minutes", "↳ Coi là offline sau (phút)", "int", "🛰 Fleet",
+          "Trung tâm: máy im lặng lâu hơn mức này sẽ hiện đỏ trên trang Fleet."),
     # ── Web / Security ──
     Field("dashboard_auth_password", "Dashboard password", "password", "Web / Security",
           "Password to access this dashboard (HTTP Basic — any username). Stored as a "
@@ -736,6 +759,13 @@ EXPORT_EXCLUDE = frozenset({
     "workspace_map", "workspaces",
     "database_url", "health_host", "health_port", "plugins_directory",
     "trigger_tag",          # per-host default tag
+    # ── fleet wiring: identity, never shared ──
+    # A central that exported these would turn every worker that applied the document
+    # into a second central pointed at itself, and hand the fleet token to anything
+    # that could read one machine's config. They say WHO a machine is in the fleet,
+    # which is the one thing the fleet cannot be allowed to overwrite.
+    "fleet_role", "fleet_central_url", "fleet_token", "fleet_worker_name",
+    "fleet_local_keys", "fleet_sync_interval_minutes", "fleet_offline_after_minutes",
     "repos",                # RepoConfig entries embed local filesystem paths
 })
 

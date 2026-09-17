@@ -1,0 +1,182 @@
+"""Fleet mode — one central VM holds the shared configuration, worker machines pull it.
+
+Every machine already runs a complete autopilot: its own trigger tag (``<hostname>-
+autopilot``), its own role, its own assignee. What it did not have was a centre. Shared
+settings — trigger states, the role relay, alert thresholds — had to be edited by hand on
+each host or passed around as an exported YAML, and nobody could say which host was
+running which version of it, or what any of them were doing right now.
+
+Two rules shape everything here:
+
+**Connectivity goes one way.** The worker calls the central; the central never calls the
+worker. A developer's machine sits behind NAT, sleeps, and changes IP — anything that
+needs to dial INTO it works in a demo and not in an office.
+
+**The central never sends secrets, and the worker never accepts machine-specific keys.**
+The document is built by ``settings_form.export_settings`` (which already strips the ADO
+PAT, SMTP/Zalo tokens, ``trigger_tag``, ``workspaces``, ``repos``, ``database_url``), and
+the worker strips them AGAIN on arrival along with whatever it declared in
+``fleet_local_keys``. Filtering on both ends is the point: a compromised or misconfigured
+centre still cannot write a PAT, a filesystem path, or another machine's tag onto a host.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import secrets
+from typing import Any
+
+import yaml
+from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import BaseModel, Field
+
+from ai_autopilot.dashboard import settings_form
+from ai_autopilot.logging_config import get_logger
+
+_log = get_logger("fleet")
+
+# The header a worker authenticates with. A header rather than a query parameter so the
+# token does not land in access logs or browser history.
+TOKEN_HEADER = "x-fleet-token"
+
+ROLE_CENTRAL = "central"
+ROLE_WORKER = "worker"
+
+
+class RunningRun(BaseModel):
+    """One run the worker has in flight right now — what "in flight" means on /now."""
+
+    id: int = 0
+    title: str = ""
+    role: str = ""
+    skill: str = ""
+    elapsed: int = 0        # seconds since it started
+
+
+class WorkerReport(BaseModel):
+    """What a worker says about itself on every heartbeat.
+
+    Deliberately small and derived: everything here can be recomputed on the next beat,
+    so a lost report costs nothing and the central holds no state the worker cannot
+    restate. ``config_hash`` is what turns the heartbeat into a sync — see
+    :func:`config_hash`.
+    """
+
+    name: str = ""
+    hostname: str = ""
+    version: str = ""
+    profile: str = ""                       # the role this machine runs
+    tags: list[str] = Field(default_factory=list)   # its OWN tags (trigger, run-now…)
+    config_hash: str = ""                   # hash of the central document it last applied
+    running: list[RunningRun] = Field(default_factory=list)
+    done_today: int = 0
+    failed_today: int = 0
+
+
+class SyncResponse(BaseModel):
+    """The central's answer: the shared configuration, when it differs.
+
+    ``config`` is omitted when the worker's hash already matches — the common case, every
+    beat of every hour. Sending it anyway would work, but it turns an idle fleet into a
+    stream of full configuration documents and makes "did anything change?" unanswerable
+    from a log.
+    """
+
+    config_hash: str = ""
+    config: dict[str, Any] | None = None
+    # Echoed back so a worker pointed at the wrong host (or at a machine that is not a
+    # central at all) fails loudly instead of quietly syncing with nothing.
+    central_version: str = ""
+
+
+def config_hash(document: dict[str, Any]) -> str:
+    """A stable fingerprint of a configuration document.
+
+    Hashed from YAML with sorted keys rather than from ``str(dict)``: dict ordering
+    reflects insertion history, so the same settings saved twice would fingerprint
+    differently and every worker would "resync" a document it already had.
+    """
+    body = yaml.safe_dump(document, sort_keys=True, allow_unicode=True, default_flow_style=False)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+
+def config_document(config: Any) -> tuple[dict[str, Any], str]:
+    """The shared document a central hands out, and its hash.
+
+    Built from ``export_settings`` — the same filter the Settings page's "export config"
+    download uses — so there is ONE definition of what is shareable. A key that must
+    never leave the centre belongs in ``settings_form.EXPORT_EXCLUDE``, not in a second
+    list here that would drift from it.
+    """
+    document = settings_form.export_settings(config)
+    return document, config_hash(document)
+
+
+def strip_local(updates: dict[str, Any], local_keys: list[str] | None = None) -> dict[str, Any]:
+    """Filter a document the worker received down to what it may actually apply.
+
+    Three things are dropped: keys that are not Settings fields at all, keys the export
+    filter already considers unshareable (secrets, ``trigger_tag``, ``workspaces``,
+    ``repos``, ``database_url``), and the keys this machine declared as its own in
+    ``fleet_local_keys``.
+
+    The second of those is the load-bearing one. The central strips them too, so this
+    looks redundant — it is not: it is what makes a hostile or simply misconfigured
+    central unable to write a PAT or a filesystem path onto a worker. A filter that runs
+    only on the sending side protects nobody.
+    """
+    from ai_autopilot.config import Settings
+
+    valid = set(Settings.model_fields)
+    mine = {str(k).strip() for k in (local_keys or []) if str(k).strip()}
+    return {
+        k: v for k, v in (updates or {}).items()
+        if k in valid and k not in settings_form.EXPORT_EXCLUDE and k not in mine
+    }
+
+
+def create_fleet_router() -> APIRouter:
+    """The central's side: one endpoint, mounted only when ``fleet_role`` is central.
+
+    Mounted conditionally rather than always-with-a-guard so a standalone or worker
+    install does not present a fleet API at all — a route that exists and answers 401 is
+    still a route to attack, and it tells a scanner what this host is.
+    """
+    router = APIRouter(prefix="/api/fleet", tags=["fleet"])
+
+    @router.post("/heartbeat", response_model=SyncResponse)
+    async def heartbeat(
+        request: Request,
+        report: WorkerReport,
+        x_fleet_token: str | None = Header(default=None),
+    ) -> SyncResponse:
+        """Record what a worker is doing, and answer with the shared configuration.
+
+        One call does both on purpose: a worker that can report is a worker that can
+        sync, so there is no state where the centre sees a machine it cannot configure.
+        """
+        c = request.app.state.container
+        cfg = c.config
+        token = (cfg.fleet_token or "").strip()
+        if not token or not secrets.compare_digest((x_fleet_token or "").strip(), token):
+            # Same answer for "no token configured" and "wrong token": a different one
+            # would tell an unauthenticated caller whether this central is armed.
+            raise HTTPException(status_code=401, detail="unauthorized")
+        if not (report.name or "").strip():
+            raise HTTPException(status_code=422, detail="worker name is required")
+
+        document, digest = config_document(cfg)
+        await c.fleet_repo.upsert(report, config_hash=digest)
+        _log.info(
+            "fleet heartbeat", worker=report.name, version=report.version,
+            running=len(report.running), in_sync=report.config_hash == digest,
+        )
+        from ai_autopilot import __version__ as central_version
+
+        return SyncResponse(
+            config_hash=digest,
+            config=None if report.config_hash == digest else document,
+            central_version=central_version,
+        )
+
+    return router

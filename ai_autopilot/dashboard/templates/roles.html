@@ -164,28 +164,33 @@
         <div class="rl-f">
           <label>Waits in (ADO state)</label>
           <input type="text" class="rl-in" name="role_{{ r.name }}_waits" value="{{ r.waits_in }}"
-                 list="rl-states" placeholder="blank = not wired · comma-separate for several">
+                 list="rl-states" placeholder="blank = not wired"
+                 title="Blank = not wired. Comma-separate to wait in several states.">
           <span class="rl-hint">The door. An item here is this role's turn. Several states? Separate them with commas — new work and rework are the same person's two queues.</span>
         </div>
 
         <div class="rl-f">
           <label>Shows while running</label>
           <input type="text" class="rl-in" name="role_{{ r.name }}_shows" value="{{ r.shows }}"
-                 list="rl-states" placeholder="falls back to {{ in_progress or 'the global state' }}">
+                 list="rl-states" placeholder="↳ {{ in_progress or 'global state' }}"
+                 title="Blank falls back to {{ in_progress or 'the global working state' }}.">
           <span class="rl-hint">So the board says who is holding it.</span>
         </div>
 
         <div class="rl-f">
           <label>Run-now tag</label>
           <input type="text" class="rl-in mono" name="role_{{ r.name }}_tag" value="{{ r.entry_tag }}"
-                 placeholder="falls back to {{ entry_tag or 'nothing' }}">
+                 placeholder="↳ {{ entry_tag or 'nothing' }}"
+                 title="Blank falls back to {{ entry_tag or 'nothing' }} — this role then has no tag of its own.">
 <span class="rl-hint">Starts <b>this role</b> where the item stands, whatever the state — the tag names the role, so it runs even with no door wired. Removed on pickup, and again when the role hands off.{% if entry_tag %} Blank uses the shared <b>{{ entry_tag }}</b> (<a href="/dashboard/settings#Tags%20%26%20Trigger">change it</a>), which names no role: the state picks, and on a state nobody waits in that is the default profile.{% else %} No shared fallback is set — blank means this role has no run-now tag.{% endif %}</span>
         </div>
 
         <div class="rl-f">
           <label>When done →</label>
           <input type="text" class="rl-in" name="role_{{ r.name }}_done" value="{{ r.done }}"
-                 list="rl-states" placeholder="{% if resolved_state %}falls back to {{ resolved_state }}{% else %}blank = stop and wait for a person{% endif %}">
+                 list="rl-states"
+                 placeholder="{% if resolved_state %}↳ {{ resolved_state }}{% else %}blank = stops here{% endif %}"
+                 title="{% if resolved_state %}Blank falls back to {{ resolved_state }}.{% else %}Blank = stop and wait for a person — no fallback state is set.{% endif %}">
           {% if r.lands_on %}
           <span class="rl-hint">Hands to <b>{{ r.lands_on }}</b>.</span>
           {% elif r.dead_end and r.done %}

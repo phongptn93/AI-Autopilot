@@ -238,8 +238,11 @@ def test_the_when_done_placeholder_names_the_state_a_blank_field_really_sets(tmp
         sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
     ) as client:
         page = client.get("/dashboard/roles").text
-        assert "falls back to Resolved" in page
-        assert "blank = stop and wait for a person" not in page
+        # Short enough to survive the column width — the input clipped the sentence
+        # mid-word ("blank = stop and wait f"), which is worse than no placeholder.
+        assert 'placeholder="↳ Resolved"' in page
+        assert "Blank falls back to Resolved." in page          # the full text, on hover
+        assert "stop and wait for a person" not in page
 
 
 def test_it_says_stop_only_when_there_really_is_no_fallback(tmp_path):
@@ -247,7 +250,9 @@ def test_it_says_stop_only_when_there_really_is_no_fallback(tmp_path):
         tmp_path, resolved_state="",
         sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
     ) as client:
-        assert "blank = stop and wait for a person" in client.get("/dashboard/roles").text
+        page = client.get("/dashboard/roles").text
+        assert 'placeholder="blank = stops here"' in page
+        assert "stop and wait for a person" in page             # the full text, on hover
 
 
 def test_the_page_says_where_the_shared_run_now_tag_is_changed(tmp_path):
@@ -259,7 +264,8 @@ def test_the_page_says_where_the_shared_run_now_tag_is_changed(tmp_path):
         sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
     ) as client:
         page = client.get("/dashboard/roles").text
-        assert "falls back to autopilot-run" in page
+        assert 'placeholder="↳ autopilot-run"' in page
+        assert "Blank falls back to autopilot-run" in page      # the full text, on hover
         assert "/dashboard/settings" in page and "shared" in page
 
 
@@ -270,7 +276,7 @@ def test_it_does_not_promise_a_shared_fallback_that_is_not_set(tmp_path):
     ) as client:
         page = client.get("/dashboard/roles").text
         assert "No shared fallback is set" in page
-        assert "falls back to nothing" in page
+        assert 'placeholder="↳ nothing"' in page
 
 
 def test_a_role_run_now_tag_equal_to_the_trigger_tag_is_refused(tmp_path, monkeypatch):

@@ -3220,6 +3220,13 @@ def create_dashboard_router() -> APIRouter:
     _SETUP_STEP_ADO = ("ado", "Kết nối Azure DevOps", (
         "ado_organization", "ado_project", "ado_pat",
     ))
+    # Same step, said differently. On a Jira machine this connection buys the PR half of
+    # the pipeline and nothing else, and doctor's own finding says a Jira team's code
+    # usually lives in Bitbucket or GitHub — so for most of them it is not needed at
+    # all. Naming it in the rail as an ordinary numbered step made the product look like
+    # it still requires Azure DevOps.
+    _SETUP_STEP_ADO_OPTIONAL = ("ado", "Kết nối Azure DevOps · tuỳ chọn",
+                                _SETUP_STEP_ADO[2])
     # Jira lives on a WORKSPACE, not on the root settings, so this step has no setting
     # keys of its own — `_setup_save_jira` writes the workspace instead.
     _SETUP_STEP_JIRA = ("jira", "Kết nối Jira", ())
@@ -3235,11 +3242,14 @@ def create_dashboard_router() -> APIRouter:
         two clicks away and unmentioned.
         """
         # Jira answers "where do the work items come from"; ADO answers "where do the
-        # pull requests live". A Jira team needs the second one too if it wants the
-        # babysitter — so both steps are offered, in that order, and the ADO one says
-        # it is optional rather than pretending to be required.
-        tracker = ([_SETUP_STEP_JIRA, _SETUP_STEP_ADO] if source == "jira"
-                   else [_SETUP_STEP_ADO])
+        # pull requests live". A Jira team needs the second only if its code is in
+        # Azure DevOps, which doctor's own finding says is usually not the case — so on
+        # that branch the connection step is still OFFERED, but at the END and named as
+        # optional. Sitting mid-rail between two required steps, it read as something
+        # setup could not finish without, which is the opposite of true.
+        jira = source == "jira"
+        tracker = [_SETUP_STEP_JIRA] if jira else [_SETUP_STEP_ADO]
+        trailing = [_SETUP_STEP_ADO_OPTIONAL] if jira else []
         if role == "worker":
             return [
                 ("connect", "Nối về trung tâm", ("fleet_central_url", "fleet_token")),
@@ -3250,6 +3260,7 @@ def create_dashboard_router() -> APIRouter:
                 _SETUP_STEP_SOURCE,
                 *tracker,
                 ("workspace", "Mã nguồn", ("workspace_directory",)),
+                *trailing,
             ]
         steps = [
             _SETUP_STEP_SOURCE,
@@ -3266,6 +3277,7 @@ def create_dashboard_router() -> APIRouter:
             "Chính sách chung của đội" if role == "central" else "Cách máy này làm việc",
             ("autonomy_level", "claude_model", "execution_mode", "max_concurrent"),
         ))
+        steps.extend(trailing)
         return steps
 
     def _ws_attr(ws, key: str) -> str:

@@ -465,3 +465,31 @@ def test_reopening_the_wizard_lands_a_jira_team_on_their_own_path(tmp_path):
     assert 'value="jira"\n                 checked' in page or 'checked' in page
     with TestClient(create_app(cfg)) as client:
         assert client.get("/dashboard/setup?step=jira").status_code == 200
+
+
+def test_the_ado_step_moves_to_the_end_on_the_jira_branch(tmp_path):
+    """Offered, but last and named optional.
+
+    A Jira team needs this connection only if its code is in Azure DevOps, and doctor's
+    own finding says it usually is not (Bitbucket, GitHub). Sitting mid-rail between
+    two required steps it read as something setup cannot finish without — the opposite
+    of true — which is exactly how it looked on screen.
+    """
+    import re
+
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        rails = {}
+        for src in ("ado", "jira"):
+            page = client.get(f"/dashboard/setup?step=source&src={src}").text
+            rails[src] = [x.strip() for x in
+                          re.findall(r'class="wz-dot[^"]*">([^<]+)<', page)]
+
+    # The ADO branch is untouched: the connection is required there and stays early.
+    assert "Kết nối Azure DevOps" in rails["ado"]
+    assert rails["ado"].index("Kết nối Azure DevOps") < rails["ado"].index("Mã nguồn")
+
+    # On the Jira branch it is last before the check, and says it is optional.
+    jira = rails["jira"]
+    assert "Kết nối Jira" in jira
+    assert jira[-2] == "Kết nối Azure DevOps · tuỳ chọn"
+    assert jira.index("Kết nối Jira") < jira.index("Mã nguồn") < len(jira) - 2

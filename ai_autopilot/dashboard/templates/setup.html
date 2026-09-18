@@ -89,6 +89,7 @@
 {% if step_id == 'role' %}
 <form method="post" action="/dashboard/setup">
   <input type="hidden" name="step" value="role">
+  <input type="hidden" name="src" value="{{ source }}">
   <div class="wz-card">
     <header><b>Máy này đóng vai gì?</b></header>
     <div class="wz-body">
@@ -149,11 +150,69 @@
 {% else %}
 <form method="post" action="/dashboard/setup" id="step-form">
   <input type="hidden" name="step" value="{{ step_id }}">
+  <input type="hidden" name="src" value="{{ source }}">
   <div class="wz-card">
     <header><b>{{ heading }}</b></header>
     <div class="wz-body">
-      {% if step_id == 'ado' %}
+      {% if step_id == 'source' %}
+      <p class="wz-sub" style="margin-bottom:14px">Quyết định máy này đọc việc từ đâu.
+        Pull request, repo và build <b>luôn chạy qua Azure DevOps</b> dù bạn chọn gì —
+        nên một đội dùng Jira vẫn cần kết nối ADO nếu muốn babysitter và auto-review.</p>
+      <div class="wz-roles">
+        {% for value, ico, name, desc in [
+          ('ado', '🔷', 'Azure DevOps',
+           'Work item đọc từ ADO. Mặc định, và đúng cho hầu hết trường hợp.'),
+          ('jira', '🟦', 'Jira',
+           'Work item đọc từ Jira Cloud. Khai site, email và project key ở bước sau.')] %}
+        <label class="wz-role {{ 'sel' if source == value else '' }}">
+          <input type="radio" name="work_item_source" value="{{ value }}"
+                 {% if source == value %}checked{% endif %}>
+          <span class="ico">{{ ico }}</span><b>{{ name }}</b><p>{{ desc }}</p>
+        </label>
+        {% endfor %}
+      </div>
+
+      {% elif step_id == 'jira' %}
       <div class="wz-note">
+        Work item đọc từ Jira; <b>PR vẫn chạy qua Azure DevOps</b> — babysitter,
+        auto-review và merge → state chưa áp dụng cho workspace Jira. Bỏ qua bước
+        “Kết nối Azure DevOps” nếu code của bạn không nằm ở ADO: agent vẫn tự mở PR được.
+      </div>
+      <div class="wz-f">
+        <label for="jira_name">Tên workspace</label>
+        <input type="text" id="jira_name" name="jira_name" value="{{ jira.name }}"
+               placeholder="Nhà máy Khatoco">
+        <div class="form-help">Tên hiển thị trên trang Workspaces.</div>
+      </div>
+      <div class="wz-f">
+        <label for="jira_url">Jira site</label>
+        <input type="text" id="jira_url" name="jira_url" value="{{ jira.url }}"
+               placeholder="https://cong-ty.atlassian.net">
+      </div>
+      <div class="wz-f">
+        <label for="jira_email">Jira email</label>
+        <input type="text" id="jira_email" name="jira_email" value="{{ jira.email }}"
+               placeholder="bot@cong-ty.vn">
+        <div class="form-help">Tài khoản mà API token thuộc về.</div>
+      </div>
+      <div class="wz-f">
+        <label for="jira_project">Jira project key</label>
+        <input type="text" id="jira_project" name="jira_project" value="{{ jira.project }}"
+               placeholder="DXF">
+        <div class="form-help">
+          Dùng làm <b>khoá định tuyến</b> luôn — wizard tự điền vào danh sách project của
+          workspace, nên hai chỗ không thể lệch nhau (lệch là item Jira bị gửi nhầm sang ADO).
+          {% if jira.token_set %}<br/>✅ API token đã lưu.
+          {% else %}<br/>⚠️ API token khai ở biến môi trường, không nhập ở đây:
+          <code>AUTOPILOT_WORKSPACES__{{ jira.index }}__JIRA_TOKEN</code>.{% endif %}
+        </div>
+      </div>
+
+      {% elif step_id == 'ado' %}
+      <div class="wz-note">
+        {% if source == 'jira' %}<b>Không bắt buộc với đội dùng Jira.</b> Chỉ cần khai nếu
+        bạn muốn babysitter / auto-review / merge → state cho pull request — những thứ đó
+        đọc PR qua kết nối này. Code không ở ADO thì bấm “Bỏ qua bước này”.<br/>{% endif %}
         Một kết nối ADO cho cả máy (một tổ chức, một PAT). Nhiều <b>dự án</b> trên cùng tổ chức
         thì khai thêm ở Settings hoặc ở
         <a href="/dashboard/workspaces" style="color:var(--accent-hover)">🗂 Workspaces</a> —
@@ -205,9 +264,9 @@
       {% endif %}
     </div>
     <div class="wz-foot">
-      {% if prev_id %}<a class="wz-skip" href="/dashboard/setup?step={{ prev_id }}">← Quay lại</a>{% endif %}
+      {% if prev_id %}<a class="wz-skip" href="/dashboard/setup?step={{ prev_id }}&src={{ source }}">← Quay lại</a>{% endif %}
       <span class="wz-spacer"></span>
-      <a class="wz-skip" href="/dashboard/setup?step={{ next_id }}">Bỏ qua bước này</a>
+      <a class="wz-skip" href="/dashboard/setup?step={{ next_id }}&src={{ source }}">Bỏ qua bước này</a>
       <button type="submit" class="wz-next">Lưu và tiếp tục →</button>
     </div>
   </div>

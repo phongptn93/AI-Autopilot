@@ -188,7 +188,8 @@ def test_choosing_the_role_decides_the_rest_of_the_wizard(tmp_path, own_config):
                            follow_redirects=False)
         # The next step is computed AFTER the role is applied — it is the role that
         # decides which steps exist at all.
-        assert resp.headers["location"] == "/dashboard/setup?step=connect"
+        # The tracker choice rides along, or stepping on would drop the branch.
+        assert resp.headers["location"] == "/dashboard/setup?step=connect&src=ado"
         assert client.app.state.container.config.fleet_role == "worker"
 
 
@@ -381,3 +382,86 @@ def test_doctor_catches_a_jira_workspace_whose_key_routes_nowhere():
     ws.ado_projects = ["DXF"]                        # …and it clears when they agree
     ok = doctor.check_providers(Settings(workspaces=[ws]))
     assert not any(f.level == doctor.ERROR for f in ok), ok
+
+
+# ── Setup asks WHERE the work comes from, before asking for a connection ─────
+
+def test_the_wizard_asks_for_the_tracker_before_the_connection(tmp_path):
+    """It used to go straight to "Kết nối Azure DevOps", which reads as "this product
+    is for ADO teams" — while a Jira team's path existed the whole time on the
+    Workspaces page, two clicks away and unmentioned."""
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        page = client.get("/dashboard/setup?step=source").text
+    assert 'name="work_item_source"' in page
+    assert "Azure DevOps" in page and "Jira" in page
+
+
+def test_choosing_jira_changes_the_next_step(tmp_path, own_config):
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        resp = client.post("/dashboard/setup",
+                           data={"step": "source", "work_item_source": "jira"},
+                           follow_redirects=False)
+        assert resp.headers["location"] == "/dashboard/setup?step=jira&src=jira"
+        # …and the ADO branch still goes where it did.
+        resp = client.post("/dashboard/setup",
+                           data={"step": "source", "work_item_source": "ado"},
+                           follow_redirects=False)
+        assert resp.headers["location"] == "/dashboard/setup?step=ado&src=ado"
+
+
+def test_the_jira_step_writes_a_workspace_that_routes_to_itself(tmp_path, own_config):
+    """The wizard is the one place that can make the Jira key and the routing list
+    agree by construction. Left to be typed twice, the day they differ the lookup falls
+    back to Azure DevOps and a Jira item's comments go to the wrong tracker, silently.
+    """
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        client.post("/dashboard/setup", data={
+            "step": "jira", "src": "jira", "jira_name": "Khatoco",
+            "jira_url": "https://kh.atlassian.net", "jira_email": "bot@kh.vn",
+            "jira_project": "DXF",
+        })
+        live = client.app.state.container.config
+        # A just-saved workspace is a plain dict until the config is re-read (see
+        # _ws_attr): assert on the shape that is actually there.
+        ws = next(w for w in live.workspaces if dict(w).get("provider") == "jira")
+        assert dict(ws)["jira_project"] == "DXF"
+        assert dict(ws)["ado_projects"] == ["DXF"]   # routes to itself, by construction
+
+        # And the check that exists for the hand-written case now has nothing to say.
+        from ai_autopilot import doctor
+        from ai_autopilot.config import Settings as S
+        reread = S(workspaces=[dict(w) for w in live.workspaces])
+        assert not [f for f in doctor.check_providers(reread)
+                    if f.level == doctor.ERROR and "DXF" in f.title]
+
+
+def test_a_jira_step_without_a_key_changes_nothing(tmp_path, own_config):
+    """There is nothing to route on, and a half-written workspace is a broken route."""
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        client.post("/dashboard/setup", data={
+            "step": "jira", "src": "jira", "jira_url": "https://kh.atlassian.net",
+        })
+        assert not client.app.state.container.config.workspaces
+
+
+def test_the_ado_step_is_optional_once_jira_is_chosen(tmp_path):
+    """PRs still run through ADO, but a team whose code is elsewhere must not be told
+    it cannot finish setup without it."""
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        page = client.get("/dashboard/setup?step=ado&src=jira").text
+    assert "Không bắt buộc với đội dùng Jira" in page
+
+
+def test_reopening_the_wizard_lands_a_jira_team_on_their_own_path(tmp_path):
+    """Derived from what is configured, so coming back later does not start over on
+    the ADO branch."""
+    from ai_autopilot.config import WorkspaceConfig
+
+    cfg = _settings(tmp_path, workspaces=[WorkspaceConfig(
+        name="Khatoco", provider="jira", ado_projects=["DXF"], jira_project="DXF",
+    )])
+    with TestClient(create_app(cfg)) as client:
+        page = client.get("/dashboard/setup?step=source").text
+    assert 'value="jira"\n                 checked' in page or 'checked' in page
+    with TestClient(create_app(cfg)) as client:
+        assert client.get("/dashboard/setup?step=jira").status_code == 200

@@ -3217,37 +3217,82 @@ def create_dashboard_router() -> APIRouter:
     # save_to_yaml/apply_to_config as the Settings page, so there is no wizard state to
     # lose, leaving halfway keeps what you answered, and coming back later is just
     # opening the page again.
-    _SETUP_FLOWS: dict[str, list[tuple[str, str, tuple[str, ...]]]] = {
-        # role: [(step id, heading, setting keys)]
-        "worker": [
-            ("connect", "Nối về trung tâm", ("fleet_central_url", "fleet_token")),
-            ("identity", "Máy này là ai", (
-                "fleet_worker_name", "trigger_tag", "assignee_trigger_user", "sdlc_profile",
-            )),
-            ("ado", "Kết nối Azure DevOps", (
-                "ado_organization", "ado_project", "ado_pat", "workspace_directory",
-            )),
-        ],
-        "central": [
-            ("ado", "Kết nối Azure DevOps", (
-                "ado_organization", "ado_project", "ado_pat",
-            )),
+    _SETUP_STEP_ADO = ("ado", "Kết nối Azure DevOps", (
+        "ado_organization", "ado_project", "ado_pat",
+    ))
+    # Jira lives on a WORKSPACE, not on the root settings, so this step has no setting
+    # keys of its own — `_setup_save_jira` writes the workspace instead.
+    _SETUP_STEP_JIRA = ("jira", "Kết nối Jira", ())
+    _SETUP_STEP_SOURCE = ("source", "Nguồn work item", ())
+
+    def _setup_flow(role: str, source: str) -> list[tuple[str, str, tuple[str, ...]]]:
+        """The steps for this machine, in the order the answers depend on each other.
+
+        The tracker question comes before the connection step because it decides which
+        connection is being asked for. It used to be skipped entirely and the page went
+        straight to "Kết nối Azure DevOps" — which reads as "this product is for ADO
+        teams", while a Jira team's path existed the whole time on the Workspaces page,
+        two clicks away and unmentioned.
+        """
+        # Jira answers "where do the work items come from"; ADO answers "where do the
+        # pull requests live". A Jira team needs the second one too if it wants the
+        # babysitter — so both steps are offered, in that order, and the ADO one says
+        # it is optional rather than pretending to be required.
+        tracker = ([_SETUP_STEP_JIRA, _SETUP_STEP_ADO] if source == "jira"
+                   else [_SETUP_STEP_ADO])
+        if role == "worker":
+            return [
+                ("connect", "Nối về trung tâm", ("fleet_central_url", "fleet_token")),
+                ("identity", "Máy này là ai", (
+                    "fleet_worker_name", "trigger_tag", "assignee_trigger_user",
+                    "sdlc_profile",
+                )),
+                _SETUP_STEP_SOURCE,
+                *tracker,
+                ("workspace", "Mã nguồn", ("workspace_directory",)),
+            ]
+        steps = [
+            _SETUP_STEP_SOURCE,
+            *tracker,
             ("workspace", "Mã nguồn", ("workspace_directory", "base_branch", "trigger_tag")),
-            ("fleet", "Phát cấu hình cho đội", ("fleet_token", "fleet_offline_after_minutes")),
-            ("policy", "Chính sách chung của đội", (
-                "autonomy_level", "claude_model", "execution_mode", "max_concurrent",
-            )),
-        ],
-        "standalone": [
-            ("ado", "Kết nối Azure DevOps", (
-                "ado_organization", "ado_project", "ado_pat",
-            )),
-            ("workspace", "Mã nguồn", ("workspace_directory", "base_branch", "trigger_tag")),
-            ("policy", "Cách máy này làm việc", (
-                "autonomy_level", "claude_model", "execution_mode", "max_concurrent",
-            )),
-        ],
-    }
+        ]
+        if role == "central":
+            steps.append(
+                ("fleet", "Phát cấu hình cho đội",
+                 ("fleet_token", "fleet_offline_after_minutes"))
+            )
+        steps.append((
+            "policy",
+            "Chính sách chung của đội" if role == "central" else "Cách máy này làm việc",
+            ("autonomy_level", "claude_model", "execution_mode", "max_concurrent"),
+        ))
+        return steps
+
+    def _ws_attr(ws, key: str) -> str:
+        """One field of a workspace entry, whichever shape it is in right now.
+
+        A saved workspace is a plain dict until the config is re-read from disk —
+        ``to_settings_updates`` writes dicts and ``apply_to_config`` assigns them
+        without validation — so anything reading the LIVE config has to accept both.
+        """
+        if isinstance(ws, dict):
+            return str(ws.get(key, "") or "")
+        return str(getattr(ws, key, "") or "")
+
+    def _setup_source(request: Request, cfg) -> str:
+        """Which tracker this machine's work items come from.
+
+        Read from the query string while the wizard is walking, and otherwise derived
+        from what is configured — so reopening the page later lands a Jira team back on
+        their own path instead of on the ADO one.
+        """
+        asked = (request.query_params.get("src") or "").strip().lower()
+        if asked in ("ado", "jira"):
+            return asked
+        return "jira" if any(
+            _ws_attr(ws, "provider").strip().lower() == "jira"
+            for ws in (cfg.workspaces or [])
+        ) else "ado"
     # Which step offers a "test it now" button, and what that button proves. A wizard
     # that only collects text and lets the failure surface hours later during a real run
     # is a form with extra clicks.
@@ -3256,9 +3301,6 @@ def create_dashboard_router() -> APIRouter:
     def _setup_role(cfg) -> str:
         return (cfg.fleet_role or "").strip() or "standalone"
 
-    def _setup_steps(cfg) -> list[tuple[str, str, tuple[str, ...]]]:
-        return _SETUP_FLOWS[_setup_role(cfg)]
-
     @router.get("/setup", response_class=HTMLResponse)
     async def setup_page(request: Request):
         """The short path to a machine that works, in the order the answers depend."""
@@ -3266,7 +3308,8 @@ def create_dashboard_router() -> APIRouter:
         cfg = c.config
         by_key = {f.key: f for f in settings_form.FIELDS}
         role = _setup_role(cfg)
-        steps = _setup_steps(cfg)
+        source = _setup_source(request, cfg)
+        steps = _setup_flow(role, source)
         want = (request.query_params.get("step") or "").strip()
         # "role" is step zero and always reachable: changing your mind about what this
         # machine is must not mean editing config.yaml by hand.
@@ -3282,7 +3325,7 @@ def create_dashboard_router() -> APIRouter:
             request, "setup.html",
             _ctx(
                 request, "setup",
-                role=role, steps=steps, step_id=current, flash=flash,
+                role=role, source=source, steps=steps, step_id=current, flash=flash,
                 heading=step[1] if step else "",
                 step_fields=[by_key[k] for k in (step[2] if step else ()) if k in by_key],
                 check=_SETUP_CHECKS.get(current, ""),
@@ -3298,6 +3341,7 @@ def create_dashboard_router() -> APIRouter:
                 findings=_setup_findings(cfg) if current == "done" else [],
                 central_url=(cfg.fleet_central_url or "").strip(),
                 fleet_token_set=bool((cfg.fleet_token or "").strip()),
+                jira=_setup_jira_view(cfg),
             ),
         )
         if flash is not None:
@@ -3321,6 +3365,71 @@ def create_dashboard_router() -> APIRouter:
         ]
         return sorted(rows, key=lambda r: rank.get(r["level"].upper(), 9))
 
+    def _setup_jira_view(cfg) -> dict:
+        """This machine's Jira workspace as the wizard shows it (blank when there is none)."""
+        for view in workspaces_mod.resolve(cfg):
+            if (view.provider or "").strip().lower() == "jira":
+                return {
+                    "name": view.name, "url": view.jira_url, "email": view.jira_email,
+                    "project": view.jira_project, "token_set": view.jira_token_set,
+                    "index": max(0, len(cfg.workspaces or []) - 1),
+                }
+        return {"name": "", "url": "", "email": "", "project": "", "token_set": False,
+                "index": len(cfg.workspaces or [])}
+
+    async def _setup_save_jira(request: Request, form) -> None:
+        """Write the Jira workspace the wizard just collected.
+
+        Goes through the Workspaces page's own resolve → to_settings_updates →
+        carry_secrets path rather than assembling a dict here, so the wizard cannot
+        drift from the editor that owns this shape (and so a stored API token is not
+        wiped by a page that never renders it).
+
+        Sets the workspace's project list to the Jira key. Routing matches an item's own
+        project against that list, and a Jira item carries its JIRA key — leave them to
+        be typed separately and the day they disagree the lookup silently falls back to
+        Azure DevOps. The wizard is the one place that can make them agree by
+        construction instead of by a doctor warning afterwards.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        url = str(form.get("jira_url", "") or "").strip()
+        email = str(form.get("jira_email", "") or "").strip()
+        project = str(form.get("jira_project", "") or "").strip()
+        name = str(form.get("jira_name", "") or "").strip() or (project or "Jira")
+        if not project:
+            return                      # nothing to route on — leave the config alone
+
+        views = workspaces_mod.resolve(cfg)
+        target = next(
+            (v for v in views if (v.provider or "").lower() == "jira" and not v.is_default),
+            None,
+        )
+        if target is None:
+            target = workspaces_mod.WorkspaceView(
+                id=workspaces_mod.slugify(name, {v.id for v in views}), name=name,
+            )
+            views.append(target)
+        target.name = name
+        target.provider = "jira"
+        target.jira_url, target.jira_email, target.jira_project = url, email, project
+        target.projects = [project]
+        target.enabled = True
+        if not target.directory:
+            target.directory = cfg.workspace_directory or ""
+
+        updates = workspaces_mod.carry_secrets(
+            workspaces_mod.to_settings_updates(views), cfg
+        )
+        settings_form.save_to_yaml(config_file_path(), updates)
+        settings_form.apply_to_config(cfg, updates)
+        with contextlib.suppress(Exception):
+            c.build_providers()     # the tracker for this project just changed
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="setup.jira_configured",
+            target=project, detail=url[:200],
+        )
+
     @router.post("/setup")
     async def setup_save(request: Request):
         """Save one step and move on. Same write path as the Settings page."""
@@ -3328,6 +3437,9 @@ def create_dashboard_router() -> APIRouter:
         cfg = c.config
         form = await request.form()
         step_id = str(form.get("step", "")).strip()
+        source = str(form.get("src", "")).strip().lower()
+        if source not in ("ado", "jira"):
+            source = _setup_source(request, cfg)
         updates: dict = {}
 
         if step_id == "role":
@@ -3335,8 +3447,20 @@ def create_dashboard_router() -> APIRouter:
             if chosen not in ("", "central", "worker"):
                 raise HTTPException(status_code=422, detail="unknown role")
             updates["fleet_role"] = chosen
+        elif step_id == "source":
+            # Nothing is written here. The choice only decides which connection the
+            # next step asks for, and it travels in the URL — creating a half-filled
+            # Jira workspace off a radio button would leave a broken route behind for
+            # anyone who changed their mind.
+            chosen = str(form.get("work_item_source", "")).strip().lower()
+            source = chosen if chosen in ("ado", "jira") else "ado"
+        elif step_id == "jira":
+            await _setup_save_jira(request, form)
         else:
-            keys = next((s[2] for s in _setup_steps(cfg) if s[0] == step_id), None)
+            keys = next(
+                (s[2] for s in _setup_flow(_setup_role(cfg), source) if s[0] == step_id),
+                None,
+            )
             if keys is None:
                 raise HTTPException(status_code=404, detail="unknown step")
             by_key = {f.key: f for f in settings_form.FIELDS}
@@ -3365,10 +3489,12 @@ def create_dashboard_router() -> APIRouter:
             )
         # Recomputed AFTER the save: choosing a role on step zero decides which steps
         # exist, so the "next" of that step only becomes knowable once it is applied.
-        ids = ["role", *[s[0] for s in _setup_steps(cfg)], "done"]
+        ids = ["role", *[s[0] for s in _setup_flow(_setup_role(cfg), source)], "done"]
         here = ids.index(step_id) if step_id in ids else 0
         nxt = ids[here + 1] if here + 1 < len(ids) else "done"
-        return RedirectResponse(f"/dashboard/setup?step={nxt}", status_code=303)
+        return RedirectResponse(
+            f"/dashboard/setup?step={nxt}&src={source}", status_code=303
+        )
 
     @router.post("/setup/check/{what}")
     async def setup_check(request: Request, what: str):

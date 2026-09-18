@@ -132,7 +132,12 @@ def test_the_worker_page_locks_what_it_shows(tmp_path):
                     fleet_central_url="http://c")
     with TestClient(create_app(cfg)) as client:
         page = client.get("/dashboard/settings").text
-    assert "trung tâm quản lý" in page and "Giành quyền" in page
+    # The per-field pill is gone on purpose: these are hidden until the section toggle
+    # — which says "do trung tâm quản lý" once — is pressed, and each is visibly locked.
+    # Stamping the same badge onto 152 of 180 fields repeated what the group already
+    # said and squeezed the label itself off the row. What stays is the actionable bit.
+    assert "own-badge own-central" not in page
+    assert "Giành quyền" in page
     assert "<fieldset disabled" in page          # revealed, but not editable
     start = page.index('data-k="board_drop_map"')
     assert 'data-owner="central"' in page[start - 300:start + 120]

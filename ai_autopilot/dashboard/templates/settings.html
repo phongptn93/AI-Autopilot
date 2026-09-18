@@ -67,12 +67,32 @@
   .field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:2px 30px;padding:8px 20px 16px}
   .field{padding:13px 0;border-bottom:1px solid var(--border-soft);min-width:0}
   .field.wide{grid-column:1/-1}
-  .field > label{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--text);margin-bottom:7px}
+  /* Block, not flex. A label can now carry up to three chips (restart / owner / claim /
+     "chỉ khi X đang bật"), and as flex items with `white-space:nowrap` they refused to
+     shrink — so the label TEXT was crushed to its longest word and rendered one word
+     per line, a column of vertical text. Inline flow wraps the text and the chips
+     together, which is what a label with trailing chips actually is. */
+  /* 1.5 is the smallest leading that still clears an inline-block chip without the
+     rows touching; 1.75 bought nothing and added a line's worth of height to every
+     label that wraps — including the ones that already wrapped before any of this. */
+  .field > label{display:block;font-size:13px;font-weight:600;color:var(--text);
+    margin-bottom:7px;line-height:1.5}
+  .field > label > *{vertical-align:middle}
+  /* The lock wrapper must not exist as far as layout is concerned. A real fieldset box
+     became the field's flex child instead of `.form-input`, so `.field.bool`'s order
+     rules stopped matching: the checkbox jumped to the left of its own label and the
+     help text got trapped in the control column. `display:contents` keeps `disabled`
+     (a DOM property, not a painted box) and hands the children straight back to the
+     field's own grid/flex. */
+  .field > fieldset{display:contents}
   .field .form-help{margin-top:6px}
   .field .form-input input[type=text],.field .form-input input[type=password],
   .field .form-input input[type=number],.field .form-input select,.field .form-input textarea{max-width:100%}
   .field.bool{display:flex;flex-direction:row;align-items:flex-start;gap:11px;justify-content:space-between}
-  .field.bool > label{margin-bottom:0;order:1}
+  /* The label is the part that grows: a checkbox is 13px wide and never needs the
+     spare room, while the label now carries chips that stacked one per line when it
+     was left to shrink. */
+  .field.bool > label{margin-bottom:0;order:1;flex:1 1 auto;min-width:0}
   .field.bool .form-input{order:2}
   .field.bool .form-input input[type=checkbox]{margin-top:1px}
   .field.bool .form-help{flex-basis:100%;order:3;margin-top:2px}
@@ -142,7 +162,7 @@
      way out (claim it) rather than being lumped in as "không áp dụng". */
   .card.show-na .field.managed{opacity:.6}
   .field.managed .form-input{position:relative}
-  .own-badge{font-size:10px;font-weight:600;padding:1px 7px;border-radius:20px;margin-left:6px;
+  .own-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 7px;border-radius:20px;margin-left:6px;
              text-transform:none;letter-spacing:0;white-space:nowrap}
   .own-central{background:rgba(99,102,241,.14);color:var(--accent-hover,#818cf8)}
   .own-claimed{background:rgba(46,160,67,.16);color:#3fb950}
@@ -150,7 +170,7 @@
            border-radius:20px;padding:2px 9px;font-size:11px;font-family:inherit;
            cursor:pointer;margin-left:6px;white-space:nowrap}
   .own-btn:hover{border-color:var(--accent);color:var(--text)}
-  .na-badge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:20px;margin-left:6px;
+  .na-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:20px;margin-left:6px;
             background:var(--bg);border:1px solid var(--border);color:var(--text-dim);
             text-transform:none;letter-spacing:0;white-space:nowrap}
   /* Lives in the card header: says how many fields this section is holding back and
@@ -512,16 +532,24 @@
            data-when-vals="{{ f.show_when_values|join(',') }}"
            data-filled="{{ '1' if kept else '' }}"{% endif %}>
         <label for="{{ f.key }}">{{ f.label }}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}
+          {# No "do trung tâm quản lý" pill per field. These are hidden until the section
+             toggle — which says exactly that, once — is pressed, and every one of them
+             is visibly locked. Stamping the same two pills onto 152 of 180 fields was
+             the noise: it repeated a fact the group already stated and left no room for
+             the label itself. What stays is the one thing that is actionable. #}
           {% if managed %}
-          <span class="own-badge own-central" title="Trung tâm phát giá trị này cho cả đội. Sửa ở đây sẽ bị ghi đè ở lần đồng bộ tới.">🛰 trung tâm quản lý</span>
           <button type="submit" form="claim-form" name="key" value="{{ f.key }}" class="own-btn"
-                  title="Máy này tự quyết thiết lập này từ giờ — trung tâm sẽ không ghi đè nữa">🖥 Giành quyền</button>
+                  title="Trung tâm đang phát giá trị này. Bấm để máy này tự quyết — trung tâm sẽ không ghi đè nữa.">🖥 Giành quyền</button>
           {% elif owner == 'claimed' %}
           <span class="own-badge own-claimed" title="Máy này đã giành quyền — trung tâm không ghi đè.">🖥 máy này tự giữ</span>
           <button type="submit" form="release-form" name="key" value="{{ f.key }}" class="own-btn"
                   title="Trả về cho trung tâm — lần đồng bộ tới sẽ nhận lại giá trị chung">🛰 Trả lại</button>
           {% endif %}
-          {% if f.show_when_key %}
+          {# Not shown next to a central-managed field: "chỉ khi X đang bật" answers a
+             question you cannot act on here anyway, and a third chip is what pushed a
+             bool row's label into a column of stacked pills. The reason it is not yours
+             to set is the owner badge; whether it also applies is secondary. #}
+          {% if f.show_when_key and not managed %}
           {# Names the control the reader can see, not the config key underneath it:
              «Vai của máy này» is on screen, `fleet_role` is not. #}
           <span class="na-badge">chỉ khi “{{ field_labels.get(f.show_when_key, f.show_when_key) }}”
@@ -533,7 +561,7 @@
            only — the save handler refuses these keys regardless of what the browser
            sends (settings_form.writable_here), because a disabled input is a suggestion
            and the same POST can come from curl. #}
-        {% if managed %}<fieldset disabled style="border:0;padding:0;margin:0;min-width:0">{% endif %}
+        {% if managed %}<fieldset disabled>{% endif %}
         <div class="form-input">
           {% if f.kind == 'bool' %}
             <input type="checkbox" id="{{ f.key }}" name="{{ f.key }}" {% if current.get(f.key) %}checked{% endif %} />

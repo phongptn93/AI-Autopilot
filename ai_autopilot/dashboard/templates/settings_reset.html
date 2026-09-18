@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block content %}
+{# Reset, with the damage shown first. "Reset" with no preview is the one destructive
+   button people press by accident, and a config file is exactly the thing nobody has a
+   backup of. Nothing here changes anything until the form below is submitted. #}
+<style>
+  .main{max-width:1000px}
+  .rs-head h2{font-size:21px;font-weight:750;letter-spacing:-.02em}
+  .rs-sub{color:var(--text-muted);font-size:13px;margin:4px 0 16px}
+  .rs-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
+           margin-bottom:12px;overflow:hidden}
+  .rs-card>header{padding:13px 18px;border-bottom:1px solid var(--border);background:var(--bg);
+                  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .rs-card>header b{font-size:14px}
+  .rs-body{padding:14px 18px}
+  .rs-scope{display:flex;flex-wrap:wrap;gap:6px}
+  .rs-pill{font-size:12px;text-decoration:none;color:var(--text-muted);padding:5px 11px;
+           border:1px solid var(--border);border-radius:20px;white-space:nowrap}
+  .rs-pill:hover{border-color:var(--accent);color:var(--text)}
+  .rs-pill.on{color:var(--accent-hover);border-color:rgba(99,102,241,.5);background:var(--accent-bg)}
+  table.rs{width:100%;border-collapse:collapse;font-size:13px}
+  table.rs th{text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.06em;
+              text-transform:uppercase;color:var(--text-dim);padding:0 10px 8px 0}
+  table.rs td{padding:8px 10px 8px 0;border-top:1px solid var(--border-soft);vertical-align:top}
+  table.rs td.k{font-weight:600;min-width:180px}
+  table.rs td.k small{display:block;font-weight:400;color:var(--text-dim);font-size:11px}
+  .rs-now{color:var(--text-muted);word-break:break-word}
+  .rs-after{color:#3fb950;word-break:break-word}
+  .rs-empty{padding:30px 18px;text-align:center;color:var(--text-muted);font-size:13px}
+  .rs-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 18px;
+           border-top:1px solid var(--border);background:var(--bg)}
+  .rs-spacer{flex:1}
+  .rs-go{background:var(--red,#e5484d);color:#fff;border:none;border-radius:8px;
+         padding:8px 17px;font-size:13.5px;font-weight:650;font-family:inherit;cursor:pointer}
+  .rs-go:hover{filter:brightness(1.08)}
+  .rs-keep{font-size:12.3px;color:var(--text-muted);line-height:1.7}
+  .rs-keep code{font-family:var(--mono);font-size:11px;background:var(--bg-input);
+                padding:1px 6px;border-radius:5px}
+</style>
+
+<div class="rs-head"><h2>↩ Đặt lại thiết lập</h2></div>
+<p class="rs-sub">Đưa các thiết lập về <b>giá trị mặc định</b>. Trang này chỉ <b>xem trước</b> —
+  không có gì thay đổi cho tới khi bạn bấm nút ở cuối.</p>
+
+{% if flash %}
+<div class="rs-card" style="border-color:var(--{{ flash[0] }})">
+  <div style="padding:13px 18px;color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+</div>
+{% endif %}
+
+<div class="rs-card">
+  <header><b>Phạm vi</b></header>
+  <div class="rs-body">
+    <div class="rs-scope">
+      <a class="rs-pill {{ 'on' if not section else '' }}" href="/dashboard/settings/reset">Toàn bộ</a>
+      {% for s in sections %}
+      <a class="rs-pill {{ 'on' if section == s else '' }}"
+         href="/dashboard/settings/reset?section={{ s | urlencode }}">{{ s }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="rs-card">
+  <header>
+    <b>{{ rows|length }} thiết lập sẽ đổi</b>
+    <span class="rs-spacer"></span>
+    <span style="font-size:12.3px;color:var(--text-muted)">
+      {{ section or 'Mọi mục' }}</span>
+  </header>
+  {% if rows %}
+  <div class="rs-body" style="overflow-x:auto">
+    <table class="rs">
+      <thead><tr><th>Thiết lập</th><th>Hiện tại</th><th>Sau khi đặt lại</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="k">{{ r.label }}<small>{{ r.key }}{% if not section %} · {{ r.section }}{% endif %}</small></td>
+          <td class="rs-now">{{ r.now }}</td>
+          <td class="rs-after">{{ r.after }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="rs-empty">Không có gì để đặt lại — phần này đang ở đúng giá trị mặc định.</div>
+  {% endif %}
+  <div class="rs-foot">
+    <a class="btn-ghost" style="text-decoration:none" href="/dashboard/settings">← Quay lại Settings</a>
+    <span class="rs-spacer"></span>
+    {% if rows %}
+    <form method="post" action="/dashboard/settings/reset" style="margin:0"
+          onsubmit="return confirm('Đặt lại {{ rows|length }} thiết lập về mặc định? Giá trị hiện tại không khôi phục được — tải bản sao lưu ở Settings → Chuyển cấu hình nếu cần.')">
+      <input type="hidden" name="section" value="{{ section }}">
+      <button type="submit" class="rs-go">↩ Đặt lại {{ rows|length }} thiết lập</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="rs-card">
+  <header><b>🔒 Không bao giờ bị đặt lại</b></header>
+  <div class="rs-body rs-keep">
+    Mất những thứ này không phải là "về mặc định" — nó khoá bạn ra khỏi chính máy đang
+    đặt lại, làm mồ côi dữ liệu của máy, hoặc âm thầm ngắt máy khỏi đội:
+    {% for k in kept %}<code>{{ k }}</code>{% if not loop.last %} {% endif %}{% endfor %}.
+  </div>
+</div>
+{% endblock %}

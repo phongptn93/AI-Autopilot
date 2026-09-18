@@ -103,22 +103,24 @@ def config_hash(document: dict[str, Any]) -> str:
 def config_document(config: Any) -> tuple[dict[str, Any], str]:
     """The shared document a central hands out, and its hash.
 
-    Built from ``export_settings`` — the same filter the Settings page's "export config"
-    download uses — so there is ONE definition of what is shareable. A key that must
-    never leave the centre belongs in ``settings_form.EXPORT_EXCLUDE``, not in a second
-    list here that would drift from it.
+    Built from ``fleet_settings``, which is the export filter minus the notification
+    channels: a central may hand its OWN workers the webhook it posts to, over an
+    authenticated endpoint, to machines that already hold the shared token. The
+    downloadable export still excludes them, because that file leaves the building.
+    A key that must never travel at all belongs in ``settings_form.NEVER_SHARED``, not
+    in a second list here that would drift from it.
     """
-    document = settings_form.export_settings(config)
+    document = settings_form.fleet_settings(config)
     return document, config_hash(document)
 
 
 def strip_local(updates: dict[str, Any], local_keys: list[str] | None = None) -> dict[str, Any]:
     """Filter a document the worker received down to what it may actually apply.
 
-    Three things are dropped: keys that are not Settings fields at all, keys the export
-    filter already considers unshareable (secrets, ``trigger_tag``, ``workspaces``,
-    ``repos``, ``database_url``), and the keys this machine declared as its own in
-    ``fleet_local_keys``.
+    Three things are dropped: keys that are not Settings fields at all, keys the fleet
+    filter considers unsendable (the ADO PAT, ``trigger_tag``, ``workspaces``,
+    ``repos``, ``database_url``, and everything each machine answers for itself), and
+    the keys this machine declared as its own in ``fleet_local_keys``.
 
     The second of those is the load-bearing one. The central strips them too, so this
     looks redundant — it is not: it is what makes a hostile or simply misconfigured
@@ -131,7 +133,7 @@ def strip_local(updates: dict[str, Any], local_keys: list[str] | None = None) ->
     mine = {str(k).strip() for k in (local_keys or []) if str(k).strip()}
     return {
         k: v for k, v in (updates or {}).items()
-        if k in valid and k not in settings_form.EXPORT_EXCLUDE and k not in mine
+        if k in valid and k not in settings_form.FLEET_EXCLUDE and k not in mine
     }
 
 

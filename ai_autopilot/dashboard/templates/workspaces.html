@@ -12,6 +12,10 @@
               background:var(--accent-bg,rgba(99,102,241,.15)); color:var(--accent-hover,#818cf8); white-space:nowrap; }
   .ws-body { padding:14px 16px; display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px 16px; }
   .ws-field { display:flex; flex-direction:column; gap:5px; min-width:0; }
+  /* `display:flex` above outranks the UA rule for [hidden], so without this the
+     attribute is inert and every ADO workspace shows the Jira credential boxes. */
+  .ws-field[hidden] { display:none; }
+  [data-lbl-ado][hidden], [data-lbl-jira][hidden] { display:none; }
   .ws-field.wide { grid-column:1 / -1; }
   .ws-field label { font-size:12px; font-weight:600; color:var(--text-muted); }
   .ws-field .hint { font-size:11px; color:var(--text-dim); line-height:1.45; }
@@ -110,11 +114,16 @@
 
     <div class="ws-body">
       <div class="ws-field">
-        <label>ADO project (work items) <span class="req" title="Bắt buộc">*</span></label>
+        {# The routing key, whatever the tracker is. "ADO project" was only true for half
+           the page: this list is what an item's own project is matched against, and a
+           Jira item carries its JIRA key — so on a Jira workspace the two must be the
+           same string or the lookup misses and the item gets answered on Azure DevOps
+           instead. The label now asks for the one it actually wants. #}
+        <label><span data-lbl-ado>ADO project (work items)</span><span data-lbl-jira hidden>Jira project key (định tuyến)</span> <span class="req" title="Bắt buộc">*</span></label>
         <textarea class="ws-area" name="ws{{ loop.index0 }}_projects"
                   placeholder="Mỗi dòng một project">{{ ws.projects | join('\n') }}</textarea>
         <span class="hint">Work item của các project này sẽ build trong workspace này.
-          {% if ws.is_default %}Project <b>đầu tiên</b> là nơi tạo work item mới.{% endif %}</span>
+          {% if ws.is_default %}Project <b>đầu tiên</b> là nơi tạo work item mới.{% endif %}<span data-lbl-jira hidden><br/><b>Phải trùng “Jira project key”</b> bên dưới — đây là khoá định tuyến item về đúng workspace.</span></span>
       </div>
 
       <div class="ws-field">
@@ -308,9 +317,12 @@ Cấu hình của chúng sẽ bị gỡ khỏi config. Thư mục và repo trên
     var card = select.closest('.ws-card');
     if (!card) return;
     select.addEventListener('change', function () {
-      card.querySelectorAll('.ws-jira').forEach(function (field) {
-        field.hidden = select.value !== 'jira';
-      });
+      var jira = select.value === 'jira';
+      card.querySelectorAll('.ws-jira').forEach(function (field) { field.hidden = !jira; });
+      // The routing field means the same thing either way, but it asks for a different
+      // string — say which, instead of leaving "ADO project" on a Jira row.
+      card.querySelectorAll('[data-lbl-ado]').forEach(function (el) { el.hidden = jira; });
+      card.querySelectorAll('[data-lbl-jira]').forEach(function (el) { el.hidden = !jira; });
     });
   });
 </script>

@@ -456,6 +456,26 @@ def check_providers(config: Settings) -> list[Finding]:
                 "Nothing routes to it, so its tracker is never consulted.",
                 "Add the Jira project key to the workspace's projects.",
             ))
+        # Routing is keyed on the workspace's project list, but a Jira item carries its
+        # JIRA key as its project. When the two disagree the lookup misses and falls
+        # back to the machine's ADO client — so a Jira item's comments and state changes
+        # are addressed to Azure DevOps, with a Jira id, and nothing says a word.
+        elif (ws.jira_project or "").strip() and not any(
+            (p or "").strip().lower() == ws.jira_project.strip().lower()
+            for p in ws.ado_projects
+        ):
+            out.append(Finding(
+                ERROR,
+                f"Workspace '{label}': project list does not contain its Jira key "
+                f"'{ws.jira_project}'",
+                "Items are routed by the project they carry, and a Jira item carries "
+                f"'{ws.jira_project}'. With no workspace claiming that name the lookup "
+                "falls back to this machine's Azure DevOps connection, so comments and "
+                "state changes for those items are sent to ADO — silently, and with an "
+                "id that means nothing there.",
+                f"Add '{ws.jira_project}' to this workspace's project list at "
+                "/dashboard/workspaces.",
+            ))
     if not out and config.feedback_loop_enabled:
         out.append(Finding(
             WARN, "Jira workspaces do not get the PR half of the pipeline",

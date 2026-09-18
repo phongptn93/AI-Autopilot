@@ -1023,12 +1023,53 @@ MACHINE_LOCAL = frozenset({
     "default_workspace_name",
     "teams_agent_enabled",
     "pr_bot_identity",         # the identity of THIS machine's PAT
+    # 💬 Teams bot — the whole section. The bot runs on whichever machine holds the
+    # credentials, and its credentials were never shareable, so a central pushing the
+    # switch and the behaviour knobs configures a bot that cannot start: persona and
+    # review skill for nobody, and an enabled flag that fails in a loop.
+    "bot_persona_name", "bot_persona_voice", "teams_review_skill",
+    "teams_agentic_enabled", "teams_agent_session_memory",
+    "teams_agent_max_concurrent", "teams_agent_nlu_enabled",
+    # 🔔 Cảnh báo — who gets interrupted, how often, and inside which hours. Every
+    # channel these reach is per-machine already, so the thresholds that decide the
+    # noise belong with the machine that makes it. A team that wants one policy sets
+    # it once and leaves it; a machine that is being watched more closely for a week
+    # does not have to argue with the central about it.
+    "alert_events", "alert_min_severity",
+    "delivery_merge_hours", "delivery_review_hours", "delivery_stale_days",
+    "delivery_max_age_days",
+    "alert_dedup_enabled", "alert_repeat_hours", "alert_snooze_default_days",
+    "pr_reviewer_reminder_hours", "pr_reviewer_reminder_repeat_hours",
+    "teams_agent_digest_interval_hours", "teams_agent_digest_at",
+    "digest_skip_when_empty", "digest_respect_quiet_hours",
+    "notify_hours_start", "notify_hours_end", "notify_days", "notify_quiet_max_held",
 })
 
-# What the export filter actually applies. One name, so every call site (share, fleet
-# document, import, worker-side strip) agrees by construction rather than by everyone
-# remembering to check two lists.
+# Where a team's notices go. These ARE credentials — a Teams Workflows URL is itself
+# the authorisation to post — so they never belong in the YAML somebody downloads and
+# emails to a colleague. But inside one fleet they are exactly what should be the same
+# everywhere: a worker that reports to a different channel than the rest of the team is
+# a worker nobody reads.
+#
+# Two audiences, two answers, which is why the single filter had to be split. The fleet
+# document is served over an authenticated endpoint to machines that already hold the
+# shared token; the export is a file that leaves the building.
+FLEET_ONLY_SHARED = frozenset({
+    "teams_webhook_url", "teams_webhook_urls", "teams_webhook_channels",
+    "smtp_host", "smtp_port", "smtp_user", "smtp_password",
+    "email_from", "email_to",
+    "zalo_oa_access_token", "zalo_recipient_user_id",
+})
+
+# What a downloadable/shareable config leaves out: secrets, this host's identity, and
+# anything each machine answers for itself.
 EXPORT_EXCLUDE = NEVER_SHARED | MACHINE_LOCAL
+
+# What the FLEET document leaves out. The same list minus the notification channels,
+# which a central may serve to its own workers even though a shared file must not carry
+# them. Derived rather than written out, so a key added to either set above cannot be
+# forgotten here.
+FLEET_EXCLUDE = EXPORT_EXCLUDE - FLEET_ONLY_SHARED
 
 # Keys stripped even from the FULL (with-secrets) export: the export/auth
 # mechanism's own material — embedding it would be pointless (the export key)
@@ -1052,7 +1093,11 @@ def owner_of(key: str, config: Any) -> str:
     """
     if (getattr(config, "fleet_role", "") or "") != "worker":
         return OWNER_MACHINE
-    if key in EXPORT_EXCLUDE:
+    # FLEET_EXCLUDE, not EXPORT_EXCLUDE: the question here is what the central actually
+    # SENDS, and the two differ by the notification channels. Reading the export filter
+    # would have shown the webhook fields as this machine's own while the next
+    # heartbeat quietly replaced them.
+    if key in FLEET_EXCLUDE:
         return OWNER_MACHINE
     claimed = {str(k).strip() for k in (getattr(config, "fleet_local_keys", None) or [])}
     return OWNER_CLAIMED if key in claimed else OWNER_CENTRAL
@@ -1068,6 +1113,25 @@ def writable_here(key: str, config: Any) -> bool:
     disabled input is a suggestion, and because the same POST can arrive from curl.
     """
     return owner_of(key, config) != OWNER_CENTRAL
+
+
+def fleet_settings(config: Any) -> dict[str, Any]:
+    """What a central serves its own workers.
+
+    Everything :func:`export_settings` shares, plus the notification channels — so a
+    fleet reports to one place without somebody pasting the same webhook URL onto every
+    machine. Never use this to build a file: that is what ``export_settings`` is for,
+    and the difference between them is a credential.
+    """
+    data = _dump(config)
+    return {k: v for k, v in data.items() if k not in FLEET_EXCLUDE}
+
+
+def _dump(config: Any) -> dict[str, Any]:
+    """Settings as plain JSON-able data (nested models included)."""
+    if hasattr(config, "model_dump"):
+        return config.model_dump(mode="json")
+    return {f.key: getattr(config, f.key, None) for f in FIELDS}   # tests' stand-ins
 
 
 def export_settings(config: Any) -> dict[str, Any]:
@@ -1272,6 +1336,44 @@ def save_to_yaml(path: Path, updates: Mapping[str, Any]) -> None:
     path.write_text(
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
+
+
+# Never reset, whatever the scope. Losing these does not restore a default — it locks
+# you out of the machine you are resetting (the dashboard password), orphans its data
+# (the database), or silently disconnects it from the fleet it belongs to. A reset is
+# for "put this configuration back the way it came", not "make this host unreachable".
+RESET_KEEP = frozenset({
+    "dashboard_auth_password_hash", "dashboard_auth_token", "config_export_password",
+    "database_url", "health_host", "health_port",
+    "fleet_role", "fleet_central_url", "fleet_token", "fleet_worker_name",
+    "fleet_local_keys", "fleet_sync_interval_minutes", "fleet_offline_after_minutes",
+})
+
+
+def reset_plan(config: Any, section: str = "") -> dict[str, Any]:
+    """What a reset would change, as ``{key: default}`` — nothing applied yet.
+
+    Returned rather than performed so the page can SHOW the damage before anyone
+    agrees to it. "Reset" with no preview is the one destructive button people press
+    by accident, and a config file is exactly the thing nobody has a backup of.
+
+    ``section`` limits it to one heading on the page; blank means every field. Only
+    keys whose value actually differs from the default appear, so the preview is the
+    list of things that will really move and an empty result honestly means "this is
+    already stock".
+    """
+    defaults = model_defaults(config)
+    wanted = [f for f in FIELDS if not section or f.section == section]
+    out: dict[str, Any] = {}
+    for f in wanted:
+        if f.key in RESET_KEEP or f.key not in defaults:
+            continue
+        # A password field is never echoed to the page, so "is it different" cannot be
+        # asked of the form — ask the live config instead.
+        current = getattr(config, f.key, None)
+        if current != defaults[f.key]:
+            out[f.key] = defaults[f.key]
+    return out
 
 
 def run_now_tag_conflict(stage_entry_tag: str, config: Any) -> str:

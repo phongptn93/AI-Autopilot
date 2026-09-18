@@ -43,14 +43,21 @@ def _report(**over) -> fleet.WorkerReport:
 # ── what may travel ──────────────────────────────────────────────────────────
 
 
-def test_the_shared_document_carries_no_secrets():
-    """The document is served to every machine that knows the token. A PAT in it would
-    be a credential distributed by design, not by accident."""
-    cfg = Settings(ado_pat="PAT-12345", smtp_password="hunter2",
-                   dashboard_auth_password_hash="pbkdf2$x", teams_webhook_url="https://hook")
+def test_the_shared_document_carries_no_credentials_of_its_own():
+    """The document is served to every machine that knows the token, so anything in it
+    is distributed by design.
+
+    The ADO PAT, the dashboard hash and the per-tenant credentials never travel: they
+    are how a machine proves it is itself. The notification channels are the deliberate
+    exception — a central may tell its OWN workers where the team's notices go, which
+    is a different decision from putting them in a file somebody downloads (see
+    tests/test_setup_and_ownership.py).
+    """
+    cfg = Settings(ado_pat="PAT-12345", dashboard_auth_password_hash="pbkdf2$x",
+                   webhook_secret="s")
     document, _ = fleet.config_document(cfg)
-    for leaked in ("ado_pat", "smtp_password", "dashboard_auth_password_hash",
-                   "teams_webhook_url", "tenants"):
+    for leaked in ("ado_pat", "dashboard_auth_password_hash", "dashboard_auth_token",
+                   "webhook_secret", "config_export_password", "tenants"):
         assert leaked not in document
     assert "trigger_states" in document      # …but the shared settings ARE there
 
@@ -83,25 +90,25 @@ def test_the_worker_keeps_its_own_tag_even_if_the_central_sends_one():
     simply misconfigured still cannot rewrite this machine's identity."""
     kept = fleet.strip_local(
         {"trigger_tag": "central-autopilot", "ado_pat": "PAT", "workspace_directory": "C:/x",
-         "alert_repeat_hours": 6},
+         "max_revisions": 6},
         local_keys=[],
     )
-    assert kept == {"alert_repeat_hours": 6}
+    assert kept == {"max_revisions": 6}
 
 
 def test_a_worker_declared_key_is_left_alone():
     kept = fleet.strip_local(
-        {"sdlc_profile": "full", "stage_entry_tag": "run", "alert_repeat_hours": 6},
+        {"sdlc_profile": "full", "stage_entry_tag": "run", "max_revisions": 6},
         local_keys=["sdlc_profile", "stage_entry_tag"],
     )
-    assert kept == {"alert_repeat_hours": 6}
+    assert kept == {"max_revisions": 6}
 
 
 def test_an_unknown_key_is_dropped_rather_than_set():
     """A document from a NEWER central will contain settings this build has never heard
     of. Dropping them keeps an upgrade one-directional instead of crashing the worker."""
-    assert fleet.strip_local({"from_the_future": 1, "alert_repeat_hours": 6}) == {
-        "alert_repeat_hours": 6
+    assert fleet.strip_local({"from_the_future": 1, "max_revisions": 6}) == {
+        "max_revisions": 6
     }
 
 
@@ -288,24 +295,24 @@ async def test_the_worker_applies_the_shared_config_but_keeps_its_own(tmp_path, 
     recorded: list[dict] = []
     cfg = Settings(
         fleet_role="worker", fleet_central_url="http://central", fleet_token=TOKEN,
-        fleet_local_keys=["sdlc_profile"], sdlc_profile="qc", alert_repeat_hours=24,
+        fleet_local_keys=["sdlc_profile"], sdlc_profile="qc", max_revisions=24,
     )
     audit = SimpleNamespace(record=lambda **kw: recorded.append(kw) or _done())
     svc = _agent(cfg, audit=audit)
 
     await svc._apply({"config": {
-        "alert_repeat_hours": 6,        # shared → applied
+        "max_revisions": 6,        # shared → applied
         "sdlc_profile": "full",         # this machine's own → kept
         "ado_pat": "PAT",               # never accepted
         "trigger_tag": "central-tag",   # machine identity → kept
     }})
 
-    assert cfg.alert_repeat_hours == 6
+    assert cfg.max_revisions == 6
     assert cfg.sdlc_profile == "qc"
     assert cfg.ado_pat == ""
     import yaml
     saved = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert saved == {"alert_repeat_hours": 6}
+    assert saved == {"max_revisions": 6}
     assert recorded and recorded[0]["action"] == "config.synced"
 
 
@@ -314,9 +321,9 @@ async def test_an_unchanged_document_writes_nothing(tmp_path, monkeypatch):
     trail with changes that changed nothing — which is how a real change gets lost."""
     path = tmp_path / "worker.yaml"
     monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(path))
-    cfg = Settings(fleet_role="worker", alert_repeat_hours=6)
+    cfg = Settings(fleet_role="worker", max_revisions=6)
     svc = _agent(cfg, audit=SimpleNamespace(record=lambda **kw: _done()))
-    await svc._apply({"config": {"alert_repeat_hours": 6}})
+    await svc._apply({"config": {"max_revisions": 6}})
     assert not path.exists()
 
 
@@ -378,14 +385,14 @@ async def test_a_worker_and_a_central_complete_a_round_trip(tmp_path, monkeypatc
     from ai_autopilot.services.fleet_agent import FleetAgentService
 
     central_cfg = _settings(tmp_path, fleet_role="central", fleet_token=TOKEN)
-    central_cfg.alert_repeat_hours = 6            # what the centre wants everyone on
+    central_cfg.max_revisions = 6            # what the centre wants everyone on
     with TestClient(create_app(central_cfg)) as central_client:
         worker_yaml = tmp_path / "worker.yaml"
         monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(worker_yaml))
         worker_cfg = Settings(
             fleet_role="worker", fleet_central_url="http://central", fleet_token=TOKEN,
             fleet_worker_name="tram-01", fleet_local_keys=["sdlc_profile"],
-            sdlc_profile="qc", alert_repeat_hours=24,
+            sdlc_profile="qc", max_revisions=24,
             database_url=f"sqlite+aiosqlite:///{tmp_path / 'worker.db'}",
         )
         # Speak to the central's real ASGI app over httpx, so routing, JSON encoding and
@@ -412,11 +419,11 @@ async def test_a_worker_and_a_central_complete_a_round_trip(tmp_path, monkeypatc
         rows = await container.fleet_repo.list_all()
         assert [r.name for r in rows] == ["tram-01"]
         # …and the machine took the shared setting while keeping its own role.
-        assert worker_cfg.alert_repeat_hours == 6
+        assert worker_cfg.max_revisions == 6
         assert worker_cfg.sdlc_profile == "qc"
         assert worker_cfg.fleet_role == "worker"      # identity never overwritten
         import yaml
-        assert yaml.safe_load(worker_yaml.read_text(encoding="utf-8"))["alert_repeat_hours"] == 6
+        assert yaml.safe_load(worker_yaml.read_text(encoding="utf-8"))["max_revisions"] == 6
 
 
 # ── "Đồng bộ ngay" ────────────────────────────────────────────────────────────
@@ -465,12 +472,12 @@ def test_pressing_sync_beats_once_and_says_nothing_changed(tmp_path):
 
 
 def test_pressing_sync_names_what_it_brought_back(tmp_path):
-    agent = _StubAgent(ok=True, applied=("alert_repeat_hours", "trigger_states"),
+    agent = _StubAgent(ok=True, applied=("max_revisions", "trigger_states"),
                        detail="Đã nhận 2 thiết lập mới.")
     with _worker_client(tmp_path, agent) as client:
         page = client.post("/dashboard/fleet/sync")
     assert "Đã đồng bộ và áp dụng ngay" in page.text
-    assert "alert_repeat_hours" in page.text and "trigger_states" in page.text
+    assert "max_revisions" in page.text and "trigger_states" in page.text
 
 
 def test_a_failed_sync_says_so_and_why(tmp_path):

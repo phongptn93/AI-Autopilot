@@ -230,3 +230,154 @@ def test_the_central_check_calls_a_real_heartbeat(tmp_path):
     with TestClient(create_app(cfg)) as client:
         body = client.post("/dashboard/setup/check/fleet").json()
     assert body["ok"] is False and "URL trung tâm" in body["detail"]
+
+
+# ── Two audiences for one config ─────────────────────────────────────────────
+# A fleet document is served over an authenticated endpoint to machines that already
+# hold the shared token. An export is a file that leaves the building. They had one
+# filter between them, which meant the notification channels could go to neither.
+
+def test_a_downloadable_config_still_carries_no_channels():
+    """A Teams Workflows URL IS the authorisation to post. It must never ride along in
+    a file somebody emails to a colleague."""
+    cfg = Settings(teams_webhook_url="https://hook", smtp_password="hunter2",
+                   zalo_oa_access_token="z", email_to="a@b.c")
+    shared = sf.export_settings(cfg)
+    for key in sf.FLEET_ONLY_SHARED:
+        assert key not in shared, key
+
+
+def test_a_central_may_hand_its_own_workers_the_channels():
+    """A worker reporting to a different channel than the rest of the team is a worker
+    nobody reads — and pasting the same webhook onto every machine by hand is how that
+    happens."""
+    cfg = Settings(teams_webhook_url="https://hook", smtp_host="smtp.local")
+    document, _ = fleet.config_document(cfg)
+    assert document["teams_webhook_url"] == "https://hook"
+    assert document["smtp_host"] == "smtp.local"
+    # …and a worker accepts them, which the strip has to allow on its side too.
+    assert fleet.strip_local({"teams_webhook_url": "https://hook"}) == {
+        "teams_webhook_url": "https://hook"
+    }
+
+
+def test_the_ado_pat_travels_on_neither_road():
+    cfg = Settings(ado_pat="PAT-123", dashboard_auth_password_hash="pbkdf2$x")
+    document, _ = fleet.config_document(cfg)
+    assert "ado_pat" not in document and "ado_pat" not in sf.export_settings(cfg)
+    assert "dashboard_auth_password_hash" not in document
+
+
+def test_the_owner_answer_follows_what_the_central_actually_sends():
+    """owner_of reads the FLEET filter, not the export one. Reading the export filter
+    would have shown the webhook fields as this machine's own while the next heartbeat
+    quietly replaced them."""
+    worker = Settings(fleet_role="worker")
+    assert sf.owner_of("teams_webhook_channels", worker) == sf.OWNER_CENTRAL
+    assert sf.owner_of("ado_pat", worker) == sf.OWNER_MACHINE
+
+
+@pytest.mark.parametrize("key", [
+    "bot_persona_name", "teams_agentic_enabled", "teams_agent_nlu_enabled",
+    "alert_events", "delivery_review_hours", "notify_hours_start",
+    "digest_skip_when_empty", "alert_repeat_hours",
+])
+def test_the_bot_and_the_alerting_are_each_machines_own(key):
+    """The bot runs where its credentials are, and every channel an alert reaches is
+    per-machine already — so the knobs that decide the noise belong to the machine
+    that makes it."""
+    document, _ = fleet.config_document(Settings())
+    assert key not in document
+
+
+# ── Reset ────────────────────────────────────────────────────────────────────
+
+def test_reset_lists_only_what_actually_differs():
+    """An empty plan honestly means "already stock", which is why the preview is built
+    from real differences rather than from the whole field list."""
+    stock = Settings()
+    assert sf.reset_plan(stock) == {}
+    changed = Settings(max_concurrent=9, base_branch="develop")
+    plan = sf.reset_plan(changed)
+    assert plan["max_concurrent"] == Settings().max_concurrent
+    assert plan["base_branch"] == Settings().base_branch
+
+
+def test_reset_can_be_scoped_to_one_section():
+    changed = Settings(max_concurrent=9, base_branch="develop")
+    plan = sf.reset_plan(changed, "Workspace & Repository")
+    assert "base_branch" in plan and "max_concurrent" not in plan
+
+
+@pytest.mark.parametrize("key", sorted(sf.RESET_KEEP))
+def test_reset_never_touches_what_would_lock_you_out(key):
+    """Losing these is not "back to default" — it is being locked out of the machine
+    you are resetting, orphaning its data, or dropping it out of its fleet."""
+    changed = Settings(fleet_role="worker", fleet_token="t", fleet_central_url="http://c",
+                       dashboard_auth_password_hash="pbkdf2$x",
+                       database_url="sqlite+aiosqlite:///x.db", health_port=9999)
+    assert key not in sf.reset_plan(changed)
+
+
+def test_reset_previews_before_it_changes_anything(tmp_path, own_config):
+    cfg = _settings(tmp_path, max_concurrent=9)
+    with TestClient(create_app(cfg)) as client:
+        page = client.get("/dashboard/settings/reset")
+        assert page.status_code == 200
+        assert "Max concurrent" in page.text
+        # A GET must not have moved anything.
+        assert client.app.state.container.config.max_concurrent == 9
+        client.post("/dashboard/settings/reset", data={"section": ""})
+        assert client.app.state.container.config.max_concurrent == Settings().max_concurrent
+
+
+def test_a_worker_does_not_reset_what_the_central_hands_straight_back(tmp_path, own_config):
+    """That would be a reset the next heartbeat undoes — the same lie as a save that
+    does not stick."""
+    cfg = _settings(tmp_path, fleet_role="worker", fleet_token="t",
+                    fleet_central_url="http://c", board_max_per_column=99, max_concurrent=9)
+    with TestClient(create_app(cfg)) as client:
+        client.post("/dashboard/settings/reset", data={"section": ""})
+        live = client.app.state.container.config
+        assert live.board_max_per_column == 99                      # central's to decide
+        assert live.max_concurrent == Settings().max_concurrent      # this machine's own
+
+
+# ── The work-item source is a choice, and the page has to follow it ───────────
+
+def test_the_jira_boxes_can_actually_be_hidden(tmp_path):
+    """`.ws-field{display:flex}` is an author rule and outranks the UA stylesheet's
+    `[hidden]{display:none}` — so the attribute the template and the picker both set
+    was inert, and every ADO workspace showed the Jira credential boxes."""
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        page = client.get("/dashboard/workspaces").text
+    assert ".ws-field[hidden] { display:none; }" in page
+
+
+def test_the_routing_field_asks_for_the_key_the_chosen_tracker_uses(tmp_path):
+    """Items route on the workspace's project list, and a Jira item carries its JIRA
+    key — so on a Jira row the field is not asking for an "ADO project"."""
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        page = client.get("/dashboard/workspaces").text
+    assert "data-lbl-ado" in page and "data-lbl-jira" in page
+    assert "Jira project key (định tuyến)" in page
+
+
+def test_doctor_catches_a_jira_workspace_whose_key_routes_nowhere():
+    """The quiet one: the lookup misses, falls back to this machine's ADO client, and
+    a Jira item's comments are addressed to Azure DevOps with an id that means nothing
+    there. Nothing logs it."""
+    from ai_autopilot import doctor
+    from ai_autopilot.config import WorkspaceConfig
+
+    ws = WorkspaceConfig(
+        name="Khatoco", provider="jira", ado_projects=["KHATOCO"],
+        jira_url="https://x.atlassian.net", jira_email="b@c.d",
+        jira_token="t", jira_project="DXF",          # ← not in ado_projects
+    )
+    found = doctor.check_providers(Settings(workspaces=[ws]))
+    assert any(f.level == doctor.ERROR and "DXF" in f.title for f in found), found
+
+    ws.ado_projects = ["DXF"]                        # …and it clears when they agree
+    ok = doctor.check_providers(Settings(workspaces=[ws]))
+    assert not any(f.level == doctor.ERROR for f in ok), ok

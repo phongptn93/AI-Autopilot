@@ -205,6 +205,8 @@
     </form>
     <button type="button" class="btn-ghost" id="xfer-toggle"
             aria-expanded="false" aria-controls="xfer">⇅ Export / Import</button>
+    {# A link, not a button: it opens the preview. Nothing on this page resets anything. #}
+    <a class="btn-ghost" style="text-decoration:none" href="/dashboard/settings/reset">↩ Đặt lại</a>
   </div>
 </div>
 <p class="subnote">Saved to <code>{{ config_path }}</code> and applied live.</p>

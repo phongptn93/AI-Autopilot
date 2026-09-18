@@ -147,6 +147,10 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                             "vẫn được giữ."),
     "roles_saved": ("green", "✅ Đã lưu vai trò (stage · cửa vào · cửa ra) và áp dụng ngay."),
     "roles_cleared": ("green", "↩ Đã gỡ toàn bộ vai trò — máy quay về dùng Trigger states."),
+    "reset_done": ("green", "↩ Đã đưa các thiết lập về mặc định và áp dụng ngay. "
+                            "Xem đúng những gì đã đổi ở <a href='/dashboard/audit'>Audit</a>."),
+    "reset_nothing": ("green", "✅ Không có gì để đặt lại — phần này đang ở đúng giá trị "
+                               "mặc định."),
     "setting_claimed": ("green", "🖥 Máy này đã giành quyền thiết lập đó — trung tâm sẽ "
                                  "không ghi đè nữa, và bạn sửa được ngay tại chỗ."),
     "setting_released": ("green", "🛰 Đã trả thiết lập đó về cho trung tâm — lần đồng bộ "
@@ -2569,6 +2573,20 @@ def create_dashboard_router() -> APIRouter:
                  offline_after_minutes=cfg.fleet_offline_after_minutes),
         )
 
+    def _reset_display(spec, value) -> str:
+        """One value as the preview shows it. A secret is never printed — only whether
+        there IS one, which is the part that decides whether you care."""
+        if spec is not None and spec.kind == "password":
+            return "••• đã đặt" if value else "(trống)"
+        if isinstance(value, bool):
+            return "bật" if value else "tắt"
+        if isinstance(value, (list, tuple)):
+            return ", ".join(str(v) for v in value) if value else "(trống)"
+        if isinstance(value, dict):
+            return ", ".join(f"{k} => {v}" for k, v in value.items()) if value else "(trống)"
+        text = str(value if value is not None else "")
+        return text if text.strip() else "(trống)"
+
     def _worker_fleet_ctx(request: Request) -> dict:
         """What this worker can say about its own link to the centre.
 
@@ -2588,7 +2606,7 @@ def create_dashboard_router() -> APIRouter:
             "interval": cfg.fleet_sync_interval_minutes,
             "local_hash": local_hash,
             "local_keys": [str(k) for k in (cfg.fleet_local_keys or []) if str(k).strip()],
-            "shared_count": len(settings_form.export_settings(cfg)),
+            "shared_count": len(settings_form.fleet_settings(cfg)),
             # None until the first beat of this process — which is not the same as "it
             # failed", and the page says so rather than painting a red cross at boot.
             "last_ok": getattr(agent, "last_ok", None),
@@ -2944,7 +2962,7 @@ def create_dashboard_router() -> APIRouter:
                 # drift from what the central actually serves.
                 fleet={
                     "role": cfg.fleet_role or "",
-                    "shared_count": len(settings_form.export_settings(cfg)),
+                    "shared_count": len(settings_form.fleet_settings(cfg)),
                     "interval": cfg.fleet_sync_interval_minutes,
                     "local_keys": [str(k) for k in (cfg.fleet_local_keys or []) if str(k).strip()],
                 },
@@ -3404,6 +3422,61 @@ def create_dashboard_router() -> APIRouter:
                           f"token khớp. Bản cấu hình đang phát: {body.get('config_hash') or '?'}.",
             })
         raise HTTPException(status_code=404, detail="unknown check")
+
+    @router.get("/settings/reset", response_class=HTMLResponse)
+    async def reset_preview(request: Request):
+        """Show exactly what a reset would change, before anything is touched."""
+        c: Container = request.app.state.container
+        section = (request.query_params.get("section") or "").strip()
+        plan = settings_form.reset_plan(c.config, section)
+        by_key = {f.key: f for f in settings_form.FIELDS}
+        rows = [
+            {
+                "key": key,
+                "label": by_key[key].label if key in by_key else key,
+                "section": by_key[key].section if key in by_key else "",
+                "now": _reset_display(by_key.get(key), getattr(c.config, key, None)),
+                "after": _reset_display(by_key.get(key), value),
+            }
+            for key, value in plan.items()
+        ]
+        flash = _take_flash(request)
+        response = _TEMPLATES.TemplateResponse(
+            request, "settings_reset.html",
+            _ctx(request, "settings", rows=rows, section=section, flash=flash,
+                 sections=[s for s, _ in settings_form.sections()],
+                 kept=sorted(settings_form.RESET_KEEP)),
+        )
+        if flash is not None:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/settings/reset")
+    async def reset_settings(request: Request):
+        """Apply the reset the preview just described."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        section = str(form.get("section", "")).strip()
+        plan = settings_form.reset_plan(c.config, section)
+        # Recomputed here rather than carried through the form: what the page listed a
+        # minute ago is a description, and the only thing safe to apply is what is
+        # different NOW. A worker also cannot reset what the central will hand straight
+        # back — that would be a reset the next heartbeat undoes.
+        plan = {k: v for k, v in plan.items() if settings_form.writable_here(k, c.config)}
+        if not plan:
+            return _flash("/dashboard/settings/reset", "reset_nothing")
+        settings_form.save_to_yaml(config_file_path(), plan)
+        settings_form.apply_to_config(c.config, plan)
+        with contextlib.suppress(Exception):
+            c.ado.refresh()
+        _log.warning("settings reset via dashboard", count=len(plan),
+                     section=section or "(all)")
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.reset",
+            target=section or "(toàn bộ)",
+            detail=f"{len(plan)} thiết lập: " + ", ".join(sorted(plan))[:260],
+        )
+        return _flash("/dashboard/settings", "reset_done")
 
     @router.post("/settings/claim")
     async def claim_setting(request: Request):

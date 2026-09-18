@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from ai_autopilot.config import SdlcRole, Settings
@@ -115,11 +116,16 @@ class _FakeExecRepo:
         self.results: list = []
         self.retries: list[tuple[int, int]] = []
         self.profiles: list[str] = []
+        self.started: list[tuple[int, str, object]] = []
 
-    async def start_execution(self, item, skill, trigger_tag=None, profile=""):
+    async def start_execution(self, item, skill, trigger_tag=None, profile="",
+                              started_at=None):
         # `profile` is which ROLE the run is. Recorded because "interactive:<session>"
         # names the console, not the work — see the In-flight page.
         self.profiles.append(profile)
+        # `started_at` is back-dated for a run that began before this row did (an
+        # interactive session recovered after a restart), so it is worth capturing.
+        self.started.append((item.id, skill, started_at))
         return 99
 
     async def complete_execution(self, record_id, result):
@@ -1923,3 +1929,80 @@ async def test_the_sdlc_run_decides_the_role_before_the_item_leaves_its_door():
     assert seen["profile"] == "qc"          # the door decided, not the default
     assert seen["recorded"] == "qc"         # …and the record says the same thing
     assert seen["state_at_run"] == "Active"  # even though the door is already gone
+
+
+# ── An interactive session that outlived a restart ─────────────────────────────
+# Its console is still on screen and its result lands normally; what the autopilot
+# lost was the in-memory row pointing at it. Everything below is what that costs.
+
+async def test_a_recovered_orphan_session_is_recorded_like_any_other_run():
+    """It used to notify and update ADO without ever opening a row.
+
+    So a run that had been working for half an hour finished invisibly: nothing in
+    History, no tokens counted, and — because "is this PR ours" is answered from the
+    work items we hold runs for — its pull request missing from the merge rate and
+    from cost-per-shipped-PR. The Teams card's "Duration 00:00" was the visible
+    corner of it: with no row, nothing filled the time in either.
+    """
+    p, c = _poller()
+    done = ExecutionResult.ok(7, "agent", "done")
+    done.pr_url = "https://pr"
+    done.duration_seconds = 1800.0          # what the session handle says it lived
+    c.executor = _FakeExec(final=done)
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", c.config.live_tag])]
+
+    await p._finalize_orphan_sessions()
+
+    assert c.execution_repo.completed == [(99, True)]
+    item_id, skill, started_at = c.execution_repo.started[0]
+    assert (item_id, skill) == (7, "interactive:(recovered)")
+    # Back-dated by the real runtime: filing it as starting when we NOTICED would put
+    # a half-hour run on the timeline as an instant one.
+    assert started_at is not None
+    assert 1795 <= (datetime.now(UTC) - started_at).total_seconds() <= 1805
+
+
+async def test_finalising_an_orphan_cleans_up_that_session_not_the_last_one_seen():
+    """The close/release used to sit AFTER the loop, reading whatever the last
+    iteration left in `item` / `run_dir`.
+
+    Since the stranded list only fills from sessions that are still RUNNING, the
+    console it shut and the worktree it deleted were usually a live session's —
+    taking unfinished work with them — while the orphan actually finalised here was
+    never closed or released at all. Item 7 is finished; item 8 is still working.
+    """
+    p, c = _poller()
+    c.config.interactive_close_on = "result"
+    done = ExecutionResult.ok(7, "agent", "done")
+    done.pr_url = "https://pr"
+
+    class _PerItemExec(_FakeExec):
+        def finalize_interactive(self, item, run_dir):
+            return done if item.id == 7 else None      # 8 has written nothing yet
+
+    c.executor = _PerItemExec()
+    c.ado.tagged_items = [
+        _tagged(7, "Active", ["autopilot", c.config.live_tag]),
+        _tagged(8, "Active", ["autopilot", c.config.live_tag]),
+    ]
+
+    await p._finalize_orphan_sessions()
+
+    # Exactly the finished session is torn down…
+    assert c.executor.closed == [(7, "/ws/agent-7")]
+    assert c.executor.released == ["/ws/agent-7"]
+    # …and the one still working keeps its console and its worktree.
+    assert 8 in p._stranded
+
+
+async def test_a_still_running_orphan_is_left_completely_alone():
+    p, c = _poller()
+    c.config.interactive_close_on = "result"
+    c.executor = _FakeExec(final=None)                 # nobody has written a result
+    c.ado.tagged_items = [_tagged(7, "Active", ["autopilot", c.config.live_tag])]
+
+    await p._finalize_orphan_sessions()
+
+    assert c.executor.closed == [] and c.executor.released == []
+    assert c.execution_repo.completed == []
+    assert (7, c.config.live_tag) not in c.ado.removed  # still live, still tagged

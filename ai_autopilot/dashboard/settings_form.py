@@ -9,7 +9,7 @@ from __future__ import annotations
 import contextlib
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -29,20 +29,40 @@ class Field:
     # a state — the fields that are hardest to tell apart were the ones lying.
     placeholder: str = ""
     # "Only relevant when <key> is one of <values>". A setting that does nothing on
-    # THIS machine still had to be read and dismissed by everyone configuring it — and
-    # the fleet block showed four worker-only fields to a central, which reads as "fill
-    # these in". Rendered dimmed with the reason, and re-evaluated live when the
-    # controlling field changes, rather than hidden: a value already set must never
-    # vanish from the page that is supposed to show the configuration.
+    # THIS machine still had to be read and dismissed by everyone configuring it — the
+    # fleet block showed four worker-only fields to a central, which reads as "fill
+    # these in".
+    #
+    # The page resolves this in two steps, because "hide it" and "never lose a value"
+    # are both true and only look contradictory:
+    #   • inapplicable AND empty  → HIDDEN. There is nothing to see and nothing to lose.
+    #   • inapplicable AND set    → shown dimmed with the reason. A value somebody
+    #                               configured must not vanish from the page whose job
+    #                               is to show the configuration.
+    # Each section then offers one toggle to reveal what it hid, so the hiding is never
+    # something you have to know about to undo. Re-evaluated live as the controlling
+    # field changes — picking "worker" lights up the worker fields immediately.
+    #
+    # For a BOOL controlling field the values are ("1",): a ticked checkbox reads as
+    # "1" and an unticked one as "" on both sides (see :func:`control_value`).
     show_when_key: str = ""
     show_when_values: tuple[str, ...] = field(default_factory=tuple)
     # Offers a "generate" button next to the input (password kinds). For a shared secret
     # nobody should be inventing by hand.
     generate: bool = False
+    # Password kinds only: the 👁 button fetches and shows the STORED value, instead of
+    # only un-masking whatever was typed into an empty box. Reserved for a secret whose
+    # whole purpose is to be copied somewhere else — the fleet token has to be typed
+    # into every worker, and a shared secret you cannot read back is one you have to
+    # rotate across the fleet just to find out what it was.
+    reveal: bool = False
 
 
 # Order here is the order rendered on the page. Sections group consecutive fields.
-FIELDS: tuple[Field, ...] = (
+# Declares the fields themselves; the parent-switch relationships are applied below,
+# in ``_DEPENDS_ON``, so they can be read as one table instead of hunting a keyword
+# argument through nine hundred lines.
+_BASE_FIELDS: tuple[Field, ...] = (
     # ── Workspace & Repository ──
     Field("workspace_directory", "Workspace directory", "text", "Workspace & Repository",
           "Folder holding the shared .claude (skills/rules/MCP). Claude runs HERE and the agent "
@@ -711,11 +731,13 @@ FIELDS: tuple[Field, ...] = (
           "trên trang Fleet.",
           show_when_key="fleet_role", show_when_values=("worker",)),
     Field("fleet_token", "↳ Token chung", "password", "🛰 Fleet",
-          "Bí mật chung của cả đội, phải khớp ở 2 phía. Bấm ✨ để sinh ngẫu nhiên trên trung tâm "
-          "rồi phát cho từng máy trạm (nên đặt qua biến môi trường AUTOPILOT_FLEET_TOKEN). "
+          "Bí mật chung của cả đội, phải khớp ở 2 phía. Bấm ✨ để sinh ngẫu nhiên trên trung tâm, "
+          "👁 để xem lại token đang lưu mà copy sang máy trạm (nên đặt qua biến môi trường "
+          "AUTOPILOT_FLEET_TOKEN). "
           "Trung tâm KHÔNG bật API fleet khi token rỗng — một endpoint mở sẽ phát toàn bộ cấu "
           "hình chung cho bất kỳ ai gọi tới.",
-          show_when_key="fleet_role", show_when_values=("central", "worker"), generate=True),
+          show_when_key="fleet_role", show_when_values=("central", "worker"),
+          generate=True, reveal=True),
     Field("fleet_worker_name", "↳ Tên máy trạm", "text", "🛰 Fleet",
           "Tên hiển thị trên trang Fleet. Blank = hostname. Giữ nguyên qua các lần khởi động "
           "lại thì lịch sử của máy mới gom về một dòng.",
@@ -743,6 +765,168 @@ FIELDS: tuple[Field, ...] = (
           "this same password to decrypt the exported file. Blank = keep the current one."),
 )
 
+# ── Parent switches ──────────────────────────────────────────────────────────────
+# ``child key -> (controlling key, values that make it apply)``.
+#
+# The "↳" prefix in a label already says "this belongs to the switch above me", but a
+# prefix is a convention the page cannot act on: ~40 of these stayed on screen, fully
+# editable, while the switch that gives them any meaning was off. Someone raising the
+# test timeout on a machine with the test gate disabled is configuring nothing, and
+# there was no way to tell from the page.
+#
+# ON is spelled "1" for a bool parent (see :func:`control_value`). Only relationships
+# where the child is genuinely INERT while the parent is off belong here — a field
+# that merely *relates* to another keeps being shown, because hiding something that
+# still has an effect is worse than the clutter this removes.
+_DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
+    # Execution & Autonomy — the interactive console has no counterpart headless.
+    "interactive_close_on": ("execution_mode", ("interactive",)),
+    "interactive_idle_timeout_minutes": ("execution_mode", ("interactive",)),
+    "interactive_resume_on_rework": ("execution_mode", ("interactive",)),
+    "claude_session_ttl_hours": ("reuse_claude_session", ("1",)),
+    # 🧪 Quality gates
+    "lessons_max_injected": ("learning_loop_enabled", ("1",)),
+    "test_commands": ("test_gate_enabled", ("1",)),
+    "test_timeouts": ("test_gate_enabled", ("1",)),
+    "test_command": ("test_gate_enabled", ("1",)),
+    "test_timeout_seconds": ("test_gate_enabled", ("1",)),
+    "pr_score_auto_min": ("pr_scoring_enabled", ("1",)),
+    "pr_score_review_min": ("pr_scoring_enabled", ("1",)),
+    # 🔁 PR review & feedback
+    "max_revisions": ("feedback_loop_enabled", ("1",)),
+    "pr_auto_review_on_added": ("pr_reviewer_tracking_enabled", ("1",)),
+    "max_comment_rounds": ("comment_reprocess_enabled", ("1",)),
+    # 🚚 Delivery — the history switch is what starts the clock at all.
+    "delivery_history_interval_minutes": ("delivery_history_enabled", ("1",)),
+    "delivery_history_retention_days": ("delivery_history_enabled", ("1",)),
+    # Dependency scheduling
+    "scheduler_ai_conflict_min_score": ("scheduler_use_ai_conflicts", ("1",)),
+    "batch_max_items": ("batch_related_enabled", ("1",)),
+    "batch_stacked_prs": ("batch_related_enabled", ("1",)),
+    # Planning workbench
+    "planning_ai_max_pairs": ("planning_ai_analysis", ("1",)),
+    "planning_ai_min_score": ("planning_ai_analysis", ("1",)),
+    "planning_ai_timeout_seconds": ("planning_ai_analysis", ("1",)),
+    # Closed-loop SDLC
+    "sdlc_profile": ("sdlc_loop_enabled", ("1",)),
+    "sdlc_type_profiles": ("sdlc_loop_enabled", ("1",)),
+    "sdlc_default_profile": ("sdlc_loop_enabled", ("1",)),
+    "sdlc_max_iterations": ("sdlc_loop_enabled", ("1",)),
+    "sdlc_advance_on_draft": ("sdlc_loop_enabled", ("1",)),
+    # Process health
+    "process_health_interval_hours": ("process_health_enabled", ("1",)),
+    "process_health_window_days": ("process_health_enabled", ("1",)),
+    "process_health_blocked_days": ("process_health_enabled", ("1",)),
+    "process_health_adhoc_threshold_pct": ("process_health_enabled", ("1",)),
+    # Spec drift
+    "spec_drift_tag": ("spec_drift_enabled", ("1",)),
+    "spec_drift_holds_item": ("spec_drift_enabled", ("1",)),
+    # 🔔 Cảnh báo
+    "alert_repeat_hours": ("alert_dedup_enabled", ("1",)),
+    # 💬 Teams bot — every one of these is read only by the bot.
+    "bot_persona_name": ("teams_agent_enabled", ("1",)),
+    "bot_persona_voice": ("teams_agent_enabled", ("1",)),
+    "teams_review_skill": ("teams_agent_enabled", ("1",)),
+    "teams_agentic_enabled": ("teams_agent_enabled", ("1",)),
+    "teams_agent_session_memory": ("teams_agent_enabled", ("1",)),
+    "teams_agent_max_concurrent": ("teams_agent_enabled", ("1",)),
+    "teams_agent_nlu_enabled": ("teams_agent_enabled", ("1",)),
+    "teams_agent_app_id": ("teams_agent_enabled", ("1",)),
+    "teams_agent_tenant_id": ("teams_agent_enabled", ("1",)),
+    "teams_agent_app_secret": ("teams_agent_enabled", ("1",)),
+}
+
+
+def _with_dependencies(fields: tuple[Field, ...]) -> tuple[Field, ...]:
+    """Apply ``_DEPENDS_ON`` to the declared fields.
+
+    A field that already carries its own ``show_when_key`` keeps it — the table is a
+    convenience, never an override.
+    """
+    out = []
+    for f in fields:
+        dep = _DEPENDS_ON.get(f.key)
+        out.append(
+            replace(f, show_when_key=dep[0], show_when_values=dep[1])
+            if dep and not f.show_when_key else f
+        )
+    return tuple(out)
+
+
+FIELDS: tuple[Field, ...] = _with_dependencies(_BASE_FIELDS)
+
+# Every parent named above must be a real field, or the page would hide a child behind
+# a switch that does not exist — silently, and only on the machine whose config happens
+# to reach that branch. Cheap to check once at import.
+_UNKNOWN_PARENTS = {
+    parent for parent, _ in _DEPENDS_ON.values()
+} - {f.key for f in _BASE_FIELDS}
+if _UNKNOWN_PARENTS:  # pragma: no cover - a typo caught at import time
+    raise RuntimeError(f"_DEPENDS_ON names unknown settings: {sorted(_UNKNOWN_PARENTS)}")
+
+
+def control_value(current: Mapping[str, Any], key: str) -> str:
+    """The controlling field's value as the page compares it.
+
+    A checkbox has no meaningful ``value`` — it is ticked or it is not — so a bool
+    reads as ``"1"`` / ``""``. The browser does the same thing in
+    ``settings.html``, which is what keeps the server-rendered state and the live
+    re-evaluation from disagreeing.
+    """
+    value = current.get(key)
+    if isinstance(value, bool):
+        return "1" if value else ""
+    return str(value or "")
+
+
+def applies(f: Field, current: Mapping[str, Any]) -> bool:
+    """Does this field do anything on a machine configured like ``current``?"""
+    if not f.show_when_key:
+        return True
+    return control_value(current, f.show_when_key) in f.show_when_values
+
+
+def model_defaults(config: Any) -> dict[str, Any]:
+    """Every settings field's out-of-the-box value, for :func:`has_value`."""
+    out: dict[str, Any] = {}
+    for key, info in getattr(type(config), "model_fields", {}).items():
+        try:
+            out[key] = info.get_default(call_default_factory=True)
+        except Exception:  # noqa: BLE001 — a factory that needs context is not a default
+            continue
+    return out
+
+
+def has_value(
+    f: Field,
+    current: Mapping[str, Any],
+    secrets_set: Mapping[str, bool],
+    defaults: Mapping[str, Any] | None = None,
+) -> bool:
+    """Has somebody actually configured this, or is it just sitting at its default?
+
+    Decides between hiding an inapplicable field and dimming it. "Non-empty" is the
+    wrong test and hid almost nothing: every int and bool ships with a default, so
+    ``30`` in "coi là offline sau (phút)" counted as a decision someone made and the
+    field stayed on screen for a worker that can never use it. A value equal to the
+    default is not a decision — hiding it loses nothing, because turning the switch
+    back brings the same number with it.
+
+    Secrets never reach ``current`` (they are not echoed back), so their answer comes
+    from ``secrets_set`` instead.
+    """
+    if f.kind == "password":
+        return bool(secrets_set.get(f.key))
+    value = current.get(f.key)
+    if defaults is not None and f.key in defaults and value == defaults[f.key]:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (list, tuple, dict)):
+        return bool(value)
+    return bool(str(value or "").strip())
+
+
 # Fields that only take effect after a restart (the value is captured at startup).
 RESTART_REQUIRED = frozenset({"max_concurrent"})
 
@@ -756,6 +940,13 @@ RESTART_REQUIRED = frozenset({"max_concurrent"})
 # with the webhook URLs too.
 SECRET_KEYS = frozenset({
     "ado_pat", "teams_agent_app_secret",
+    # The fleet token is a password field like the rest, and leaving it out of this set
+    # was not a security hole (a password input never renders its value) — it broke the
+    # page's ability to SAY it is set: the box read "not set" on a central with a
+    # perfectly good token, which is the exact sentence that sends someone rotating a
+    # working secret across the fleet. It is still readable back on demand — see the
+    # `reveal` flag, which is a different question from whether it is echoed into HTML.
+    "fleet_token",
     "teams_webhook_url", "smtp_password", "zalo_oa_access_token",
     "dashboard_auth_password", "dashboard_auth_password_hash", "config_export_password",
 })

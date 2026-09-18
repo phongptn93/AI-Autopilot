@@ -1316,20 +1316,24 @@ def test_the_probe_result_is_shown_once(client):
     assert 'class="wh-probe-row"' not in client.get("/dashboard/settings").text
 
 
-def test_fleet_fields_that_do_nothing_here_are_marked_not_removed(tmp_path):
+def test_fleet_fields_that_do_nothing_here_are_put_away_not_deleted(tmp_path):
     """A central was shown four worker-only fields as if they were things to fill in.
-    Dimmed and labelled — never removed, because a value already set must stay visible
-    on the page that is supposed to show the configuration."""
+
+    Dimming them was the first answer and it was not enough: they still occupied the
+    section, still read as blanks to fill. An EMPTY one is now hidden outright — with
+    the section offering one click to show it — while a value somebody configured stays
+    on the page (see tests/test_settings_visibility.py for that half of the rule).
+    """
     settings = Settings(dry_run=True, fleet_role="central",
                         database_url=f"sqlite+aiosqlite:///{tmp_path / 'c.db'}")
     with TestClient(create_app(settings)) as client:
         page = client.get("/dashboard/settings").text
-    # The worker-only field is present…
+    # The worker-only field is still rendered — hidden is not deleted…
     assert 'data-k="fleet_central_url"' in page
-    # …and carried into the page as inapplicable, with the reason on it.
     row = page.split('data-k="fleet_central_url"')[0].rsplit('<div class="field', 1)[1]
-    assert "na" in row
-    assert "fleet_offline_after_minutes" in page      # the central's own field is there
+    assert "off" in row                              # …just put away: empty and inert here
+    assert "data-na-toggle" in page                  # and one click brings it back
+    assert "fleet_offline_after_minutes" in page     # the central's own field is there
 
 
 def test_the_shared_token_can_be_generated_and_revealed(tmp_path):

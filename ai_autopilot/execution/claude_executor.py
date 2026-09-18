@@ -1064,7 +1064,32 @@ class ClaudeExecutor:
             return None
         result = self._result_from_agent(item, agent)
         self._apply_interactive_usage(result, run_dir)
+        result.duration_seconds = self._interactive_duration(run_dir, item.id)
         return result
+
+    def _interactive_duration(self, run_dir: str, item_id: int) -> float:
+        """How long the live session actually took, from its own handle file.
+
+        Nothing times an interactive run: the console is launched and the poller comes
+        back later to read the result, so the executor never holds a stopwatch. The DB
+        covers the normal case by measuring dispatch → finalise, but that fallback
+        needs a RUNNING row, and a session that outlived a restart has none — it was
+        reported at "Duration 00:00", which reads as "this failed instantly" for work
+        that ran for half an hour and was cut short by the restart.
+
+        The handle written at launch carries the start time, so the session can say how
+        long it lived even when nothing in this process was there to watch it. 0.0 when
+        the handle is missing or unreadable, which is the same "we don't know" the DB
+        fallback then fills in.
+        """
+        handle = self._read_session_handle(run_dir, item_id) or {}
+        try:
+            started = float(handle.get("started") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        # A clock that moved backwards (or a handle from the future) must not produce a
+        # negative duration — better to say nothing than to say something impossible.
+        return max(0.0, time.time() - started) if started else 0.0
 
     def _apply_interactive_usage(self, result: ExecutionResult, run_dir: str) -> None:
         """Record what the live session spent, read from its own transcript.

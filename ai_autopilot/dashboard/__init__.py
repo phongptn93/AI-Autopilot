@@ -15,7 +15,13 @@ from urllib.parse import parse_qs, quote, urlencode
 
 import yaml
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.templating import Jinja2Templates
 
 from ai_autopilot import (
@@ -2749,6 +2755,9 @@ def create_dashboard_router() -> APIRouter:
             getattr(c.config, "dashboard_auth_password_hash", "")
         )
         cfg = c.config
+        # Out-of-the-box values, so "is this configured" can mean "did somebody decide
+        # it" rather than "is it non-empty" — see settings_form.has_value.
+        defaults = settings_form.model_defaults(cfg)
         # Read-only overview of every ADO tag the autopilot writes/reads — so the
         # whole tag vocabulary is visible in one place (not scattered across fields).
         tag_overview = [
@@ -2811,6 +2820,20 @@ def create_dashboard_router() -> APIRouter:
                 current=current,
                 has_pat=has_pat,
                 secrets_set=secrets_set,
+                # Which fields do anything on THIS machine, and which of the rest are
+                # nonetheless configured. The page hides an inapplicable field that is
+                # empty and dims one that is set — computed here so the first paint
+                # already agrees with what the browser re-computes on every change.
+                applicable={
+                    f.key: settings_form.applies(f, current) for f in settings_form.FIELDS
+                },
+                filled={
+                    f.key: settings_form.has_value(f, current, secrets_set, defaults)
+                    for f in settings_form.FIELDS
+                },
+                # "chỉ khi «Vai của máy này» = worker" beats "chỉ dùng khi fleet role
+                # = worker": the badge names the control the reader can actually see.
+                field_labels={f.key: f.label for f in settings_form.FIELDS},
                 restart_keys=settings_form.RESTART_REQUIRED,
                 flash=flash,
                 webhook_channels=channels,
@@ -3052,6 +3075,33 @@ def create_dashboard_router() -> APIRouter:
             target=", ".join(str(f.get("name")) for f in parsed)[:300],
         )
         return _flash("/dashboard/flow", "flow_saved")
+
+    @router.get("/settings/reveal/{key}")
+    async def reveal_secret(request: Request, key: str):
+        """Hand back a stored secret so the 👁 button can actually show it.
+
+        Only for fields that declare ``reveal`` — today that is the fleet token alone.
+        A shared secret exists to be copied onto every other machine, so "type it again
+        or rotate it across the fleet" is the wrong answer to "what is it". Everything
+        else (the PAT, SMTP, the dashboard password) stays write-only: those are typed
+        in once and nobody needs them back, so there is no reason to build a way out.
+
+        Fetched on demand rather than rendered into the page, so the value is not
+        sitting in the HTML of a tab left open, and each look is one audited event.
+        """
+        c: Container = request.app.state.container
+        spec = next(
+            (f for f in settings_form.FIELDS if f.key == key and f.reveal), None
+        )
+        if spec is None:
+            raise HTTPException(status_code=404, detail="not revealable")
+        value = str(getattr(c.config, key, "") or "")
+        with contextlib.suppress(Exception):
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="settings.secret_revealed",
+                target=key, detail="" if value else "(chưa đặt)",
+            )
+        return JSONResponse({"key": key, "value": value})
 
     @router.post("/settings/reload")
     async def reload_settings(request: Request):

@@ -126,13 +126,32 @@
                 border-bottom:1px solid var(--border)}
   .wh-probe-ico{width:16px;flex:none}
   .wh-probe-note{padding:8px 12px;font-size:12px;color:var(--text-muted);background:var(--bg)}
-  /* A setting that does nothing on THIS machine: dimmed and labelled, never removed —
-     a value already set must stay visible on the page that shows the configuration. */
-  .field.na{opacity:.45}
-  .field.na:focus-within{opacity:1}
+  /* A setting that does nothing on THIS machine. Two cases, because "don't make me
+     read it" and "never lose a value I set" are both true:
+       • empty  → .off, hidden outright (nothing to see, nothing to lose)
+       • set    → .na, dimmed with the reason (it is part of the configuration)
+     Each section offers one toggle that reveals what it hid, so the hiding is never
+     something you have to know about in order to undo. */
+  .field.off{display:none}
+  .card.show-na .field.off{display:block}
+  .card.show-na .field.off.bool{display:flex}
+  .field.na,.card.show-na .field.off{opacity:.5}
+  .field.na:focus-within,.card.show-na .field.off:focus-within{opacity:1}
   .na-badge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:20px;margin-left:6px;
             background:var(--bg);border:1px solid var(--border);color:var(--text-dim);
-            text-transform:none;letter-spacing:0}
+            text-transform:none;letter-spacing:0;white-space:nowrap}
+  /* Lives in the card header: says how many fields this section is holding back and
+     why, and takes one click to show them. Hidden when a section hides nothing. */
+  .na-toggle{margin-left:auto;flex:none;background:var(--bg);border:1px solid var(--border);
+             color:var(--text-dim);border-radius:20px;padding:3px 11px;font-size:11.5px;
+             font-family:inherit;cursor:pointer;white-space:nowrap}
+  .na-toggle:hover{border-color:var(--accent);color:var(--text)}
+  .na-toggle[hidden]{display:none}
+  .card-header{flex-wrap:wrap}
+  /* The section nav is sticky, so jumping to a section parked its heading UNDER the
+     nav — you landed on a card whose title (and now its "show what I hid" button) was
+     behind the bar you had just clicked. */
+  .card[id^="sec-"]{scroll-margin-top:64px}
   .pw-wrap{display:flex;align-items:center;gap:6px}
   .pw-wrap input{flex:1;min-width:0}
   .pw-btn{flex:none;background:var(--bg);border:1px solid var(--border);border-radius:7px;
@@ -292,6 +311,10 @@
         per-type states, actions and roll-up live on
         <a href="/dashboard/flow" style="color:var(--accent-hover)">🔀 State flow</a>.</span>
       {% endif %}
+      {# Filled in by script: how many fields this section is holding back, and the one
+         click that shows them. Starts hidden, so a section that hides nothing — the
+         common case — carries no extra chrome at all. #}
+      <button type="button" class="na-toggle" data-na-toggle hidden aria-expanded="false"></button>
     </div>
 
     {# What this connection is FOR. Someone configuring Jira comes looking here first —
@@ -335,9 +358,12 @@
         <span class="form-help" style="margin:0">
           {% if fleet.role == 'central' %}Máy này <b>phát</b> {{ fleet.shared_count }} thiết lập chung cho máy trạm.
           {% elif fleet.role == 'worker' %}Máy này <b>nhận</b> thiết lập chung từ trung tâm mỗi {{ fleet.interval }} phút.
-          {% else %}Chưa bật — chọn vai ở trên để dùng.{% endif %}
+          {% else %}Máy độc lập — không gửi và không nhận gì. Chọn <b>vai</b> bên dưới để dùng.{% endif %}
         </span>
       </div>
+      {# Three columns about what a central sends and a worker keeps say nothing to a
+         machine that is neither. Shown once the role makes them true. #}
+      {% if fleet.role %}
       <div class="fleet-cols">
         <div class="fleet-col">
           <b>✅ Được đồng bộ</b>
@@ -368,6 +394,7 @@
         nên một trung tâm bị chiếm vẫn không ghi được PAT hay đường dẫn lên máy trạm.
         {% if fleet.role == 'central' %} Theo dõi đội máy ở <a href="/dashboard/fleet" style="color:var(--accent-hover)">🛰 Fleet</a>.{% endif %}
       </div>
+      {% endif %}
     </div>
     {% endif %}
 
@@ -452,16 +479,26 @@
     <div class="field-grid">
       {% for f in fields %}
       {% set wide = f.kind in ('list','map','stateset') %}
-      {# "Only relevant when X is Y": dimmed with the reason, never removed. A value
-         already set must not vanish from the page that is supposed to show the
-         configuration — it just stops looking like something to fill in. #}
-      {% set off = f.show_when_key and (current.get(f.show_when_key) or '') not in f.show_when_values %}
-      <div class="field {{ 'wide' if wide else '' }} {{ 'bool' if f.kind=='bool' else '' }} {{ 'na' if off else '' }}"
+      {# A field that does nothing on THIS machine. Empty → hidden; already configured
+         → dimmed with the reason, because a value somebody set must not vanish from
+         the page whose job is to show the configuration. `data-filled` carries that
+         distinction to the browser, which re-decides it as the parent switch moves. #}
+      {% set na = not applicable.get(f.key, True) %}
+      {% set kept = filled.get(f.key, False) %}
+      <div class="field {{ 'wide' if wide else '' }} {{ 'bool' if f.kind=='bool' else '' }}
+                  {{ ('na' if kept else 'off') if na else '' }}"
            data-k="{{ f.key }}"
            {% if f.show_when_key %}data-when-key="{{ f.show_when_key }}"
-           data-when-vals="{{ f.show_when_values|join(',') }}"{% endif %}>
+           data-when-vals="{{ f.show_when_values|join(',') }}"
+           data-filled="{{ '1' if kept else '' }}"{% endif %}>
         <label for="{{ f.key }}">{{ f.label }}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}
-          {% if f.show_when_key %}<span class="na-badge">chỉ dùng khi {{ f.show_when_key.replace('_', ' ') }} = {{ f.show_when_values|join(' / ') }}</span>{% endif %}
+          {% if f.show_when_key %}
+          {# Names the control the reader can see, not the config key underneath it:
+             «Vai của máy này» is on screen, `fleet_role` is not. #}
+          <span class="na-badge">chỉ khi “{{ field_labels.get(f.show_when_key, f.show_when_key) }}”
+            {%- if f.show_when_values == ('1',) %} đang bật
+            {%- else %} = {{ f.show_when_values|join(' / ') }}{% endif %}</span>
+          {% endif %}
         </label>
         <div class="form-input">
           {% if f.kind == 'bool' %}
@@ -477,7 +514,8 @@
               <input type="password" id="{{ f.key }}" name="{{ f.key }}"
                      placeholder="{{ '•••••• set — leave blank to keep' if secrets_set.get(f.key) else 'not set' }}" autocomplete="off" />
               <button type="button" class="pw-btn" data-pw-toggle="{{ f.key }}"
-                      title="Hiện / ẩn">👁</button>
+                      {% if f.reveal %}data-pw-reveal="{{ f.key }}"{% endif %}
+                      title="{{ 'Hiện giá trị đang lưu (để copy sang máy khác)' if f.reveal else 'Hiện / ẩn' }}">👁</button>
               {% if f.generate %}
               <button type="button" class="pw-btn" data-pw-gen="{{ f.key }}"
                       title="Sinh token ngẫu nhiên (32 byte) và hiện ra để copy">✨</button>
@@ -575,27 +613,96 @@
   })();
 
   // ── Fields that do nothing on THIS machine ────────────────────────────────
-  // Re-evaluated as the controlling field changes, so picking "worker" lights up the
-  // worker fields immediately instead of after a save-and-reload.
+  // Same two rules the server rendered with (see settings_form.Field.show_when_key):
+  // inapplicable + empty is hidden, inapplicable + configured is dimmed. Re-evaluated
+  // as the controlling field changes, so picking "worker" lights up the worker fields
+  // immediately rather than after a save-and-reload — and hides the central-only ones
+  // in the same instant.
   (function () {
     var conditional = Array.prototype.slice.call(document.querySelectorAll('[data-when-key]'));
+    var toggles = Array.prototype.slice.call(document.querySelectorAll('[data-na-toggle]'));
     if (!conditional.length) return;
+
+    // A checkbox has no meaningful `value` — it is ticked or it is not. Mirrors
+    // settings_form.control_value so the two sides can never disagree.
+    function valueOf(ctl) {
+      if (ctl.type === 'checkbox') return ctl.checked ? '1' : '';
+      return ctl.value || '';
+    }
+
     function apply() {
       conditional.forEach(function (el) {
         var ctl = document.getElementById(el.dataset.whenKey);
         if (!ctl) return;
-        var vals = (el.dataset.whenVals || '').split(',');
-        el.classList.toggle('na', vals.indexOf(ctl.value || '') === -1);
+        var applies = (el.dataset.whenVals || '').split(',').indexOf(valueOf(ctl)) !== -1;
+        var keep = applies || !!el.dataset.filled;
+        el.classList.toggle('na', !applies && keep);
+        el.classList.toggle('off', !applies && !keep);
+      });
+      // Count per section AFTER the pass above: the toggle has to describe the state
+      // the reader is actually looking at.
+      toggles.forEach(function (btn) {
+        var card = btn.closest('.card');
+        var n = card ? card.querySelectorAll('.field.off').length : 0;
+        btn.hidden = n === 0;
+        if (n === 0) { card.classList.remove('show-na'); return; }
+        var open = card.classList.contains('show-na');
+        btn.textContent = open ? '⌃ Ẩn ' + n + ' thiết lập không áp dụng'
+                               : '⌄ ' + n + ' thiết lập không áp dụng';
+        btn.setAttribute('aria-expanded', String(open));
       });
     }
+
     conditional.forEach(function (el) {
       var ctl = document.getElementById(el.dataset.whenKey);
       if (ctl && !ctl.dataset.whenBound) {
         ctl.dataset.whenBound = '1';
+        // 'change' misses a checkbox toggled by keyboard in some browsers; 'input'
+        // covers typing into a select-less control. Both land on the same pass.
         ctl.addEventListener('change', apply);
+        ctl.addEventListener('input', apply);
       }
     });
+    toggles.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var card = btn.closest('.card');
+        if (card) card.classList.toggle('show-na');
+        apply();
+      });
+    });
     apply();
+  })();
+
+  // ── Reveal a stored secret ────────────────────────────────────────────────
+  // For fields that declare `reveal` (the fleet token). The value is NOT rendered into
+  // the page — it is fetched when asked for, so it is not sitting in the HTML of a tab
+  // someone left open, and every look is one audited event on the server.
+  (function () {
+    document.querySelectorAll('[data-pw-reveal]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var input = document.getElementById(btn.dataset.pwReveal);
+        // Same button as the 👁 toggle, whose listener ran first: fetch only on the
+        // stroke that UNMASKS, never on the one that hides again.
+        if (!input || input.type !== 'text') return;
+        // Something already typed is what the user is about to save — never overwrite it.
+        if (input.value) return;
+        btn.disabled = true;
+        fetch('/dashboard/settings/reveal/' + encodeURIComponent(btn.dataset.pwReveal),
+              { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) {
+            if (!data) return;
+            if (data.value) {
+              input.value = data.value;
+              input.select();
+            } else {
+              input.placeholder = 'chưa đặt';
+            }
+          })
+          .catch(function () { /* stays masked; the page must not break over this */ })
+          .finally(function () { btn.disabled = false; });
+      });
+    });
   })();
 </script>
 
@@ -635,7 +742,9 @@
         if (on) hits++;
       });
       cards.forEach(function (c) {
-        c.classList.toggle('hide', !c.querySelector('.field[data-k]:not(.hide)'));
+        // `.off` is a field this machine has no use for: it is not a search result
+        // either, so a section whose only matches are hidden must not claim one.
+        c.classList.toggle('hide', !c.querySelector('.field[data-k]:not(.hide):not(.off)'));
       });
       empty.classList.toggle('hide', hits > 0);
       count.textContent = hits + (hits === 1 ? ' match' : ' matches');

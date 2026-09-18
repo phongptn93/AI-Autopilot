@@ -77,11 +77,17 @@ class ExecutionRepository:
 
     async def start_execution(
         self, item: WorkItemInfo, skill: str, trigger_tag: str | None = None,
-        profile: str = "",
+        profile: str = "", started_at: datetime | None = None,
     ) -> int:
         """Open a RUNNING row. ``profile`` is which ROLE the run is — recorded at the
         start because the item moves to its working state immediately after, and from
-        there the role can no longer be derived."""
+        there the role can no longer be derived.
+
+        ``started_at`` overrides "now" for a run that began before this row did: an
+        interactive session recovered after a restart really started when its console
+        was launched, and filing it as starting at the moment we noticed would put a
+        half-hour run on the timeline as an instant one.
+        """
         async with self._db.session() as session:
             record = ExecutionRecord(
                 work_item_id=item.id,
@@ -92,7 +98,7 @@ class ExecutionRepository:
                 trigger_tag=trigger_tag,
                 profile=(profile or "").strip() or None,
                 status=ExecutionStatus.RUNNING,
-                started_at=datetime.now(UTC),
+                started_at=started_at or datetime.now(UTC),
             )
             session.add(record)
             await session.commit()

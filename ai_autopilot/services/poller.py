@@ -1500,8 +1500,32 @@ class AdoPollerService:
                 continue
             await self._remove_live_tag(item.id)
             self._stranded.discard(item.id)
+            # Record it. This path used to notify and update ADO without ever opening a
+            # row, so a session that outlived a restart finished in silence as far as
+            # every number is concerned: no History entry, no tokens counted, and —
+            # because "is this PR ours" is answered from the work items we have runs
+            # for — its pull request missing from the merge rate and the cost per
+            # shipped PR. The card's "Duration 00:00" was the visible corner of it:
+            # with no row, nothing backfilled the time either.
+            record_id = await c.execution_repo.start_execution(
+                item, "interactive:(recovered)", trigger_tag=self._matched_tag(item),
+                started_at=datetime.now(UTC) - timedelta(seconds=result.duration_seconds),
+            )
+            await c.execution_repo.complete_execution(record_id, result)
+            if result.cost_tokens:
+                await c.cost_tracker.track(record_id, result.cost_tokens)
+                metrics.record_cost(result.cost_tokens)
             await self._handle_agent_result(item, result)
             self._processed[item.id] = datetime.now(UTC)
+            # Inside the loop, where `item` and `run_dir` are THIS session's. They used
+            # to sit after it, under `if newly_stranded:` — reading whatever the last
+            # iteration happened to leave behind. Since `newly_stranded` only fills from
+            # sessions that are still RUNNING, the console it closed and the worktree it
+            # deleted were usually a live session's, taking unfinished work with them;
+            # and the orphan actually finalised here was never closed or released at all.
+            if await self._close_live_session(item.id, run_dir):
+                await c.executor.release_scratch(run_dir)
+            self._log.info("orphan interactive session finalized", id=item.id)
         if newly_stranded:
             # The remedy moved and this line did not follow it. ▶ Run has released a
             # stranded live tag since it learned to ask the poller whether a session is
@@ -1517,9 +1541,6 @@ class AdoPollerService:
                      f"running and clears the tag when none is. ({cfg.restart_tag} also "
                      "releases it, but wipes the item's SDLC progress.)",
             )
-            if await self._close_live_session(item.id, run_dir):
-                await c.executor.release_scratch(run_dir)
-            self._log.info("orphan interactive session finalized", id=item.id)
 
     def _score_run(self, result: ExecutionResult) -> RunScore | None:
         """Grade a successful run from its objective signals (None if disabled)."""

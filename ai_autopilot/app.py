@@ -91,24 +91,40 @@ def _dashboard_challenge(request: Request) -> Response:
     )
 
 
+# Windows socket errors that mean "the peer went away", nothing more. None of them is
+# actionable and none says anything about our own state, so they belong at debug level.
+#   10054 ECONNRESET   — connection forcibly closed by the remote host
+#   10053 ECONNABORTED — the local stack aborted a half-open connection
+#      64 ERROR_NETNAME_DELETED — the network name is no longer available, i.e. the
+#         client vanished between the SYN and the completion of AcceptEx
+#    1236 ERROR_CONNECTION_ABORTED
+_PEER_GONE_WINERRORS = frozenset({64, 1236, 10053, 10054})
+
+
 def _quiet_proactor_connection_reset(log) -> None:
-    """Downgrade the harmless Windows ``[WinError 10054]`` Proactor callback noise.
+    """Downgrade the harmless Windows "peer went away" Proactor noise.
 
     On Windows the Proactor event loop logs an *unhandled*
     ``ConnectionResetError: [WinError 10054] An existing connection was forcibly
     closed by the remote host`` from ``_ProactorBasePipeTransport._call_connection_lost``
     whenever a subprocess pipe / TLS socket is torn down after the peer already
     closed it. It does not affect the run (``claude_client`` retries the real
-    failure) — it just spams the log. Route only this one callback error to debug
-    and delegate everything else to the loop's default handler.
+    failure) — it just spams the log. The same is true of the ``Task exception was
+    never retrieved`` report for the ``accept_coro`` task that
+    :func:`_keep_listener_alive_on_accept_error` leaves behind when a client drops
+    mid-accept. Route only these to debug and delegate everything else to the loop's
+    default handler.
     """
     loop = asyncio.get_running_loop()
     previous = loop.get_exception_handler()
 
     def handler(loop, context):
         exc = context.get("exception")
-        if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
-            log.debug("ignored proactor connection reset (WinError 10054)")
+        if (
+            isinstance(exc, OSError)
+            and getattr(exc, "winerror", None) in _PEER_GONE_WINERRORS
+        ):
+            log.debug("ignored proactor socket error", winerror=exc.winerror)
             return
         if previous is not None:
             previous(loop, context)
@@ -116,6 +132,66 @@ def _quiet_proactor_connection_reset(log) -> None:
             loop.default_exception_handler(context)
 
     loop.set_exception_handler(handler)
+
+
+def _keep_listener_alive_on_accept_error(log, loop=None) -> None:
+    """Stop one dead client connection from taking the whole HTTP listener down.
+
+    On Windows, ``AcceptEx`` completes with ``OSError [WinError 64] The specified
+    network name is no longer available`` when a client disappears between the SYN
+    and the completion — a port scan, a probe from a monitoring tool, a laptop that
+    slept, a VPN that flapped. CPython's Proactor accept loop
+    (``BaseProactorEventLoop._start_serving``) treats *any* ``OSError`` there as fatal
+    for the listening socket:
+
+        except OSError as exc:
+            if sock.fileno() != -1:
+                self.call_exception_handler({'message': 'Accept failed on a socket', ...})
+                sock.close()          # ← the listener is now gone, permanently
+
+    Nothing re-opens it. The process stays up — the poller, the loops and the PR
+    babysitter all keep running, so from the outside it looks healthy — but every
+    later request to the dashboard hangs at TCP connect with no one left to accept it,
+    until someone restarts the process. That is the "dashboard only loads after it
+    hangs" symptom.
+
+    The fix is to keep the failure away from that ``except`` clause: wrap the
+    proactor's ``accept`` so a failed accept is retried on the same listening socket
+    instead of raising into the loop that would close it. Patched on the running
+    loop's proactor instance, not the class, so it is scoped to this application and
+    inert on every other platform (no ``_proactor``, nothing to wrap).
+
+    ``loop`` defaults to the running loop and exists so a test can hand in a stub
+    proactor instead of mutating the loop it is running on.
+    """
+    loop = loop or asyncio.get_running_loop()
+    proactor = getattr(loop, "_proactor", None)
+    accept = getattr(proactor, "accept", None)
+    if accept is None or getattr(proactor, "_autopilot_accept_guard", False):
+        return  # not a Proactor loop (POSIX), or already wrapped
+
+    async def _accept_until_one_succeeds(listener):
+        while True:
+            try:
+                return await accept(listener)
+            except OSError as exc:
+                if listener.fileno() == -1:
+                    raise  # the listener really is closed — we are shutting down
+                log.warning(
+                    "client dropped during accept; listener kept open",
+                    winerror=getattr(exc, "winerror", None), error=str(exc),
+                )
+                # A storm of failing accepts must not turn into a busy loop.
+                await asyncio.sleep(0.05)
+
+    def guarded_accept(listener):
+        # The caller stores this in ``_accept_futures`` and cancels it on shutdown, so
+        # it has to be a future — a Task is one, and cancelling it cancels the inner
+        # accept exactly as before.
+        return asyncio.ensure_future(_accept_until_one_succeeds(listener))
+
+    proactor.accept = guarded_accept
+    proactor._autopilot_accept_guard = True
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -126,6 +202,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         _quiet_proactor_connection_reset(log)
+        # Before uvicorn calls `loop.create_server` (lifespan startup runs first), so the
+        # very first accept is already guarded.
+        _keep_listener_alive_on_accept_error(log)
         container = Container(config)
         app.state.container = container
         started: list = []  # services successfully .start()ed — torn down in reverse

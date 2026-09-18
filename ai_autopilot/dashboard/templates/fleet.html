@@ -66,9 +66,11 @@
     {% if w.hostname and w.hostname != w.name %}<span class="fl-host">{{ w.hostname }}</span>{% endif %}
     <span class="fl-spacer"></span>
     {% if w.version %}
-    <span class="fl-badge {{ 'warn' if w.version_drift else 'mute' }}"
-          title="{{ 'Khác version của máy trung tâm (' ~ version ~ ')' if w.version_drift else 'Cùng version với trung tâm' }}">
-      v{{ w.version }}
+    {# Máy CŨ hơn mới là vấn đề — nó không có field cho thiết lập mới nên sẽ bỏ qua.
+       Máy mới hơn trung tâm là chuyện bình thường giữa chừng một đợt nâng cấp. #}
+    <span class="fl-badge {{ 'warn' if w.version_behind else 'mute' }}"
+          title="{% if w.version_behind %}Cũ hơn trung tâm (v{{ version }}) — máy này cần cập nhật, thiết lập mới sẽ bị nó bỏ qua{% elif w.version_drift %}Mới hơn trung tâm (v{{ version }}){% else %}Cùng version với trung tâm{% endif %}">
+      v{{ w.version }}{% if w.version_behind %} · cần cập nhật{% endif %}
     </span>
     {% endif %}
     {% if w.in_sync %}

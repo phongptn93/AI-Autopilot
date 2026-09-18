@@ -840,6 +840,17 @@ class Settings(BaseSettings):
         yaml_file=_yaml_path(),
         yaml_file_encoding="utf-8",
         extra="ignore",
+        # Parsing happens at STARTUP, but this object is also written to while the
+        # process runs: the Settings page, the setup wizard and a fleet sync all assign
+        # straight onto it so running services see the change without a restart. Those
+        # writers hand over JSON/form shapes — a `sdlc_roles` arriving from the central
+        # is a dict of dicts, not a dict of ``SdlcRole`` — and without this flag pydantic
+        # stores them verbatim. Every reader that says ``role.stages`` then raises, so a
+        # worker that synced happily served 500s on /dashboard/roles and
+        # /dashboard/board-views until someone restarted it, which put the real models
+        # back from YAML. Validating on assignment makes the live object obey its own
+        # types no matter which door the value came in through.
+        validate_assignment=True,
     )
 
     # ── Azure DevOps connection ──
@@ -1780,6 +1791,25 @@ class Settings(BaseSettings):
     @property
     def has_auth(self) -> bool:
         return bool(self.ado_pat or self.oauth_app_id)
+
+    @property
+    def has_tracker_auth(self) -> bool:
+        """Can this machine reach ANY work-item tracker?
+
+        ``has_auth`` answers the narrower question "can we reach Azure DevOps", and the
+        poller used it as the gate on polling at all — so a team whose items live in
+        Jira had a machine that fetched nothing, forever, with a log line telling them
+        to set an ADO PAT they do not own. The poller asks every provider, so the gate
+        has to be every provider too.
+        """
+        if self.has_auth:
+            return True
+        return any(
+            (getattr(ws, "provider", "") or "").strip().lower() == "jira"
+            and (getattr(ws, "jira_url", "") or "").strip()
+            and (getattr(ws, "jira_token", "") or "").strip()
+            for ws in self.effective_workspaces
+        )
 
     # ── Multi-project / multi-workspace resolution ───────────────────────────
     #

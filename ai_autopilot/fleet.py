@@ -71,6 +71,13 @@ class WorkerReport(BaseModel):
     running: list[RunningRun] = Field(default_factory=list)
     done_today: int = 0
     failed_today: int = 0
+    # "Prove this URL and token, do not enrol me." The setup wizard's "test it now"
+    # button has to send a REAL heartbeat — reachability proves nothing about whether
+    # the token matches — but the machine pressing it is usually not configured yet, so
+    # the central filed a worker named after the probe itself. Every install left a
+    # phantom `setup-check` machine on the fleet page, permanently offline and
+    # permanently "config lệch", which somebody then had to work out and delete.
+    probe: bool = False
 
 
 class SyncResponse(BaseModel):
@@ -87,6 +94,36 @@ class SyncResponse(BaseModel):
     # Echoed back so a worker pointed at the wrong host (or at a machine that is not a
     # central at all) fails loudly instead of quietly syncing with nothing.
     central_version: str = ""
+
+
+def version_tuple(version: str) -> tuple[int, ...]:
+    """A version string as comparable numbers. Unparseable → ``()``, which sorts first.
+
+    Deliberately forgiving: a build string this does not understand must degrade to
+    "cannot tell", never to an exception on a page or in a heartbeat.
+    """
+    parts: list[int] = []
+    for chunk in (version or "").strip().split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def is_behind(theirs: str, ours: str) -> bool:
+    """Is ``theirs`` an OLDER build than ``ours``?
+
+    "Different" was the old test, and it answered the wrong question twice over: a
+    worker running AHEAD of the central (mid-rollout, which is normal for an hour) was
+    flagged as a problem, and nothing anywhere said which side needed the update. The
+    only version drift that costs anything is a machine running code that predates the
+    settings being sent to it — so that is the one worth a warning.
+    """
+    mine, other = version_tuple(ours), version_tuple(theirs)
+    if not mine or not other:
+        return False                       # cannot tell — say nothing rather than cry wolf
+    return other < mine
 
 
 def config_hash(document: dict[str, Any]) -> str:
@@ -168,6 +205,14 @@ def create_fleet_router() -> APIRouter:
             raise HTTPException(status_code=422, detail="worker name is required")
 
         document, digest = config_document(cfg)
+        if report.probe:
+            # Answered in full — the caller is checking that this host is a central and
+            # that the token matches, and both of those are in the reply — but nothing
+            # is recorded. A machine joins the fleet by running, not by being tested.
+            _log.info("fleet heartbeat (probe, not enrolled)", worker=report.name)
+            from ai_autopilot import __version__ as central_version
+
+            return SyncResponse(config_hash=digest, central_version=central_version)
         await c.fleet_repo.upsert(report, config_hash=digest)
         _log.info(
             "fleet heartbeat", worker=report.name, version=report.version,

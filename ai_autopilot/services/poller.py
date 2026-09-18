@@ -184,8 +184,7 @@ class AdoPollerService:
         the heavier work-item poll so commands are picked up within
         ``comment_poll_interval_seconds`` regardless of ``poll_interval_seconds``."""
         cfg = self._config
-        if not cfg.has_auth:
-            return
+        await self._await_credentials()
         while True:
             try:
                 await asyncio.sleep(cfg.comment_poll_interval_seconds or 15)
@@ -194,6 +193,34 @@ class AdoPollerService:
                 raise
             except Exception as exc:  # noqa: BLE001
                 self._log.error("comment loop failed", error=describe_exc(exc))
+
+    async def _await_credentials(self) -> None:
+        """Block until this machine can reach a tracker — however long that takes.
+
+        A first-run machine has no credentials yet: that is the entire premise of the
+        setup wizard, which writes them into the LIVE config so nothing needs
+        restarting. This loop used to `return` instead, killing itself for the lifetime
+        of the process — so finishing the wizard produced a configured machine that
+        polled nothing, and the only cure was the restart the wizard exists to avoid.
+
+        Announced once, and once more when it clears: an operator who has just typed a
+        PAT wants to see the machine notice.
+        """
+        cfg = self._config
+        if cfg.has_tracker_auth:
+            return
+        self._log.warning(
+            "no tracker credentials yet — waiting, nothing is being polled. "
+            "Finish /dashboard/setup (or set AUTOPILOT_ADO_PAT / a Jira workspace token); "
+            "polling starts on its own, no restart needed.",
+            recheck_seconds=max(5, min(int(cfg.poll_interval_seconds or 30), 60)),
+        )
+        while not cfg.has_tracker_auth:
+            await asyncio.sleep(max(5, min(int(cfg.poll_interval_seconds or 30), 60)))
+        self._log.info(
+            "tracker credentials configured — polling starts now",
+            org=cfg.ado_organization, projects=cfg.effective_ado_projects,
+        )
 
     async def _run(self) -> None:
         cfg = self._config
@@ -208,12 +235,7 @@ class AdoPollerService:
         )
         self._log_trigger_amendments()
 
-        if not cfg.has_auth:
-            self._log.warning(
-                "no auth configured — offline mode (no ADO polling). "
-                "Set AUTOPILOT_ADO_PAT or AUTOPILOT_OAUTH_APP_ID + AUTOPILOT_OAUTH_APP_SECRET"
-            )
-            return
+        await self._await_credentials()
 
         # Resume: re-queue any runs left mid-flight by a previous (crashed) process.
         requeued = await self._c.state_repo.requeue_in_progress()

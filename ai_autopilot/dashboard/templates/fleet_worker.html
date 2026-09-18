@@ -44,6 +44,24 @@
 </div>
 {% endif %}
 
+{% if behind %}
+{# Không phải chuyện thẩm mỹ: build cũ KHÔNG có field cho thiết lập mới, nên nó nhận
+   tài liệu của trung tâm rồi lặng lẽ bỏ qua đúng những khoá vừa được thêm. #}
+<div class="fl-card" style="border-color:var(--amber,#f5a524)">
+  <div style="padding:13px 16px">
+    <div style="color:var(--amber,#f5a524);font-weight:600;margin-bottom:6px">
+      ⚠️ Máy này đang chạy bản cũ hơn trung tâm
+    </div>
+    <div style="font-size:13px;line-height:1.6">
+      Máy này <b>v{{ my_version }}</b> · trung tâm <b>v{{ central_version }}</b>.
+      Thiết lập nào chỉ có ở bản mới sẽ bị máy này <b>âm thầm bỏ qua</b> — nó không có chỗ để lưu.
+      Cập nhật rồi khởi động lại:
+    </div>
+    <div class="val mono" style="margin-top:8px;word-break:break-all;font-size:12px">{{ upgrade_cmd }}</div>
+  </div>
+</div>
+{% endif %}
+
 <div class="fl-note">
   Máy này <b>gọi về</b> trung tâm mỗi <b>{{ interval }} phút</b> (và một lần ngay khi khởi động):
   đẩy tình trạng lên, kéo <b>{{ shared_count }}</b> thiết lập chung về.

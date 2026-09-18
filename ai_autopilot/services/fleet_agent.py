@@ -41,6 +41,12 @@ class FleetAgentService:
         self.last_ok: bool | None = None
         self.last_detail: str = ""
         self.last_applied: list[str] = []
+        # What the central said it is running, and whether this machine trails it. The
+        # central already showed this drift on its own page; the machine that has to be
+        # updated could not see it anywhere.
+        self.central_version: str = ""
+        self.behind: bool = False
+        self._warned_version: str = ""   # so the nag is once per version, not per beat
 
     @property
     def worker_name(self) -> str:
@@ -103,12 +109,41 @@ class FleetAgentService:
         if resp.status_code >= 400:
             self._log.warning("fleet heartbeat rejected", status=resp.status_code, url=base)
             return self._beat_failed(f"Trung tâm trả lỗi HTTP {resp.status_code}.")
-        applied = await self._apply(resp.json() or {})
+        body = resp.json() or {}
+        self._note_central_version(str(body.get("central_version") or ""))
+        applied = await self._apply(body)
         self.last_ok, self.last_applied = True, applied
         self.last_detail = (
             f"Đã nhận {len(applied)} thiết lập mới." if applied else "Đã khớp với trung tâm."
         )
         return True
+
+    def _note_central_version(self, central: str) -> None:
+        """Compare this build against the central's, and say so when we are behind.
+
+        The central's page has always been able to see the drift; the machine that has
+        to DO something about it could not. A worker running older code may not even
+        understand the settings it is being handed — it silently drops keys its
+        ``Settings`` has no field for — so "the central upgraded" has to reach the
+        worker's own log and its own page, with the command that fixes it.
+
+        Said once per central version, not once per beat: at a ten-minute interval the
+        nag would file 144 identical lines a day and bury everything else in the log.
+        """
+        from ai_autopilot import __version__
+
+        self.central_version = central
+        self.behind = fleet.is_behind(__version__, central)
+        if not self.behind or central == self._warned_version:
+            return
+        self._warned_version = central
+        self._log.warning(
+            "this worker is running an OLDER build than the central — update it",
+            worker_version=__version__, central_version=central,
+            fix="pip install --upgrade "
+                "https://github.com/phongptn93/AI-Autopilot/releases/latest/download/"
+                f"ai_autopilot-{central}-py3-none-any.whl",
+        )
 
     def _beat_failed(self, detail: str) -> bool:
         """Record why the round trip did not happen, and report it as a failure."""
@@ -141,12 +176,16 @@ class FleetAgentService:
             hostname=socket.gethostname(),
             version=__version__,
             profile=(cfg.sdlc_profile or cfg.sdlc_default_profile or ""),
-            # The tags that make this machine ITS OWN: what it claims work with, and
-            # what starts a run on it by hand. They are exactly the settings the central
-            # does not supply, so the fleet page is where you go to see what each host
-            # chose for itself.
+            # The tags that make this machine ITS OWN: what it claims work with, and who
+            # it answers for. They are exactly the settings the central does not supply,
+            # so the fleet page is where you go to see what each host chose for itself.
+            #
+            # `stage_entry_tag` used to be in here and did not belong: it is the SHARED
+            # run-now tag the central serves to everybody, so it printed the identical
+            # chip on every row of a column headed "tag riêng của máy" — the one column
+            # whose whole job is to show where two machines differ.
             tags=[t for t in (
-                *cfg.effective_trigger_tags, cfg.stage_entry_tag, cfg.assignee_trigger_tag,
+                *cfg.effective_trigger_tags, cfg.assignee_trigger_tag,
             ) if t],
             config_hash=self._local_hash(),
             running=running, done_today=done, failed_today=failed,
@@ -196,10 +235,15 @@ class FleetAgentService:
         # Only the keys that actually differ: applying identical values would rewrite
         # config.yaml on every beat and fill the audit trail with changes that changed
         # nothing, which is how a real change becomes impossible to spot.
-        changed = {
-            k: v for k, v in updates.items()
-            if getattr(self._config, k, None) != v
-        }
+        #
+        # Compared in the DOCUMENT's own shape, not against the live attribute. The
+        # central sends JSON, so `sdlc_roles` arrives as a dict of dicts while this
+        # machine holds a dict of `SdlcRole` — those two never compare equal, so every
+        # structured setting counted as "changed" on every single beat: config.yaml
+        # rewritten, an audit row filed, and the fleet page showing a worker eternally
+        # out of sync over settings that were identical all along.
+        mine = fleet.config_document(self._config)[0]
+        changed = {k: v for k, v in updates.items() if mine.get(k) != v}
         if not changed:
             return []
         settings_form.save_to_yaml(config_file_path(), changed)

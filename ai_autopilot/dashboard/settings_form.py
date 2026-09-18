@@ -15,6 +15,10 @@ from typing import Any
 
 import yaml
 
+from ai_autopilot.logging_config import describe_exc, get_logger
+
+_log = get_logger("dashboard.settings")
+
 
 @dataclass(frozen=True)
 class Field:
@@ -1425,10 +1429,27 @@ def run_now_tag_conflict(stage_entry_tag: str, config: Any) -> str:
     return ""
 
 
-def apply_to_config(config: Any, updates: Mapping[str, Any]) -> None:
-    """Apply updates to the live Settings object (so running services see them)."""
+def apply_to_config(config: Any, updates: Mapping[str, Any]) -> list[str]:
+    """Apply updates to the live Settings object (so running services see them).
+
+    ``Settings`` validates on assignment, so each value is coerced into the field's real
+    type here — a ``sdlc_roles`` handed over as a dict of dicts (the shape a fleet sync
+    and a form both produce) becomes a dict of ``SdlcRole`` before any reader sees it.
+
+    One unusable value must not cost the other thirty: a central serving a single
+    malformed key would otherwise leave a worker with a half-applied document and no
+    idea which half. So each key is applied on its own and the failures are returned
+    (and logged) rather than raised.
+    """
+    rejected: list[str] = []
     for key, value in updates.items():
-        setattr(config, key, value)
+        try:
+            setattr(config, key, value)
+        except Exception as exc:  # noqa: BLE001 — the bad key is the news, not a crash
+            rejected.append(key)
+            _log.error("setting rejected — value does not fit the field",
+                       key=key, error=describe_exc(exc))
+    return rejected
 
 
 def reload_from_file(config: Any) -> list[str]:

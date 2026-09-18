@@ -2554,11 +2554,23 @@ def create_dashboard_router() -> APIRouter:
                 "version": row.version,
                 # A worker on an older build may not even understand the settings it is
                 # being sent, so the drift is worth showing next to the sync state.
+                #
+                # Two facts, not one. "Different" flagged a machine running AHEAD of the
+                # central — normal for the hour of a rollout — with the same red chip as
+                # one running code that predates the settings it is being handed, and it
+                # never said which side had to move.
                 "version_drift": bool(row.version and row.version != request.app.version),
+                "version_behind": fleet_mod.is_behind(row.version, request.app.version),
                 "profile": row.profile,
                 "stages": [s.name for s in sdlc_plan.profile_stages(row.profile, cfg)]
                           if row.profile else [],
-                "tags": _json_list(row.tags),
+                # Minus the shared run-now tag. Workers stopped sending it, but one
+                # already in the field goes on doing so until it is upgraded, and the
+                # column claims to show what each machine chose for ITSELF.
+                "tags": [
+                    t for t in _json_list(row.tags)
+                    if str(t).strip().lower() != (cfg.stage_entry_tag or "").strip().lower()
+                ],
                 "in_sync": bool(row.config_hash) and row.config_hash == central_hash,
                 "synced_ago": int((now - synced).total_seconds()) if synced else None,
                 "online": quiet <= offline_after,
@@ -2618,6 +2630,18 @@ def create_dashboard_router() -> APIRouter:
             # No agent at all means the service never started: fleet_role says worker but
             # this process is not running one, which no amount of button-pressing fixes.
             "agent_live": agent is not None,
+            # "The centre moved on without you." A worker on older code can silently
+            # DROP settings it has no field for, so this is a correctness warning, not
+            # a cosmetic one — and it belongs on the machine that has to act on it.
+            "my_version": request.app.version,
+            "central_version": getattr(agent, "central_version", ""),
+            "behind": bool(getattr(agent, "behind", False)),
+            "upgrade_cmd": (
+                "pip install --upgrade https://github.com/phongptn93/AI-Autopilot/"
+                "releases/latest/download/ai_autopilot-"
+                f"{getattr(agent, 'central_version', '') or request.app.version}"
+                "-py3-none-any.whl"
+            ),
         }
 
     @router.post("/fleet/sync")
@@ -3529,8 +3553,11 @@ def create_dashboard_router() -> APIRouter:
                 return JSONResponse({"ok": False, "detail": "Chưa có URL trung tâm hoặc token."})
             # A real heartbeat, not a ping: reachability proves nothing about whether
             # the token matches or whether that host is a central at all.
+            # `probe` keeps the central from enrolling the machine that is merely
+            # testing its answers — see WorkerReport.probe.
             report = fleet_mod.WorkerReport(
                 name=(cfg.fleet_worker_name or "").strip() or "setup-check",
+                probe=True,
             )
             try:
                 resp = await c.http.post(

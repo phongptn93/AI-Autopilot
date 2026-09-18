@@ -40,9 +40,6 @@ class DeliveryTrackerService:
         if not self._config.delivery_history_enabled:
             self._log.info("delivery history recording disabled")
             return
-        if not self._config.has_auth:
-            self._log.info("delivery history: no ADO auth — not recording")
-            return
         self._task = asyncio.create_task(self._run(), name="delivery-tracker")
 
     async def stop(self) -> None:
@@ -62,7 +59,11 @@ class DeliveryTrackerService:
         # at which the page becomes useful.
         while True:
             try:
-                await self.record_once()
+                # Checked every cycle rather than once at start-up: credentials typed into
+                # the setup wizard land in the live config, and a service that decided
+                # it had nothing to do at boot would stay decided until a restart.
+                if self._config.has_auth:
+                    await self.record_once()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 — a bad cycle must not kill the loop

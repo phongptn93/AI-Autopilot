@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block content %}
+{# First-run setup. Not a second settings store — every step writes through the same
+   save path as the Settings page, so leaving halfway keeps what you answered and
+   coming back is just opening this page again. #}
+<style>
+  .main{max-width:920px}
+  .wz-head{margin-bottom:6px}
+  .wz-head h1{font-size:23px;font-weight:750;letter-spacing:-.02em}
+  .wz-sub{color:var(--text-muted);font-size:13px;margin-bottom:18px}
+  .wz-rail{display:flex;align-items:center;gap:0;flex-wrap:wrap;margin-bottom:18px}
+  .wz-dot{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-dim);
+          padding:5px 11px;border:1px solid var(--border);border-radius:20px;white-space:nowrap}
+  .wz-dot.on{color:var(--accent-hover);border-color:rgba(99,102,241,.5);background:var(--accent-bg)}
+  .wz-dot.done{color:#3fb950;border-color:rgba(46,160,67,.35)}
+  .wz-line{flex:1;min-width:10px;height:1px;background:var(--border)}
+  .wz-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .wz-card>header{padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg)}
+  .wz-card>header b{font-size:15px}
+  .wz-body{padding:16px 20px}
+  .wz-f{padding:12px 0;border-bottom:1px solid var(--border-soft)}
+  .wz-f:last-child{border-bottom:none}
+  .wz-f>label{display:block;font-size:13px;font-weight:600;margin-bottom:7px}
+  .wz-f .form-help{margin-top:6px}
+  .wz-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+           padding:13px 20px;border-top:1px solid var(--border);background:var(--bg)}
+  .wz-spacer{flex:1}
+  .wz-next{background:var(--accent,#6366f1);color:#fff;border:none;border-radius:8px;
+           padding:8px 18px;font-size:13.5px;font-weight:650;font-family:inherit;cursor:pointer}
+  .wz-next:hover{filter:brightness(1.1)}
+  .wz-skip{color:var(--text-dim);font-size:12.5px;text-decoration:none}
+  .wz-skip:hover{color:var(--text)}
+  /* Role picker: three cards, because this one answer decides every later step. */
+  .wz-roles{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  .wz-role{display:block;cursor:pointer;border:1px solid var(--border);border-radius:10px;
+           padding:14px 16px;background:var(--bg)}
+  .wz-role:hover{border-color:var(--accent)}
+  .wz-role input{position:absolute;opacity:0;width:0;height:0}
+  .wz-role b{display:block;font-size:14px;margin-bottom:5px}
+  .wz-role p{font-size:12.3px;color:var(--text-muted);line-height:1.55}
+  .wz-role.sel{border-color:var(--accent);background:var(--accent-bg)}
+  .wz-role .ico{font-size:20px;line-height:1;margin-bottom:8px;display:block}
+  .wz-check{margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .wz-test{background:var(--bg);border:1px solid var(--border);color:var(--text);
+           border-radius:8px;padding:6px 13px;font-size:12.5px;font-family:inherit;cursor:pointer}
+  .wz-test:hover{border-color:var(--accent)}
+  .wz-res{font-size:12.5px}
+  .wz-res.ok{color:#3fb950}
+  .wz-res.bad{color:var(--red,#e5484d)}
+  .wz-find{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border-soft);font-size:13px}
+  .wz-find:last-child{border-bottom:none}
+  .wz-find .lv{flex:none;font-weight:700;font-size:11px;padding:1px 8px;border-radius:20px;height:fit-content}
+  .lv-ERROR{background:rgba(229,72,77,.14);color:#e5484d}
+  .lv-WARN{background:rgba(210,153,34,.16);color:#d29922}
+  .lv-OK,.lv-INFO{background:rgba(46,160,67,.14);color:#3fb950}
+  .wz-find .tx b{display:block;margin-bottom:3px}
+  .wz-find .tx span{color:var(--text-muted);font-size:12.3px}
+  .pw-wrap{display:flex;align-items:center;gap:6px}
+  .pw-wrap input{flex:1;min-width:0}
+  .pw-btn{flex:none;background:var(--bg);border:1px solid var(--border);border-radius:7px;
+          padding:5px 8px;font-size:13px;cursor:pointer;line-height:1}
+  .wz-note{font-size:12.5px;color:var(--text-muted);background:var(--bg);
+           border:1px solid var(--border);border-radius:9px;padding:11px 14px;margin-bottom:14px}
+  .wz-note code{font-family:var(--mono);font-size:11.5px}
+</style>
+
+<div class="wz-head"><h1>🚀 Cài đặt ban đầu</h1></div>
+<p class="wz-sub">Chỉ những thứ máy này <b>không chạy được nếu thiếu</b>. Mọi tinh chỉnh khác
+  nằm ở <a href="/dashboard/settings" style="color:var(--accent-hover)">🛠️ Settings</a> và
+  có thể để sau.</p>
+
+{% if flash %}
+<div class="wz-card" style="border-color:var(--{{ flash[0] }});margin-bottom:12px">
+  <div style="padding:13px 20px;color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+</div>
+{% endif %}
+
+<div class="wz-rail">
+  <span class="wz-dot {{ 'on' if step_id == 'role' else 'done' }}">① Vai trò</span>
+  {% for sid, title, keys in steps %}
+  <span class="wz-line"></span>
+  <span class="wz-dot {{ 'on' if step_id == sid else ('done' if loop.index < index else '') }}">{{ title }}</span>
+  {% endfor %}
+  <span class="wz-line"></span>
+  <span class="wz-dot {{ 'on' if step_id == 'done' else '' }}">Kiểm tra</span>
+</div>
+
+{# ── Step 0: what is this machine ── #}
+{% if step_id == 'role' %}
+<form method="post" action="/dashboard/setup">
+  <input type="hidden" name="step" value="role">
+  <div class="wz-card">
+    <header><b>Máy này đóng vai gì?</b></header>
+    <div class="wz-body">
+      <p class="wz-sub" style="margin-bottom:14px">Câu này quyết định các bước còn lại —
+        chọn sai cũng quay lại đổi được bất cứ lúc nào.</p>
+      <div class="wz-roles">
+        {% for value, ico, name, desc in [
+          ('', '💻', 'Độc lập',
+           'Một máy, tự giữ toàn bộ cấu hình. Mặc định, và đúng cho hầu hết trường hợp.'),
+          ('central', '🛰', 'Trung tâm',
+           'Giữ cấu hình chung cho cả đội và phát cho máy trạm; theo dõi chúng ở trang Fleet.'),
+          ('worker', '🖥', 'Máy trạm',
+           'Kéo cấu hình chung từ trung tâm về. Chỉ cần khai vài thứ riêng của máy.')] %}
+        <label class="wz-role {{ 'sel' if (role == 'standalone' and value == '') or role == value else '' }}">
+          <input type="radio" name="fleet_role" value="{{ value }}"
+                 {% if (role == 'standalone' and value == '') or role == value %}checked{% endif %}>
+          <span class="ico">{{ ico }}</span><b>{{ name }}</b><p>{{ desc }}</p>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="wz-foot">
+      <span class="wz-spacer"></span>
+      <button type="submit" class="wz-next">Tiếp tục →</button>
+    </div>
+  </div>
+</form>
+
+{# ── Final step: hand over to the real doctor ── #}
+{% elif step_id == 'done' %}
+<div class="wz-card">
+  <header><b>✅ Xong phần bắt buộc — đây là những gì máy tự kiểm</b></header>
+  <div class="wz-body">
+    <div class="wz-note">
+      Bảng dưới là kết quả của <b>chính bộ kiểm tra</b> mà lệnh <code>ai-autopilot doctor</code>
+      chạy — không phải một checklist riêng của wizard, để hai bên không bao giờ nói khác nhau.
+    </div>
+    {% for f in findings %}
+    <div class="wz-find">
+      <span class="lv lv-{{ f.level|upper }}">{{ f.level|upper }}</span>
+      <span class="tx"><b>{{ f.title }}</b>
+        {% if f.detail %}<span>{{ f.detail }}</span>{% endif %}
+        {% if f.fix %}<span>→ {{ f.fix }}</span>{% endif %}
+      </span>
+    </div>
+    {% else %}
+    <p class="wz-sub" style="margin:0">Không có phát hiện nào.</p>
+    {% endfor %}
+  </div>
+  <div class="wz-foot">
+    <a class="wz-skip" href="/dashboard/setup?step=role">← Xem lại từ đầu</a>
+    <span class="wz-spacer"></span>
+    <a class="wz-next" style="text-decoration:none" href="/dashboard">Vào dashboard →</a>
+  </div>
+</div>
+
+{# ── A normal step: a handful of real settings ── #}
+{% else %}
+<form method="post" action="/dashboard/setup" id="step-form">
+  <input type="hidden" name="step" value="{{ step_id }}">
+  <div class="wz-card">
+    <header><b>{{ heading }}</b></header>
+    <div class="wz-body">
+      {% if step_id == 'ado' %}
+      <div class="wz-note">
+        Một kết nối ADO cho cả máy (một tổ chức, một PAT). Nhiều <b>dự án</b> trên cùng tổ chức
+        thì khai thêm ở Settings hoặc ở
+        <a href="/dashboard/workspaces" style="color:var(--accent-hover)">🗂 Workspaces</a> —
+        nơi mỗi workspace còn có thể dùng <b>Jira</b> làm nguồn work item riêng.
+      </div>
+      {% endif %}
+      {% if step_id == 'fleet' and fleet_token_set %}
+      <div class="wz-note">Token đã có. Mỗi máy trạm cần <b>đúng token này</b> cùng với địa chỉ
+        của máy trung tâm.</div>
+      {% endif %}
+
+      {% for f in step_fields %}
+      <div class="wz-f">
+        <label for="{{ f.key }}">{{ f.label }}</label>
+        {% if f.kind == 'password' %}
+        <span class="pw-wrap">
+          <input type="password" id="{{ f.key }}" name="{{ f.key }}" autocomplete="off"
+                 placeholder="{{ '•••••• đã đặt — để trống là giữ nguyên' if secrets_set.get(f.key) else 'chưa đặt' }}">
+          <button type="button" class="pw-btn" data-pw-toggle="{{ f.key }}" title="Hiện / ẩn">👁</button>
+          {% if f.generate %}
+          <button type="button" class="pw-btn" data-pw-gen="{{ f.key }}"
+                  title="Sinh token ngẫu nhiên và hiện ra để copy">✨</button>
+          {% endif %}
+        </span>
+        {% elif f.kind == 'select' %}
+        <select id="{{ f.key }}" name="{{ f.key }}">
+          {% for opt in f.options %}<option value="{{ opt }}" {% if current.get(f.key) == opt %}selected{% endif %}>{{ opt or '— để trống —' }}</option>{% endfor %}
+        </select>
+        {% elif f.kind == 'int' %}
+        <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}">
+        {% elif f.kind == 'bool' %}
+        <input type="checkbox" id="{{ f.key }}" name="{{ f.key }}" {% if current.get(f.key) %}checked{% endif %}>
+        {% else %}
+        <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}">
+        {% endif %}
+        {% if f.help %}<div class="form-help">{{ f.help }}</div>{% endif %}
+      </div>
+      {% endfor %}
+
+      {% if check %}
+      {# Verify before moving on. A wizard that only collects text and lets the failure
+         surface hours later, inside a real run, is a form with extra clicks. #}
+      <div class="wz-check">
+        <button type="button" class="wz-test" data-check="{{ check }}">
+          {{ '🔌 Kiểm tra kết nối ADO' if check == 'ado' else '🛰 Kiểm tra trung tâm' }}
+        </button>
+        <span class="wz-res" id="check-result">Lưu bước này trước, rồi bấm kiểm tra.</span>
+      </div>
+      {% endif %}
+    </div>
+    <div class="wz-foot">
+      {% if prev_id %}<a class="wz-skip" href="/dashboard/setup?step={{ prev_id }}">← Quay lại</a>{% endif %}
+      <span class="wz-spacer"></span>
+      <a class="wz-skip" href="/dashboard/setup?step={{ next_id }}">Bỏ qua bước này</a>
+      <button type="submit" class="wz-next">Lưu và tiếp tục →</button>
+    </div>
+  </div>
+</form>
+{% endif %}
+
+<script>
+  // Secrets: reveal + generate (same behaviour as the Settings page).
+  document.querySelectorAll('[data-pw-toggle]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var i = document.getElementById(b.dataset.pwToggle);
+      if (!i) return;
+      var shown = i.type === 'text';
+      i.type = shown ? 'password' : 'text';
+      b.textContent = shown ? '👁' : '🙈';
+    });
+  });
+  document.querySelectorAll('[data-pw-gen]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var i = document.getElementById(b.dataset.pwGen);
+      if (!i) return;
+      var raw = new Uint8Array(24); crypto.getRandomValues(raw);
+      i.value = btoa(String.fromCharCode.apply(null, raw))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      i.type = 'text'; i.focus(); i.select();
+    });
+  });
+  // The check runs against what is SAVED, not what is typed — so it proves the thing
+  // the autopilot will actually use, and saying so beats a green tick that lied.
+  document.querySelectorAll('[data-check]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var out = document.getElementById('check-result');
+      out.className = 'wz-res'; out.textContent = 'Đang kiểm tra…';
+      b.disabled = true;
+      fetch('/dashboard/setup/check/' + b.dataset.check,
+            { method: 'POST', credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          out.className = 'wz-res ' + (d.ok ? 'ok' : 'bad');
+          out.textContent = (d.ok ? '✅ ' : '⛔ ') + d.detail;
+        })
+        .catch(function () {
+          out.className = 'wz-res bad';
+          out.textContent = '⛔ Không gọi được máy chủ.';
+        })
+        .finally(function () { b.disabled = false; });
+    });
+  });
+  // Selecting a role highlights its card without waiting for a round trip.
+  document.querySelectorAll('.wz-role input').forEach(function (r) {
+    r.addEventListener('change', function () {
+      document.querySelectorAll('.wz-role').forEach(function (c) { c.classList.remove('sel'); });
+      if (r.checked) r.closest('.wz-role').classList.add('sel');
+    });
+  });
+</script>
+{% endblock %}

@@ -1125,9 +1125,9 @@ class AlertStateRepository:
                 due = elapsed >= repeat_hours
 
             if not (escalated or due):
-                return AlertDecision(send=False, reason="da bao")
+                return AlertDecision(send=False, reason="đã báo")
 
-            reason = f"tang tu {_hours_label(baseline)}" if escalated else "van chua xu ly"
+            reason = f"tăng từ {_hours_label(baseline)}" if escalated else "vẫn chưa xử lý"
             # A snooze that has run out is SPENT, not merely inactive. Leaving the stale
             # timestamp behind kept the row looking muted to ``muted_count``, so the
             # dashboard reported alerts as silenced while they were in fact being sent —
@@ -1238,12 +1238,17 @@ def _naive(value: datetime | None) -> datetime | None:
 
 
 def _hours_label(hours: float) -> str:
-    """A wait as Vietnamese prose - the same vocabulary the Delivery page uses."""
+    """A wait as Vietnamese prose — the same vocabulary the Delivery page uses.
+
+    Accented, like every other string the digest prints. These three were not, and the
+    card showed "tang tu 28 gio" in the middle of a paragraph that was otherwise correct
+    Vietnamese — which reads as a bug in the product, because it is one.
+    """
     if hours < 1:
-        return f"{int(hours * 60)} phut"
+        return f"{int(hours * 60)} phút"
     if hours < 48:
-        return f"{int(hours)} gio"
-    return f"{int(hours // 24)} ngay"
+        return f"{int(hours)} giờ"
+    return f"{int(hours // 24)} ngày"
 
 
 class SpecDriftRepository:

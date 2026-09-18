@@ -137,6 +137,19 @@
   .card.show-na .field.off.bool{display:flex}
   .field.na,.card.show-na .field.off{opacity:.5}
   .field.na:focus-within,.card.show-na .field.off:focus-within{opacity:1}
+  /* Served by the central. Put away for the same reason as .off — it is not something
+     to fill in here — but for a DIFFERENT reason, so it gets its own badge and its own
+     way out (claim it) rather than being lumped in as "không áp dụng". */
+  .card.show-na .field.managed{opacity:.6}
+  .field.managed .form-input{position:relative}
+  .own-badge{font-size:10px;font-weight:600;padding:1px 7px;border-radius:20px;margin-left:6px;
+             text-transform:none;letter-spacing:0;white-space:nowrap}
+  .own-central{background:rgba(99,102,241,.14);color:var(--accent-hover,#818cf8)}
+  .own-claimed{background:rgba(46,160,67,.16);color:#3fb950}
+  .own-btn{background:none;border:1px solid var(--border);color:var(--text-dim);
+           border-radius:20px;padding:2px 9px;font-size:11px;font-family:inherit;
+           cursor:pointer;margin-left:6px;white-space:nowrap}
+  .own-btn:hover{border-color:var(--accent);color:var(--text)}
   .na-badge{font-size:10px;font-weight:600;padding:1px 6px;border-radius:20px;margin-left:6px;
             background:var(--bg);border:1px solid var(--border);color:var(--text-dim);
             text-transform:none;letter-spacing:0;white-space:nowrap}
@@ -485,13 +498,29 @@
          distinction to the browser, which re-decides it as the parent switch moves. #}
       {% set na = not applicable.get(f.key, True) %}
       {% set kept = filled.get(f.key, False) %}
+      {# Who decides this setting HERE. On a standalone or central machine everything
+         comes back "machine" and the page is unchanged. On a worker, what the central
+         serves is put away and locked: editing it would be undone by the next beat,
+         and a green "đã lưu" for a change that vanishes in ten minutes is worse than
+         not offering the box. Taking it over is one click, at the field. #}
+      {% set owner = owners.get(f.key, 'machine') %}
+      {% set managed = owner == 'central' %}
       <div class="field {{ 'wide' if wide else '' }} {{ 'bool' if f.kind=='bool' else '' }}
-                  {{ ('na' if kept else 'off') if na else '' }}"
-           data-k="{{ f.key }}"
+                  {{ 'managed off' if managed else (('na' if kept else 'off') if na else '') }}"
+           data-k="{{ f.key }}" data-owner="{{ owner }}"
            {% if f.show_when_key %}data-when-key="{{ f.show_when_key }}"
            data-when-vals="{{ f.show_when_values|join(',') }}"
            data-filled="{{ '1' if kept else '' }}"{% endif %}>
         <label for="{{ f.key }}">{{ f.label }}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}
+          {% if managed %}
+          <span class="own-badge own-central" title="Trung tâm phát giá trị này cho cả đội. Sửa ở đây sẽ bị ghi đè ở lần đồng bộ tới.">🛰 trung tâm quản lý</span>
+          <button type="submit" form="claim-form" name="key" value="{{ f.key }}" class="own-btn"
+                  title="Máy này tự quyết thiết lập này từ giờ — trung tâm sẽ không ghi đè nữa">🖥 Giành quyền</button>
+          {% elif owner == 'claimed' %}
+          <span class="own-badge own-claimed" title="Máy này đã giành quyền — trung tâm không ghi đè.">🖥 máy này tự giữ</span>
+          <button type="submit" form="release-form" name="key" value="{{ f.key }}" class="own-btn"
+                  title="Trả về cho trung tâm — lần đồng bộ tới sẽ nhận lại giá trị chung">🛰 Trả lại</button>
+          {% endif %}
           {% if f.show_when_key %}
           {# Names the control the reader can see, not the config key underneath it:
              «Vai của máy này» is on screen, `fleet_role` is not. #}
@@ -500,6 +529,11 @@
             {%- else %} = {{ f.show_when_values|join(' / ') }}{% endif %}</span>
           {% endif %}
         </label>
+        {# A disabled fieldset disables every control inside it in one stroke. Cosmetic
+           only — the save handler refuses these keys regardless of what the browser
+           sends (settings_form.writable_here), because a disabled input is a suggestion
+           and the same POST can come from curl. #}
+        {% if managed %}<fieldset disabled style="border:0;padding:0;margin:0;min-width:0">{% endif %}
         <div class="form-input">
           {% if f.kind == 'bool' %}
             <input type="checkbox" id="{{ f.key }}" name="{{ f.key }}" {% if current.get(f.key) %}checked{% endif %} />
@@ -562,6 +596,7 @@
           {% endif %}
           {% if f.help %}<div class="form-help">{{ f.help }}</div>{% endif %}
         </div>
+        {% if managed %}</fieldset>{% endif %}
       </div>
       {% endfor %}
     </div>
@@ -578,6 +613,17 @@
 {# Target of the "Gửi thử thông báo" button up in the Channels card. Empty and outside
    the settings form on purpose: a test must never save the page. #}
 <form id="probe-form" method="post" action="/dashboard/settings/test-notification"></form>
+
+{# Targets of the per-field 🖥 / 🛰 buttons. Outside the settings form because nesting
+   forms is invalid markup — the buttons reach these by id (HTML5 `form=`), and a submit
+   button's own name/value travels with the form it names, which is how each button says
+   WHICH setting it means without a line of script. #}
+{% if is_worker %}
+<form id="claim-form" method="post" action="/dashboard/settings/claim"></form>
+<form id="release-form" method="post" action="/dashboard/settings/claim">
+  <input type="hidden" name="release" value="1">
+</form>
+{% endif %}
 
 <script>
   // ── Secrets: reveal, and generate ─────────────────────────────────────────
@@ -643,12 +689,21 @@
       // the reader is actually looking at.
       toggles.forEach(function (btn) {
         var card = btn.closest('.card');
-        var n = card ? card.querySelectorAll('.field.off').length : 0;
+        if (!card) return;
+        var hidden = card.querySelectorAll('.field.off');
+        var n = hidden.length;
         btn.hidden = n === 0;
         if (n === 0) { card.classList.remove('show-na'); return; }
+        // Two reasons a field is put away, and they are not interchangeable: "does
+        // nothing on this machine" and "the central decides this". The label says
+        // which, because the way OUT of each is different — change a switch, or
+        // claim the setting.
+        var managed = card.querySelectorAll('.field.off.managed').length;
+        var what = managed === n ? 'do trung tâm quản lý'
+                 : managed === 0 ? 'không áp dụng'
+                 : 'đang ẩn';
         var open = card.classList.contains('show-na');
-        btn.textContent = open ? '⌃ Ẩn ' + n + ' thiết lập không áp dụng'
-                               : '⌄ ' + n + ' thiết lập không áp dụng';
+        btn.textContent = (open ? '⌃ Ẩn ' : '⌄ ') + n + ' thiết lập ' + what;
         btn.setAttribute('aria-expanded', String(open));
       });
     }

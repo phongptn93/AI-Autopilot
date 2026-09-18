@@ -509,10 +509,35 @@ async def _digest_loop(
 # ── Daily digest — the Delivery report, rendered for chat ────────────────────
 
 def _short(text: str, limit: int = 62) -> str:
-    """Trim a title so a digest line stays one line in Teams. Titles here come from ADO
-    and routinely run past 100 chars, which wraps into three lines and buries the id."""
+    """Trim a title so a digest line stays one line in Teams.
+
+    Titles here come from ADO and routinely run past 100 chars, which wraps into three
+    lines and buries the id. Cut on a word boundary when there is one near the end:
+    "…không áp dụng cấu hìn…" reads like corrupted text, and a reader who cannot tell a
+    truncation from a defect ends up opening the item to find out.
+    """
     text = (text or "").strip()
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    if len(text) <= limit:
+        return text
+    clipped = text[: limit - 1].rstrip()
+    cut = clipped.rfind(" ")
+    # Only honour the boundary if it is not throwing most of the line away.
+    if cut >= limit * 0.6:
+        clipped = clipped[:cut].rstrip()
+    return clipped + "…"
+
+
+def _person(name: str) -> str:
+    """A teammate's name without the job title ADO staples onto it.
+
+    Display names arrive as "Phong Huynh (Industrial - Developer)". In a channel where
+    everyone already knows who Phong is, that parenthetical is 24 characters of noise
+    repeated on every line — it pushed the work item title off the end of the row and
+    made two adjacent lines look identical at a glance.
+    """
+    name = (name or "").strip()
+    head = name.split(" (", 1)[0].strip()
+    return head or name
 
 
 def _wi_link(cfg, wid: int, label: str = "") -> str:
@@ -601,11 +626,13 @@ def _digest_headline(report, delivered_recent: int, window_label: str) -> str:
             )
         return "✅ Không có gì tắc quá ngưỡng."
     worst = report.actions[0]
-    label = _ACTION_LABEL.get(worst.kind, worst.kind).lower()
-    detail = f" ({_short(worst.title, 40)})" if worst.title else ""
+    # Not lower-cased: "pr bị từ chối" mid-sentence reads as a typo in Vietnamese, and
+    # the label is a proper noun here — it is the name of a state on the board.
+    label = _ACTION_LABEL.get(worst.kind, worst.kind)
+    detail = f" — {_short(worst.title, 40)}" if worst.title else ""
     return (
-        f"⚠️ **{len(report.actions)} việc cần xử lý** — nặng nhất: "
-        f"{label} đã {worst.age_label}{detail}."
+        f"⚠️ **{len(report.actions)} việc cần xử lý** · nặng nhất: "
+        f"**{label}** đã {worst.age_label}{detail}"
     )
 
 
@@ -648,30 +675,67 @@ def _format_actions(rows, cfg, limit: int = _DIGEST_ACTION_LIMIT) -> str:
     """The action list — already ordered by urgency then age by ``compute_delivery``.
 
     ``rows`` are ``(action, note)`` pairs. The note is why this line is being shown
-    again ("tang tu 26 gio"); repeating a line without saying what changed is what made
+    again ("tăng từ 26 giờ"); repeating a line without saying what changed is what made
     the digest read as a broken record rather than as an escalation.
+
+    Two things make this readable that the first version got wrong.
+
+    **Every line is a list item.** Markdown collapses single newlines into a paragraph,
+    so joining bare lines produced one unbroken block — six separate problems welded
+    into a wall of text with "·" where the line breaks should have been. The people and
+    KPI sections had a leading "- " and rendered as clean lists all along; this one did
+    not, which is the entire reason the card looked the way it did.
+
+    **Lines are grouped by kind.** A flat list repeated "❌ Run lỗi" on four scattered
+    lines and left the reader to count them. The kind is a heading now, so it is said
+    once and carries its own total, and the age — the thing that decides what to open
+    first — starts the line instead of trailing behind a label you already read.
+    Groups keep the report's urgency order, because the first time a kind appears IS
+    its rank.
     """
-    lines = []
-    for action, note in rows[:limit]:
-        icon = _ACTION_ICON.get(action.kind, "•")
-        label = _ACTION_LABEL.get(action.kind, action.kind)
-        head = f"{icon} **{label} · {action.age_label}**"
-        tail = []
-        if action.work_item_id:
-            tail.append(_wi_link(cfg, action.work_item_id))
-        if action.title:
-            tail.append(_short(action.title, 46))
-        if action.owner:
-            tail.append(f"_{action.owner}_")
-        if action.pr_id and action.repo:
-            tail.append(_pr_link(cfg, action.repo, action.pr_id))
-        if note:
-            tail.append(f"↑ _{note}_")
-        lines.append(f"{head} — " + " · ".join(tail) if tail else head)
+    shown = rows[:limit]
+    order: list[str] = []
+    grouped: dict[str, list] = {}
+    for action, note in shown:
+        if action.kind not in grouped:
+            order.append(action.kind)
+            grouped[action.kind] = []
+        grouped[action.kind].append((action, note))
+
+    blocks = []
+    for kind in order:
+        members = grouped[kind]
+        icon = _ACTION_ICON.get(kind, "•")
+        label = _ACTION_LABEL.get(kind, kind)
+        # The count belongs on the heading: "four runs are failing" is a different
+        # situation from "one is", and a flat list never said which.
+        head = f"{icon} **{label}**" + (f" · {len(members)} việc" if len(members) > 1 else "")
+        lines = [head]
+        for action, note in members:
+            parts = [f"**{action.age_label}**"]
+            if action.work_item_id:
+                parts.append(_wi_link(cfg, action.work_item_id))
+            if action.title:
+                parts.append(_short(action.title, 46))
+            bits = " · ".join(parts)
+            trail = []
+            if action.owner:
+                trail.append(_person(action.owner))
+            if action.pr_id and action.repo:
+                # "!3943" alone is Azure DevOps shorthand nobody outside the tab reads
+                # as "pull request". Two characters of prefix, and the link says so.
+                trail.append(_pr_link(cfg, action.repo, action.pr_id, f"PR !{action.pr_id}"))
+            if note:
+                trail.append(f"↑ {note}")
+            if trail:
+                bits += " — _" + " · ".join(trail) + "_"
+            lines.append(f"- {bits}")
+        blocks.append("\n".join(lines))
+
     extra = len(rows) - limit
     if extra > 0:
-        lines.append(f"_… +{extra} việc nữa._")
-    return "\n".join(lines)
+        blocks.append(f"_… +{extra} việc nữa — xem đầy đủ trên bảng Delivery._")
+    return "\n\n".join(blocks)
 
 
 # Every action kind the digest can raise — the keys of the label map, so a kind added
@@ -747,7 +811,7 @@ def _format_people(report, limit: int = _DIGEST_PEOPLE_LIMIT) -> str:
         if person.delivered:
             parts.append(f"{person.delivered} xong")
         if parts:
-            lines.append(f"- **{person.name}** — " + " · ".join(parts))
+            lines.append(f"- **{_person(person.name)}** — " + " · ".join(parts))
     extra = len(report.people) - limit
     if extra > 0:
         lines.append(f"_… +{extra} người nữa._")

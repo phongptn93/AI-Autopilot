@@ -1092,7 +1092,9 @@ def test_work_item_and_pr_ids_are_clickable_in_the_digest():
     ])
     body = teams_agent.build_digest(report, _LINK_CFG)
     assert "[#7188](https://dev.azure.com/org/Track/_workitems/edit/7188)" in body
-    assert "[!1400](https://dev.azure.com/org/Code/_git/Micro-Frontend/pullrequest/1400)" in body
+    # Labelled "PR !1400": bare "!1400" is Azure DevOps shorthand that nobody outside
+    # that tab reads as "pull request".
+    assert "[PR !1400](https://dev.azure.com/org/Code/_git/Micro-Frontend/pullrequest/1400)" in body
 
 
 def test_digest_degrades_to_plain_ids_without_an_organization():
@@ -1173,7 +1175,9 @@ def test_digest_leads_with_the_worst_thing_not_a_count():
     body = teams_agent.build_digest(report, _LINK_CFG)
     headline = body.split("\n\n")[1]
     assert "2 việc cần xử lý" in headline
-    assert "chờ merge" in headline and "3 ngày" in headline
+    # Not lower-cased: "chờ merge" mid-sentence reads as a typo in Vietnamese, and the
+    # label is the name of a state on the board.
+    assert "Chờ merge" in headline and "3 ngày" in headline
 
 
 def test_digest_says_so_plainly_when_nothing_is_stuck():
@@ -1427,3 +1431,80 @@ async def test_digest_without_a_fixed_time_still_uses_the_interval(monkeypatch):
 
     assert slept == [6 * 3600, 6 * 3600]
     assert windows == [6]
+
+
+# ── The digest has to survive being rendered ──────────────────────────────────
+# Everything below is about the card a person actually sees in Teams, not about the
+# numbers in it. The numbers were right the whole time; the card was unreadable.
+
+def test_every_action_is_a_list_item():
+    """Markdown collapses single newlines into one paragraph.
+
+    The action lines carried no list marker, so six separate problems were welded into
+    a wall of prose with "·" where the line breaks should have been — while the people
+    and KPI sections, which did have "- ", rendered as clean lists all along. That one
+    missing character is the whole reason the card looked the way it did.
+    """
+    report = _delivery_report(actions=[
+        _action(delivery.KIND_FAILED, work_item_id=1, title="một"),
+        _action(delivery.KIND_FAILED, work_item_id=2, title="hai"),
+        _action(delivery.KIND_FAILED, work_item_id=3, title="ba"),
+    ])
+    body = teams_agent.build_digest(report, _LINK_CFG)
+    section = body.split("**⚠️ Cần xử lý")[1]
+    rows = [ln for ln in section.splitlines() if "_workitems/edit/" in ln]
+    assert len(rows) == 3
+    assert all(ln.startswith("- ") for ln in rows), rows
+
+
+def test_actions_are_grouped_by_kind_with_a_count():
+    """A flat list repeated "❌ Run lỗi" on four scattered lines and left the reader to
+    count them. Four failing runs is a different situation from one."""
+    report = _delivery_report(actions=[
+        _action(delivery.KIND_BLOCKED_PR, age_hours=168, work_item_id=1),
+        _action(delivery.KIND_FAILED, age_hours=96, work_item_id=2),
+        _action(delivery.KIND_FAILED, age_hours=18, work_item_id=3),
+    ])
+    body = teams_agent.build_digest(report, _LINK_CFG)
+    assert "❌ **Run lỗi** · 2 việc" in body
+    # A group of one says nothing about its size — the count would be noise.
+    assert "🔴 **PR bị từ chối**\n" in body
+    # Groups keep the report's urgency order: the worst kind is still first.
+    assert body.index("PR bị từ chối") < body.index("Run lỗi")
+
+
+def test_the_age_starts_the_line():
+    """It is what decides which one to open first; it used to trail behind a label the
+    group heading now says once."""
+    report = _delivery_report(actions=[
+        _action(delivery.KIND_FAILED, age_hours=96, work_item_id=42, title="x"),
+    ])
+    body = teams_agent.build_digest(report, _LINK_CFG)
+    row = next(ln for ln in body.splitlines() if "edit/42" in ln)
+    assert row.startswith("- **4 ngày** · ")
+
+
+def test_a_title_is_cut_on_a_word_not_mid_syllable():
+    """"…không áp dụng cấu hìn…" reads like corrupted text, and a reader who cannot tell
+    a truncation from a defect opens the item to find out."""
+    cut = teams_agent._short("Tất cả các màn hình đều không áp dụng cấu hình hiển thị cột", 46)
+    assert cut.endswith("…") and not cut.endswith("hìn…")
+    assert " " not in cut[-2:]                      # no dangling space before the ellipsis
+    assert teams_agent._short("ngắn", 46) == "ngắn"  # short titles are untouched
+
+
+def test_the_job_title_is_dropped_from_a_persons_name():
+    """"(Industrial - Developer)" is 24 characters of noise on every line, in a channel
+    where everyone already knows who Phong is."""
+    assert teams_agent._person("Phong Huynh (Industrial - Developer)") == "Phong Huynh"
+    assert teams_agent._person("Bao Do") == "Bao Do"
+    assert teams_agent._person("") == ""
+
+
+def test_the_repeat_note_is_written_in_vietnamese():
+    """The card showed "tang tu 28 gio" inside a paragraph that was otherwise correct
+    Vietnamese, which reads as a defect in the product."""
+    report = _delivery_report(actions=[_action(delivery.KIND_FAILED, work_item_id=5)])
+    rows = [(report.actions[0], "tăng từ 28 giờ")]
+    body = teams_agent.build_digest(report, _LINK_CFG, rows=rows)
+    assert "↑ tăng từ 28 giờ" in body

@@ -951,12 +951,10 @@ SECRET_KEYS = frozenset({
     "dashboard_auth_password", "dashboard_auth_password_hash", "config_export_password",
 })
 
-# Keys excluded from an exported/shared config. Everything else in the Settings
-# model IS exported, so new config knobs are shared automatically. Two groups:
-#   • secrets — sharing them leaks credentials
-#   • machine/host-specific — sharing them pins a teammate to this host's paths,
-#     ports, tenants or per-host trigger tag
-EXPORT_EXCLUDE = frozenset({
+# Keys that must never LEAVE this machine: a secret, or something that only makes
+# sense against this host's disk, ports and identity. Sharing one either leaks a
+# credential or pins a teammate to folders that do not exist on their machine.
+NEVER_SHARED = frozenset({
     # ── secrets ──
     "ado_pat", "oauth_app_id", "oauth_app_secret",
     "smtp_host", "smtp_port", "smtp_user", "smtp_password",
@@ -984,10 +982,92 @@ EXPORT_EXCLUDE = frozenset({
     "repos",                # RepoConfig entries embed local filesystem paths
 })
 
+# Settings each machine answers for ITSELF. Not secret, not a path — every one of them
+# has a perfectly good value that is simply DIFFERENT per machine, so a central serving
+# one value is serving the wrong one to everybody else.
+#
+# This group was missing, and every key in it was being shared. The symptom people hit
+# first is the mildest one: ``sdlc_profile`` is documented as "the role THIS machine
+# runs", so a central pushing it turns the whole fleet into one role — which is why
+# every fleet install ends up hand-writing `sdlc_profile` into `fleet_local_keys`.
+# Needing the same manual workaround on every machine is the signal that a default is
+# wrong, not that operators are careless.
+#
+# Kept as its own name rather than folded into NEVER_SHARED because the UI owes a
+# different sentence for each: "this is a secret" and "your machine decides this" are
+# not the same answer, and a page that says the first about `max_concurrent` is lying.
+MACHINE_LOCAL = frozenset({
+    # Which work this machine takes, and who it answers to. `trigger_tag` (singular)
+    # was already here; the plural went on being shared even though
+    # `effective_trigger_tags` merges the two — so a central could hand every worker
+    # the same stream and have two machines fight over one work item, which is the
+    # exact outcome `trigger_tag`'s own comment says it exists to prevent.
+    "trigger_tags",
+    "assignee_trigger_user",   # "the assignee THIS machine claims" — and its command owner
+    "sdlc_profile",            # "the role THIS machine runs, whatever the item is"
+    # What this machine is physically able to do. A 16-core VM and a laptop cannot
+    # share a concurrency limit, and `interactive` opens a desktop console — a headless
+    # server has nowhere to put it.
+    "max_concurrent",
+    "execution_mode",
+    # Scheduled agent runs. LoopScheduler has no cross-machine coordination at all, so
+    # a shared list is N machines running the same cron: N Claude runs, N pull requests,
+    # N times the spend, for one job. Per-machine is the only safe default until
+    # something can say WHICH machine owns a loop.
+    "scheduled_loops",
+    # Companions of keys that were already local. Leaving these shared made the pairs
+    # disagree: `repos`/`workspace_directory` local but the whitelist over them shared,
+    # and the Teams bot's credentials local but its ON switch shared — which starts a
+    # bot with no credentials and fails in a loop.
+    "allowed_repos",
+    "default_workspace_name",
+    "teams_agent_enabled",
+    "pr_bot_identity",         # the identity of THIS machine's PAT
+})
+
+# What the export filter actually applies. One name, so every call site (share, fleet
+# document, import, worker-side strip) agrees by construction rather than by everyone
+# remembering to check two lists.
+EXPORT_EXCLUDE = NEVER_SHARED | MACHINE_LOCAL
+
 # Keys stripped even from the FULL (with-secrets) export: the export/auth
 # mechanism's own material — embedding it would be pointless (the export key)
 # or a hash of a credential rather than the credential itself.
 FULL_EXPORT_EXCLUDE = frozenset({"config_export_password", "dashboard_auth_password_hash"})
+
+
+# How a setting is governed on the machine you are looking at. One vocabulary for the
+# Settings page, the save handler and the doctor, so they cannot describe the same key
+# three different ways.
+OWNER_CENTRAL = "central"   # the fleet serves it; editing it here is undone on the next beat
+OWNER_MACHINE = "machine"   # this machine decides, and always has
+OWNER_CLAIMED = "claimed"   # shared by nature, but this machine took it via fleet_local_keys
+
+
+def owner_of(key: str, config: Any) -> str:
+    """Who decides ``key`` on this machine.
+
+    Only a worker has a central to answer to; a standalone or central machine owns
+    everything it holds, which is why both come back as :data:`OWNER_MACHINE`.
+    """
+    if (getattr(config, "fleet_role", "") or "") != "worker":
+        return OWNER_MACHINE
+    if key in EXPORT_EXCLUDE:
+        return OWNER_MACHINE
+    claimed = {str(k).strip() for k in (getattr(config, "fleet_local_keys", None) or [])}
+    return OWNER_CLAIMED if key in claimed else OWNER_CENTRAL
+
+
+def writable_here(key: str, config: Any) -> bool:
+    """May THIS machine persist a value for ``key``?
+
+    Enforced in the save handler, not only in the template. A worker that writes a
+    centrally-served setting has not configured anything — the next heartbeat puts the
+    central's value back — so accepting the write means showing someone a "saved"
+    banner for a change that silently disappears minutes later. Server-side because a
+    disabled input is a suggestion, and because the same POST can arrive from curl.
+    """
+    return owner_of(key, config) != OWNER_CENTRAL
 
 
 def export_settings(config: Any) -> dict[str, Any]:

@@ -147,6 +147,10 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                             "vẫn được giữ."),
     "roles_saved": ("green", "✅ Đã lưu vai trò (stage · cửa vào · cửa ra) và áp dụng ngay."),
     "roles_cleared": ("green", "↩ Đã gỡ toàn bộ vai trò — máy quay về dùng Trigger states."),
+    "setting_claimed": ("green", "🖥 Máy này đã giành quyền thiết lập đó — trung tâm sẽ "
+                                 "không ghi đè nữa, và bạn sửa được ngay tại chỗ."),
+    "setting_released": ("green", "🛰 Đã trả thiết lập đó về cho trung tâm — lần đồng bộ "
+                                  "tới máy này sẽ nhận lại giá trị chung."),
     # Sync outcomes are split three ways on purpose: "nothing changed" is a SUCCESS and
     # the most common one, and reporting it with the same green tick as "six settings
     # were rewritten" teaches people to stop reading the banner.
@@ -2918,6 +2922,12 @@ def create_dashboard_router() -> APIRouter:
                 # "chỉ khi «Vai của máy này» = worker" beats "chỉ dùng khi fleet role
                 # = worker": the badge names the control the reader can actually see.
                 field_labels={f.key: f.label for f in settings_form.FIELDS},
+                # Who decides each setting HERE. On a standalone or central machine this
+                # is "machine" for everything and the page looks exactly as it did.
+                owners={
+                    f.key: settings_form.owner_of(f.key, cfg) for f in settings_form.FIELDS
+                },
+                is_worker=(cfg.fleet_role or "") == fleet_mod.ROLE_WORKER,
                 restart_keys=settings_form.RESTART_REQUIRED,
                 flash=flash,
                 webhook_channels=channels,
@@ -2991,6 +3001,24 @@ def create_dashboard_router() -> APIRouter:
                     hint="name it after the trigger tag, e.g. '<trigger-tag>-run'",
                 )
                 return _flash("/dashboard/settings", "err_run_tag_clash")
+
+        # A worker may not write what the central serves. Not a UI nicety: the next
+        # heartbeat puts the central's value back, so accepting the write means showing
+        # a green "đã lưu" for a change that disappears within the sync interval —
+        # which is worse than refusing it. Enforced here rather than only in the
+        # template because a disabled input is a suggestion, and the same POST can
+        # arrive from curl.
+        #
+        # Counted, not listed: `parse_form` emits a value for EVERY field on the page,
+        # so on a worker this is ~105 keys on every save no matter what was touched.
+        # Logging the names would bury the one line that matters under a paragraph
+        # nobody reads, and it would describe form shape rather than anyone's intent.
+        refused = [k for k in updates if not settings_form.writable_here(k, c.config)]
+        for key in refused:
+            updates.pop(key, None)
+        if refused:
+            _log.debug("settings: central-managed keys skipped on this worker",
+                       count=len(refused))
 
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
@@ -3159,6 +3187,257 @@ def create_dashboard_router() -> APIRouter:
             target=", ".join(str(f.get("name")) for f in parsed)[:300],
         )
         return _flash("/dashboard/flow", "flow_saved")
+
+    # ── First-run setup ──────────────────────────────────────────────────────
+    # The Settings page is ~240 fields across 20 sections, ordered by subject. That is
+    # the right shape for changing ONE thing and the wrong shape for the first hour:
+    # nothing there says which eight fields a machine cannot run without, and the eight
+    # are scattered across five sections. Three roles need three different eights, which
+    # is why the first question is which role this machine is.
+    #
+    # Deliberately NOT a parallel settings store: each step writes through the same
+    # save_to_yaml/apply_to_config as the Settings page, so there is no wizard state to
+    # lose, leaving halfway keeps what you answered, and coming back later is just
+    # opening the page again.
+    _SETUP_FLOWS: dict[str, list[tuple[str, str, tuple[str, ...]]]] = {
+        # role: [(step id, heading, setting keys)]
+        "worker": [
+            ("connect", "Nối về trung tâm", ("fleet_central_url", "fleet_token")),
+            ("identity", "Máy này là ai", (
+                "fleet_worker_name", "trigger_tag", "assignee_trigger_user", "sdlc_profile",
+            )),
+            ("ado", "Kết nối Azure DevOps", (
+                "ado_organization", "ado_project", "ado_pat", "workspace_directory",
+            )),
+        ],
+        "central": [
+            ("ado", "Kết nối Azure DevOps", (
+                "ado_organization", "ado_project", "ado_pat",
+            )),
+            ("workspace", "Mã nguồn", ("workspace_directory", "base_branch", "trigger_tag")),
+            ("fleet", "Phát cấu hình cho đội", ("fleet_token", "fleet_offline_after_minutes")),
+            ("policy", "Chính sách chung của đội", (
+                "autonomy_level", "claude_model", "execution_mode", "max_concurrent",
+            )),
+        ],
+        "standalone": [
+            ("ado", "Kết nối Azure DevOps", (
+                "ado_organization", "ado_project", "ado_pat",
+            )),
+            ("workspace", "Mã nguồn", ("workspace_directory", "base_branch", "trigger_tag")),
+            ("policy", "Cách máy này làm việc", (
+                "autonomy_level", "claude_model", "execution_mode", "max_concurrent",
+            )),
+        ],
+    }
+    # Which step offers a "test it now" button, and what that button proves. A wizard
+    # that only collects text and lets the failure surface hours later during a real run
+    # is a form with extra clicks.
+    _SETUP_CHECKS = {"ado": "ado", "connect": "fleet"}
+
+    def _setup_role(cfg) -> str:
+        return (cfg.fleet_role or "").strip() or "standalone"
+
+    def _setup_steps(cfg) -> list[tuple[str, str, tuple[str, ...]]]:
+        return _SETUP_FLOWS[_setup_role(cfg)]
+
+    @router.get("/setup", response_class=HTMLResponse)
+    async def setup_page(request: Request):
+        """The short path to a machine that works, in the order the answers depend."""
+        c: Container = request.app.state.container
+        cfg = c.config
+        by_key = {f.key: f for f in settings_form.FIELDS}
+        role = _setup_role(cfg)
+        steps = _setup_steps(cfg)
+        want = (request.query_params.get("step") or "").strip()
+        # "role" is step zero and always reachable: changing your mind about what this
+        # machine is must not mean editing config.yaml by hand.
+        ids = ["role", *[s[0] for s in steps], "done"]
+        current = want if want in ids else "role"
+        step = next((s for s in steps if s[0] == current), None)
+        index = ids.index(current)
+        secrets_set = {
+            key: bool(getattr(cfg, key, "")) for key in settings_form.SECRET_KEYS
+        }
+        flash = _take_flash(request)
+        response = _TEMPLATES.TemplateResponse(
+            request, "setup.html",
+            _ctx(
+                request, "setup",
+                role=role, steps=steps, step_id=current, flash=flash,
+                heading=step[1] if step else "",
+                step_fields=[by_key[k] for k in (step[2] if step else ()) if k in by_key],
+                check=_SETUP_CHECKS.get(current, ""),
+                index=index, total=len(ids) - 1,
+                next_id=ids[index + 1] if index + 1 < len(ids) else "done",
+                prev_id=ids[index - 1] if index > 0 else "",
+                current={f.key: getattr(cfg, f.key, "") for f in settings_form.FIELDS
+                         if f.key not in settings_form.SECRET_KEYS},
+                secrets_set=secrets_set,
+                # The finish line reports with the SAME audit the CLI runs — a wizard
+                # that grades itself against its own shorter checklist is how "setup
+                # complete" and "actually working" drift apart.
+                findings=_setup_findings(cfg) if current == "done" else [],
+                central_url=(cfg.fleet_central_url or "").strip(),
+                fleet_token_set=bool((cfg.fleet_token or "").strip()),
+            ),
+        )
+        if flash is not None:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    def _setup_findings(cfg) -> list[dict]:
+        """What the real doctor says about this machine, worst first."""
+        from ai_autopilot import doctor as doctor_mod
+
+        try:
+            found = doctor_mod.diagnose(cfg)
+        except Exception as exc:  # noqa: BLE001 — the last page must still render
+            _log.warning("setup: audit failed", error=describe_exc(exc))
+            return []
+        rank = {"ERROR": 0, "WARN": 1, "OK": 2, "INFO": 3}
+        rows = [
+            {"level": str(getattr(f, "level", "")), "title": str(getattr(f, "title", "")),
+             "detail": str(getattr(f, "detail", "")), "fix": str(getattr(f, "fix", ""))}
+            for f in found
+        ]
+        return sorted(rows, key=lambda r: rank.get(r["level"].upper(), 9))
+
+    @router.post("/setup")
+    async def setup_save(request: Request):
+        """Save one step and move on. Same write path as the Settings page."""
+        c: Container = request.app.state.container
+        cfg = c.config
+        form = await request.form()
+        step_id = str(form.get("step", "")).strip()
+        updates: dict = {}
+
+        if step_id == "role":
+            chosen = str(form.get("fleet_role", "")).strip()
+            if chosen not in ("", "central", "worker"):
+                raise HTTPException(status_code=422, detail="unknown role")
+            updates["fleet_role"] = chosen
+        else:
+            keys = next((s[2] for s in _setup_steps(cfg) if s[0] == step_id), None)
+            if keys is None:
+                raise HTTPException(status_code=404, detail="unknown step")
+            by_key = {f.key: f for f in settings_form.FIELDS}
+            # Reuse the page's own parser so coercion and the "blank password keeps the
+            # stored one" rule cannot drift between the two ways into the same settings.
+            parsed = settings_form.parse_form(form)
+            for key in keys:
+                if key not in by_key or key not in parsed:
+                    continue
+                if by_key[key].kind == "password" and not str(form.get(key, "")).strip():
+                    continue            # blank = keep what is stored
+                if settings_form.writable_here(key, cfg):
+                    updates[key] = parsed[key]
+
+        if updates:
+            raw = updates.pop("dashboard_auth_password", None)
+            if raw:
+                updates["dashboard_auth_password_hash"] = security.hash_password(raw)
+            settings_form.save_to_yaml(config_file_path(), updates)
+            settings_form.apply_to_config(cfg, updates)
+            with contextlib.suppress(Exception):
+                c.ado.refresh()
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="setup.step_saved",
+                target=step_id, detail=", ".join(sorted(updates))[:300],
+            )
+        # Recomputed AFTER the save: choosing a role on step zero decides which steps
+        # exist, so the "next" of that step only becomes knowable once it is applied.
+        ids = ["role", *[s[0] for s in _setup_steps(cfg)], "done"]
+        here = ids.index(step_id) if step_id in ids else 0
+        nxt = ids[here + 1] if here + 1 < len(ids) else "done"
+        return RedirectResponse(f"/dashboard/setup?step={nxt}", status_code=303)
+
+    @router.post("/setup/check/{what}")
+    async def setup_check(request: Request, what: str):
+        """Prove a step's answers before moving on: ADO credentials, or the central."""
+        c: Container = request.app.state.container
+        cfg = c.config
+        if what == "ado":
+            try:
+                states = await c.ado.get_states()
+            except Exception as exc:  # noqa: BLE001 — the answer IS the error
+                return JSONResponse({"ok": False, "detail": describe_exc(exc)})
+            return JSONResponse({
+                "ok": True,
+                "detail": f"Kết nối được — đọc thấy {len(states)} trạng thái của dự án.",
+            })
+        if what == "fleet":
+            base = (cfg.fleet_central_url or "").strip().rstrip("/")
+            token = (cfg.fleet_token or "").strip()
+            if not base or not token:
+                return JSONResponse({"ok": False, "detail": "Chưa có URL trung tâm hoặc token."})
+            # A real heartbeat, not a ping: reachability proves nothing about whether
+            # the token matches or whether that host is a central at all.
+            report = fleet_mod.WorkerReport(
+                name=(cfg.fleet_worker_name or "").strip() or "setup-check",
+            )
+            try:
+                resp = await c.http.post(
+                    f"{base}/api/fleet/heartbeat", json=report.model_dump(mode="json"),
+                    headers={fleet_mod.TOKEN_HEADER: token},
+                )
+            except Exception as exc:  # noqa: BLE001
+                return JSONResponse({"ok": False, "detail": f"Không gọi được: {describe_exc(exc)}"})
+            if resp.status_code == 401:
+                return JSONResponse({
+                    "ok": False,
+                    "detail": "Trung tâm từ chối token (401) — token 2 phía chưa khớp.",
+                })
+            if resp.status_code == 404:
+                return JSONResponse({
+                    "ok": False,
+                    "detail": "Địa chỉ này không bật API fleet — có chắc nó là máy trung tâm?",
+                })
+            if resp.status_code >= 400:
+                return JSONResponse({
+                    "ok": False, "detail": f"Trung tâm trả HTTP {resp.status_code}.",
+                })
+            body = resp.json() or {}
+            return JSONResponse({
+                "ok": True,
+                "detail": f"Nối được trung tâm (v{body.get('central_version') or '?'}), "
+                          f"token khớp. Bản cấu hình đang phát: {body.get('config_hash') or '?'}.",
+            })
+        raise HTTPException(status_code=404, detail="unknown check")
+
+    @router.post("/settings/claim")
+    async def claim_setting(request: Request):
+        """Take a centrally-served setting over on THIS machine, or hand it back.
+
+        ``fleet_local_keys`` has always been able to do this, by typing an exact
+        Settings key into a textarea three sections away from the field it protects —
+        so in practice nobody did it until a sync had already overwritten something.
+        The decision belongs at the field, at the moment you want to change it, which
+        is the only moment you know you want it.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        if (cfg.fleet_role or "") != fleet_mod.ROLE_WORKER:
+            raise HTTPException(status_code=404, detail="only a worker claims settings")
+        form = await request.form()
+        key = str(form.get("key", "")).strip()
+        release = bool(form.get("release"))
+        if key not in {f.key for f in settings_form.FIELDS}:
+            raise HTTPException(status_code=422, detail="unknown setting")
+        keys = [str(k).strip() for k in (cfg.fleet_local_keys or []) if str(k).strip()]
+        if release:
+            keys = [k for k in keys if k != key]
+        elif key not in keys:
+            keys.append(key)
+        settings_form.save_to_yaml(config_file_path(), {"fleet_local_keys": keys})
+        settings_form.apply_to_config(cfg, {"fleet_local_keys": keys})
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard",
+            action="fleet.setting_released" if release else "fleet.setting_claimed",
+            target=key,
+        )
+        return _flash("/dashboard/settings",
+                      "setting_released" if release else "setting_claimed")
 
     @router.get("/settings/reveal/{key}")
     async def reveal_secret(request: Request, key: str):

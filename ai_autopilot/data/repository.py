@@ -17,6 +17,7 @@ from ai_autopilot.data.entities import (
     ClaudeSession,
     ExecutionRecord,
     ExecutionStatus,
+    FleetKnowledge,
     FleetWorker,
     HandledPrComment,
     HeldNotification,
@@ -1818,5 +1819,104 @@ class FleetWorkerRepository:
         """
         async with self._db.session() as session:
             result = await session.execute(delete(FleetWorker).where(FleetWorker.name == name))
+            await session.commit()
+            return bool(result.rowcount)
+
+
+class FleetKnowledgeRepository:
+    """The pool of knowledge the fleet has contributed, held by the CENTRAL.
+
+    Merges by NORMALISED text, so the same lesson reported by three machines is one
+    row that knows it came from three — and that number is what decides whether it is
+    worth handing back out to everybody.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+        self._log = get_logger("data.fleet_knowledge")
+
+    async def contribute(
+        self, items: list[dict], *, origin: str, auto_promote: int = 0,
+        now: datetime | None = None,
+    ) -> int:
+        """Merge one machine's contribution. Returns how many rows were newly created.
+
+        A row already marked ``rejected`` stays rejected: without that, every machine
+        that still holds the bad lesson locally would re-queue it on its next beat and
+        the reviewer would face the same line forever.
+        """
+        stamp = _naive(now or datetime.now(UTC))
+        created = 0
+        async with self._db.session() as session:
+            for item in items:
+                key = str(item.get("key") or "").strip()[:500]
+                text = str(item.get("text") or "").strip()
+                if not key or not text:
+                    continue
+                row = (await session.execute(
+                    select(FleetKnowledge).where(FleetKnowledge.key == key)
+                )).scalar_one_or_none()
+                if row is None:
+                    row = FleetKnowledge(key=key, first_seen=stamp, status="draft")
+                    session.add(row)
+                    created += 1
+                    row.text = text
+                    row.repo = str(item.get("repo") or "")[:200]
+                    row.source = str(item.get("source") or "learned")[:20]
+                origins = set(json.loads(row.origins or "[]")) | {origin}
+                row.origins = json.dumps(sorted(origins), ensure_ascii=False)
+                row.occurrences = max(int(row.occurrences or 0), 0) + max(
+                    int(item.get("count") or 1), 1
+                )
+                row.last_seen = stamp
+                # A human wrote it somewhere, so it is a rule rather than an inference —
+                # it does not need corroboration from other machines to be worth sharing.
+                if str(item.get("source") or "") == "authored":
+                    row.source = "authored"
+                if row.status == "draft" and (
+                    row.source == "authored"
+                    or (auto_promote and len(origins) >= auto_promote)
+                ):
+                    row.status = "approved"
+            await session.commit()
+        return created
+
+    async def approved(self) -> list[FleetKnowledge]:
+        """What the fleet may be told, most corroborated first."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(FleetKnowledge)
+                .where(FleetKnowledge.status == "approved")
+                .order_by(FleetKnowledge.occurrences.desc(), FleetKnowledge.last_seen.desc())
+            )
+            return list(rows.scalars().all())
+
+    async def list_all(self, status: str = "") -> list[FleetKnowledge]:
+        """Every row, newest first — optionally just one status."""
+        async with self._db.session() as session:
+            query = select(FleetKnowledge).order_by(FleetKnowledge.last_seen.desc())
+            if status:
+                query = query.where(FleetKnowledge.status == status)
+            return list((await session.execute(query)).scalars().all())
+
+    async def set_status(self, key: str, status: str) -> bool:
+        """Approve or reject one row. True when something changed."""
+        async with self._db.session() as session:
+            row = (await session.execute(
+                select(FleetKnowledge).where(FleetKnowledge.key == key)
+            )).scalar_one_or_none()
+            if row is None or row.status == status:
+                return False
+            row.status = status
+            await session.commit()
+            return True
+
+    async def forget(self, key: str) -> bool:
+        """Remove a row entirely — use when it was filed by mistake, not when it is
+        merely wrong (``rejected`` is what stops a wrong one coming back)."""
+        async with self._db.session() as session:
+            result = await session.execute(
+                delete(FleetKnowledge).where(FleetKnowledge.key == key)
+            )
             await session.commit()
             return bool(result.rowcount)

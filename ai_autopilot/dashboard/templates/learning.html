@@ -18,17 +18,78 @@
   .axis { display:flex; gap:8px; padding:6px 2px 0; overflow-x:auto; }
   .axis span { flex:0 0 auto; width:34px; text-align:center; color:var(--text-dim);
     font-size:10px; line-height:1.25; }
-  .lesson-row { display:flex; align-items:flex-start; gap:10px; padding:8px 0;
-    border-bottom:1px solid var(--border-soft,#23232b); font-size:13.5px; }
-  .lesson-row:last-child { border-bottom:none; }
-  .lesson-row .when { color:var(--text-dim); font-size:12px; white-space:nowrap; min-width:82px; }
-  .lesson-row .what { flex:1; word-break:break-word; line-height:1.45; }
+  /* A real grid, not a flex row pretending to be one. With flex, every row set its
+     own column positions, so a two-line lesson and a one-line lesson put their date,
+     their badge and their buttons in different places — which is exactly what made
+     the list look broken rather than merely dense. Fixed tracks line all four columns
+     up down the whole table. */
+  .ktable { display:grid; grid-template-columns:86px 104px minmax(0,1fr) auto 62px;
+    align-items:start; }
+  .khead { display:contents; }
+  .khead > span { position:sticky; top:0; z-index:1; padding:7px 10px;
+    background:var(--bg-card); border-bottom:1px solid var(--border);
+    font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--text-dim); white-space:nowrap; }
+  .krow { display:contents; }
+  .krow > * { padding:9px 10px; border-bottom:1px solid var(--border-soft,#23232b);
+    font-size:13.5px; line-height:1.5; background:transparent; }
+  .krow:hover > * { background:rgba(129,140,248,.055); }
+  .krow:last-child > * { border-bottom:none; }
+  /* Injected rows carry a left accent instead of yet another chip — the eye picks up
+     a rail down the edge far faster than it reads eight copies of the same word. */
+  .krow.live > .kwhen { box-shadow:inset 2px 0 0 var(--accent); }
+  .kwhen { color:var(--text-dim); font-size:11.5px; white-space:nowrap;
+    font-variant-numeric:tabular-nums; }
+  .kwhat { word-break:break-word; }
+  .kmark { text-align:right; white-space:nowrap; }
+  .kact { text-align:right; white-space:nowrap; }
+  /* Buttons only when the row is hovered: two glyphs on every one of fifty rows is
+     fifty invitations to click the wrong one. Kept reachable by keyboard. */
+  .kact .x-btn { opacity:0; transition:opacity .1s; }
+  .krow:hover .kact .x-btn, .kact .x-btn:focus { opacity:1; }
+  @media (max-width: 860px) {
+    .ktable { grid-template-columns:1fr auto; }
+    .khead { display:none; }
+    .krow > .kwhen { grid-column:1; }
+    .krow > .ksrc { grid-column:2; text-align:right; }
+    .krow > .kwhat { grid-column:1 / -1; padding-top:0; }
+    .krow > .kmark, .krow > .kact { grid-column:1 / -1; text-align:left; padding-top:0; }
+    .kact .x-btn { opacity:1; }
+  }
+  /* Who wrote a line decides how much weight it carries, so it is the first thing on
+     the row rather than something to infer from the wording. */
+  .src { display:inline-block; font-size:11px; font-weight:700; padding:1px 7px; border-radius:999px;
+    white-space:nowrap; border:1px solid transparent; }
+  .src.man { color:var(--accent-hover,#818cf8); border-color:var(--accent-hover,#818cf8);
+    background:rgba(129,140,248,.12); }
+  .src.bot { color:var(--text-dim); border-color:var(--border); }
+  .rep { display:inline-block; font-size:11px; font-weight:700; color:var(--amber,#f5a524);
+    border:1px solid var(--amber,#f5a524); background:rgba(245,165,36,.12);
+    padding:1px 6px; border-radius:999px; white-space:nowrap; cursor:help; }
+  .add-box textarea { width:100%; min-height:112px; resize:vertical; font-size:13.5px;
+    line-height:1.5; padding:9px 11px; border-radius:9px; border:1px solid var(--border);
+    background:var(--bg-input,var(--bg-card)); color:var(--text); font-family:inherit; }
+  .add-row { display:flex; gap:10px; align-items:center; margin-top:9px; flex-wrap:wrap; }
+  .add-row select { padding:7px 10px; border-radius:8px; border:1px solid var(--border);
+    background:var(--bg-input,var(--bg-card)); color:var(--text); font-size:13px; }
+  /* What the next brief will really carry. Everything else on this page is inventory;
+     this is the output, and it is the only block that answers "so what does the agent
+     actually get told?" */
+  .brief { font-family:var(--mono); font-size:12.5px; line-height:1.65; white-space:pre-wrap;
+    background:var(--bg-input,rgba(0,0,0,.18)); border:1px solid var(--border);
+    border-radius:9px; padding:11px 13px; word-break:break-word; }
+  .edit-form { display:none; gap:8px; margin-top:7px; }
+  .edit-form.on { display:flex; }
+  /* Inside a grid cell an input with no min-width refuses to shrink and blows the
+     column out; minmax(0,1fr) on the track only helps if the child agrees to shrink. */
+  .edit-form input[type=text] { flex:1; min-width:0; padding:6px 9px; border-radius:7px;
+    font-size:13px; border:1px solid var(--accent);
+    background:var(--bg-input,var(--bg-card)); color:var(--text); }
   /* Every lesson of one kind repeats the same sentence and differs only in the tail,
      so the tail is what the reader is actually scanning. */
-  .lesson-row .ctx { display:block; margin-top:2px; color:var(--text-dim); font-size:12px;
+  .ctx { display:block; margin-top:3px; color:var(--text-dim); font-size:12px;
     font-family:var(--mono); }
-  .lesson-row .inj { color:var(--accent-hover,#818cf8); font-size:11px; font-weight:700;
-    white-space:nowrap; cursor:help; }
+  .inj { color:var(--accent-hover,#818cf8); font-size:12px; white-space:nowrap; cursor:help; }
   .x-btn { background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; }
   .x-btn:hover { color:var(--red,#e5484d); }
   .repo-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -37,9 +98,15 @@
 </style>
 
 <div class="page-header">
-  <h2>🧠 Learning</h2>
-  <p>What auto-review flagged on past runs, per repo — and what gets injected into the next brief.</p>
+  <h2>🧠 Tri thức</h2>
+  <p>Những gì agent được dặn trước mỗi run: tri thức <b>bạn nạp vào</b>, cộng với bài học
+    <b>máy tự rút</b> từ review và rework của các run trước.</p>
 </div>
+
+{% if flash %}
+<div class="off-note" style="border-color:var(--{{ flash[0] }});
+     background:rgba(128,128,128,.08);color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+{% endif %}
 
 {% if not enabled %}
 <div class="off-note">
@@ -54,28 +121,160 @@
 
 <div class="stats-grid">
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Lessons stored</span><div class="stat-card-icon">📚</div></div>
-    <div class="stat-card-value">{{ total }}</div>
-    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">across {{ repos|length }} repo(s)</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Injected / run</span><div class="stat-card-icon">💉</div></div>
-    <div class="stat-card-value">{{ max_injected }}</div>
+    <div class="stat-card-header"><span class="stat-card-label">Bạn nạp vào</span><div class="stat-card-icon">📌</div></div>
+    <div class="stat-card-value">{{ authored }}</div>
     <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
-      {% if max_injected %}newest {{ max_injected }} go into every brief{% else %}recording only — nothing injected{% endif %}
+      {% if authored %}luôn vào brief trước{% else %}chưa có — hộp bên trên{% endif %}
     </div>
   </div>
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Injected ({{ days }}d)</span><div class="stat-card-icon">🧠</div></div>
-    <div class="stat-card-value">{{ injected_total }}</div>
-    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">in {{ injected_runs }} run(s)</div>
+    <div class="stat-card-header"><span class="stat-card-label">Máy tự học</span><div class="stat-card-icon">🤖</div></div>
+    <div class="stat-card-value">{{ total - authored }}</div>
+    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
+      {% if occurrences > (total - authored) %}gộp từ {{ occurrences }} lần xảy ra{% else %}qua {{ repos|length }} repo{% endif %}
+    </div>
   </div>
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">New today</span><div class="stat-card-icon">🆕</div></div>
-    <div class="stat-card-value">{{ new_today }}</div>
-    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">fewer = it stopped re-earning flags</div>
+    <div class="stat-card-header"><span class="stat-card-label">Suất mỗi brief</span><div class="stat-card-icon">💉</div></div>
+    <div class="stat-card-value">{{ max_injected }}</div>
+    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
+      {% if max_injected %}xem chính xác nội dung ở khối bên dưới
+      {% else %}đang tắt — chỉ ghi, không nạp{% endif %}
+    </div>
+  </div>
+  {# Hai con số này từng đứng cạnh nhau và mâu thuẫn ra mặt: "8 / mỗi run" bên cạnh
+     "0 trong 0 run". Chúng đo hai thứ khác nhau — một là hạn mức cấu hình, một là
+     lịch sử run có ghi số liệu — nên giờ nói rõ khi chưa có run nào. #}
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Đã nạp ({{ days }} ngày)</span><div class="stat-card-icon">🧠</div></div>
+    <div class="stat-card-value">{{ injected_total }}</div>
+    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
+      {% if injected_runs %}qua {{ injected_runs }} run
+      {% else %}chưa run nào trong {{ days }} ngày qua — nên chưa nạp lần nào{% endif %}
+    </div>
   </div>
 </div>
+
+{# ── Nạp tri thức ──────────────────────────────────────────────────────────
+   Đặt TRÊN mọi thứ khác: đây là thứ duy nhất trên trang mà người dùng chủ động
+   làm được, và trước đây nó không tồn tại — trang chỉ cho xoá và quên. #}
+<div class="card add-box">
+  <div class="card-header">
+    <h3>📌 Nạp tri thức của bạn</h3>
+    <span class="dim" style="font-size:12.5px">mỗi dòng là một điều agent phải biết ·
+      luôn được nạp <b>trước</b> bài học máy tự rút</span>
+  </div>
+  <div class="card-body">
+    <form method="post" action="/dashboard/learning/add" style="margin:0">
+      <textarea name="text" required
+        placeholder="Dán cả đoạn cũng được — mỗi dòng thành một mục, tự bỏ dấu đầu dòng:&#10;- Mọi DTO nhận từ client phải validate trước khi map sang entity&#10;- Không gọi SaveChanges trong vòng lặp — gom lại một lần&#10;- Key i18n dùng chung phải khai ở BE /Resources/i18n, không nhét vào shared-lib"></textarea>
+      <div class="add-row">
+        <label class="dim" style="font-size:12.5px" for="repo">Áp dụng cho</label>
+        <select name="repo" id="repo">
+          <option value="{{ shared_bucket }}">mọi repo trong workspace ({{ shared_bucket }})</option>
+          {% for repo in repos %}{% if repo != shared_bucket %}
+          <option value="{{ repo }}">chỉ repo {{ repo }}</option>
+          {% endif %}{% endfor %}
+        </select>
+        <button class="btn-primary" type="submit" {% if not workspace %}disabled{% endif %}>
+          Nạp vào
+        </button>
+        <span class="dim" style="font-size:12px">
+          {% if workspace %}Có hiệu lực ngay ở run kế tiếp — không cần khởi động lại.
+          {% else %}Chưa có <code>workspace_directory</code> nên chưa lưu được.{% endif %}
+        </span>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Brief kế tiếp mang gì ─────────────────────────────────────────────────
+   Dựng từ chính lessons.recent() mà executor gọi, nên không thể lệch với thứ
+   agent thật sự nhận. #}
+{% if preview %}
+<div class="card">
+  <div class="card-header">
+    <h3>💉 Brief kế tiếp sẽ mang</h3>
+    <span class="dim" style="font-size:12.5px">đúng những dòng này, theo đúng thứ tự này</span>
+  </div>
+  <div class="card-body">
+    {% for repo, lines in preview.items() %}
+      {% if lines %}
+      <div style="margin-bottom:{{ '14px' if not loop.last else '0' }}">
+        <div class="dim" style="font-size:12.5px;margin-bottom:6px">
+          📁 <b>{{ repo }}</b> · {{ lines|length }}/{{ max_injected }} suất đã dùng
+        </div>
+        <div class="brief">⚠️ Lessons from past runs on this codebase — do NOT repeat these:
+{% for line in lines %}- {{ line }}
+{% endfor %}</div>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Tri thức các máy trong đội gửi về (chỉ máy trung tâm) ────────────────────
+   Không tự động phát ngược: một máy học sai mà auto-merge thì cả đội nhiễm ngay ở
+   nhịp kế tiếp, và bài học sai được dạy lại ở MỌI run. #}
+{% if is_central %}
+<div class="card">
+  <div class="card-header">
+    <h3>🌐 Tri thức đội gửi về</h3>
+    <span class="dim" style="font-size:12.5px">
+      {% if auto_promote %}tự duyệt khi có <b>{{ auto_promote }}</b> máy khác nhau cùng báo ·
+      {% endif %}duyệt rồi mới phát ngược cho các máy
+    </span>
+  </div>
+  <div class="card-body" style="padding:0">
+    {% if pooled %}
+    <div class="ktable" style="grid-template-columns:104px minmax(0,1fr) auto 150px">
+      <div class="khead">
+        <span>Trạng thái</span><span>Nội dung</span><span style="text-align:right">Máy / Lần</span><span></span>
+      </div>
+      {% for row in pooled %}
+      <div class="krow {{ 'live' if row.status == 'approved' else '' }}">
+        <span class="ksrc">
+          {% if row.status == 'approved' %}<span class="src man">✅ đã duyệt</span>
+          {% elif row.status == 'rejected' %}<span class="src bot">🚫 từ chối</span>
+          {% else %}<span class="rep">⏳ chờ duyệt</span>{% endif %}
+        </span>
+        <span class="kwhat">
+          {{ row.text }}
+          <span class="ctx">📁 {{ row.repo or '—' }} · từ {{ row.origins | join(', ') or '—' }}</span>
+        </span>
+        <span class="kmark">
+          <span class="rep" title="{{ row.origins | length }} máy độc lập cùng báo · tổng {{ row.occurrences }} lần">
+            {{ row.origins | length }} máy · ×{{ row.occurrences }}</span>
+        </span>
+        <span class="kact">
+          {% if row.status != 'approved' %}
+          <form method="post" action="/dashboard/learning/pool/approved" style="display:inline">
+            <input type="hidden" name="key" value="{{ row.key }}"/>
+            <button class="btn-ghost" type="submit" style="font-size:12px;padding:3px 9px">Duyệt</button>
+          </form>
+          {% endif %}
+          {% if row.status != 'rejected' %}
+          <form method="post" action="/dashboard/learning/pool/rejected" style="display:inline">
+            <input type="hidden" name="key" value="{{ row.key }}"/>
+            <button class="btn-ghost" type="submit"
+                    style="font-size:12px;padding:3px 9px;border-color:var(--red,#e5484d);color:var(--red,#e5484d)">Bỏ</button>
+          </form>
+          {% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding:18px">
+      <p class="dim" style="font-size:13px">Chưa máy nào gửi tri thức về. Máy trạm gửi ở mỗi
+        nhịp đồng bộ, với điều kiện <code>fleet_knowledge_sync</code> đang bật và máy đó có
+        <code>workspace_directory</code>.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
 
 {% if series %}
 <div class="card">
@@ -112,34 +311,64 @@
               style="border-color:var(--red,#e5484d);color:var(--red,#e5484d)">🗑 Forget repo</button>
     </form>
   </div>
-  <div class="card-body">
-    {% for lesson in items %}
-    <div class="lesson-row">
-      <span class="when">{{ lesson.date or '—' }}</span>
-      <span class="what">
-        {% set parts = lesson.text.split('Context:', 1) %}
-        {{ parts[0] | trim }}
-        {% if parts | length > 1 %}<span class="ctx">Context: {{ parts[1] | trim }}</span>{% endif %}
-      </span>
-      {% if loop.index <= injected_from[repo] %}
-        <span class="inj" title="Bài học này đang được nhồi vào brief của run kế tiếp">💉 active</span>
-      {% endif %}
-      <form method="post" action="/dashboard/learning/delete" style="margin:0"
-            onsubmit="return confirm('Xoá bài học này?');">
-        <input type="hidden" name="repo" value="{{ repo }}"/>
-        <input type="hidden" name="text" value="{{ lesson.text }}"/>
-        <button class="x-btn" type="submit" title="Bài học sai/cũ — xoá để nó thôi vào brief">✕</button>
-      </form>
+  <div class="card-body" style="padding:0">
+    <div class="ktable">
+      <div class="khead">
+        <span>Ngày</span><span>Nguồn</span><span>Nội dung</span>
+        <span style="text-align:right">Lần / Nạp</span><span></span>
+      </div>
+      {% for lesson in items %}
+      {% set rid = repo | replace('.','_') | replace('-','_') ~ '_' ~ loop.index %}
+      {% set live = loop.index <= injected_from[repo] %}
+      <div class="krow {{ 'live' if live else '' }}">
+        <span class="kwhen">{{ lesson.date or '—' }}</span>
+        <span class="ksrc">
+          {% if lesson.authored %}
+            <span class="src man" title="Bạn nhập — luôn được nạp trước, và không bị xoá bớt khi file đầy">📌 bạn nhập</span>
+          {% elif lesson.source == 'fleet' %}
+            <span class="src man" title="Trung tâm đã duyệt và phát cho cả đội — cũng được ghim như tri thức bạn nhập">🌐 từ đội</span>
+          {% else %}
+            <span class="src bot" title="Máy tự rút ra từ review / rework của run trước">🤖 máy học</span>
+          {% endif %}
+        </span>
+        <span class="kwhat">
+          {% set parts = lesson.text.split('Context:', 1) %}
+          {{ parts[0] | trim }}
+          {% if parts | length > 1 %}<span class="ctx">Context: {{ parts[1] | trim }}</span>{% endif %}
+          <form method="post" action="/dashboard/learning/edit" class="edit-form" id="e{{ rid }}">
+            <input type="hidden" name="repo" value="{{ repo }}"/>
+            <input type="hidden" name="old" value="{{ lesson.text }}"/>
+            <input type="text" name="text" value="{{ lesson.text }}" required/>
+            <button class="btn-primary" type="submit">Lưu</button>
+          </form>
+        </span>
+        <span class="kmark">
+          {% if lesson.count > 1 %}<span class="rep"
+            title="Đã xảy ra {{ lesson.count }} lần — trước đây nằm thành {{ lesson.count }} dòng riêng và chiếm {{ lesson.count }} suất nạp">×{{ lesson.count }}</span>{% endif %}
+          {% if live %}<span class="inj" title="Dòng này đang được nạp vào brief của run kế tiếp">💉</span>{% endif %}
+        </span>
+        <span class="kact">
+          <button class="x-btn" type="button" title="Sửa câu chữ, giữ nguyên ngày và số lần"
+                  onclick="document.getElementById('e{{ rid }}').classList.toggle('on')">✎</button>
+          <form method="post" action="/dashboard/learning/delete" style="display:inline"
+                onsubmit="return confirm('Xoá dòng này?');">
+            <input type="hidden" name="repo" value="{{ repo }}"/>
+            <input type="hidden" name="text" value="{{ lesson.text }}"/>
+            <button class="x-btn" type="submit" title="Sai hoặc lỗi thời — xoá để nó thôi vào brief">✕</button>
+          </form>
+        </span>
+      </div>
+      {% endfor %}
     </div>
-    {% endfor %}
   </div>
 </div>
 {% else %}
 <div class="card">
   <div class="empty-state">
-    <p>Chưa học được gì.
-      {% if enabled %}Bài học được ghi khi auto-review flag một run — chạy vài item rồi quay lại.
-      {% else %}Bật learning loop ở Settings để bắt đầu ghi.{% endif %}
+    <p>Chưa có tri thức nào. Dùng hộp <b>📌 Nạp tri thức của bạn</b> ở trên để tự nạp —
+      không cần đợi máy học.
+      {% if enabled %}Máy cũng sẽ tự ghi thêm khi auto-review flag một run.
+      {% else %}Bật learning loop ở Settings để máy tự ghi thêm.{% endif %}
     </p>
     {% if workspace %}<p class="dim" style="font-size:12.5px">Lưu tại
       <code>{{ workspace }}\.autopilot\lessons\&lt;repo&gt;.md</code></p>{% endif %}

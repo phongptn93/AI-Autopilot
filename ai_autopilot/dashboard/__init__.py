@@ -141,6 +141,16 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                             "(không cần khởi động lại)."),
     "flow_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                             "vẫn được giữ."),
+    "pool_approved": ("green", "✅ Đã duyệt — máy trạm sẽ nhận dòng này ở nhịp đồng bộ kế tiếp."),
+    "pool_rejected": ("amber", "Đã từ chối. Giữ lại bản ghi để máy nào còn dòng đó gửi lên "
+                               "cũng không làm nó quay lại hàng chờ."),
+    "lesson_added": ("green", "✅ Đã nạp tri thức. Nó vào brief của run kế tiếp ngay — "
+                              "tri thức bạn nhập luôn được ưu tiên trước bài học máy tự rút."),
+    "lesson_edited": ("green", "✅ Đã sửa. Ngày ghi và số lần tái phát được giữ nguyên."),
+    "lesson_none_added": ("amber", "Không có dòng nào được ghi — nội dung trống, hoặc đã có "
+                                   "sẵn một dòng cùng nghĩa (nó chỉ tăng số lần đếm)."),
+    "lesson_no_workspace": ("red", "⛔ Chưa cấu hình <code>workspace_directory</code> — "
+                                   "tri thức không có chỗ để lưu."),
     "lens_saved": ("green", "✅ Đã lưu quy trình bảng (BA / Dev / QC…) và áp dụng ngay."),
     "lens_reset": ("green", "↩ Đã khôi phục bộ quy trình mặc định (BA / Dev / QC)."),
     "lens_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
@@ -2791,6 +2801,13 @@ def create_dashboard_router() -> APIRouter:
         limit = max(0, cfg.lessons_max_injected)
         # Per repo: how many of ITS newest lessons a brief on that repo carries.
         injected_from = {repo: min(len(items), limit) for repo, items in groups}
+        # The exact lines the next brief will carry, from the SAME function the
+        # executor calls. A page that recomputes its own idea of "what gets injected"
+        # is a page that will eventually disagree with the agent and be believed.
+        preview = {
+            repo: lessons_mod.recent(workspace, [repo], limit=limit) for repo in repos
+        }
+        flash = _take_flash(request)
         series = lessons_mod.per_day(workspace)[-days:]
         today = datetime.now().date().isoformat()
         try:
@@ -2798,13 +2815,48 @@ def create_dashboard_router() -> APIRouter:
             records, _ = await c.execution_repo.search(dfrom=dfrom, limit=5000)
         except Exception:  # noqa: BLE001 — the page must render without history
             records = []
-        return _TEMPLATES.TemplateResponse(
+        authored = sum(
+            1 for _, items in groups for le in items if le.authored
+        )
+        # The central's review queue. Only a central has one: a worker contributes and
+        # receives, but it is not the place decisions get made — one machine approving
+        # for the whole fleet from wherever it happens to be is how a wrong lesson
+        # spreads before anyone with context sees it.
+        pooled: list[dict] = []
+        is_central = (cfg.fleet_role or "") == fleet_mod.ROLE_CENTRAL
+        if is_central:
+            repo_store = getattr(c, "fleet_knowledge_repo", None)
+            if repo_store is not None:
+                with contextlib.suppress(Exception):   # the page renders without it
+                    pooled = [
+                        {
+                            "key": row.key, "text": row.text, "repo": row.repo,
+                            "status": row.status, "occurrences": row.occurrences,
+                            "origins": _json_list(row.origins),
+                            "source": row.source,
+                        }
+                        for row in await repo_store.list_all()
+                    ]
+        response = _TEMPLATES.TemplateResponse(
             request, "learning.html",
             _ctx(
-                request, "learning",
+                request, "learning", flash=flash,
                 enabled=cfg.learning_loop_enabled, workspace=workspace,
                 repos=repos, groups=groups, injected_from=injected_from,
+                preview=preview, shared_bucket=lessons_mod.SHARED_BUCKET,
                 total=sum(len(items) for _, items in groups),
+                authored=authored,
+                # Repeats are collapsed now, so this counts the occurrences BEHIND the
+                # lines — "11 lessons" hid the fact that five of them were one event
+                # five times, which is the number that actually says how bad it is.
+                # Learned lines only. Counting the authored ones in made the number
+                # say "gộp từ 10 lần xảy ra" about a tile labelled "máy tự học", when
+                # three of those ten were rules somebody typed once.
+                occurrences=sum(
+                    le.count for _, items in groups for le in items if not le.authored
+                ),
+                pooled=pooled, is_central=is_central,
+                auto_promote=cfg.fleet_knowledge_auto_promote,
                 max_injected=limit, series=series,
                 peak=max((n for _, n in series), default=0),
                 new_today=sum(n for day, n in series if day == today),
@@ -2813,6 +2865,86 @@ def create_dashboard_router() -> APIRouter:
                 injected_runs=sum(1 for r in records if r.lessons_injected),
             ),
         )
+        if flash is not None:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/learning/add")
+    async def learning_add(request: Request):
+        """Put knowledge a HUMAN wrote in front of the agent.
+
+        The page could delete and forget but never add, so the only thing that ever
+        reached a brief was the machine's own post-mortem of its mistakes — the team's
+        actual conventions, the ones that stop the mistake happening at all, had no
+        door in. One line per line pasted, so a conventions document can be dropped in
+        whole rather than retyped a sentence at a time.
+        """
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        workspace = c.config.workspace_directory
+        form = await request.form()
+        repo = str(form.get("repo") or "").strip() or lessons_mod.SHARED_BUCKET
+        blob = str(form.get("text") or "")
+        if not workspace:
+            return _flash("/dashboard/learning", "lesson_no_workspace")
+        added = lessons_mod.add_many(workspace, repo, blob)
+        if not added:
+            return _flash("/dashboard/learning", "lesson_none_added")
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="knowledge.added",
+            target=f"{repo}: {added} dòng", detail=blob[:300],
+        )
+        _log.info("knowledge added via dashboard", repo=repo, lines=added)
+        return _flash("/dashboard/learning", "lesson_added")
+
+    @router.post("/learning/pool/{decision}")
+    async def learning_pool_decide(request: Request, decision: str):
+        """Approve or reject one line the fleet contributed.
+
+        ``rejected`` is kept rather than deleted: the machines that still hold the bad
+        lesson locally re-contribute it on every beat, so a deleted row would come
+        straight back and the same line would face the reviewer forever.
+        """
+        if decision not in ("approved", "rejected"):
+            raise HTTPException(status_code=404, detail="unknown decision")
+        c: Container = request.app.state.container
+        if (c.config.fleet_role or "") != fleet_mod.ROLE_CENTRAL:
+            raise HTTPException(status_code=404, detail="only a central curates")
+        store = getattr(c, "fleet_knowledge_repo", None)
+        if store is None:
+            raise HTTPException(status_code=404, detail="no knowledge store")
+        form = await request.form()
+        key = str(form.get("key") or "")
+        if await store.set_status(key, decision):
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard",
+                action=f"knowledge.{decision}", target=key[:300],
+            )
+        return _flash("/dashboard/learning",
+                      "pool_approved" if decision == "approved" else "pool_rejected")
+
+    @router.post("/learning/edit")
+    async def learning_edit(request: Request):
+        """Reword one line in place, keeping its date, source and recurrence count.
+
+        Deleting and retyping was the only correction available, and it threw away
+        exactly the two facts that make a line worth reading: when it was learned and
+        how many times it has come back.
+        """
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        form = await request.form()
+        repo = str(form.get("repo") or "")
+        old, new = str(form.get("old") or ""), str(form.get("text") or "")
+        if lessons_mod.edit(c.config.workspace_directory, repo, old, new):
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="knowledge.edited",
+                target=f"{repo}: {new}"[:300], detail=old[:300],
+            )
+            return _flash("/dashboard/learning", "lesson_edited")
+        return _flash("/dashboard/learning", "lesson_none_added")
 
     @router.post("/learning/delete")
     async def learning_delete(request: Request):

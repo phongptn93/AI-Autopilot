@@ -444,6 +444,51 @@ class FleetWorker(Base):
     failed_today: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class FleetKnowledge(Base):
+    """One piece of knowledge the fleet has pooled, as held by the CENTRAL.
+
+    Workers learn alone. Three machines running the same codebase used to have to make
+    the same mistake three times before all three knew about it, and the central — the
+    one screen anybody looks at — could not see any of it.
+
+    Rows are keyed by the NORMALISED text, so the same lesson arriving from three
+    machines is one row that knows it came from three. That count is the whole point:
+    one machine tripping over something is an anecdote, three machines tripping over it
+    is a rule, and the difference is what decides whether it gets handed back out.
+
+    Nothing is redistributed until it is ``approved``. A worker that learned something
+    wrong would otherwise poison every other machine on the next beat, and a bad lesson
+    is re-taught on every run — the blast radius of auto-merge here is the whole fleet.
+
+    A new table rather than columns elsewhere: ``create_all`` adds missing tables to an
+    existing database but will not ALTER one, so this upgrades in place.
+    """
+
+    __tablename__ = "fleet_knowledge"
+    __table_args__ = (Index("ix_fleet_knowledge_status", "status"),)
+
+    #: Normalised text (see ``lessons.normalize``) — the natural key, so the same
+    #: lesson from two machines merges instead of appearing twice.
+    key: Mapped[str] = mapped_column(String(500), primary_key=True)
+    #: The text as it will be handed out, in the wording of whoever said it best.
+    text: Mapped[str] = mapped_column(Text, default="")
+    #: Which repo it belongs to, or the shared bucket for workspace-wide knowledge.
+    repo: Mapped[str] = mapped_column(String(200), default="")
+    #: ``draft`` (waiting for a human), ``approved`` (served to the fleet), ``rejected``
+    #: (kept, so the same wrong lesson is not re-queued on every beat by every machine).
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    #: JSON list of machine names that reported it — length is the "how many machines
+    #: independently hit this" signal that auto-promotion reads.
+    origins: Mapped[str] = mapped_column(Text, default="[]")
+    #: Total occurrences summed across machines (each machine counts its own repeats).
+    occurrences: Mapped[int] = mapped_column(Integer, default=1)
+    #: ``authored`` when a human typed it on some machine, else ``learned``. A rule a
+    #: person wrote does not need three machines to agree before it is worth sharing.
+    source: Mapped[str] = mapped_column(String(20), default="learned")
+    first_seen: Mapped[datetime] = mapped_column(DateTime)
+    last_seen: Mapped[datetime] = mapped_column(DateTime)
+
+
 class QualityKind:
     """``QualityEvent.kind`` values. Plain strings, not an ``Enum`` column: this is an
     append-only analytics log that will outlive today's vocabulary, and a new kind must

@@ -76,28 +76,57 @@ async def test_record_never_raises_into_the_caller(tmp_path: Path):
     [
         (QualityKind.REVIEW_FINDING, True),
         (QualityKind.TEST_FAILED, True),
-        (QualityKind.REVIEW_VOTE, True),
         (QualityKind.REOPENED, True),
+        # What the reviewer WROTE is the lesson — it arrives on the revision signal.
+        (QualityKind.PR_REVISION, True),
         (QualityKind.EXECUTION_RETRY, False),   # an infra flake teaches no rule
-        (QualityKind.PR_REVISION, False),       # the review comment is the lesson
+        # A vote is a score. It used to teach "re-read the comments on that PR",
+        # which points at a PR that is closed by the time any brief reads it.
+        (QualityKind.REVIEW_VOTE, False),
     ],
 )
 def test_lesson_mapping(kind: str, teaches: bool):
-    assert bool(lesson_text(kind, "detail here", "Reviewer")) is teaches
+    assert bool(lesson_text(kind, "a detail long enough to be a real ask", "Reviewer")) is teaches
 
 
 # ── the funnel: record → learn ────────────────────────────────────────────────
 
 
-async def test_blocking_vote_becomes_a_lesson(repo: QualityRepository, tmp_path: Path):
+async def test_a_blocking_vote_is_measured_but_teaches_nothing(repo: QualityRepository,
+                                                               tmp_path: Path):
+    """The vote is a score, and the score is worth keeping. The lesson it used to
+    write — "re-read the review comments on that PR" — pointed at a PR that is closed
+    by the time any future brief reads it, so no run could ever act on it; two of them
+    sat permanently in the injected set saying only that somebody had been unhappy."""
     log = _log(repo, tmp_path)
     await log.record(
         work_item_id=42, kind=QualityKind.REVIEW_VOTE, value=-10,
         actor="Phong Pham", detail="Rejected",
     )
+    assert lessons.recent(str(tmp_path / "ws"), [], limit=8) == []
+    assert (await repo.recent())[0].value == -10   # still measurable
+
+
+async def test_what_the_reviewer_asked_for_becomes_the_lesson(repo: QualityRepository,
+                                                              tmp_path: Path):
+    """The best signal the system produces: a person, looking at real code, saying
+    what is wrong with it. It used to be dropped in favour of "/ai revise round 2"."""
+    log = _log(repo, tmp_path)
+    await log.record(
+        work_item_id=42, kind=QualityKind.PR_REVISION, value=1, actor="Phong Pham",
+        detail="dùng ILogger thay cho Console.WriteLine trong toàn bộ service layer",
+    )
     carried = lessons.recent(str(tmp_path / "ws"), [], limit=8)
+    assert any("ILogger" in line for line in carried)
     assert any("Phong Pham" in line for line in carried)
-    assert (await repo.recent())[0].value == -10   # and it is still measurable
+
+
+async def test_fix_it_is_an_order_about_one_pr_not_a_lesson(repo: QualityRepository,
+                                                            tmp_path: Path):
+    log = _log(repo, tmp_path)
+    await log.record(work_item_id=42, kind=QualityKind.PR_REVISION, value=1,
+                     actor="human", detail="/ai sửa lại giúp")
+    assert lessons.recent(str(tmp_path / "ws"), [], limit=8) == []
 
 
 async def test_approval_is_recorded_but_teaches_nothing(repo: QualityRepository, tmp_path: Path):

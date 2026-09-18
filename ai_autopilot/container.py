@@ -20,6 +20,7 @@ from ai_autopilot.data import (
     ClaudeSessionRepository,
     Database,
     ExecutionRepository,
+    FleetKnowledgeRepository,
     FleetWorkerRepository,
     LoopReportRepository,
     NotificationHoldRepository,
@@ -88,6 +89,10 @@ class Container:
         self.audit_repo = AuditRepository(self.database)
         # Fleet: populated on a central by worker heartbeats; unused elsewhere.
         self.fleet_repo = FleetWorkerRepository(self.database)
+        # Central only in practice, but built unconditionally: a machine's role can be
+        # changed on the Settings page without a restart, and a repository that only
+        # exists when the process started as a central would not be there afterwards.
+        self.fleet_knowledge_repo = FleetKnowledgeRepository(self.database)
         # Scheduled audits. Their own table: a report's deliverable is its text, which
         # does not fit an execution row's summary column — see ``LoopReport``.
         self.loop_report_repo = LoopReportRepository(self.database)

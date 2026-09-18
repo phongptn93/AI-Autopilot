@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 
 import httpx
 
-from ai_autopilot import fleet
+from ai_autopilot import fleet, lessons
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
@@ -47,6 +47,9 @@ class FleetAgentService:
         self.central_version: str = ""
         self.behind: bool = False
         self._warned_version: str = ""   # so the nag is once per version, not per beat
+        #: Drafts waiting for a human at the CENTRE — shown on this worker's page so a
+        #: contributor can see their lesson is queued rather than lost.
+        self.knowledge_pending: int = 0
 
     @property
     def worker_name(self) -> str:
@@ -112,11 +115,58 @@ class FleetAgentService:
         body = resp.json() or {}
         self._note_central_version(str(body.get("central_version") or ""))
         applied = await self._apply(body)
+        learned = await self._exchange_knowledge(base)
         self.last_ok, self.last_applied = True, applied
-        self.last_detail = (
-            f"Đã nhận {len(applied)} thiết lập mới." if applied else "Đã khớp với trung tâm."
-        )
+        parts = []
+        if applied:
+            parts.append(f"Đã nhận {len(applied)} thiết lập mới.")
+        if learned:
+            parts.append(f"Nhận {learned} tri thức từ đội.")
+        self.last_detail = " ".join(parts) or "Đã khớp với trung tâm."
         return True
+
+    async def _exchange_knowledge(self, base: str) -> int:
+        """Contribute what this machine learned, take back what the fleet approved.
+
+        Returns how many lines were NEW here. Failures are swallowed on purpose: a
+        centre that is old (404 — no knowledge endpoint yet) or briefly unhappy must
+        not turn a successful heartbeat into a failed one. Configuration sync is the
+        heartbeat's job and it has already succeeded by this point.
+        """
+        cfg = self._config
+        if not cfg.fleet_knowledge_sync:
+            return 0
+        workspace = (cfg.workspace_directory or "").strip()
+        if not workspace:
+            return 0                       # nothing to contribute, nowhere to put a reply
+        try:
+            payload = fleet.KnowledgeExchange(
+                worker=self.worker_name,
+                items=[fleet.KnowledgeLine(**row) for row in lessons.contributions(workspace)],
+            )
+            resp = await self._c.http.post(
+                f"{base}/api/fleet/knowledge", json=payload.model_dump(mode="json"),
+                headers={fleet.TOKEN_HEADER: cfg.fleet_token},
+            )
+            if resp.status_code == 404:
+                return 0                   # central on an older build — nothing to say
+            if resp.status_code >= 400:
+                self._log.debug("fleet knowledge refused", status=resp.status_code)
+                return 0
+            body = resp.json() or {}
+            # Only lines the centre approved come back, so anything here is vetted.
+            incoming = [
+                (str(row.get("repo") or ""), str(row.get("text") or ""))
+                for row in (body.get("items") or [])
+            ]
+            self.knowledge_pending = int(body.get("pending") or 0)
+            added = lessons.apply_fleet(workspace, incoming)
+            if added:
+                self._log.info("fleet knowledge applied", new=added, total=len(incoming))
+            return added
+        except Exception as exc:  # noqa: BLE001 — never fail a good heartbeat over this
+            self._log.debug("fleet knowledge exchange failed", error=describe_exc(exc))
+            return 0
 
     def _note_central_version(self, central: str) -> None:
         """Compare this build against the central's, and say so when we are behind.

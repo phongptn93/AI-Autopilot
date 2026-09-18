@@ -177,7 +177,9 @@ class PrMonitorService:
             self._revision_counts[work_item_id] = count
         return self._revision_counts[work_item_id]
 
-    async def _set_revisions(self, work_item_id: int, count: int) -> None:
+    async def _set_revisions(
+        self, work_item_id: int, count: int, *, asked: str = "", actor: str = "",
+    ) -> None:
         previous = self._revision_counts.get(work_item_id, 0)
         self._revision_counts[work_item_id] = count
         if self._repo is not None:
@@ -188,9 +190,18 @@ class PrMonitorService:
         # something. Append the increment to the durable log before that happens.
         quality = getattr(self._c, "quality_repo", None)
         if quality is not None and count > previous:
+            # `asked` is what the reviewer WROTE. It used to be dropped here in favour
+            # of "/ai revise round 2" — the count survived and the reason did not, so
+            # the one place a human explains what is wrong with the code taught the
+            # next run nothing at all.
+            # Whether this ask is worth TEACHING is decided by `lesson_text`, which owns
+            # that judgement for every signal — here we only make sure the words reach
+            # it. "/ai revise round N" stays the fallback so the metric keeps a detail
+            # even when the comment was pure command with nothing said.
             await quality.record(
                 work_item_id=work_item_id, kind=QualityKind.PR_REVISION, value=count,
-                actor="human", detail=f"/ai revise round {count}",
+                actor=actor or "human",
+                detail=(asked or "").strip() or f"/ai revise round {count}",
             )
 
     def _branch_lock(self, repo_id: str, branch: str) -> asyncio.Lock:
@@ -588,7 +599,11 @@ class PrMonitorService:
                 self._spawn(self._reply_capped(repo_id, pr_id, cmd["thread_id"]))
                 break
             revision = await self._get_revisions(work_item_id) + 1
-            await self._set_revisions(work_item_id, revision)
+            await self._set_revisions(
+                work_item_id, revision,
+                asked=str(cmd.get("instruction") or ""),
+                actor=str(cmd.get("author_name") or ""),
+            )
             to_run.append((cmd, revision))
         if not to_run:
             return

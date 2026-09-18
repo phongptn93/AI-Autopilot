@@ -22,16 +22,23 @@ Signal                        Lesson
 ============================  =========================================================
 ``REVIEW_FINDING``            the findings themselves — already actionable text
 ``TEST_FAILED``               the failing-test summary
-``REVIEW_VOTE`` (negative)    that a human rejected the work, and what they voted
+``PR_REVISION``               **what the reviewer actually asked for**, close to verbatim
 ``REOPENED``                  that a human sent the item back after it looked done
 ``EXECUTION_RETRY``           nothing — an infra flake or timeout teaches no rule
-``PR_REVISION``               nothing on its own; the review comment is the lesson
+``REVIEW_VOTE``               nothing — the vote is a score; the comment is the lesson
 ============================  =========================================================
+
+``PR_REVISION`` used to teach nothing and ``REVIEW_VOTE`` used to teach a pointer
+("re-read the review comments on that PR"), which pointed at a PR that is closed by
+the time any future brief reads it. Between them they threw away the best signal the
+system produces — a person, looking at real code, saying what is wrong with it — and
+filled the injected set with lines saying only that somebody had once been unhappy.
 """
 
 from __future__ import annotations
 
 import contextlib
+import re
 from datetime import datetime
 
 from ai_autopilot import lessons
@@ -41,6 +48,30 @@ from ai_autopilot.logging_config import get_logger
 
 #: Vote at or below this means the reviewer is blocking (ADO: -5 waiting, -10 rejected).
 _BLOCKING_VOTE = -5
+
+#: A leading ``@bot`` and/or ``/command`` — addressing, not content.
+_ADDRESSING = re.compile(r"^(?:\s*@[\w.\-]+)*\s*(?:/[\w-]+)?\s*", re.UNICODE)
+#: HTML a comment may arrive wrapped in.
+_TAGS = re.compile(r"<[^>]+>")
+#: Below this many characters of actual content, a comment is an instruction for THIS
+#: pull request ("fix it", "sửa lại giúp", "ok chưa") and not a rule worth carrying to
+#: the next one. A blunt length gate on purpose: the alternative is an LLM call per
+#: comment, which is a bigger decision than this change should make on its own.
+_MIN_TEACHABLE = 25
+
+
+def teachable_ask(text: str) -> str:
+    """The content of a reviewer's ask, or '' when there is no lesson in it.
+
+    Strips the addressing (``@bot``, ``/ai``) and any HTML, then keeps it only if what
+    remains says something. "fix it" is a command about one PR; "dùng ILogger thay cho
+    Console.WriteLine" is a rule about every PR, and only the second is worth telling
+    the next run.
+    """
+    body = _TAGS.sub(" ", text or "")
+    body = _ADDRESSING.sub("", body, count=1)
+    body = " ".join(body.split())
+    return body if len(body) >= _MIN_TEACHABLE else ""
 
 
 def lesson_text(kind: str, detail: str, actor: str) -> str:
@@ -53,12 +84,26 @@ def lesson_text(kind: str, detail: str, actor: str) -> str:
         return detail  # the findings text is already the lesson
     if kind == QualityKind.TEST_FAILED:
         return f"Tests failed on a previous run — check this before opening a PR: {detail}"
+    if kind == QualityKind.PR_REVISION:
+        # The highest-quality signal in the system: a real person, looking at real
+        # code, saying what is wrong with it — and it used to be thrown away. The
+        # revision counter kept the NUMBER of rounds and dropped the sentence.
+        #
+        # Stored close to verbatim rather than paraphrased. A reviewer's own words
+        # carry the specifics ("dùng ILogger, đừng Console.WriteLine") that a
+        # generated summary sands off, and specifics are the whole value.
+        ask = teachable_ask(detail)
+        if not ask:
+            return ""       # "fix it" is about one PR, not about the next one
+        who = f" ({actor})" if actor and actor != "human" else ""
+        return f"Reviewer{who} đã yêu cầu sửa: «{ask}». Kiểm tra điểm này TRƯỚC khi mở PR."
     if kind == QualityKind.REVIEW_VOTE:
-        return (
-            f"A human reviewer ({actor or 'unknown'}) blocked a previous PR "
-            f"[{detail}]. Re-read the review comments on that PR before repeating "
-            f"the same approach."
-        )
+        # Deliberately teaches nothing. It used to produce "…blocked a previous PR.
+        # Re-read the review comments on that PR" — a pointer to a PR that is closed
+        # by the time any future brief reads it, so no run could ever follow it. Two
+        # of those sat permanently in the injected set saying only "somebody was once
+        # unhappy". What the reviewer actually SAID now arrives via PR_REVISION.
+        return ""
     if kind == QualityKind.REOPENED:
         return (
             "A work item that looked finished was reopened by a human — the result "

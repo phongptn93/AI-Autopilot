@@ -983,6 +983,11 @@ NEVER_SHARED = frozenset({
     # which is the one thing the fleet cannot be allowed to overwrite.
     "fleet_role", "fleet_central_url", "fleet_token", "fleet_worker_name",
     "fleet_local_keys", "fleet_sync_interval_minutes", "fleet_offline_after_minutes",
+    # Same rule, and the second one would be actively wrong: the promotion threshold
+    # is a CENTRAL's editorial policy about what it redistributes, meaningless on a
+    # machine that only contributes. The first is each machine's own answer to "do I
+    # share what I learn" — not the centre's to decide.
+    "fleet_knowledge_sync", "fleet_knowledge_auto_promote",
     "repos",                # RepoConfig entries embed local filesystem paths
 })
 

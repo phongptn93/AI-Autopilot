@@ -80,6 +80,38 @@ class WorkerReport(BaseModel):
     probe: bool = False
 
 
+class KnowledgeLine(BaseModel):
+    """One piece of knowledge crossing between a worker and the centre."""
+
+    key: str = ""        # normalised text — the identity two machines agree on
+    text: str = ""
+    repo: str = ""
+    source: str = "learned"
+    count: int = 1
+
+
+class KnowledgeExchange(BaseModel):
+    """A worker's contribution going up. The reply carries what may come back down."""
+
+    worker: str = ""
+    items: list[KnowledgeLine] = Field(default_factory=list)
+
+
+class KnowledgeResponse(BaseModel):
+    """What the centre is willing to hand back — approved lines only.
+
+    Deliberately NOT part of the config document. Three reasons, and each of them
+    alone would be enough: the document is a whole-snapshot with one hash while
+    knowledge is a growing set; the document travels one way while knowledge has to
+    come back UP from the machines that learn it; and a lesson can quote code or a
+    customer's name, so it answers to a different disclosure rule than a setting does.
+    """
+
+    items: list[KnowledgeLine] = Field(default_factory=list)
+    accepted: int = 0        # how many of the contribution were new to the centre
+    pending: int = 0         # drafts waiting for a human there — shown on the worker
+
+
 class SyncResponse(BaseModel):
     """The central's answer: the shared configuration, when it differs.
 
@@ -224,6 +256,56 @@ def create_fleet_router() -> APIRouter:
             config_hash=digest,
             config=None if report.config_hash == digest else document,
             central_version=central_version,
+        )
+
+    @router.post("/knowledge", response_model=KnowledgeResponse)
+    async def knowledge(
+        request: Request,
+        exchange: KnowledgeExchange,
+        x_fleet_token: str | None = Header(default=None),
+    ) -> KnowledgeResponse:
+        """Pool what one machine has learned, and hand back what the fleet may know.
+
+        Contribution and distribution in one call, like the heartbeat: a machine that
+        can contribute is a machine that can be told, so there is no state where the
+        centre has knowledge it cannot deliver.
+
+        Nothing crosses back until a human at the centre approved it — or until
+        ``fleet_knowledge_auto_promote`` separate machines independently reported the
+        same thing, which is corroboration rather than a guess. Auto-merging in both
+        directions would let one machine's wrong lesson reach every other machine on
+        the next beat, and a wrong lesson is re-taught on every single run.
+        """
+        c = request.app.state.container
+        cfg = c.config
+        token = (cfg.fleet_token or "").strip()
+        if not token or not secrets.compare_digest((x_fleet_token or "").strip(), token):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        if not (exchange.worker or "").strip():
+            raise HTTPException(status_code=422, detail="worker name is required")
+        repo = getattr(c, "fleet_knowledge_repo", None)
+        if repo is None:                       # central without the store — nothing to do
+            return KnowledgeResponse()
+
+        accepted = await repo.contribute(
+            [item.model_dump() for item in exchange.items],
+            origin=exchange.worker.strip(),
+            auto_promote=max(0, int(cfg.fleet_knowledge_auto_promote or 0)),
+        )
+        approved = await repo.approved()
+        drafts = await repo.list_all(status="draft")
+        _log.info(
+            "fleet knowledge exchange", worker=exchange.worker,
+            received=len(exchange.items), new=accepted,
+            serving=len(approved), pending=len(drafts),
+        )
+        return KnowledgeResponse(
+            items=[
+                KnowledgeLine(key=row.key, text=row.text, repo=row.repo,
+                              source="fleet", count=row.occurrences)
+                for row in approved
+            ],
+            accepted=accepted, pending=len(drafts),
         )
 
     return router

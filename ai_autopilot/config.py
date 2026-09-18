@@ -1164,6 +1164,15 @@ class Settings(BaseSettings):
     fleet_local_keys: list[str] = Field(default_factory=list)
     # Central: a worker silent for longer than this is shown as offline.
     fleet_offline_after_minutes: int = 30
+    # Pool what each machine learns instead of every machine learning it alone. A
+    # worker contributes on each beat and takes back what the centre has APPROVED —
+    # see `fleet.KnowledgeResponse` for why this is not part of the config document.
+    fleet_knowledge_sync: bool = True
+    # Central: how many SEPARATE machines must independently report the same lesson
+    # before it is served to the fleet without anybody approving it. One machine
+    # tripping over something is an anecdote; several is corroboration. 0 disables
+    # auto-promotion entirely — then a human approves every line by hand.
+    fleet_knowledge_auto_promote: int = 2
 
     # ── Multi-workspace (one connection, several projects) ──
     # What to call the workspace backed by the global fields above (its directory, base

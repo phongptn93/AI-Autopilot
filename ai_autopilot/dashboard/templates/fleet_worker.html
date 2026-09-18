@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+{# The worker's half of the Fleet page. A worker has no table of machines — it IS one —
+   so the question this page answers is the opposite one: who do I call, did that call
+   work, and can I make it happen now instead of waiting out the interval. #}
+<style>
+  .main { max-width: 1240px; }
+  .fl-note { font-size:12px; color:var(--text-muted); background:var(--bg,#0d0d12);
+             border:1px solid var(--border,#23232b); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
+  .fl-note code { font-family:var(--mono,monospace); font-size:11px; }
+  .fl-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:12px;
+             margin-bottom:12px; overflow:hidden; }
+  .fl-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+             padding:11px 16px; border-bottom:1px solid var(--border,#23232b); background:var(--bg,#0d0d12); }
+  .fl-name { font-weight:600; font-size:14px; }
+  .fl-spacer { flex:1; }
+  .fl-badge { font-size:11px; font-weight:600; padding:2px 9px; border-radius:20px; white-space:nowrap;
+              background:var(--accent-bg,rgba(99,102,241,.15)); color:var(--accent-hover,#818cf8); }
+  .fl-badge.ok { background:rgba(46,160,67,.16); color:#3fb950; }
+  .fl-badge.bad { background:rgba(229,72,77,.14); color:#e5484d; }
+  .fl-badge.mute { background:rgba(125,125,140,.14); color:var(--text-dim); }
+  .fl-body { padding:12px 16px; display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px 18px; }
+  .fl-f { display:flex; flex-direction:column; gap:4px; min-width:0; }
+  .fl-f label { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); }
+  .fl-f .val { font-size:13px; word-break:break-all; }
+  .fl-f .val.mono { font-family:var(--mono,monospace); font-size:12px; }
+  .fl-tags { display:flex; flex-wrap:wrap; gap:5px; }
+  .fl-tag { font-family:var(--mono,monospace); font-size:11px; padding:1px 7px; border-radius:6px;
+            background:var(--bg,#0d0d12); border:1px solid var(--border,#23232b); color:var(--text-dim); }
+  .fl-wide { grid-column:1 / -1; }
+  .fl-foot { display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+             padding:10px 16px; border-top:1px solid var(--border,#23232b); font-size:12px; color:var(--text-muted); }
+  .fl-sync { background:var(--accent,#6366f1); color:#fff; border:none; border-radius:8px;
+             padding:7px 15px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
+  .fl-sync:hover { filter:brightness(1.1); }
+  .fl-sync:disabled { opacity:.45; cursor:not-allowed; filter:none; }
+</style>
+
+<h1>🛰 Fleet — máy trạm</h1>
+
+{% if flash %}
+<div class="fl-card" style="border-color:var(--{{ flash[0] }})">
+  <div style="padding:13px 16px;color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+</div>
+{% endif %}
+
+<div class="fl-note">
+  Máy này <b>gọi về</b> trung tâm mỗi <b>{{ interval }} phút</b> (và một lần ngay khi khởi động):
+  đẩy tình trạng lên, kéo <b>{{ shared_count }}</b> thiết lập chung về.
+  Chiều ngược lại không tồn tại — trung tâm không bao giờ gọi vào máy này.
+  Secrets, <code>trigger_tag</code>, <code>workspaces</code>, <code>repos</code> và toàn bộ
+  <code>fleet_*</code> <b>không</b> bị ghi đè.
+</div>
+
+<div class="fl-card">
+  <div class="fl-head">
+    <span class="fl-name">{{ worker_name }}</span>
+    <span class="fl-spacer"></span>
+    {% if not agent_live %}
+      <span class="fl-badge bad">⚠️ fleet agent chưa chạy</span>
+    {% elif last_ok is none %}
+      <span class="fl-badge mute">chưa gọi lần nào trong tiến trình này</span>
+    {% elif last_ok %}
+      <span class="fl-badge ok">✅ gọi được trung tâm</span>
+    {% else %}
+      <span class="fl-badge bad">⛔ không gọi được</span>
+    {% endif %}
+  </div>
+
+  <div class="fl-body">
+    <div class="fl-f">
+      <label>Trung tâm</label>
+      <div class="val mono">{{ central_url or '— chưa khai —' }}</div>
+    </div>
+
+    <div class="fl-f">
+      <label>Token chung</label>
+      <div class="val">
+        {% if token_set %}đã đặt{% else %}<span style="color:var(--red,#e5484d)">chưa đặt — không gọi được</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="fl-f">
+      <label>Lần gọi gần nhất</label>
+      <div class="val">
+        {% if beat_ago is not none %}{{ fmt_duration(beat_ago) }} trước
+        {% else %}<span style="color:var(--text-dim)">chưa lần nào</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="fl-f">
+      {# The same fingerprint the central compares against, so "khớp" means the same
+         thing on both pages. Shown because it is the only way to tell, from here,
+         whether this machine is running what the team is running. #}
+      <label>Vân tay cấu hình chung</label>
+      <div class="val mono">{{ local_hash }}</div>
+    </div>
+
+    {% if last_detail %}
+    <div class="fl-f fl-wide">
+      <label>Kết quả</label>
+      <div class="val" {% if last_ok is false %}style="color:var(--red,#e5484d)"{% endif %}>{{ last_detail }}</div>
+    </div>
+    {% endif %}
+
+    {% if last_applied %}
+    <div class="fl-f fl-wide">
+      <label>Thiết lập vừa nhận ({{ last_applied|length }})</label>
+      <div class="fl-tags">
+        {% for k in last_applied %}<span class="fl-tag">{{ k }}</span>{% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="fl-f fl-wide">
+      <label>Máy này tự giữ ({{ local_keys|length }})</label>
+      <div class="fl-tags">
+        {% for k in local_keys %}<span class="fl-tag">{{ k }}</span>{% else %}
+        <span style="color:var(--text-dim);font-size:12px">— chưa khai gì. Sửa tay một thiết lập
+          CHUNG trên máy này sẽ bị trung tâm ghi đè ở lần gọi sau; muốn giữ riêng thì khai tên
+          nó ở <a href="/dashboard/settings#sec-repos" style="color:var(--accent-hover)">Settings →
+          Khoá máy trạm tự giữ</a>.</span>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="fl-foot">
+    <form method="post" action="/dashboard/fleet/sync" style="margin:0">
+      <button type="submit" class="fl-sync"
+              {% if not central_url or not token_set or not agent_live %}disabled
+              title="Cần URL trung tâm, token chung và fleet agent đang chạy"{% endif %}>
+        ⟳ Đồng bộ ngay
+      </button>
+    </form>
+    <span>Không cần đợi hết {{ interval }} phút — bấm là gọi về trung tâm ngay và báo lại kết quả.</span>
+  </div>
+</div>
+{% endblock %}

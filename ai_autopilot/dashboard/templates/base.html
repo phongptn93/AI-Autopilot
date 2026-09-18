@@ -253,7 +253,9 @@
         </nav>
         <div class="nav-section">Configure</div>
         <nav>
-{% if fleet_role == 'central' %}
+{# Both roles, different pages: a central watches its machines, a worker watches its one
+   link to the centre and presses "sync now". Only a standalone machine has neither. #}
+{% if fleet_role in ('central', 'worker') %}
             <a class="nav-link {{ 'active' if active == 'fleet' else '' }}" href="/dashboard/fleet"><span class="ico">🛰</span> Fleet</a>
 {% endif %}
             <a class="nav-link {{ 'active' if active == 'workspaces' else '' }}" href="/dashboard/workspaces"><span class="ico">🗂</span> Workspaces</a>

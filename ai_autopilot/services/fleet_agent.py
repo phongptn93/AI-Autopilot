@@ -33,6 +33,14 @@ class FleetAgentService:
         self._config = container.config
         self._log = get_logger("services.fleet_agent")
         self._task: asyncio.Task | None = None
+        # What the last round trip did. Kept in memory so the Fleet page can answer
+        # "did this machine reach the centre, and when" without a reader having to open
+        # the server's log — which on a worker is usually the one machine they are not
+        # sitting at. Lost on restart, which is honest: the next beat is seconds away.
+        self.last_beat_at: datetime | None = None
+        self.last_ok: bool | None = None
+        self.last_detail: str = ""
+        self.last_applied: list[str] = []
 
     @property
     def worker_name(self) -> str:
@@ -70,11 +78,13 @@ class FleetAgentService:
         can ask whether the round trip actually worked.
         """
         cfg = self._config
+        self.last_beat_at = datetime.now(UTC)
+        self.last_applied = []
         base = (cfg.fleet_central_url or "").strip().rstrip("/")
         if not base or not (cfg.fleet_token or "").strip():
             # Nothing to do, and nothing to warn about every interval: doctor says this
             # once, loudly, instead of the log saying it 144 times a day.
-            return False
+            return self._beat_failed("Chưa khai URL trung tâm hoặc token chung.")
         report = await self.build_report()
         try:
             resp = await self._c.http.post(
@@ -84,17 +94,26 @@ class FleetAgentService:
             )
         except httpx.HTTPError as exc:
             self._log.warning("fleet central unreachable", url=base, error=describe_exc(exc))
-            return False
+            return self._beat_failed(f"Không gọi được trung tâm: {describe_exc(exc)}")
         if resp.status_code == 401:
             # Named separately from other failures: a wrong token fails identically to a
             # network outage in the logs otherwise, and the fix is completely different.
             self._log.error("fleet token rejected by central — check fleet_token", url=base)
-            return False
+            return self._beat_failed("Trung tâm từ chối token (401) — token 2 phía chưa khớp.")
         if resp.status_code >= 400:
             self._log.warning("fleet heartbeat rejected", status=resp.status_code, url=base)
-            return False
-        await self._apply(resp.json() or {})
+            return self._beat_failed(f"Trung tâm trả lỗi HTTP {resp.status_code}.")
+        applied = await self._apply(resp.json() or {})
+        self.last_ok, self.last_applied = True, applied
+        self.last_detail = (
+            f"Đã nhận {len(applied)} thiết lập mới." if applied else "Đã khớp với trung tâm."
+        )
         return True
+
+    def _beat_failed(self, detail: str) -> bool:
+        """Record why the round trip did not happen, and report it as a failure."""
+        self.last_ok, self.last_detail = False, detail
+        return False
 
     async def build_report(self) -> fleet.WorkerReport:
         """This machine's current condition, entirely derived from local state."""
@@ -163,11 +182,16 @@ class FleetAgentService:
         _, digest = fleet.config_document(self._config)
         return digest
 
-    async def _apply(self, payload: dict) -> None:
-        """Apply the central's document, minus everything this machine owns."""
+    async def _apply(self, payload: dict) -> list[str]:
+        """Apply the central's document, minus everything this machine owns.
+
+        Returns the keys actually written, so the caller can say what a sync DID rather
+        than only that it happened — "đã đồng bộ" and "đã đổi 6 thiết lập" are different
+        answers and only one of them tells you to go look at something.
+        """
         document = payload.get("config")
         if not isinstance(document, dict) or not document:
-            return                      # already in sync — the common case
+            return []                   # already in sync — the common case
         updates = fleet.strip_local(document, self._config.fleet_local_keys)
         # Only the keys that actually differ: applying identical values would rewrite
         # config.yaml on every beat and fill the audit trail with changes that changed
@@ -177,7 +201,7 @@ class FleetAgentService:
             if getattr(self._config, k, None) != v
         }
         if not changed:
-            return
+            return []
         settings_form.save_to_yaml(config_file_path(), changed)
         settings_form.apply_to_config(self._config, changed)
         with contextlib.suppress(Exception):
@@ -188,3 +212,4 @@ class FleetAgentService:
             target=(self._config.fleet_central_url or "")[:300],
             detail=f"{len(changed)} keys: {', '.join(sorted(changed))}",
         )
+        return sorted(changed)

@@ -257,6 +257,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # on demand, so it needs the instance, not another copy: a second
                     # scheduler would double-fire every job it registered.
                     app.state.loop_scheduler = svc
+                if isinstance(svc, FleetAgentService):
+                    # The Fleet page's "sync now" button beats through THIS instance —
+                    # a second agent would report a second machine under the same name.
+                    app.state.fleet_agent = svc
 
             teams_bot = build_teams_agent(config, container, reviewer_tracker)
             if teams_bot is not None:

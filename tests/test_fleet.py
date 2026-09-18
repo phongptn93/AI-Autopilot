@@ -8,6 +8,7 @@ an endpoint that answers without a token.
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -239,12 +240,29 @@ async def test_the_fleet_page_marks_a_silent_machine_offline(tmp_path):
         assert "quiet-01" in page and "is-offline" in page
 
 
-def test_the_fleet_page_is_absent_on_a_worker(tmp_path):
-    """Its table is empty by definition there; a link to an empty page reads as a bug."""
+def test_a_worker_gets_its_own_half_of_the_fleet_page(tmp_path):
+    """The central's TABLE is empty on a worker — but the worker's own question is not.
+
+    It used to 404 for exactly that reason, which left the one machine that syncs with
+    no way to see whether syncing works, and no way to make it happen: the interval was
+    a floor of one minute, so every check cost a restart or a wait.
+    """
     cfg = _settings(tmp_path, fleet_role="worker", fleet_token=TOKEN,
                     fleet_central_url="http://central")
     with TestClient(create_app(cfg)) as client:
+        page = client.get("/dashboard/fleet")
+        assert page.status_code == 200
+        assert "Đồng bộ ngay" in page.text          # the button, not just a status page
+        assert "http://central" in page.text        # who this machine calls
+        assert "/dashboard/fleet" in client.get("/dashboard").text   # and it is linked
+
+
+def test_the_fleet_page_is_absent_on_a_standalone_machine(tmp_path):
+    """Neither half means anything here, and a link to an empty page reads as a bug."""
+    cfg = _settings(tmp_path, fleet_role="")
+    with TestClient(create_app(cfg)) as client:
         assert client.get("/dashboard/fleet").status_code == 404
+        assert client.post("/dashboard/fleet/sync").status_code == 404
         assert "/dashboard/fleet" not in client.get("/dashboard").text
 
 
@@ -399,3 +417,91 @@ async def test_a_worker_and_a_central_complete_a_round_trip(tmp_path, monkeypatc
         assert worker_cfg.fleet_role == "worker"      # identity never overwritten
         import yaml
         assert yaml.safe_load(worker_yaml.read_text(encoding="utf-8"))["alert_repeat_hours"] == 6
+
+
+# ── "Đồng bộ ngay" ────────────────────────────────────────────────────────────
+# The interval is a floor of one minute and usually ten, so "did my change reach the
+# centre" cost either a restart or a wait. beat() has always returned whether the round
+# trip worked; this is the caller it was written for.
+
+
+class _StubAgent:
+    """Stands in for the running FleetAgentService, with a scripted outcome."""
+
+    def __init__(self, ok=True, applied=(), detail=""):
+        self._ok, self.last_applied, self.last_detail = ok, list(applied), detail
+        self.last_ok, self.last_beat_at, self.beats = None, None, 0
+        self.worker_name = "worker-01"
+
+    async def beat(self):
+        self.beats += 1
+        self.last_ok = self._ok
+        return self._ok
+
+
+@contextlib.contextmanager
+def _worker_client(tmp_path, agent):
+    """A worker app whose fleet agent is the stub — patched INSIDE the lifespan.
+
+    Entering the TestClient is what starts the services, and starting them is what sets
+    `app.state.fleet_agent`; patching before that (or entering twice) hands the route the
+    real agent, which then beats at a central that does not exist.
+    """
+    cfg = _settings(tmp_path, fleet_role="worker", fleet_token=TOKEN,
+                    fleet_central_url="http://central")
+    with TestClient(create_app(cfg)) as client:
+        client.app.state.fleet_agent = agent
+        yield client
+
+
+def test_pressing_sync_beats_once_and_says_nothing_changed(tmp_path):
+    """The common case, and a SUCCESS — reported differently from "six settings moved",
+    because one green tick for both teaches people to stop reading the banner."""
+    agent = _StubAgent(ok=True, applied=(), detail="Đã khớp với trung tâm.")
+    with _worker_client(tmp_path, agent) as client:
+        page = client.post("/dashboard/fleet/sync")
+    assert agent.beats == 1
+    assert "vốn đã khớp" in page.text
+
+
+def test_pressing_sync_names_what_it_brought_back(tmp_path):
+    agent = _StubAgent(ok=True, applied=("alert_repeat_hours", "trigger_states"),
+                       detail="Đã nhận 2 thiết lập mới.")
+    with _worker_client(tmp_path, agent) as client:
+        page = client.post("/dashboard/fleet/sync")
+    assert "Đã đồng bộ và áp dụng ngay" in page.text
+    assert "alert_repeat_hours" in page.text and "trigger_states" in page.text
+
+
+def test_a_failed_sync_says_so_and_why(tmp_path):
+    """"Không đồng bộ được" alone sends someone to the server log of the one machine
+    they are usually not sitting at — so the reason travels with it."""
+    agent = _StubAgent(ok=False, detail="Trung tâm từ chối token (401) — token 2 phía chưa khớp.")
+    with _worker_client(tmp_path, agent) as client:
+        page = client.post("/dashboard/fleet/sync")
+    assert "Không đồng bộ được" in page.text
+    assert "từ chối token (401)" in page.text
+
+
+def test_sync_without_a_running_agent_is_not_silent(tmp_path):
+    """fleet_role says worker but no service started: no amount of pressing fixes that,
+    so the page must say it rather than report a failed heartbeat."""
+    cfg = _settings(tmp_path, fleet_role="worker", fleet_token=TOKEN,
+                    fleet_central_url="http://central")
+    with TestClient(create_app(cfg)) as client:
+        client.app.state.fleet_agent = None
+        page = client.post("/dashboard/fleet/sync")
+    assert "không chạy fleet agent" in page.text
+
+
+async def test_beat_records_why_it_could_not_run(tmp_path):
+    """The page reads these; without them a red cross has nothing to show."""
+    from ai_autopilot.services.fleet_agent import FleetAgentService
+
+    svc = _agent(Settings(fleet_role="worker", fleet_central_url="", fleet_token=""))
+    svc.last_beat_at = svc.last_ok = None
+    svc.last_detail, svc.last_applied = "", []
+    assert await FleetAgentService.beat(svc) is False
+    assert svc.last_ok is False
+    assert "URL trung tâm" in svc.last_detail
+    assert svc.last_beat_at is not None          # we DID try, and when

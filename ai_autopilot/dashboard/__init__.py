@@ -147,6 +147,18 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                             "vẫn được giữ."),
     "roles_saved": ("green", "✅ Đã lưu vai trò (stage · cửa vào · cửa ra) và áp dụng ngay."),
     "roles_cleared": ("green", "↩ Đã gỡ toàn bộ vai trò — máy quay về dùng Trigger states."),
+    # Sync outcomes are split three ways on purpose: "nothing changed" is a SUCCESS and
+    # the most common one, and reporting it with the same green tick as "six settings
+    # were rewritten" teaches people to stop reading the banner.
+    "fleet_synced_same": ("green", "✅ Đã gọi về trung tâm — máy này vốn đã khớp, "
+                                   "không có gì phải đổi."),
+    "fleet_synced_changed": ("green", "🔄 Đã đồng bộ và áp dụng ngay. Xem danh sách thiết "
+                                      "lập vừa đổi ở khung bên dưới."),
+    "fleet_sync_failed": ("red", "⛔ Không đồng bộ được — lý do cụ thể ở khung "
+                                 "<b>Lần gọi gần nhất</b> bên dưới."),
+    "fleet_no_agent": ("red", "⛔ Tiến trình này không chạy fleet agent. Vai đang là "
+                              "<code>worker</code> nhưng service chưa khởi động — "
+                              "khởi động lại autopilot."),
     "loops_saved": ("green", "✅ Đã lưu lịch chạy và áp dụng ngay (không cần khởi động lại)."),
     "loop_deleted": ("green", "🗑 Đã xoá lịch chạy."),
     "loop_started": ("green", "▶ Đã chạy ngay — bấm <b>xem trực tiếp</b> ở dòng tương ứng để "
@@ -2502,7 +2514,19 @@ def create_dashboard_router() -> APIRouter:
         """
         c: Container = request.app.state.container
         cfg = c.config
-        if (cfg.fleet_role or "") != "central":
+        role = cfg.fleet_role or ""
+        if role == fleet_mod.ROLE_WORKER:
+            # A worker has no table of machines — it IS one. Same page, its own half:
+            # who it calls, whether that call worked, and the button to make it now.
+            flash = _take_flash(request)
+            response = _TEMPLATES.TemplateResponse(
+                request, "fleet_worker.html",
+                _ctx(request, "fleet", flash=flash, **_worker_fleet_ctx(request)),
+            )
+            if flash is not None:
+                response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+            return response
+        if role != fleet_mod.ROLE_CENTRAL:
             raise HTTPException(status_code=404, detail="fleet mode is not enabled here")
         _, central_hash = fleet_mod.config_document(cfg)
         now = datetime.now(UTC)
@@ -2539,6 +2563,66 @@ def create_dashboard_router() -> APIRouter:
             request, "fleet.html",
             _ctx(request, "fleet", workers=workers, central_hash=central_hash,
                  offline_after_minutes=cfg.fleet_offline_after_minutes),
+        )
+
+    def _worker_fleet_ctx(request: Request) -> dict:
+        """What this worker can say about its own link to the centre.
+
+        Everything is local: the agent's last round trip, and the fingerprint of the
+        shareable half of this machine's config — the same one the central compares
+        against, so "khớp" here means the same thing it means on the central's page.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        agent = getattr(request.app.state, "fleet_agent", None)
+        _, local_hash = fleet_mod.config_document(cfg)
+        beat_at = getattr(agent, "last_beat_at", None)
+        return {
+            "central_url": (cfg.fleet_central_url or "").strip(),
+            "token_set": bool((cfg.fleet_token or "").strip()),
+            "worker_name": getattr(agent, "worker_name", cfg.fleet_worker_name or ""),
+            "interval": cfg.fleet_sync_interval_minutes,
+            "local_hash": local_hash,
+            "local_keys": [str(k) for k in (cfg.fleet_local_keys or []) if str(k).strip()],
+            "shared_count": len(settings_form.export_settings(cfg)),
+            # None until the first beat of this process — which is not the same as "it
+            # failed", and the page says so rather than painting a red cross at boot.
+            "last_ok": getattr(agent, "last_ok", None),
+            "last_detail": getattr(agent, "last_detail", ""),
+            "last_applied": list(getattr(agent, "last_applied", []) or []),
+            "beat_ago": (
+                int((datetime.now(UTC) - beat_at).total_seconds()) if beat_at else None
+            ),
+            # No agent at all means the service never started: fleet_role says worker but
+            # this process is not running one, which no amount of button-pressing fixes.
+            "agent_live": agent is not None,
+        }
+
+    @router.post("/fleet/sync")
+    async def fleet_sync(request: Request):
+        """Beat now, instead of waiting out the interval.
+
+        The interval is a floor of one minute and usually ten, so every "did the centre
+        get my change" question cost either a restart or a wait. ``beat()`` has always
+        returned whether the round trip worked — this is the caller it was written for.
+        """
+        c: Container = request.app.state.container
+        if (c.config.fleet_role or "") != fleet_mod.ROLE_WORKER:
+            raise HTTPException(status_code=404, detail="only a worker syncs")
+        agent = getattr(request.app.state, "fleet_agent", None)
+        if agent is None:
+            return _flash("/dashboard/fleet", "fleet_no_agent")
+        ok = await agent.beat()
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="fleet.sync_requested",
+            target=(c.config.fleet_central_url or "")[:300],
+            detail=agent.last_detail,
+        )
+        if not ok:
+            return _flash("/dashboard/fleet", "fleet_sync_failed")
+        return _flash(
+            "/dashboard/fleet",
+            "fleet_synced_changed" if agent.last_applied else "fleet_synced_same",
         )
 
     @router.post("/fleet/forget")

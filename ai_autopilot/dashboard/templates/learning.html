@@ -25,6 +25,10 @@
      up down the whole table. */
   .ktable { display:grid; grid-template-columns:86px 104px minmax(0,1fr) auto 62px;
     align-items:start; }
+  /* Same 20px the app's real tables use, so a column heading lines up with the card
+     heading instead of starting half a centimetre to its left. */
+  .khead > span:first-child, .krow > *:first-child { padding-left:20px; }
+  .khead > span:last-child, .krow > *:last-child { padding-right:20px; }
   .khead { display:contents; }
   .khead > span { position:sticky; top:0; z-index:1; padding:7px 10px;
     background:var(--bg-card); border-bottom:1px solid var(--border);
@@ -66,6 +70,7 @@
   .rep { display:inline-block; font-size:11px; font-weight:700; color:var(--amber,#f5a524);
     border:1px solid var(--amber,#f5a524); background:rgba(245,165,36,.12);
     padding:1px 6px; border-radius:999px; white-space:nowrap; cursor:help; }
+  .add-box .card-body, .brief-body { padding:15px 20px 18px; }
   .add-box textarea { width:100%; min-height:112px; resize:vertical; font-size:13.5px;
     line-height:1.5; padding:9px 11px; border-radius:9px; border:1px solid var(--border);
     background:var(--bg-input,var(--bg-card)); color:var(--text); font-family:inherit; }
@@ -199,7 +204,7 @@
     <h3>💉 Brief kế tiếp sẽ mang</h3>
     <span class="dim" style="font-size:12.5px">đúng những dòng này, theo đúng thứ tự này</span>
   </div>
-  <div class="card-body">
+  <div class="card-body brief-body">
     {% for repo, lines in preview.items() %}
       {% if lines %}
       <div style="margin-bottom:{{ '14px' if not loop.last else '0' }}">
@@ -283,7 +288,7 @@
   <div class="card-header"><h3>📉 New lessons per day</h3>
     <span class="dim" style="font-size:12.5px">peak {{ peak }}/day · a falling tail means the loop is working</span>
   </div>
-  <div class="card-body">
+  <div class="card-body" style="padding:15px 20px 18px">
     <div class="chart">
       {% for day, n in series %}
       <div class="col {{ 'zero' if not n else '' }}" title="{{ day }} · {{ n }} new lesson(s)">

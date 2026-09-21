@@ -24,6 +24,8 @@ from fastapi.responses import (
 )
 from fastapi.templating import Jinja2Templates
 
+from html import escape as html_escape
+
 from ai_autopilot import (
     activity,
     delivery,
@@ -38,6 +40,9 @@ from ai_autopilot import (
 )
 from ai_autopilot import (
     lenses as lenses_mod,
+)
+from ai_autopilot import (
+    markdown_lite,
 )
 from ai_autopilot import (
     reports as reports_mod,
@@ -141,6 +146,16 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                             "(không cần khởi động lại)."),
     "flow_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                             "vẫn được giữ."),
+    "compacted": ("green", "🧹 Đã dọn: gộp các dòng trùng nghĩa và bỏ những bài học "
+                           "không hành động được (kiểu «re-read the review comments on that PR»)."),
+    "compact_clean": ("green", "Không có gì để dọn — danh sách đã gọn."),
+    "file_created": ("green", "✅ Đã tạo work item từ các finding bạn chọn — mở tab Board "
+                              "hoặc Overview để thấy chúng."),
+    "file_partial": ("amber", "Tạo được một phần — có finding không tạo được work item. "
+                              "Xem log để biết lý do (thường là sai project hoặc loại item)."),
+    "file_failed": ("red", "⛔ Không tạo được work item nào. Kiểm tra project và loại work "
+                           "item có đúng với process template của ADO không."),
+    "file_none_picked": ("amber", "Chưa tick finding nào."),
     "pool_approved": ("green", "✅ Đã duyệt — máy trạm sẽ nhận dòng này ở nhịp đồng bộ kế tiếp."),
     "pool_rejected": ("amber", "Đã từ chối. Giữ lại bản ghi để máy nào còn dòng đó gửi lên "
                                "cũng không làm nó quay lại hàng chờ."),
@@ -1612,9 +1627,14 @@ def create_dashboard_router() -> APIRouter:
                  selected=loop, severities=reports_mod.SEVERITIES),
         )
 
+    # What a finding can be filed as. Deliberately short: these are the types every ADO
+    # process template has, so the picker cannot offer something the project will reject.
+    _WORK_ITEM_TYPES = ("Bug", "Task", "Issue", "User Story")
+
     @router.get("/reports/{report_id}", response_class=HTMLResponse)
     async def report_detail(request: Request, report_id: int):
         c: Container = request.app.state.container
+        cfg = c.config
         row = await c.loop_report_repo.get(report_id)
         if row is None:
             return RedirectResponse("/dashboard/reports", status_code=303)
@@ -1622,11 +1642,99 @@ def create_dashboard_router() -> APIRouter:
             findings = json.loads(row.findings_json or "[]")
         except (ValueError, TypeError):
             findings = []       # a malformed row must still render its text
-        return _TEMPLATES.TemplateResponse(
+        flash = _take_flash(request)
+        response = _TEMPLATES.TemplateResponse(
             request, "report_detail.html",
-            _ctx(request, "reports", row=row, findings=findings,
+            _ctx(request, "reports", row=row, findings=findings, flash=flash,
                  body=reports_mod.strip_findings_block(row.body_md or ""),
+                 # Rendered here rather than in the template: the renderer escapes
+                 # every byte before producing a tag, which is what makes the result
+                 # safe to mark `|safe` — an audit quotes the very code it is warning
+                 # about, so the report must never execute what it is showing you.
+                 body_html=markdown_lite.render(
+                     reports_mod.strip_findings_block(row.body_md or "")
+                 ),
+                 workspaces=workspaces_mod.resolve(cfg),
+                 item_types=_WORK_ITEM_TYPES,
                  severities=reports_mod.SEVERITIES),
+        )
+        if flash is not None:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/reports/{report_id}/file")
+    async def report_file_work_items(request: Request, report_id: int):
+        """Turn the findings somebody ticked into work items.
+
+        An audit that nobody can act on is a document. Its findings already carry a
+        title, a severity, a file and a line — everything a work item needs — and
+        re-typing that by hand is where they stop being acted on at all.
+
+        One item per finding rather than one item listing all of them: they are fixed
+        by different people at different times, and a single item with nine findings
+        is closed when the easiest one is done.
+        """
+        c: Container = request.app.state.container
+        cfg = c.config
+        row = await c.loop_report_repo.get(report_id)
+        if row is None:
+            return RedirectResponse("/dashboard/reports", status_code=303)
+        form = await request.form()
+        picked = {str(v) for v in form.getlist("finding")}
+        project = str(form.get("project") or "").strip()
+        item_type = str(form.get("item_type") or "Bug").strip()
+        if item_type not in _WORK_ITEM_TYPES:
+            raise HTTPException(status_code=422, detail="unknown work item type")
+        if not picked:
+            return _flash(f"/dashboard/reports/{report_id}", "file_none_picked")
+        try:
+            findings = json.loads(row.findings_json or "[]")
+        except (ValueError, TypeError):
+            findings = []
+
+        created: list[int] = []
+        failed = 0
+        for index, finding in enumerate(findings):
+            if str(index) not in picked:
+                continue
+            title = str(finding.get("title") or "").strip() or "Audit finding"
+            where = str(finding.get("file") or "")
+            if where and finding.get("line"):
+                where = f"{where}:{finding['line']}"
+            severity = str(finding.get("severity") or "")
+            body = "<br/>".join(filter(None, [
+                html_escape(str(finding.get("detail") or "")),
+                f"<b>Where:</b> <code>{html_escape(where)}</code>" if where else "",
+                f"<b>Severity:</b> {html_escape(severity)}" if severity else "",
+                f"<b>From audit:</b> {html_escape(row.loop_name or '')} "
+                f"(report #{report_id})",
+            ]))
+            try:
+                new_id = await c.ado.create_work_item(
+                    title=f"[{severity or 'audit'}] {title}"[:250],
+                    item_type=item_type, parent_id=None,
+                    tag=cfg.trigger_tag, description=body, project=project,
+                )
+            except Exception as exc:  # noqa: BLE001 — one bad finding must not stop the rest
+                _log.warning("filing a finding failed", error=describe_exc(exc), title=title)
+                new_id = 0
+            if new_id:
+                created.append(new_id)
+            else:
+                failed += 1
+
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="report.filed",
+            target=f"report #{report_id} → {', '.join(f'#{i}' for i in created)}"[:300],
+            detail=f"{project or cfg.ado_project}: {item_type}",
+        )
+        _log.info("audit findings filed as work items",
+                  report=report_id, created=created, failed=failed, project=project)
+        if not created:
+            return _flash(f"/dashboard/reports/{report_id}", "file_failed")
+        return _flash(
+            f"/dashboard/reports/{report_id}",
+            "file_partial" if failed else "file_created",
         )
 
     @router.get("/reviews", response_class=HTMLResponse)
@@ -2923,6 +3031,26 @@ def create_dashboard_router() -> APIRouter:
             )
         return _flash("/dashboard/learning",
                       "pool_approved" if decision == "approved" else "pool_rejected")
+
+    @router.post("/learning/compact")
+    async def learning_compact(request: Request):
+        """Fold duplicates and drop dead lines in files an older build wrote.
+
+        Runs once at startup too; this is the button for when somebody wants it now,
+        or after hand-editing the files.
+        """
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        merged, dropped = lessons_mod.compact_all(c.config.workspace_directory)
+        if merged or dropped:
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="knowledge.compacted",
+                target=f"gộp {merged}, bỏ {dropped}",
+            )
+            _log.info("knowledge compacted via dashboard", merged=merged, dropped=dropped)
+        return _flash("/dashboard/learning",
+                      "compacted" if (merged or dropped) else "compact_clean")
 
     @router.post("/learning/edit")
     async def learning_edit(request: Request):

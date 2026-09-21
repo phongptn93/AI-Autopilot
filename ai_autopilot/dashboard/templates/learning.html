@@ -69,7 +69,9 @@
   .add-box textarea { width:100%; min-height:112px; resize:vertical; font-size:13.5px;
     line-height:1.5; padding:9px 11px; border-radius:9px; border:1px solid var(--border);
     background:var(--bg-input,var(--bg-card)); color:var(--text); font-family:inherit; }
-  .add-row { display:flex; gap:10px; align-items:center; margin-top:9px; flex-wrap:wrap; }
+  .add-row { display:flex; gap:12px; align-items:center; margin-top:14px; flex-wrap:wrap;
+    padding-top:13px; border-top:1px solid var(--border-soft,#23232b); }
+  .add-row > .grow { flex:1 1 auto; }
   .add-row select { padding:7px 10px; border-radius:8px; border:1px solid var(--border);
     background:var(--bg-input,var(--bg-card)); color:var(--text); font-size:13px; }
   /* What the next brief will really carry. Everything else on this page is inventory;
@@ -176,10 +178,10 @@
           <option value="{{ repo }}">chỉ repo {{ repo }}</option>
           {% endif %}{% endfor %}
         </select>
-        <button class="btn-primary" type="submit" {% if not workspace %}disabled{% endif %}>
+        <button class="btn-save" type="submit" {% if not workspace %}disabled{% endif %}>
           Nạp vào
         </button>
-        <span class="dim" style="font-size:12px">
+        <span class="dim grow" style="font-size:12px">
           {% if workspace %}Có hiệu lực ngay ở run kế tiếp — không cần khởi động lại.
           {% else %}Chưa có <code>workspace_directory</code> nên chưa lưu được.{% endif %}
         </span>
@@ -304,6 +306,10 @@
     <span class="dim" style="font-size:12.5px">{{ items|length }} lesson(s) ·
       newest {{ injected_from[repo] }} feed the next brief on this repo</span>
     <span style="flex:1"></span>
+    <form method="post" action="/dashboard/learning/compact" style="margin:0">
+      <button class="btn-ghost" type="submit"
+              title="Gộp các dòng trùng nghĩa, bỏ bài học không hành động được">🧹 Dọn gọn</button>
+    </form>
     <form method="post" action="/dashboard/learning/clear" style="margin:0"
           onsubmit="return confirm('Xoá TOÀN BỘ bài học của {{ repo }}?');">
       <input type="hidden" name="repo" value="{{ repo }}"/>
@@ -339,7 +345,7 @@
             <input type="hidden" name="repo" value="{{ repo }}"/>
             <input type="hidden" name="old" value="{{ lesson.text }}"/>
             <input type="text" name="text" value="{{ lesson.text }}" required/>
-            <button class="btn-primary" type="submit">Lưu</button>
+            <button class="btn-save" type="submit">Lưu</button>
           </form>
         </span>
         <span class="kmark">

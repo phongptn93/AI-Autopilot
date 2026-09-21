@@ -479,3 +479,58 @@ def contributions(workspace: str) -> list[dict]:
                 "source": le.source, "count": le.count,
             })
     return out
+
+
+#: Lines older builds wrote that teach nothing and cannot be acted on. The pointer one
+#: is the whole reason: it says "re-read the review comments on that PR" about a pull
+#: request that is closed by the time any future brief reads it, so no run could ever
+#: follow it — and two of them sat permanently in the injected set saying only that
+#: somebody had once been unhappy.
+_DEAD_PATTERNS = (
+    re.compile(r"re-?read the review comments on that pr", re.IGNORECASE),
+)
+
+
+def compact(workspace: str, repo: str) -> tuple[int, int]:
+    """Merge duplicates and drop dead lines in a file written by an older build.
+
+    Returns ``(merged, dropped)``. Dedup and the dead-line rule both run on WRITE, so
+    a file already on disk keeps whatever it accumulated — five identical reopens and
+    two useless pointers went on eating seven of the eight injection slots after the
+    upgrade that fixed them, which reads as "the fix did nothing".
+    """
+    items = _read(workspace, repo)
+    if not items:
+        return (0, 0)
+    kept: list[Lesson] = []
+    by_key: dict[str, int] = {}
+    merged = dropped = 0
+    for le in items:
+        if any(p.search(le.text) for p in _DEAD_PATTERNS):
+            dropped += 1
+            continue
+        key = normalize(le.text)
+        at = by_key.get(key)
+        if at is None:
+            by_key[key] = len(kept)
+            kept.append(le)
+            continue
+        was = kept[at]
+        merged += 1
+        kept[at] = Lesson(
+            repo=repo, date=max(was.date, le.date), text=was.text,
+            source=_strongest(was.source, le.source), count=was.count + le.count,
+        )
+    if merged or dropped:
+        _write(workspace, repo, kept)
+    return (merged, dropped)
+
+
+def compact_all(workspace: str) -> tuple[int, int]:
+    """Compact every repo in the workspace. Returns the totals."""
+    merged = dropped = 0
+    for repo in list_repos(workspace):
+        m, d = compact(workspace, repo)
+        merged += m
+        dropped += d
+    return (merged, dropped)

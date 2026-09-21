@@ -230,6 +230,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # so a failed boot never leaks resources or leaves live background tasks.
         try:
             await container.startup()
+            # Fold together what older builds left behind. Dedup-by-meaning and the
+            # dead-pointer rule both run on WRITE, so a file already on disk kept
+            # everything it had accumulated: five identical reopens and two "re-read
+            # the comments on that PR" lines went on eating seven of the eight
+            # injection slots after the upgrade that fixed them — which reads, fairly,
+            # as the fix having done nothing. Once per process, best-effort.
+            if config.workspace_directory:
+                with contextlib.suppress(Exception):
+                    from ai_autopilot import lessons as _lessons
+
+                    merged, dropped = _lessons.compact_all(config.workspace_directory)
+                    if merged or dropped:
+                        log.info("knowledge compacted", merged=merged, dropped=dropped)
             reviewer_tracker = ReviewerTrackerService(container)
             for svc in (
                 AdoPollerService(container),

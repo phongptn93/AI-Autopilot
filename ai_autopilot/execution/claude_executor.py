@@ -835,14 +835,17 @@ class ClaudeExecutor:
                     await self._git(
                         ["fetch", "--no-recurse-submodules", "origin"], src_repo, check=False
                     )
-                    # Repos may use different base branches — resolve one that exists
-                    # in THIS repo (configured base → its default branch), else skip
-                    # it rather than aborting the whole scratch.
-                    base_ref = await self._resolve_base_ref(src_repo, base_branch)
+                    # Repos may use different base branches. An explicit per-repo
+                    # override is taken first — guessing from `origin/HEAD` is right
+                    # until the day a split BE/FE makes it quietly wrong — and only
+                    # then do the fallbacks apply. Skip the repo rather than abort the
+                    # whole scratch when nothing usable exists.
+                    repo_base = self._config.branch_for_repo(repo) or base_branch
+                    base_ref = await self._resolve_base_ref(src_repo, repo_base)
                     if base_ref is None:
                         self._log.warning(
                             "scratch: skipping repo — no usable base branch",
-                            id=item_id, repo=repo, base=base_branch,
+                            id=item_id, repo=repo, base=repo_base,
                         )
                         continue
                     await self._git(["worktree", "add", "--detach", worktree, base_ref], src_repo)
@@ -1431,10 +1434,20 @@ class ClaudeExecutor:
         """
         result_rel = f".autopilot/runs/{item.id}.json"
         descs = parse_repo_descriptions(self._config.repo_descriptions)
+        # A repo that cuts from its own branch says so ON ITS OWN LINE. One base
+        # branch for the whole workspace is true right up until a split BE/FE makes it
+        # false, and then the agent branches the front end off a ref that exists only
+        # in the API repo. Silent when nothing is overridden — which is the default.
+        shared_base = self._config.base_branch
         if repos:
-            repo_list = "\n".join(
-                f"- ./{r}" + (f" — {descs[r.lower()]}" if r.lower() in descs else "") for r in repos
-            )
+            rows = []
+            for r in repos:
+                note = f" — {descs[r.lower()]}" if r.lower() in descs else ""
+                own = self._config.branch_for_repo(r)
+                if own and own != shared_base:
+                    note += f" [base branch: `{own}` — NOT `{shared_base}`]"
+                rows.append(f"- ./{r}{note}")
+            repo_list = "\n".join(rows)
         else:
             repo_list = "(none discovered)"
 
@@ -2422,7 +2435,9 @@ class ClaudeExecutor:
         if ws and repo_name:
             path = Path(ws) / repo_name
             if path.is_dir():
-                return str(path), self._config.base_branch
+                # The PR names its repo, so the branch this revise re-bases on is that
+                # repo's, not the workspace's one-size-fits-all base.
+                return str(path), self._config.branch_for_repo(repo_name)
             self._log.warning(
                 "revise: repo folder not found in workspace — falling back",
                 repo=repo_name, workspace=ws,

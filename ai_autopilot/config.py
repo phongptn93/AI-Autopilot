@@ -481,6 +481,13 @@ class WorkspaceConfig(BaseModel):
     base_branch: str = ""
     allowed_repos: list[str] = Field(default_factory=list)
     repo_descriptions: list[str] = Field(default_factory=list)
+    # "RepoName = branch", one per line. One `base_branch` per workspace assumes every
+    # repo in it cuts from the same place, and that is simply not true of a split
+    # BE/FE: the API can sit on `development` while the front end sits on `main`.
+    # Without this the agent branched the front end off a ref that does not exist
+    # there, and the fallback guessed from `origin/HEAD` — a guess that is right until
+    # the day it quietly is not. Named repos win; everything else inherits `base_branch`.
+    repo_branches: list[str] = Field(default_factory=list)
     trigger_tag: str = ""
     # ── state vocabulary overrides ──
     # ADO state names belong to a PROJECT's process, not just to a work-item type: two
@@ -523,7 +530,7 @@ class WorkspaceConfig(BaseModel):
             if value:
                 out[key] = value
         for key in (
-            "allowed_repos", "repo_descriptions",
+            "allowed_repos", "repo_descriptions", "repo_branches",
             "work_item_flows", "done_states", "parent_rollup_map",
         ):
             value = getattr(self, key) or []
@@ -581,7 +588,7 @@ def parse_workspace_line(line: str) -> WorkspaceConfig | None:
         value = value.strip()
         if not field_name or not value:
             continue
-        if field_name in ("allowed_repos", "repo_descriptions"):
+        if field_name in ("allowed_repos", "repo_descriptions", "repo_branches"):
             setattr(ws, field_name, [v.strip() for v in value.split(",") if v.strip()])
         else:
             setattr(ws, field_name, value)
@@ -1054,6 +1061,12 @@ class Settings(BaseSettings):
     # "RepoName = description", e.g. "Backend-Fresh = .NET API" / "Dxfac-gitops =
     # deploy manifests, don't edit for features". Shown in the agent brief.
     repo_descriptions: list[str] = Field(default_factory=list)
+    # "RepoName = branch" for repos that do NOT cut from `base_branch`. A split BE/FE
+    # is the ordinary case: the API on `development`, the front end on `main`. One
+    # branch per workspace made the agent branch the front end off a ref that does not
+    # exist there, and the fallback then guessed from `origin/HEAD` — right until the
+    # day it quietly is not.
+    repo_branches: list[str] = Field(default_factory=list)
     repos: list[RepoConfig] = Field(default_factory=list)
     max_concurrent: int = 1
     task_timeout_minutes: int = 30
@@ -1800,6 +1813,24 @@ class Settings(BaseSettings):
     @property
     def has_auth(self) -> bool:
         return bool(self.ado_pat or self.oauth_app_id)
+
+    def branch_for_repo(self, repo: str) -> str:
+        """The base branch THIS repo cuts from — its override, else ``base_branch``.
+
+        Read through ``scoped_for_project`` like every other per-workspace value, so a
+        workspace's own ``repo_branches`` wins over the root's for items routed to it.
+        Matching is case-insensitive because the name comes from a folder on disk, a
+        PR payload or a hand-typed line, and those three disagree about capitalisation
+        more often than anyone expects.
+        """
+        from ai_autopilot.workspace import parse_repo_descriptions
+
+        name = (repo or "").strip().lower()
+        if name:
+            mapped = parse_repo_descriptions(self.repo_branches).get(name, "")
+            if mapped:
+                return mapped
+        return self.base_branch
 
     @property
     def has_tracker_auth(self) -> bool:

@@ -26,6 +26,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from ai_autopilot import markdown_lite
+
 # Ordered worst-first: this is the sort order, the display order, and the order the
 # counts are reported in. "info" is last and is also where anything unrecognised lands.
 SEVERITIES = ("critical", "high", "medium", "low", "info")
@@ -298,7 +300,12 @@ def render_html(report: Report) -> str:
         f".chip.{sev}{{background:{bg};color:{fg}}}"
         for sev, (fg, bg) in _SEVERITY_COLOR.items()
     )
-    body = _esc(strip_findings_block(report.body_md)) or "—"
+    # Rendered, not escaped-and-preformatted. This file is the one that gets
+    # forwarded — attached to a mail, opened on a machine that has never heard of the
+    # dashboard — so it is the LAST place the severity ranking should be invisible.
+    # `markdown_lite.render` escapes every byte before emitting a tag, which is what
+    # makes embedding its output here safe.
+    body = markdown_lite.render(strip_findings_block(report.body_md)) or "—"
     agents = ", ".join(report.agents) or "—"
 
     return f"""<!doctype html>
@@ -328,8 +335,24 @@ th{{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut
 word-break:break-all}}
 .detail{{color:var(--muted);font-size:13px;margin-top:3px}}
 .empty{{color:var(--muted);margin:0}}
-pre{{white-space:pre-wrap;word-wrap:break-word;margin:0;font-family:inherit}}
 .scroll{{overflow-x:auto}}
+.md>:first-child{{margin-top:0}}.md>:last-child{{margin-bottom:0}}
+.md h1,.md h2,.md h3,.md h4{{margin:18px 0 8px;line-height:1.3}}
+.md h1{{font-size:19px}}.md h2{{font-size:17px}}.md h3{{font-size:15px}}
+.md h2,.md h3{{border-bottom:1px solid var(--line);padding-bottom:5px}}
+.md p{{margin:8px 0}}
+.md ul,.md ol{{margin:8px 0;padding-left:22px}}
+.md li{{margin:4px 0}}
+.md code{{font-family:ui-monospace,'Cascadia Code',Consolas,monospace;font-size:12.5px;
+padding:1px 5px;border-radius:5px;background:rgba(127,127,127,.16);word-break:break-all}}
+.md pre{{margin:10px 0;padding:11px 13px;border-radius:8px;overflow-x:auto;
+background:rgba(127,127,127,.12);border:1px solid var(--line)}}
+.md pre code{{background:none;padding:0;white-space:pre;word-break:normal}}
+.md blockquote{{margin:10px 0;padding:2px 13px;border-left:3px solid var(--muted);
+color:var(--muted)}}
+.md table{{margin:10px 0;display:block;overflow-x:auto}}
+.md th,.md td{{border:1px solid var(--line)}}
+.md hr{{border:none;border-top:1px solid var(--line);margin:16px 0}}
 </style></head><body><div class="wrap">
 <h1>{_esc(report.loop)}</h1>
 <div class="meta">{_esc(when)} · {report.duration_seconds:.0f}s · status
@@ -338,5 +361,5 @@ pre{{white-space:pre-wrap;word-wrap:break-word;margin:0;font-family:inherit}}
 <div class="card">{chips}
 {f"<p>{_esc(report.summary)}</p>" if report.summary else ""}</div>
 <div class="card scroll">{table}</div>
-<div class="card"><pre>{body}</pre></div>
+<div class="card md">{body}</div>
 </div></body></html>"""

@@ -399,3 +399,88 @@ def test_knowledge_arriving_twice_by_two_routes_is_not_stored_twice(tmp_path):
     assert lessons.apply_fleet(ws, [("repo", "Validate at the edge")]) == 0
     items = lessons.entries(ws, "repo")
     assert len(items) == 1 and items[0].pinned          # merged, and promoted
+
+
+# ── files an older build left behind ─────────────────────────────────────────
+
+
+def test_compaction_folds_what_an_older_build_accumulated(tmp_path):
+    """Dedup-by-meaning and the dead-pointer rule both run on WRITE, so a file already
+    on disk kept everything it had: five identical reopens and two useless pointers
+    went on eating seven of the eight slots after the upgrade that fixed them — which
+    reads, fairly, as the fix having done nothing."""
+    path = tmp_path / ".autopilot" / "lessons" / "_workspace.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("\n".join([
+        f"- [2026-09-0{i}] {REOPENED} Context: reopened from state 'S{i}'" for i in range(1, 6)
+    ] + [
+        "- [2026-09-11] A human reviewer (Thach Pham) blocked a previous PR [Rejected]. "
+        "Re-read the review comments on that PR before repeating the same approach.",
+        "- [2026-09-12] A human reviewer (Phong Huynh) blocked a previous PR [Waiting]. "
+        "Re-read the review comments on that PR before repeating the same approach.",
+        "- [2026-09-13] Tests failed on a previous run — check this before opening a PR",
+    ]) + "\n", encoding="utf-8")
+    ws = str(tmp_path)
+    assert len(lessons.entries(ws, lessons.SHARED_BUCKET)) == 8
+
+    merged, dropped = lessons.compact_all(ws)
+
+    assert (merged, dropped) == (4, 2)
+    items = lessons.entries(ws, lessons.SHARED_BUCKET)
+    assert len(items) == 2
+    reopened = next(le for le in items if "reopened" in le.text)
+    assert reopened.count == 5 and reopened.date == "2026-09-05"
+    assert not any("Re-read the review comments" in le.text for le in items)
+
+
+def test_compacting_an_already_clean_file_rewrites_nothing(tmp_path):
+    ws = str(tmp_path)
+    lessons.add(ws, "repo", "a rule")
+    before = (tmp_path / ".autopilot" / "lessons" / "repo.md").read_text(encoding="utf-8")
+    assert lessons.compact_all(ws) == (0, 0)
+    assert (tmp_path / ".autopilot" / "lessons" / "repo.md").read_text(encoding="utf-8") == before
+
+
+def test_startup_compacts_what_is_already_on_disk(tmp_path):
+    """The upgrade has to fix the file you ALREADY have, or it looks like nothing
+    happened — which is exactly how it was reported."""
+    path = tmp_path / ".autopilot" / "lessons" / "repo.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("- [2026-09-01] same thing\n- [2026-09-02] Same Thing\n",
+                    encoding="utf-8")
+    with _client(tmp_path):
+        pass                                # starting the app IS the action under test
+    items = lessons.entries(str(tmp_path), "repo")
+    assert len(items) == 1 and items[0].count == 2
+
+
+def test_the_page_can_compact_on_demand(tmp_path):
+    """The button is for after a hand-edit, with the process already running."""
+    with _client(tmp_path) as client:
+        path = tmp_path / ".autopilot" / "lessons" / "repo.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("- [2026-09-01] same thing\n- [2026-09-02] Same Thing\n",
+                        encoding="utf-8")
+        assert "Đã dọn" in client.post(
+            "/dashboard/learning/compact", follow_redirects=True
+        ).text
+    items = lessons.entries(str(tmp_path), "repo")
+    assert len(items) == 1 and items[0].count == 2
+
+
+# ── per-repo base branches (optional; shared branch stays the default) ───────
+
+
+def test_every_repo_shares_the_base_branch_until_one_is_named():
+    cfg = Settings(base_branch="development")
+    assert cfg.branch_for_repo("Backend-Fresh") == "development"
+    assert cfg.branch_for_repo("Micro-Frontend") == "development"
+    assert cfg.branch_for_repo("") == "development"
+
+
+def test_a_named_repo_cuts_from_its_own_branch():
+    """A split BE/FE is the ordinary case: the API on `development`, the UI on `main`."""
+    cfg = Settings(base_branch="development", repo_branches=["Micro-Frontend = main"])
+    assert cfg.branch_for_repo("Micro-Frontend") == "main"
+    assert cfg.branch_for_repo("micro-frontend") == "main"      # folder vs typed case
+    assert cfg.branch_for_repo("Backend-Fresh") == "development"

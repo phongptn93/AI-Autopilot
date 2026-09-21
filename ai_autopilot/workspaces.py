@@ -59,6 +59,10 @@ class WorkspaceView:
     repo_working_directory: str = ""
     allowed_repos: list[str] = field(default_factory=list)
     repo_descriptions: list[str] = field(default_factory=list)
+    #: "RepoName = branch" for repos that do NOT cut from ``base_branch``. Optional —
+    #: empty means every repo shares the workspace's one branch, which stays the
+    #: default; it exists for the split BE/FE where the two live on different ones.
+    repo_branches: list[str] = field(default_factory=list)
     trigger_tag: str = ""
     # Which tracker owns this workspace's work items ("ado" | "jira"), and how to reach
     # it. The default workspace is always ADO: it is backed by the machine's own
@@ -94,6 +98,7 @@ class WorkspaceView:
             "base_branch": self.base_branch,
             "allowed_repos": list(self.allowed_repos),
             "repo_descriptions": list(self.repo_descriptions),
+            "repo_branches": list(self.repo_branches),
             "trigger_tag": self.trigger_tag,
             "provider": self.provider,
             "jira_url": self.jira_url,
@@ -167,6 +172,7 @@ def _from_config(ws: Any, index: int, taken: set[str]) -> WorkspaceView:
         repo_working_directory=str(get("repo_working_directory", "") or ""),
         allowed_repos=[str(r) for r in (get("allowed_repos", None) or [])],
         repo_descriptions=[str(r) for r in (get("repo_descriptions", None) or [])],
+        repo_branches=[str(r) for r in (get("repo_branches", None) or [])],
         trigger_tag=str(get("trigger_tag", "") or ""),
         provider=(str(get("provider", "") or "ado").strip().lower() or "ado"),
         jira_url=str(get("jira_url", "") or ""),
@@ -193,6 +199,7 @@ def _legacy_lines(config: Any) -> list[WorkspaceView]:
             repo_working_directory=ws.repo_working_directory,
             allowed_repos=list(ws.allowed_repos),
             repo_descriptions=list(ws.repo_descriptions),
+            repo_branches=list(getattr(ws, "repo_branches", None) or []),
             trigger_tag=ws.trigger_tag, enabled=ws.enabled,
         ))
     return out
@@ -214,6 +221,7 @@ def _default_view(config: Any, claimed: set[str]) -> WorkspaceView:
         repo_working_directory=getattr(config, "repo_working_directory", "") or "",
         allowed_repos=list(getattr(config, "allowed_repos", None) or []),
         repo_descriptions=list(getattr(config, "repo_descriptions", None) or []),
+        repo_branches=list(getattr(config, "repo_branches", None) or []),
         trigger_tag=getattr(config, "trigger_tag", "") or "",
         enabled=True,
         is_default=True,
@@ -296,6 +304,15 @@ def parse_form(form: Mapping[str, Any]) -> tuple[list[WorkspaceView], list[str]]
                 for line in str(form.get(f"{prefix}repo_descriptions", "") or "").splitlines()
                 if line.strip()
             ],
+            # Only read when the row TICKED "repos on different branches". Unticked
+            # means every repo shares one branch — the default, and what the box is
+            # left at — so a map typed once and then switched off does not keep
+            # silently overriding branches nobody can see on the page any more.
+            repo_branches=([
+                line.strip()
+                for line in str(form.get(f"{prefix}repo_branches", "") or "").splitlines()
+                if line.strip()
+            ] if form.get(f"{prefix}split_branches") else []),
             trigger_tag=str(form.get(f"{prefix}trigger_tag", "") or "").strip(),
             # The default workspace is always ADO: it is backed by the machine's own
             # connection, which every pull-request feature also uses.
@@ -415,6 +432,7 @@ def to_settings_updates(views: list[WorkspaceView]) -> dict[str, Any]:
             "repo_working_directory": default.repo_working_directory,
             "allowed_repos": list(default.allowed_repos),
             "repo_descriptions": list(default.repo_descriptions),
+            "repo_branches": list(default.repo_branches),
             "trigger_tag": default.trigger_tag,
         })
     return updates

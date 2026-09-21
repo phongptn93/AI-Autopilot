@@ -17,6 +17,11 @@
   .ws-field[hidden] { display:none; }
   [data-lbl-ado][hidden], [data-lbl-jira][hidden] { display:none; }
   .ws-field.wide { grid-column:1 / -1; }
+  .ws-check { display:flex; align-items:center; gap:8px; font-weight:600; cursor:pointer; }
+  .ws-check input { margin:0; }
+  .ws-hint { font-weight:400; color:var(--text-dim); font-size:11.5px; }
+  .ws-branches { display:flex; flex-direction:column; gap:5px; margin-top:7px; }
+  .ws-branches[hidden] { display:none; }
   .ws-field label { font-size:12px; font-weight:600; color:var(--text-muted); }
   .ws-field .hint { font-size:11px; color:var(--text-dim); line-height:1.45; }
   .ws-input, .ws-area { width:100%; box-sizing:border-box; background:var(--bg,#0d0d12); color:var(--text);

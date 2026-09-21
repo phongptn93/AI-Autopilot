@@ -22,6 +22,8 @@
   .ws-hint { font-weight:400; color:var(--text-dim); font-size:11.5px; }
   .ws-branches { display:flex; flex-direction:column; gap:5px; margin-top:7px; }
   .ws-branches[hidden] { display:none; }
+  .ws-org { display:flex; flex-direction:column; gap:6px; margin-top:7px; }
+  .ws-org[hidden] { display:none; }
   .ws-field label { font-size:12px; font-weight:600; color:var(--text-muted); }
   .ws-field .hint { font-size:11px; color:var(--text-dim); line-height:1.45; }
   .ws-input, .ws-area { width:100%; box-sizing:border-box; background:var(--bg,#0d0d12); color:var(--text);
@@ -208,6 +210,47 @@
         <textarea class="ws-area" name="ws{{ loop.index0 }}_repo_descriptions"
                   placeholder="Backend-Fresh = .NET API&#10;Micro-Frontend = Angular">{{ ws.repo_descriptions | join('\n') }}</textarea>
       </div>
+
+      {# Tuỳ chọn. Mặc định mọi repo trong workspace cắt từ cùng một Base branch;
+         ô này dành cho trường hợp BE/FE nằm trên hai nhánh khác nhau. #}
+      <div class="ws-field wide">
+        <label class="ws-check">
+          <input type="checkbox" name="ws{{ loop.index0 }}_split_branches"
+                 onchange="this.closest('.ws-field').querySelector('.ws-branches').hidden = !this.checked"
+                 {{ 'checked' if ws.repo_branches }}/>
+          Repos khác nhánh
+          <span class="ws-hint">— mặc định tất cả dùng <b>Base branch</b> ở trên</span>
+        </label>
+        <div class="ws-branches" {{ '' if ws.repo_branches else 'hidden' }}>
+          <textarea class="ws-area" name="ws{{ loop.index0 }}_repo_branches"
+                    placeholder="Backend-Fresh = development&#10;Micro-Frontend = main">{{ ws.repo_branches | join('\n') }}</textarea>
+          <span class="ws-hint">Repo không khai ở đây vẫn cắt từ <b>Base branch</b>.</span>
+        </div>
+      </div>
+
+      {# Tuỳ chọn. Mặc định mọi workspace dùng chung org + PAT của máy. #}
+      {% if not ws.is_default %}
+      <div class="ws-field wide">
+        <label class="ws-check">
+          <input type="checkbox" name="ws{{ loop.index0 }}_own_org"
+                 onchange="this.closest('.ws-field').querySelector('.ws-org').hidden = !this.checked"
+                 {{ 'checked' if ws.ado_organization }}/>
+          Org + PAT riêng
+          <span class="ws-hint">— mặc định dùng chung kết nối Azure DevOps của máy</span>
+        </label>
+        <div class="ws-org" {{ '' if ws.ado_organization else 'hidden' }}>
+          <input class="ws-input" name="ws{{ loop.index0 }}_ado_organization"
+                 value="{{ ws.ado_organization }}"
+                 placeholder="https://dev.azure.com/ten-to-chuc"/>
+          <input class="ws-input" type="password" name="ws{{ loop.index0 }}_ado_pat"
+                 autocomplete="new-password"
+                 placeholder="{% if ws.ado_pat_set %}••••• đã có PAT — để trống là giữ nguyên{% else %}Personal Access Token của org đó{% endif %}"/>
+          <span class="ws-hint">⚠️ Work item của workspace này đọc/ghi qua org riêng.
+            <b>Pull request, review và build vẫn đi qua kết nối mặc định của máy</b> —
+            PR khác org chưa hỗ trợ.</span>
+        </div>
+      </div>
+      {% endif %}
     </div>
 
     <div class="ws-foot">

@@ -208,6 +208,20 @@ class Container:
         """
         return self.providers.get((project or "").strip().lower(), self.ado)
 
+    def ado_for(self, project: str = ""):
+        """The Azure DevOps client that owns ``project``.
+
+        Distinct from :meth:`provider_for` on purpose, and the difference is not
+        cosmetic: ``provider_for`` may hand back a Jira client, which has no
+        ``get_repositories`` and no builds. This one only ever returns an ADO client —
+        a workspace's own organization when it declared one, the machine's otherwise —
+        so it is safe at the call sites that use ADO-specific endpoints.
+        """
+        from ai_autopilot.ado.client import AdoClient
+
+        found = self.providers.get((project or "").strip().lower())
+        return found if isinstance(found, AdoClient) else self.ado
+
     def build_providers(self) -> None:
         """Instantiate a provider per workspace that asked for a non-ADO tracker.
 
@@ -215,22 +229,37 @@ class Container:
         item carries its project, and every other per-workspace lookup in the codebase
         (``scoped_for_project``) is keyed the same way.
         """
+        from ai_autopilot.ado.auth import AdoAuthService
+        from ai_autopilot.ado.client import AdoClient
         from ai_autopilot.providers import PROVIDER_JIRA
         from ai_autopilot.providers.jira import JiraClient
 
         self.providers = {}
         for ws in self.config.workspaces or []:
-            if (getattr(ws, "provider", "") or "").strip().lower() != PROVIDER_JIRA:
+            projects = [p.strip() for p in (ws.ado_projects or []) if p.strip()]
+            if not projects:
                 continue
-            scoped = self.config.scoped_for_project((ws.ado_projects or [""])[0])
-            client = JiraClient(self.http, scoped, ws)
-            for project in ws.ado_projects or []:
-                if project.strip():
-                    self.providers[project.strip().lower()] = client
-            self.log.info(
-                "jira provider registered", workspace=ws.name or "(unnamed)",
-                projects=list(ws.ado_projects or []), site=ws.jira_url,
-            )
+            scoped = self.config.scoped_for_project(projects[0])
+            if (getattr(ws, "provider", "") or "").strip().lower() == PROVIDER_JIRA:
+                client = JiraClient(self.http, scoped, ws)
+                self.log.info(
+                    "jira provider registered", workspace=ws.name or "(unnamed)",
+                    projects=projects, site=ws.jira_url,
+                )
+            elif (getattr(ws, "ado_organization", "") or "").strip():
+                # A SECOND Azure DevOps organization, on the same machine. Its own
+                # client because org and credential live on the client, and the scoped
+                # settings already carry the workspace's overrides — so this is the
+                # same object the root connection is, pointed somewhere else.
+                client = AdoClient(self.http, AdoAuthService(scoped), scoped)
+                self.log.info(
+                    "second ADO organization registered", workspace=ws.name or "(unnamed)",
+                    projects=projects, org=scoped.ado_organization,
+                )
+            else:
+                continue                      # shares the machine's own connection
+            for project in projects:
+                self.providers[project.lower()] = client
 
     async def startup(self) -> None:
         self.build_providers()

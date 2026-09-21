@@ -475,6 +475,17 @@ class WorkspaceConfig(BaseModel):
     # System.TeamProject. Empty = the workspace is inert (nothing routes to it).
     ado_projects: list[str] = Field(default_factory=list)
     # ── overrides (blank/empty = inherit the root Settings value) ──
+    # Its OWN Azure DevOps connection. Optional, and blank is the default: every
+    # workspace shares the machine's single org and PAT unless it says otherwise.
+    # Filled in, this workspace's work items are read and written through a separate
+    # client — which is the only way one autopilot can serve two organizations.
+    #
+    # NOT a second copy of `TenantConfig`: a tenant is a whole isolated install
+    # (its own tags, repos, notification channels) that nothing in this codebase
+    # currently routes to. This is the narrow thing people actually ask for — the same
+    # machine, the same board conventions, a different org.
+    ado_organization: str = ""
+    ado_pat: str = ""
     code_project: str = ""          # project holding the repos/PRs for these items
     workspace_directory: str = ""   # folder with the shared .claude + repo subfolders
     repo_working_directory: str = ""
@@ -523,6 +534,7 @@ class WorkspaceConfig(BaseModel):
         """
         out: dict[str, Any] = {}
         for key in (
+            "ado_organization", "ado_pat",
             "code_project", "workspace_directory", "repo_working_directory",
             "base_branch", "trigger_tag",
         ):

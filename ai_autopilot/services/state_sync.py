@@ -175,6 +175,21 @@ class StateSyncService:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
 
+    def _ado(self, item_or_project=None):
+        """The ADO client that owns this item. The machine's own unless a workspace
+        declared its own organization.
+
+        Work-item writes MUST go through this: an item discovered in a second
+        organization whose state is then updated on the first either 404s or — far
+        worse, and the reason this is not a nicety — lands on a same-named project in
+        the wrong org. Repository, build and pull-request calls deliberately stay on
+        the default connection; cross-org PRs are a separate question this does not
+        pretend to answer.
+        """
+        project = getattr(item_or_project, "project", item_or_project) or ""
+        resolve = getattr(self._c, "ado_for", None)
+        return resolve(str(project)) if resolve is not None else self._c.ado
+
     async def _run(self) -> None:
         self._log.info("state-sync started — merged PRs → state, parent roll-up")
         await self._restore()
@@ -225,8 +240,15 @@ class StateSyncService:
             except Exception as exc:  # noqa: BLE001
                 self._log.warning("state-sync: fetch tagged failed", error=describe_exc(exc))
                 tagged = []
-            for parent_id in {i.parent_id for i in tagged if i.parent_id}:
-                await self._maybe_roll_up_parent(parent_id)
+            # A parent lives in the same project as its children — ADO cannot link a
+            # hierarchy across projects — so the child's project is the parent's, and
+            # it is the only thing here that knows which organization to ask.
+            seen_parents: dict[int, str] = {}
+            for child in tagged:
+                if child.parent_id:
+                    seen_parents.setdefault(child.parent_id, child.project or "")
+            for parent_id, project in seen_parents.items():
+                await self._maybe_roll_up_parent(parent_id, project)
         # C. deploy: a fresh successful deploy build → items awaiting deploy are deployed.
         if stage_configured(cfg, "on_deploy") and stage_configured(cfg, "on_merge"):
             await self._check_deploys()
@@ -288,14 +310,14 @@ class StateSyncService:
             if cfg.dry_run:
                 self._log.info("[DRY-RUN] would mark deployed", id=item.id, state=target)
                 continue
-            if not await c.ado.update_state(item.id, target):
+            if not await self._ado(item).update_state(item.id, target):
                 # Same reasoning as the merge path: don't comment "Deployed" on an item
                 # that is still sitting in the merge state.
                 self._log.error("deploy transition failed", id=item.id, state=target,
                                 type=item.work_item_type, build=newest)
                 continue
             if should_comment(item_cfg, "on_deploy", item.work_item_type):
-                await c.ado.add_comment(
+                await self._ado(item).add_comment(
                     item.id, "<div><b>🚀 Deployed</b> — deploy pipeline succeeded.</div>"
                 )
             self._log.info("marked deployed", id=item.id, state=target, build=newest)
@@ -474,7 +496,7 @@ class StateSyncService:
             self._log.info("[DRY-RUN] would transition on merge", id=work_item_id, pr=pr_id,
                            state=target, type=item.work_item_type)
             return
-        if target and not await c.ado.update_state(work_item_id, target):
+        if target and not await self._ado(item).update_state(work_item_id, target):
             # The state move FAILED — almost always because `target` isn't a state of
             # this item's type. Stop here: tagging it done and commenting "autopilot
             # marked it done" on an item that never moved makes the board and the
@@ -486,12 +508,12 @@ class StateSyncService:
                 hint="state must exist on this work-item type — check /dashboard/flow",
             )
             return
-        await c.ado.add_tag(
+        await self._ado(item).add_tag(
             work_item_id,
             resolve_tag(item_cfg, "on_merge", item.work_item_type, cfg.processed_tag),
         )
         if should_comment(cfg, "on_merge", item.work_item_type):
-            await c.ado.add_comment(
+            await self._ado(item).add_comment(
                 work_item_id, "<div><b>🔀 PR merged</b> — autopilot marked it done.</div>"
             )
         await self._remember(pr_id, work_item_id, target)
@@ -505,15 +527,15 @@ class StateSyncService:
             with contextlib.suppress(Exception):
                 await self._sync_repo.mark_merged_pr(pr_id, work_item_id, state)
 
-    async def _maybe_roll_up_parent(self, parent_id: int) -> None:
+    async def _maybe_roll_up_parent(self, parent_id: int, project: str = "") -> None:
         c, cfg = self._c, self._config
-        children = await c.ado.get_children(parent_id)
+        children = await self._ado(project).get_children(parent_id)
         if not children:
             return
         # The parent is fetched BEFORE computing the target: roll-up lines live on the
         # parent's own flow (the state they set is the parent's), so its type is needed
         # to know which map applies.
-        parent = await c.ado.get_work_item(parent_id)
+        parent = await self._ado(project).get_work_item(parent_id)
         if parent is None or not self._assignee_ok(parent):
             return
         pairs = parse_rollup_map(resolve_rollup(self._cfg_for(parent), parent.work_item_type))
@@ -541,7 +563,7 @@ class StateSyncService:
         if cfg.dry_run:
             self._log.info("[DRY-RUN] would roll up parent", id=parent_id, state=target)
             return
-        if not await c.ado.update_state(parent_id, target):
+        if not await self._ado(project).update_state(parent_id, target):
             self._log.error("parent roll-up failed", id=parent_id, state=target,
                             type=parent.work_item_type)
             self._parent_targets.pop(parent_id, None)  # retry next cycle once fixed

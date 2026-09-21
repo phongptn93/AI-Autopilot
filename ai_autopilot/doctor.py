@@ -489,6 +489,45 @@ def check_providers(config: Settings) -> list[Finding]:
     return out or [Finding(OK, f"Providers: {len(jira)} Jira workspace(s)")]
 
 
+def check_second_organization(config: Settings) -> list[Finding]:
+    """A workspace pointed at its own ADO org — and the half of the pipeline that
+    does not follow it there yet.
+
+    Work items route per project, so they are read and written in the organization
+    that owns them. Pull requests, reviews and builds do NOT: those call sites reach
+    for the machine's connection, and a repo that lives in the other org is simply not
+    there. Said here because the failure is quiet — the babysitter finds no PRs and
+    reports nothing, which looks exactly like "nobody opened one".
+
+    Offline: every value is config.
+    """
+    own = [
+        ws for ws in (config.workspaces or [])
+        if (getattr(ws, "ado_organization", "") or "").strip()
+    ]
+    if not own:
+        return []
+    out: list[Finding] = []
+    for ws in own:
+        label = ws.name or (ws.ado_projects[0] if ws.ado_projects else "(unnamed)")
+        if not (getattr(ws, "ado_pat", "") or "").strip():
+            out.append(Finding(
+                ERROR, f"Workspace '{label}' names another organization but has no PAT",
+                f"{ws.ado_organization} cannot be reached without a credential of its "
+                "own — the machine's PAT is not valid there.",
+                "Add the PAT on /dashboard/workspaces, or clear the organization to go "
+                "back to the machine's connection.",
+            ))
+    out.append(Finding(
+        WARN, f"{len(own)} workspace(s) use a second Azure DevOps organization",
+        "Work items route to the right org. Pull requests, reviews and builds still "
+        "use this machine's connection — a repo in the other org will not be found.",
+        "Keep the code for those projects in this machine's organization, or treat "
+        "that workspace as work-items-only for now.",
+    ))
+    return out
+
+
 def check_fleet(config: Settings) -> list[Finding]:
     """Fleet mode wired half-way — the failure mode is silence, on both sides.
 
@@ -1500,6 +1539,7 @@ CHECKS = (
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
     check_relay_hands_over, check_default_profile_is_not_a_doorway,
     check_sdlc_needs_headless, check_fleet, check_providers,
+    check_second_organization,
     check_workspace_context, check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,

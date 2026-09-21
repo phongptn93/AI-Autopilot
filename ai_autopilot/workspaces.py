@@ -72,6 +72,14 @@ class WorkspaceView:
     jira_email: str = ""
     jira_project: str = ""
     jira_token_set: bool = False        # never the value — only whether one is stored
+    #: Its own Azure DevOps organization, when this workspace does not share the
+    #: machine's. Optional; blank is the default and means "use the machine's".
+    ado_organization: str = ""
+    ado_pat_set: bool = False           # again: whether one is stored, never the value
+    #: Write-only. Populated ONLY by ``parse_form`` when somebody types a new PAT;
+    #: never filled from stored config, so the page has nothing to leak. Blank on save
+    #: means "keep what is stored" — ``carry_secrets`` puts it back.
+    ado_pat: str = ""
     enabled: bool = True
     is_default: bool = False
 
@@ -99,6 +107,8 @@ class WorkspaceView:
             "allowed_repos": list(self.allowed_repos),
             "repo_descriptions": list(self.repo_descriptions),
             "repo_branches": list(self.repo_branches),
+            "ado_organization": self.ado_organization,
+            "ado_pat": self.ado_pat,
             "trigger_tag": self.trigger_tag,
             "provider": self.provider,
             "jira_url": self.jira_url,
@@ -179,6 +189,8 @@ def _from_config(ws: Any, index: int, taken: set[str]) -> WorkspaceView:
         jira_email=str(get("jira_email", "") or ""),
         jira_project=str(get("jira_project", "") or ""),
         jira_token_set=bool(str(get("jira_token", "") or "").strip()),
+        ado_organization=str(get("ado_organization", "") or ""),
+        ado_pat_set=bool(str(get("ado_pat", "") or "").strip()),
         enabled=bool(get("enabled", True)),
     )
     view.id = slugify(view.label, taken)
@@ -200,6 +212,8 @@ def _legacy_lines(config: Any) -> list[WorkspaceView]:
             allowed_repos=list(ws.allowed_repos),
             repo_descriptions=list(ws.repo_descriptions),
             repo_branches=list(getattr(ws, "repo_branches", None) or []),
+            ado_organization=getattr(ws, "ado_organization", "") or "",
+            ado_pat_set=bool(getattr(ws, "ado_pat", "") or ""),
             trigger_tag=ws.trigger_tag, enabled=ws.enabled,
         ))
     return out
@@ -313,6 +327,13 @@ def parse_form(form: Mapping[str, Any]) -> tuple[list[WorkspaceView], list[str]]
                 for line in str(form.get(f"{prefix}repo_branches", "") or "").splitlines()
                 if line.strip()
             ] if form.get(f"{prefix}split_branches") else []),
+            # Blank when the row did not tick "org riêng" — so switching it off really
+            # does return the workspace to the machine's connection rather than leaving
+            # an org configured that nothing on the page shows any more.
+            ado_organization=(str(form.get(f"{prefix}ado_organization", "") or "").strip()
+                              if form.get(f"{prefix}own_org") else ""),
+            ado_pat=(str(form.get(f"{prefix}ado_pat", "") or "").strip()
+                     if form.get(f"{prefix}own_org") else ""),
             trigger_tag=str(form.get(f"{prefix}trigger_tag", "") or "").strip(),
             # The default workspace is always ADO: it is backed by the machine's own
             # connection, which every pull-request feature also uses.
@@ -382,25 +403,30 @@ def carry_secrets(updates: dict[str, Any], config: Any) -> dict[str, Any]:
         shapes reach here (YAML load vs. a live dashboard apply)."""
         return ws.get(key, default) if isinstance(ws, Mapping) else getattr(ws, key, default)
 
-    stored: dict[str, str] = {}
+    secret_keys = ("jira_token", "ado_pat")
+    stored: dict[str, dict[str, str]] = {key: {} for key in secret_keys}
     for ws in getattr(config, "workspaces", None) or []:
         def get(key: str, default: Any = "", _ws: Any = ws) -> Any:
             return read(_ws, key, default)
 
-        token = str(get("jira_token", "") or "")
-        if not token:
-            continue
-        for key in (str(get("name", "") or ""), *(get("ado_projects", None) or [])):
-            if str(key).strip():
-                stored[str(key).strip().lower()] = token
+        names = [str(get("name", "") or ""), *(get("ado_projects", None) or [])]
+        for secret in secret_keys:
+            value = str(get(secret, "") or "")
+            if not value:
+                continue
+            for key in names:
+                if str(key).strip():
+                    stored[secret][str(key).strip().lower()] = value
     for row in updates.get("workspaces") or []:
-        if row.get("jira_token"):
-            continue
-        for key in (row.get("name", ""), *(row.get("ado_projects") or [])):
-            token = stored.get(str(key).strip().lower())
-            if token:
-                row["jira_token"] = token
-                break
+        names = [row.get("name", ""), *(row.get("ado_projects") or [])]
+        for secret in secret_keys:
+            if row.get(secret):
+                continue                      # the form sent a new one — keep it
+            for key in names:
+                value = stored[secret].get(str(key).strip().lower())
+                if value:
+                    row[secret] = value
+                    break
     return updates
 
 

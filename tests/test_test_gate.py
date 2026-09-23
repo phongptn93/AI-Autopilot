@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 
 from ai_autopilot.config import Settings
 from ai_autopilot.execution.test_gate import TestGate, detect_test_command
@@ -66,12 +67,28 @@ async def test_gate_fails_on_nonzero_exit(tmp_path):
 
 
 async def test_gate_times_out(tmp_path):
+    """The timeout must BOUND the gate, not merely describe what happened.
+
+    The runner is the shell's grandchild, so killing the shell alone leaves it alive
+    holding our stdout pipe: the gate then returned only when the runner finished by
+    itself — 25s measured against a 1s timeout, and never at all for a runner that
+    does not exit (`ng test` in watch mode), which is the case the timeout exists for.
+    Asserting the summary text alone passed happily through all of that, so assert the
+    clock: returning fast is the only proof the whole tree actually died.
+    """
     cmd = f'"{sys.executable}" -c "import time; time.sleep(30)"'
+    started = time.monotonic()
     res = await TestGate(
         Settings(test_gate_enabled=True, test_command=cmd, test_timeout_seconds=1)
     ).run(str(tmp_path))
+    elapsed = time.monotonic() - started
+
     assert res.ran is True and res.passed is False
     assert "timed out" in res.summary
+    assert elapsed < 15, (
+        f"gate returned after {elapsed:.1f}s for a 1s timeout — the runner outlived "
+        "the kill and the gate waited for it"
+    )
 
 
 def test_angular_is_not_detected_as_a_watch_run(tmp_path):

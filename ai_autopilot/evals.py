@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_autopilot.logging_config import describe_exc, get_logger
+from ai_autopilot.proc import spawn_kwargs, terminate_tree
 
 _log = get_logger("evals")
 
@@ -168,12 +169,14 @@ async def _shell_ok(command: str, cwd: str) -> tuple[bool, str]:
     proc = await asyncio.create_subprocess_shell(
         command, cwd=cwd or None,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        **spawn_kwargs(),
     )
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=_CHECK_TIMEOUT_SECONDS)
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
+        # Kill the tree, not just the shell — otherwise the ceiling above is advisory and
+        # one hung case still holds the suite. See ai_autopilot.proc.
+        await terminate_tree(proc)
         return False, f"timed out after {_CHECK_TIMEOUT_SECONDS}s"
     return proc.returncode == 0, (out or b"").decode("utf-8", "replace")[-2000:]
 

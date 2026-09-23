@@ -19,6 +19,7 @@ from pathlib import Path
 
 from ai_autopilot.config import Settings
 from ai_autopilot.logging_config import describe_exc, get_logger
+from ai_autopilot.proc import spawn_kwargs, terminate_tree
 
 # Keep only the tail of the test output — enough to see the failing assertions in
 # a log / comment without carrying megabytes of passing noise.
@@ -118,12 +119,15 @@ class TestGate:
                 cwd=work_dir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                **spawn_kwargs(),
             )
             try:
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except TimeoutError:
-                proc.kill()
-                await proc.wait()
+                # The runner is the SHELL's child, so killing the shell alone leaves it
+                # running and holding our stdout pipe — the wait below would then last as
+                # long as the suite we are trying to abandon. See ai_autopilot.proc.
+                await terminate_tree(proc)
                 # A timeout BLOCKS, so the note has to say which repo, which command and
                 # which setting to raise. The two ways to get here are a runner that
                 # never exits and a suite that genuinely needs longer than one global

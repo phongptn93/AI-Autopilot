@@ -115,6 +115,45 @@ _OVERFLOW_MARKERS = ("prompt is too long", "context length", "too many tokens")
 _THRASH_MARKER = "autocompact is thrashing"
 _TRANSIENT_RETRIES = 2  # extra FRESH attempts after the first
 _TRANSIENT_BACKOFF = 3.0  # seconds, doubled per retry (3s, 6s)
+#: How much of the CLI's own diagnosis to keep. Long enough for the whole sentence it
+#: writes about thrashing, which is the part with the actual numbers in it.
+_DIAGNOSIS_CHARS = 400
+
+
+def _clip(text: str, limit: int = _DIAGNOSIS_CHARS, *, sentences: int = 2) -> str:
+    """The CLI's own diagnosis: what HAPPENED, trimmed on a sentence boundary.
+
+    Two separate defects produced one unreadable line on the report page. A flat
+    ``text[:200]`` cut mid-word, so the message ended "…for the context window. T)" —
+    which reads as a broken tool, and a reader who thinks the tool is broken does not
+    act on the finding. And the caller then wrapped this text inside a sentence of its
+    own that restated it, printing the same diagnosis twice.
+
+    So keep only the factual head — the sentences carrying the numbers — and leave the
+    advice to the caller, which has the concrete levers. The CLI's own trailing
+    suggestion ("Try narrowing the scope…") is dropped for exactly that reason: it is
+    the vaguer version of what the caller is about to say.
+    """
+    flat = " ".join((text or "").split())
+    kept, rest = [], flat
+    while rest and len(kept) < sentences:
+        cut = min(
+            (at for at in (rest.find(e) for e in (". ", "! ", "? ")) if at != -1),
+            default=-1,
+        )
+        if cut == -1:
+            kept.append(rest)
+            rest = ""
+            break
+        kept.append(rest[: cut + 1])
+        rest = rest[cut + 2 :]
+    head = " ".join(part.strip() for part in kept).strip()
+    if not head:
+        head = flat
+    if len(head) <= limit:
+        return head
+    at = head[:limit].rfind(" ")
+    return (head[:at] if at > 0 else head[:limit]).rstrip(" ,;:-") + "…"
 
 
 def _is_transient(exc: BaseException) -> bool:
@@ -347,9 +386,9 @@ async def run_claude(
         lowered = text.lower()
         if any(marker in lowered for marker in _OVERFLOW_MARKERS):
             # Remembered, because the exception that follows says nothing about size.
-            overflow["hit"] = text[:200]
+            overflow["hit"] = _clip(text)
         elif _THRASH_MARKER in lowered:
-            overflow["thrash"] = text[:200]
+            overflow["thrash"] = _clip(text)
         pulse["last"] = text[:140]
         pulse["at"] = time.monotonic()
         pulse["events"] += 1
@@ -456,10 +495,14 @@ async def run_claude(
                         hint="the agent is re-reading more than fits; narrow what the "
                              "prompt asks it to open (fewer files, a range, --oneline)",
                     )
+                    # The CLI's own sentence, then what to DO about it. Wrapping its
+                    # diagnosis in parentheses inside a sentence that restated the same
+                    # thing gave the reader the message twice, the second copy cut off
+                    # mid-word — it read as a broken tool rather than as a finding.
                     raise RuntimeError(
-                        "Context thrashing: the run kept refilling its context right "
-                        f"after compacting ({overflow['thrash']}). Narrow what it is "
-                        "asked to read — it cannot finish by re-reading more than fits."
+                        f"{overflow['thrash']} Narrow what this run is asked to read "
+                        "(fewer files, a line range, --oneline): it cannot finish by "
+                        "re-reading more than fits in the context."
                     ) from exc
                 if overflow.get("hit"):
                     # Deterministic: the same commands produce the same flood. Say what

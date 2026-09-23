@@ -216,7 +216,52 @@ async def test_a_thrashing_run_is_stopped_instead_of_burning_its_timeout(monkeyp
         yield AssistantMessage(content=[TextBlock(text="reading another file")], model="x")
 
     monkeypatch.setattr(cc, "query", fake_query)
-    with pytest.raises(RuntimeError, match="Context thrashing"):
+    # The error leads with the CLI's own diagnosis rather than a heading of our own: it
+    # used to be wrapped inside a sentence that restated it, so the reader got the same
+    # explanation twice and the inner copy arrived cut off mid-word.
+    with pytest.raises(RuntimeError, match="Autocompact is thrashing") as caught:
         await cc.run_claude("audit everything", ".", timeout_seconds=5)
 
+    message = str(caught.value)
+    assert "Narrow what this run is asked to read" in message   # and what to do about it
+    assert message.count("Autocompact is thrashing") == 1       # said once, not nested
     assert attempts["n"] == 1      # not retried: the next lap reads the same thing
+
+
+# ── the diagnosis a human reads on the report page ───────────────────────────
+def test_diagnosis_is_never_cut_mid_word():
+    """A flat `text[:200]` left the report page ending in "…context window. T)".
+
+    A message that stops on a stray letter reads as a broken tool, and a reader who
+    believes the tool is broken does not act on the finding it was carrying.
+    """
+    from ai_autopilot.execution.claude_client import _clip
+
+    long_first_sentence = "Autocompact is thrashing because " + "x" * 600
+    out = _clip(long_first_sentence)
+    assert out.endswith("…")
+    assert not out.rstrip("…").endswith(" ")       # no dangling space before the ellipsis
+
+
+def test_diagnosis_keeps_the_facts_and_drops_the_cli_s_vaguer_advice():
+    """Ours says the concrete levers; keeping both printed the same advice twice."""
+    from ai_autopilot.execution.claude_client import _clip
+
+    out = _clip(
+        "Autocompact is thrashing: the context refilled to the limit within 3 turns "
+        "of the previous compact, 3 times in a row. A file being read or a tool output "
+        "is likely too large for the context window. Try narrowing the scope of what "
+        "the agent reads, or split the task into smaller pieces."
+    )
+    assert "3 times in a row" in out               # the numbers are the useful part
+    assert "too large for the context window" in out
+    assert "Try narrowing" not in out              # the caller says this, better
+
+
+def test_diagnosis_survives_text_with_no_sentence_break():
+    from ai_autopilot.execution.claude_client import _clip
+
+    assert _clip("autocompact is thrashing and it keeps going") == (
+        "autocompact is thrashing and it keeps going"
+    )
+    assert _clip("") == ""

@@ -92,6 +92,10 @@
     font-size:12.5px; font-weight:650; }
   .brief-n { font-weight:500; color:var(--text-dim); font-size:11.5px; }
   .stat-sub { color:var(--text-muted); font-size:12px; margin-top:4px; }
+  /* The file the agent really reads — named in full, because "it is in your workspace"
+     is not an answer somebody can act on. */
+  .mem-path { font-family:var(--mono); font-size:12px; color:var(--accent-hover,#818cf8);
+    word-break:break-all; }
   .edit-form { display:none; gap:8px; margin-top:7px; }
   .edit-form.on { display:flex; }
   /* Inside a grid cell an input with no min-width refuses to shrink and blows the
@@ -118,8 +122,9 @@
 
 <div class="page-header">
   <h2>🧠 Tri thức</h2>
-  <p>Những gì agent được dặn trước mỗi run: tri thức <b>bạn nạp vào</b>, cộng với bài học
-    <b>máy tự rút</b> từ review và rework của các run trước.</p>
+  <p>Tri thức <b>bạn nạp vào</b> cộng với bài học <b>máy tự rút</b> từ review và rework
+    của các run trước — ghi thành một rule trong workspace để <b>Claude tự nạp</b> khi task
+    có liên quan, thay vì nhồi vào mọi brief.</p>
 </div>
 
 {% if flash %}
@@ -159,12 +164,11 @@
     </div>
   </div>
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Mỗi brief mang</span></div>
-    <div class="stat-card-value">{{ max_injected }}</div>
+    <div class="stat-card-header"><span class="stat-card-label">Agent đọc được</span></div>
+    <div class="stat-card-value">{{ total if memory_live else 0 }}</div>
     <div class="stat-sub">
-      {% if not max_injected %}đang tắt — chỉ ghi, không nạp
-      {% elif injected_runs %}đã nạp {{ injected_total }} dòng qua {{ injected_runs }} run ({{ days }} ngày)
-      {% else %}chưa run nào trong {{ days }} ngày qua{% endif %}
+      {% if memory_live %}qua memory của workspace{% if max_injected %} · cộng {{ max_injected }} dòng ép vào brief{% endif %}
+      {% else %}chưa ghi ra memory{% endif %}
     </div>
   </div>
 </div>
@@ -205,11 +209,44 @@
 {# ── Brief kế tiếp mang gì ─────────────────────────────────────────────────
    Dựng từ chính lessons.recent() mà executor gọi, nên không thể lệch với thứ
    agent thật sự nhận. #}
-{% if preview %}
+{# The primary channel: the workspace's own Claude memory, which every run loads by
+   itself. Shown before anything else because it is what the agent actually reads. #}
 <div class="card">
   <div class="card-header">
-    <h3>Brief kế tiếp sẽ mang</h3>
-    <span class="dim" style="font-size:12.5px">đúng những dòng này, theo đúng thứ tự này</span>
+    <h3>Agent đọc gì</h3>
+    <span class="dim" style="font-size:12.5px">
+      {% if memory_live %}Claude tự nạp file này ở mỗi run — cùng cách nó nạp các rule khác
+      của workspace{% else %}chưa có gì để nạp{% endif %}
+    </span>
+  </div>
+  <div class="card-body brief-body">
+    {% if memory_live %}
+    <div class="mem-path">{{ memory_file }}</div>
+    <p class="dim" style="font-size:12.5px;margin:8px 0 10px">
+      File này <b>do máy ghi</b> từ danh sách bên dưới, và nằm cạnh các rule khác trong
+      <code>.claude/rules/</code> — nên commit được vào git và review như code.
+      Claude chọn dùng khi task có liên quan, thay vì bị nhồi vào mọi brief.
+    </p>
+    <div class="brief">{{ memory_body }}</div>
+    {% else %}
+    <p class="dim" style="font-size:13px;margin:0">
+      Chưa có bài học nào. Khi có, máy sẽ ghi vào
+      <code>.claude/rules/autopilot-lessons.md</code> trong workspace và trỏ một dòng từ
+      <code>CLAUDE.md</code> — Claude nạp file đó như mọi rule khác.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+{# The escape hatch, only when somebody has deliberately turned it back on. #}
+{% if preview and max_injected %}
+<div class="card">
+  <div class="card-header">
+    <h3>Ép thêm vào brief</h3>
+    <span class="dim" style="font-size:12.5px">
+      <b>{{ max_injected }}</b> dòng bị prepend vào <b>mọi</b> brief bất kể có liên quan hay
+      không — đặt <code>lessons_max_injected = 0</code> để tắt và chỉ dùng memory ở trên
+    </span>
   </div>
   <div class="card-body brief-body">
     {% if shared_lines %}
@@ -326,8 +363,8 @@
 <div class="card">
   <div class="card-header repo-head">
     <h3>{{ 'Mọi repo' if repo == shared_bucket else repo }}</h3>
-    <span class="dim" style="font-size:12.5px">{{ rows|length }} mục ·
-      {{ injected_from[repo] }} đang vào brief</span>
+    <span class="dim" style="font-size:12.5px">{{ rows|length }} mục{% if max_injected %} ·
+      {{ injected_from[repo] }} đang ép vào brief{% endif %}</span>
     <span style="flex:1"></span>
     <form method="post" action="/dashboard/learning/compact" style="margin:0">
       <button class="btn-ghost" type="submit"
@@ -344,19 +381,19 @@
     <div class="ktable">
       <div class="khead">
         <span>Ngày</span><span>Nguồn</span><span>Nội dung</span>
-        <span style="text-align:right">Lần / Suất</span><span></span>
+        <span style="text-align:right">Số lần gặp</span><span></span>
       </div>
       {% for lesson, live in rows %}
       {% set rid = repo | replace('.','_') | replace('-','_') ~ '_' ~ loop.index %}
-      <div class="krow {{ 'live' if live else 'off' }}">
+      <div class="krow {{ ('live' if live else 'off') if max_injected else '' }}">
         <span class="kwhen">{{ lesson.date or '—' }}</span>
         <span class="ksrc">
           {% if lesson.authored %}
-            <span class="src man" title="Bạn nhập — luôn được nạp trước, và không bị xoá bớt khi file đầy">bạn nhập</span>
+            <span class="src man" title="Bạn nhập — luôn được nạp trước, và không bị xoá bớt khi file đầy">bạn nạp</span>
           {% elif lesson.source == 'fleet' %}
             <span class="src man" title="Trung tâm đã duyệt và phát cho cả đội — cũng được ghim như tri thức bạn nhập">từ đội</span>
           {% else %}
-            <span class="src bot" title="Máy tự rút ra từ review / rework của run trước">máy học</span>
+            <span class="src bot" title="Máy tự rút ra từ review / rework của run trước">máy tự rút</span>
           {% endif %}
         </span>
         <span class="kwhat">
@@ -372,13 +409,13 @@
         </span>
         <span class="kmark">
           {% if lesson.count > 1 %}<span class="rep"
-            title="Đã xảy ra {{ lesson.count }} lần — trước đây nằm thành {{ lesson.count }} dòng riêng và chiếm {{ lesson.count }} suất nạp">×{{ lesson.count }}</span>{% endif %}
+            title="Chuyện này đã xảy ra {{ lesson.count }} lần. Trước đây nó nằm thành {{ lesson.count }} dòng riêng và chiếm {{ lesson.count }} suất nạp của brief — giờ gộp làm một.">{{ lesson.count }} lần</span>{% endif %}
           {# Mark the EXCEPTION, not the rule. Marking every injected row put the same
              chip on all four rows of a four-row table — four labels carrying no
              difference. Most rows do reach the brief, so the one worth a word is the one
              that does NOT: it is sitting in the file doing nothing, and that is the fact
              an operator has to act on (prune, or raise the cap). #}
-          {% if not live %}<span class="noinj"
+          {% if max_injected and not live %}<span class="noinj"
             title="Quá suất — dòng này KHÔNG vào brief. Xoá bớt dòng cũ, hoặc tăng lessons_max_injected ở Settings.">ngoài suất</span>{% endif %}
         </span>
         <span class="kact">

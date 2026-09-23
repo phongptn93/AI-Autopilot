@@ -133,3 +133,70 @@ def test_repo_name_cannot_escape_the_lessons_dir(tmp_path):
     # Separators are stripped, so the name can never climb out of the lessons dir.
     assert written[0].parent == lessons_dir
     assert "/" not in written[0].name and "\\" not in written[0].name
+
+
+# ── the workspace's own Claude memory ────────────────────────────────────────
+
+_NOW_MEM = datetime(2026, 9, 23)
+
+
+def test_lessons_are_written_where_claude_already_looks(tmp_path):
+    """The agent runs with setting_sources=["user","project","local"], so it loads the
+    workspace's CLAUDE.md and .claude/ rules by itself. Prepending the newest eight lines
+    to every brief was the weaker channel: it ignored whether a lesson had anything to do
+    with the task, capped the store at eight slots a burst of machine noise could take,
+    and lived in a dotfolder nobody reviews.
+    """
+    ws = str(tmp_path)
+    lessons.add(ws, lessons.SHARED_BUCKET, "Validate every DTO before mapping")
+    lessons.record_lessons(ws, "Backend", ["[High] null check missing"], now=_NOW_MEM)
+
+    rule = tmp_path / ".claude" / "rules" / "autopilot-lessons.md"
+    assert rule.is_file(), "the agent reads .claude/rules — that is where lessons belong"
+    body = rule.read_text(encoding="utf-8")
+    assert "Validate every DTO before mapping" in body
+    assert "[High] null check missing" in body
+    # A rule somebody typed and a guess the machine made must not read as equally settled.
+    assert "Quy tắc do người viết" in body
+    assert "Máy tự rút" in body
+
+
+def test_deleting_a_lesson_takes_it_out_of_what_the_agent_reads(tmp_path):
+    ws = str(tmp_path)
+    lessons.add(ws, lessons.SHARED_BUCKET, "a rule that turns out to be wrong")
+    rule = tmp_path / ".claude" / "rules" / "autopilot-lessons.md"
+    assert "turns out to be wrong" in rule.read_text(encoding="utf-8")
+
+    lessons.delete(ws, lessons.SHARED_BUCKET, "a rule that turns out to be wrong")
+    # An emptied store removes the file rather than leaving an empty rule behind.
+    assert not rule.exists()
+
+
+def test_the_claude_md_pointer_keeps_the_file_s_own_line_endings(tmp_path):
+    """Measured before this was handled: reading CLAUDE.md with the default newline mode
+    and writing it back turned 338 LF endings into 342 CRLF — every line of a tracked
+    20KB file showing as changed, from a tool that only meant to add one pointer.
+    """
+    claude_md = tmp_path / "CLAUDE.md"
+    original = b"# Project\r\n\r\nSome convention.\r\n"
+    claude_md.write_bytes(original)
+    lessons.add(str(tmp_path), lessons.SHARED_BUCKET, "a lesson worth keeping")
+
+    after = claude_md.read_bytes()
+    assert after.startswith(b"# Project\r\n\r\nSome convention.")
+    assert after.count(b"\n") == after.count(b"\r\n"), "a bare LF crept into a CRLF file"
+    assert b"autopilot-lessons.md" in after          # the pointer is there
+
+    # …and it is removed again when there is nothing to point at.
+    lessons.delete(str(tmp_path), lessons.SHARED_BUCKET, "a lesson worth keeping")
+    assert claude_md.read_bytes() == original
+
+
+def test_writing_the_memory_twice_changes_nothing(tmp_path):
+    """It runs on every mutation, so a non-idempotent write would churn a tracked file."""
+    (tmp_path / "CLAUDE.md").write_text("# Project\n", encoding="utf-8")
+    lessons.add(str(tmp_path), lessons.SHARED_BUCKET, "one lesson")
+    first = (tmp_path / "CLAUDE.md").read_bytes()
+    lessons.sync_memory(str(tmp_path))
+    lessons.sync_memory(str(tmp_path))
+    assert (tmp_path / "CLAUDE.md").read_bytes() == first

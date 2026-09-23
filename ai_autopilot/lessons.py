@@ -164,13 +164,178 @@ def _write(workspace: str, repo: str, items: list[Lesson]) -> bool:
     path = _lessons_path(workspace, repo)
     try:
         if not items:
+            # No early return: emptying a repo is a mutation like any other, and
+            # skipping the sync below left the deleted lines in the file the agent
+            # reads — deleted from the dashboard, still in front of the model.
             path.unlink(missing_ok=True)   # an empty file shows as a ghost repo
-            return True
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(_format(le) for le in items) + "\n", encoding="utf-8")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "\n".join(_format(le) for le in items) + "\n", encoding="utf-8"
+            )
     except OSError:
         return False
+    # Every mutation funnels through here, so this is the one place that has to keep
+    # Claude's own memory in step. Doing it anywhere else means a path that edits
+    # lessons without refreshing what the agent reads.
+    sync_memory(workspace)
     return True
+
+
+# ── Claude's project memory ───────────────────────────────────────────────────
+#
+# Where these lines actually belong. The agent already runs with
+# ``setting_sources=["user", "project", "local"]`` (see
+# ai_autopilot/execution/claude_executor.py), which loads the workspace's CLAUDE.md and
+# its ``.claude/`` rules by itself — so a workspace that has been set up properly is
+# already carrying 20KB of hand-written convention into every run, chosen by the model
+# as it becomes relevant.
+#
+# Against that, prepending the newest eight lines to EVERY brief was the weaker channel
+# in every respect that matters: it ignored whether a lesson had anything to do with the
+# task, it capped the whole store at eight slots that a burst of machine noise could
+# take, and it lived in a dotfolder nobody reviews. Measured on the real workspace this
+# was written for: 21 rule files and a 20,250-byte CLAUDE.md on one side, and a lessons
+# store holding exactly one line on the other.
+#
+# So the loop writes into the memory Claude already reads, and the injection stays only
+# as an escape hatch (``lessons_max_injected``, now 0 by default).
+MEMORY_FILE = Path(".claude") / "rules" / "autopilot-lessons.md"
+#: Markers around the one line this module owns inside CLAUDE.md. A pointer rather than
+#: the content: CLAUDE.md is hand-written and large, and generated text merged into it is
+#: how somebody loses an afternoon to a conflict.
+_CLAUDE_MD_START = "<!-- autopilot:lessons:start -->"
+_CLAUDE_MD_END = "<!-- autopilot:lessons:end -->"
+
+
+def memory_path(workspace: str) -> Path:
+    """Where the generated rule file lives for ``workspace``."""
+    return Path(workspace) / MEMORY_FILE
+
+
+def memory_is_live(workspace: str) -> bool:
+    """Is the generated rule actually on disk for the agent to read?
+
+    Asked of this module rather than stat'd by the caller: the file is this module's,
+    and a dashboard route that pokes at the filesystem itself is also a blocking call on
+    the event loop.
+    """
+    if not workspace:
+        return False
+    try:
+        return memory_path(workspace).is_file()
+    except OSError:
+        return False
+
+
+def render_memory(workspace: str) -> str:
+    """The lesson store as one Claude rule file — '' when there is nothing to say.
+
+    Authored and learned lines are kept apart on purpose. A rule a human typed is a
+    standing instruction; a line the machine inferred from one bad run is a guess, and
+    presenting the two as one list asks the model to treat them as equally settled.
+    """
+    blocks: list[str] = []
+    for repo in list_repos(workspace):
+        items = _read(workspace, repo)
+        if not items:
+            continue
+        pinned = [le for le in items if le.pinned]
+        learned = [le for le in items if not le.pinned]
+        lines = [f"## {'Mọi repo' if repo == SHARED_BUCKET else repo}", ""]
+        if pinned:
+            lines.append("**Quy tắc do người viết — áp dụng như mọi convention khác:**")
+            lines += [f"- {le.text}" for le in pinned]
+            lines.append("")
+        if learned:
+            lines.append(
+                "**Máy tự rút từ review / rework của run trước** — suy luận từ một lần "
+                "hỏng, không phải quy tắc đã chốt; cân nhắc theo ngữ cảnh:"
+            )
+            lines += [
+                f"- {f'(đã gặp {le.count} lần) ' if le.count > 1 else ''}{le.text}"
+                for le in learned
+            ]
+            lines.append("")
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return ""
+    return (
+        "# Bài học từ các run trước (AI-Autopilot tự ghi)\n\n"
+        "> ⚠️ **File này do máy sinh ra và ghi đè.** Sửa tay ở đây sẽ mất ở lần ghi kế "
+        "tiếp — sửa trên trang Learning của dashboard (`/dashboard/learning`).\n"
+        "> Nguồn: `.autopilot/lessons/*.md`\n\n"
+        + "\n".join(blocks)
+    )
+
+
+def sync_memory(workspace: str) -> bool:
+    """Write the rule file (and the CLAUDE.md pointer). Best-effort, never raises.
+
+    Returns True when the file is now on disk. An empty store removes it rather than
+    leaving an empty rule for the agent to read and wonder about.
+    """
+    if not workspace:
+        return False
+    body = render_memory(workspace)
+    path = memory_path(workspace)
+    try:
+        if not body:
+            path.unlink(missing_ok=True)
+            _link_from_claude_md(workspace, present=False)
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # newline="" so Python translates nothing: this file is committed, and a machine
+        # that rewrote it with its own platform's endings would show the whole file as
+        # changed on the next machine that touched it.
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(body)
+    except OSError:
+        return False
+    _link_from_claude_md(workspace, present=True)
+    return True
+
+
+def _link_from_claude_md(workspace: str, *, present: bool) -> None:
+    """Keep one pointer line to the rule file inside CLAUDE.md, between markers.
+
+    The workspace's other rules are discoverable because CLAUDE.md indexes them, so a
+    generated rule that nothing points at is relying on undocumented auto-loading. The
+    markers make the edit idempotent and reversible: this module only ever replaces what
+    is between them, and never reads or rewrites a byte of the rest of the file.
+    """
+    path = Path(workspace) / "CLAUDE.md"
+    line = (
+        "- `.claude/rules/autopilot-lessons.md` — bài học AI-Autopilot rút ra từ "
+        "review / rework của các run trước (máy tự ghi, sửa ở `/dashboard/learning`)."
+    )
+    try:
+        if not path.is_file():
+            return                      # no CLAUDE.md to point from; the rule file stands alone
+        # newline="" on BOTH ends, so Python translates nothing in either direction.
+        # Reading with the default and writing it back turned this file's 338 LF endings
+        # into 342 CRLF — measured — which in a tracked 20KB file is every line showing
+        # as changed, from a tool that was only supposed to add one pointer.
+        with open(path, encoding="utf-8", newline="") as fh:
+            text = fh.read()
+        eol = "\r\n" if "\r\n" in text else "\n"      # follow the file, don't impose
+        block = f"{_CLAUDE_MD_START}{eol}{line}{eol}{_CLAUDE_MD_END}"
+        start, end = text.find(_CLAUDE_MD_START), text.find(_CLAUDE_MD_END)
+        has = start != -1 and end > start
+        if not present:
+            if not has:
+                return
+            text = text[:start].rstrip("\r\n") + text[end + len(_CLAUDE_MD_END):]
+        elif has:
+            if text[start:end + len(_CLAUDE_MD_END)] == block:
+                return                  # already right — do not touch the file's mtime
+            text = text[:start] + block + text[end + len(_CLAUDE_MD_END):]
+        else:
+            text = text.rstrip("\r\n") + eol + eol + block + eol
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+    except OSError:
+        return
 
 
 def _capped(items: list[Lesson]) -> list[Lesson]:
@@ -401,6 +566,9 @@ def clear(workspace: str, repo: str) -> bool:
         _lessons_path(workspace, repo).unlink()
     except OSError:
         return False
+    # The only mutation that does not go through _write, so it has to say so itself —
+    # otherwise "forget this repo" leaves the forgotten lines in front of the agent.
+    sync_memory(workspace)
     return True
 
 

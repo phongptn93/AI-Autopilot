@@ -1590,15 +1590,43 @@ class Settings(BaseSettings):
     # Blast-radius cap: block a run that changes more files than this (0 = off).
     policy_max_files_changed: int = 0
 
+    # ── Self-update ──
+    # Ask GitHub whether a newer release exists, and offer ONE button to take it. Never
+    # applies on its own: a bad release that can install itself walks across a fleet in
+    # minutes while nobody is watching, and the cost of asking is one click.
+    update_check_enabled: bool = True
+    update_repo: str = "phongptn93/AI-Autopilot"
+    # Unauthenticated GitHub allows 60 requests/hour/IP. Six hours is far inside that
+    # and still notices a release the same working day.
+    update_check_interval_hours: int = 6
+    # How long an update waits for work in flight before giving up. It gives up rather
+    # than interrupting: a restart marks every running execution FAILED with
+    # "Interrupted (process restarted)", so cutting in both loses the run and writes a
+    # lie into its history.
+    update_drain_timeout_minutes: int = 60
+    # How the process comes back. "auto" picks per platform — os.execv on POSIX, a
+    # detached respawn on Windows, where there is no real exec and the CRT emulation
+    # changes the pid out from under whatever launched us. "exit" is for a supervisor
+    # (systemd, docker restart:unless-stopped) that will start it again itself.
+    update_restart_mode: str = "auto"      # auto | exec | spawn | exit
+
     # ── Retrospective learning loop ──
-    # Capture auto-review findings per repo and inject the recent ones into the next
-    # run's brief, so the agent stops repeating flagged mistakes. Opt-in — off = the
-    # brief is unchanged and nothing is written.
+    # Capture auto-review findings per repo and write them into the workspace's Claude
+    # memory (`.claude/rules/autopilot-lessons.md`), so the agent stops repeating
+    # flagged mistakes. Opt-in — off = nothing is written.
     learning_loop_enabled: bool = False
-    # How many of the most recent lessons are injected into a brief. Too few and the
-    # loop forgets; too many and the brief drowns in old findings. 0 = record only
-    # (keep learning, stop injecting).
-    lessons_max_injected: int = 8
+    # How many lessons are ALSO prepended to every brief. 0 (the default) = none: the
+    # lessons live in the workspace's Claude memory, which the agent already loads
+    # itself (`setting_sources=["user","project","local"]`) and draws on when a task
+    # makes them relevant.
+    #
+    # It used to default to 8, and that was the weaker channel in every respect that
+    # matters: it ignored whether a lesson had anything to do with the task at hand, it
+    # capped the whole store at eight slots a burst of machine noise could take, and it
+    # lived in a dotfolder nobody reviews. Raise it above 0 only to FORCE lines in front
+    # of the model regardless of relevance — a blunt instrument, kept for when the
+    # memory file is not being honoured and you need to prove it.
+    lessons_max_injected: int = 0
 
     # ── Auto-test-gate ──
     # Run the target repo's test suite in the worktree after the agent edits but

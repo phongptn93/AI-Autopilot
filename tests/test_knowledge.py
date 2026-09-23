@@ -188,8 +188,12 @@ def test_the_page_offers_a_way_in_and_shows_what_the_brief_will_carry(tmp_path):
 
         page = client.get("/dashboard/learning").text
         assert "Validate every DTO" in page
-        assert "Brief kế tiếp sẽ mang" in page          # the output, not just inventory
-        assert "bạn nhập" in page                        # provenance is on the row
+        # The output, not just the inventory. That output is now the workspace's own
+        # Claude memory rather than a block prepended to every brief — the page names
+        # the file the agent reads.
+        assert "Agent đọc gì" in page
+        assert "autopilot-lessons.md" in page
+        assert "bạn nạp" in page                         # provenance is on the row
     stored = lessons.entries(str(tmp_path), lessons.SHARED_BUCKET)
     assert len(stored) == 2 and all(le.authored for le in stored)
 

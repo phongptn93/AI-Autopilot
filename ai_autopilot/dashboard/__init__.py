@@ -180,6 +180,19 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                                  "không ghi đè nữa, và bạn sửa được ngay tại chỗ."),
     "setting_released": ("green", "🛰 Đã trả thiết lập đó về cho trung tâm — lần đồng bộ "
                                   "tới máy này sẽ nhận lại giá trị chung."),
+    # ⬆️ Self-update. "Started" is not "done": the process is about to go away and come
+    # back, so the banner has to describe a thing in progress, not a result.
+    "update_started": ("green", "⬆️ Đang cập nhật. Máy sẽ ngừng nhận việc mới, đợi các "
+                                "task hiện tại xong rồi cài và khởi động lại — trang này "
+                                "sẽ mất kết nối một lát, tải lại sau ít phút."),
+    "update_none": ("amber", "Không có bản mới nào để cài."),
+    "update_busy": ("amber", "Một lượt cập nhật đang chạy rồi."),
+    "update_blocked_editable": ("amber", "Bản cài này là <code>pip install -e .</code> từ "
+                                         "một checkout git — cập nhật bằng "
+                                         "<code>git pull</code>, không phải bằng wheel."),
+    "update_blocked_container": ("amber", "Đang chạy trong container: image mới là việc "
+                                          "của orchestrator. Mọi thứ pip ghi vào đây sẽ "
+                                          "mất ở lần khởi động lại kế tiếp."),
     # Sync outcomes are split three ways on purpose: "nothing changed" is a SUCCESS and
     # the most common one, and reporting it with the same green tick as "six settings
     # were rewritten" teaches people to stop reading the banner.
@@ -754,6 +767,7 @@ def create_dashboard_router() -> APIRouter:
         # the current choice. Resolved here rather than per-route so a page can never
         # render the shell with a selector that disagrees with its own data.
         all_workspaces = workspaces_mod.resolve(cfg) if cfg else []
+        updater = getattr(request.app.state, "updater", None)
         current = selected_workspace(request)
         if current != "all" and not any(w.id == current for w in all_workspaces):
             current = "all"   # a renamed or deleted workspace must not strand the view
@@ -770,6 +784,15 @@ def create_dashboard_router() -> APIRouter:
                 cfg and (cfg.dashboard_auth_password_hash or cfg.dashboard_auth_token)
             ),
             "version": request.app.version,  # single source of truth: FastAPI(version=...)
+            # A newer release, surfaced on EVERY page rather than on one somebody has to
+            # think to visit. Read from the service's cached result — never a network
+            # call on a page load. `update_*` stays falsy when the checker is off or has
+            # not run, so the banner simply is not there.
+            "update_ready": bool(updater and updater.available),
+            "update_version": (updater.latest.version if updater and updater.latest else ""),
+            "update_notes": (updater.latest.notes_url if updater and updater.latest else ""),
+            "update_block": (updater.blocked() if updater and updater.available else ""),
+            "update_job": (updater.job if updater else None),
             # The Fleet page only means anything on the central VM — a worker's own
             # table is empty by definition, and a link to an empty page reads as a bug.
             "fleet_role": getattr(cfg, "fleet_role", "") if cfg else "",
@@ -2803,6 +2826,36 @@ def create_dashboard_router() -> APIRouter:
             ),
         }
 
+    @router.post("/update")
+    async def apply_update(request: Request):
+        """Take the newer release. One button, never automatic.
+
+        Returns immediately and does the work in a background task: draining can take
+        the better part of an hour, and a request that hangs that long is a request the
+        browser gives up on — after which nobody can tell whether it is still going.
+        """
+        c: Container = request.app.state.container
+        updater = getattr(request.app.state, "updater", None)
+        if updater is None or not updater.available:
+            return _flash("/dashboard/settings", "update_none")
+        if updater.job.running:
+            return _flash("/dashboard/settings", "update_busy")
+        block = updater.blocked()
+        if block:
+            return _flash("/dashboard/settings", f"update_blocked_{block}")
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="update.requested",
+            target=updater.latest.version if updater.latest else "",
+            detail=f"from {request.app.version}",
+        )
+        # Detached on purpose — see the docstring. Held on app.state so it is not
+        # garbage-collected mid-flight.
+        request.app.state.update_task = asyncio.create_task(
+            updater.apply(getattr(request.app.state, "poller", None)),
+            name="update-apply",
+        )
+        return _flash("/dashboard/settings", "update_started")
+
     @router.post("/fleet/sync")
     async def fleet_sync(request: Request):
         """Beat now, instead of waiting out the interval.
@@ -2985,6 +3038,12 @@ def create_dashboard_router() -> APIRouter:
         # biggest block on the page was half duplicates, and the reader had to diff three
         # near-identical code blocks by eye to find the part that actually differed.
         # Split once here: what every brief carries, then what each repo adds on top.
+        # What the agent actually reads. The lessons are written into the workspace's
+        # Claude memory, which the run loads by itself via setting_sources — so THIS is
+        # the primary channel now, and the brief injection below is the escape hatch.
+        memory_file = str(lessons_mod.memory_path(workspace)) if workspace else ""
+        memory_body = lessons_mod.render_memory(workspace) if workspace else ""
+        memory_live = lessons_mod.memory_is_live(workspace)
         shared_lines = preview.get(lessons_mod.SHARED_BUCKET, [])
         shared_keys = {lessons_mod.normalize(line) for line in shared_lines}
         preview_own = {
@@ -3033,6 +3092,8 @@ def create_dashboard_router() -> APIRouter:
                 repos=repos, groups=groups, injected_from=injected_from,
                 preview=preview, shared_bucket=lessons_mod.SHARED_BUCKET,
                 shared_lines=shared_lines, preview_own=preview_own,
+                memory_file=memory_file, memory_body=memory_body,
+                memory_live=memory_live,
                 total=sum(len(rows) for _, rows in groups),
                 authored=authored,
                 # Repeats are collapsed now, so this counts the occurrences BEHIND the
@@ -3305,6 +3366,33 @@ def create_dashboard_router() -> APIRouter:
         # Out-of-the-box values, so "is this configured" can mean "did somebody decide
         # it" rather than "is it non-empty" — see settings_form.has_value.
         defaults = settings_form.model_defaults(cfg)
+        # Which settings this machine cannot run without, and which of them are still
+        # blank — both taken from the SETUP WIZARD's own step list rather than from a
+        # second hand-written list here. The wizard already answers "which eight fields
+        # does this role need, in what order" (_setup_flow), so deriving from it means
+        # the two surfaces cannot drift: a step added there shows up here by itself.
+        #
+        # Why the page needs this at all: 180 fields across 23 sections is the right
+        # shape for changing ONE thing and the wrong shape for the first hour. Opening
+        # Settings on a fresh machine said nothing about where to start.
+        by_key = {f.key: f for f in settings_form.FIELDS}
+        setup_steps = _setup_flow(_setup_role(cfg), _setup_source(request, cfg))
+        essential_keys = [
+            key for _sid, _title, keys in setup_steps for key in keys if key in by_key
+        ]
+
+        def _step_done(keys: tuple[str, ...]) -> bool:
+            return all(
+                settings_form.has_value(by_key[k], current, secrets_set, defaults)
+                for k in keys if k in by_key
+            )
+
+        # Steps carrying no settings keys of their own (the tracker question, the Jira
+        # step — it writes a workspace, not a root setting) cannot be judged from the
+        # settings store, so they are not counted rather than guessed at.
+        setup_todo = [
+            title for _sid, title, keys in setup_steps if keys and not _step_done(keys)
+        ]
         # Read-only overview of every ADO tag the autopilot writes/reads — so the
         # whole tag vocabulary is visible in one place (not scattered across fields).
         tag_overview = [
@@ -3399,6 +3487,12 @@ def create_dashboard_router() -> APIRouter:
                     1 for f in settings_form.FIELDS
                     if settings_form.owner_of(f.key, cfg) == settings_form.OWNER_CENTRAL
                 ),
+                essential_keys=essential_keys,
+                setup_todo=setup_todo,
+                changed_keys=[
+                    f.key for f in settings_form.FIELDS
+                    if f.key in defaults and getattr(cfg, f.key, None) != defaults[f.key]
+                ],
                 is_worker=(cfg.fleet_role or "") == fleet_mod.ROLE_WORKER,
                 restart_keys=settings_form.RESTART_REQUIRED,
                 flash=flash,

@@ -595,3 +595,49 @@ def test_the_channels_a_team_shares_still_reach_a_worker():
     )
     assert document.get("teams_webhook_url") == "https://hook"
     assert document.get("smtp_host") == "smtp.x"
+
+
+# ── Settings: lead with the essentials, not with all 180 ─────────────────────
+
+def test_an_unconfigured_machine_is_told_which_steps_remain(tmp_path):
+    """180 fields across 23 sections is the right shape for changing ONE thing and the
+    wrong shape for the first hour — nothing on the page said where to start."""
+    settings = Settings(
+        dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 'todo.db'}",
+        dashboard_auth_password_hash="", dashboard_auth_token="",
+    )
+    with TestClient(create_app(settings)) as client:
+        body = client.get("/dashboard/settings").text
+    assert "chưa cấu hình xong" in body
+    assert "/dashboard/setup" in body                  # and where to go about it
+
+
+def test_the_essential_list_is_the_wizard_s_own_and_cannot_drift(tmp_path):
+    """Derived from `_setup_flow`, not a second hand-written list beside it: a step
+    added to setup has to show up here by itself, or the two surfaces disagree about
+    what this machine needs."""
+    settings = Settings(
+        dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 'ess.db'}",
+        dashboard_auth_password_hash="", dashboard_auth_token="",
+    )
+    with TestClient(create_app(settings)) as client:
+        body = client.get("/dashboard/settings").text
+    # The ADO connection step's keys are essential on a standalone ADO machine.
+    for key in ("ado_organization", "ado_project", "workspace_directory"):
+        assert f'"{key}"' in body, key
+    # …and something that is plainly not part of setup is not.
+    assert '"zalo_recipient_user_id"' not in body.split("__settingScopes")[1][:4000]
+
+
+def test_the_scope_filter_hides_nothing_from_the_form(tmp_path):
+    """The filter is display-only. Every field stays in the POST body, so saving while
+    a scope is active cannot silently blank the fields it was not showing."""
+    settings = Settings(
+        dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 'scope.db'}",
+        dashboard_auth_password_hash="", dashboard_auth_token="",
+    )
+    with TestClient(create_app(settings)) as client:
+        body = client.get("/dashboard/settings").text
+    # A non-essential field still has its input rendered inside the form.
+    assert 'name="zalo_recipient_user_id"' in body
+    assert 'id="zalo_recipient_user_id"' in body

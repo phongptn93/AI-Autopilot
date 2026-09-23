@@ -32,6 +32,19 @@
     border-radius:10px;padding:11px 15px;margin:0 0 16px;font-size:13px;
     color:var(--text-muted);background:var(--bg-card);line-height:1.6}
   .own-split b{color:var(--text)}
+  .setup-todo{border-left-color:var(--amber,#f5a623);display:flex;flex-wrap:wrap;
+    align-items:center;gap:8px}
+  .todo-chip{border:1px solid var(--amber,#f5a623);color:var(--amber,#f5a623);
+    border-radius:999px;padding:1px 9px;font-size:11.5px;font-weight:650}
+  .setup-go{margin-left:auto;text-decoration:none;white-space:nowrap}
+  /* Which slice of the page to show. Sits under the section rail, not inside it: the
+     rail is navigation ("jump to Fleet"), this is scope ("how much of it do I see"). */
+  .set-scope{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 14px}
+  .scope-seg{display:flex;border:1px solid var(--border);border-radius:20px;overflow:hidden}
+  .scope-seg button{background:transparent;border:none;color:var(--text-muted);
+    font:inherit;font-size:12.5px;font-weight:600;padding:6px 14px;cursor:pointer}
+  .scope-seg button.on{background:var(--accent-bg);color:var(--accent-hover)}
+  .scope-why{font-size:12px;color:var(--text-dim)}
   .set-empty{padding:26px 20px;text-align:center;color:var(--text-muted);font-size:13px}
 
   /* tags overview */
@@ -326,6 +339,17 @@
   </div>
 </div>
 
+{# A machine that has not finished setup should be told where to start, not handed 180
+   fields. Not a redirect: somebody who knows what they want must still be able to open
+   this page and change one thing. The step list comes from the wizard itself. #}
+{% if setup_todo %}
+<div class="own-split setup-todo">
+  <b>Máy này chưa cấu hình xong.</b> Còn {{ setup_todo|length }} bước:
+  {% for t in setup_todo %}<span class="todo-chip">{{ t }}</span>{% endfor %}
+  <a class="btn-save setup-go" href="/dashboard/setup">Bắt đầu cài đặt →</a>
+</div>
+{% endif %}
+
 {# On a worker most of this page is put away behind the per-section toggles. Say so once,
    here, rather than leaving the reader to discover it section by section. #}
 {% if is_worker and owned_central %}
@@ -348,6 +372,25 @@
       <span class="n" id="set-find-n"></span>
     </label>
   </div>
+
+  {# Which slice of 180 to open on. Same control, same wording as the Configuration page,
+     because it answers the same question there. "Thiết yếu" is the wizard's own key list
+     (see essential_keys in the route), so it cannot drift from what setup asks for. #}
+  <div class="set-scope">
+    <div class="scope-seg">
+      <button type="button" data-scope="need">Thiết yếu ({{ essential_keys|length }})</button>
+      <button type="button" data-scope="changed">Đã đổi ({{ changed_keys|length }})</button>
+      <button type="button" data-scope="all">Tất cả ({{ sections|map(attribute=1)|map('length')|sum }})</button>
+    </div>
+    <span class="scope-why" id="scope-why"></span>
+  </div>
+  <script>
+    window.__settingScopes = {
+      need: {{ essential_keys|tojson }},
+      changed: {{ changed_keys|tojson }},
+      start: {{ ('need' if setup_todo else 'changed')|tojson }}
+    };
+  </script>
   <div class="card set-empty hide" id="set-none">No setting matches that.</div>
 
   <!-- Allowed repositories -->
@@ -843,19 +886,35 @@
       el.__hay = ((el.dataset.k || '') + ' ' + el.textContent).toLowerCase().replace(/\s+/g, ' ');
     });
 
+    // ── Scope: how much of the page to show at all ──
+    // Folded into the SAME pass as the search rather than added as a second filter —
+    // two independent filters both toggling `.hide` fight over it, and whichever ran
+    // last wins. One rule, one place.
+    var scopes = window.__settingScopes || { need: [], changed: [], start: 'all' };
+    var scopeBtns = Array.prototype.slice.call(document.querySelectorAll('.scope-seg button'));
+    var why = document.getElementById('scope-why');
+    var scope = scopes.start || 'all';
+    var WHY = {
+      need: 'Những thiết lập máy không chạy được nếu thiếu — lấy từ chính các bước Cài đặt ban đầu.',
+      changed: 'Những thiết lập máy này đang khác mặc định.',
+      all: ''
+    };
+    var inScope = {};
+    ['need', 'changed'].forEach(function (name) {
+      inScope[name] = {};
+      (scopes[name] || []).forEach(function (k) { inScope[name][k] = true; });
+    });
+
     function apply() {
       var q = box.value.trim().toLowerCase();
       nav.classList.toggle('searching', !!q);
-      if (!q) {
-        fields.forEach(function (el) { el.classList.remove('hide'); });
-        cards.forEach(function (c) { c.classList.remove('hide'); });
-        empty.classList.add('hide');
-        count.textContent = '';
-        return;
-      }
+      // A search is an explicit request for a field, so it overrides the scope: being
+      // told a setting "does not exist" because it happens to sit at its default is the
+      // page failing at the one thing a search is for.
+      var limit = (!q && scope !== 'all') ? inScope[scope] : null;
       var hits = 0;
       fields.forEach(function (el) {
-        var on = el.__hay.indexOf(q) !== -1;
+        var on = (!q || el.__hay.indexOf(q) !== -1) && (!limit || !!limit[el.dataset.k]);
         el.classList.toggle('hide', !on);
         if (on) hits++;
       });
@@ -864,10 +923,15 @@
         // either, so a section whose only matches are hidden must not claim one.
         c.classList.toggle('hide', !c.querySelector('.field[data-k]:not(.hide):not(.off)'));
       });
-      empty.classList.toggle('hide', hits > 0);
-      count.textContent = hits + (hits === 1 ? ' match' : ' matches');
+      scopeBtns.forEach(function (b) { b.classList.toggle('on', b.dataset.scope === scope); });
+      why.textContent = q ? '' : (WHY[scope] || '');
+      empty.classList.toggle('hide', hits > 0 || (!q && scope === 'all'));
+      count.textContent = q ? hits + (hits === 1 ? ' match' : ' matches') : '';
     }
 
+    scopeBtns.forEach(function (b) {
+      b.addEventListener('click', function () { scope = b.dataset.scope; apply(); });
+    });
     box.addEventListener('input', apply);
     // Esc clears rather than blurring — the filter is the thing in the way.
     box.addEventListener('keydown', function (e) {

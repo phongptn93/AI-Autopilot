@@ -1030,6 +1030,53 @@ MACHINE_LOCAL = frozenset({
     # bot with no credentials and fails in a loop.
     "allowed_repos",
     "default_workspace_name",
+    # The rest of the "Workspace & Repository" section. Every other thing describing
+    # this machine's checkout is already local — `workspace_directory`, `workspaces`,
+    # `workspace_map`, `repos`, `allowed_repos`, `default_workspace_name` — so the
+    # section had one editable field and two the central quietly put back on the next
+    # beat, which is the single most confusing state a settings page can be in: you
+    # change a value, it saves, and minutes later it is the old one again.
+    #
+    # `base_branch` is "the branch new feature branches are cut from", i.e. a property
+    # of the clone sitting on THIS disk, and a workspace entry already overrides it
+    # locally — so the flat key was the only path by which a central could contradict
+    # a machine about its own repo. It is not cosmetic: StateSync._check_deploys asks
+    # ADO for builds on `deploy_branch or base_branch`, so a central serving the wrong
+    # branch name makes the deploy watcher find nothing and every item sits in its
+    # merge state forever, reported only as one "deploy stage found no successful
+    # build" line at info level.
+    #
+    # `repo_descriptions` describes the repos in this machine's workspace, and the list
+    # of those repos was already local — a central's descriptions are for repos a
+    # worker may not even have cloned.
+    "base_branch",
+    "repo_descriptions",
+    # Who reviews this machine's pull requests, and who may drive this machine. These
+    # name PEOPLE, and a central naming them for everybody is the one thing it is worst
+    # placed to decide.
+    #
+    # `pr_extra_reviewer_ids` holds ADO identity GUIDs, and a GUID belongs to ONE
+    # organization: a machine pointed at a second org cannot even resolve the ids the
+    # central serves it, so every PR it opens quietly fails to add the reviewers the
+    # settings page says it adds. The bot's own identity (`pr_bot_identity`) was already
+    # local for exactly that reason — the reviewers it adds were not, which is the same
+    # fact half-applied.
+    #
+    # The switch and its modifier go with the list, not against it. Leaving them shared
+    # is the pattern already described above for the Teams bot: a central turning on
+    # "add the assignee" and "mark them required" on a machine whose reviewer ids do not
+    # resolve blocks that machine's PRs on people ADO cannot find.
+    "pr_extra_reviewer_ids", "pr_add_assignee_as_reviewer", "pr_reviewers_required",
+    # Which branches this machine's reviewer tracking watches — branch topology, the
+    # same reason `base_branch` is local.
+    "pr_reviewer_target_branches",
+    # `assignee_trigger_user` is already local and its own help says it is "the OWNER:
+    # the account whose /commands and @mentions this machine obeys". These two are the
+    # rest of that sentence and were being decided elsewhere: `command_users` is who ELSE
+    # may drive this machine, and `auto_transition_assignee` is what the local owner
+    # FALLS BACK TO when it is blank — so leaving it blank on a worker handed the choice
+    # of whose items this machine acts on to the central.
+    "command_users", "auto_transition_assignee",
     "teams_agent_enabled",
     "pr_bot_identity",         # the identity of THIS machine's PAT
     # 💬 Teams bot — the whole section. The bot runs on whichever machine holds the
@@ -1063,11 +1110,20 @@ MACHINE_LOCAL = frozenset({
 # Two audiences, two answers, which is why the single filter had to be split. The fleet
 # document is served over an authenticated endpoint to machines that already hold the
 # shared token; the export is a file that leaves the building.
+#
+# The line inside this group is TRANSPORT versus RECIPIENT. How a machine sends — the
+# Teams Workflows URL, the SMTP server and the account it authenticates as, the Zalo OA
+# token — is team plumbing: identical everywhere, tedious to paste onto each machine,
+# and genuinely the central's to serve. WHO gets the message is not plumbing, it is a
+# person: `email_to` and the Zalo recipient name individuals, and a central serving them
+# means one operator's phone is the one that buzzes for every machine in the fleet, with
+# no way to opt a machine out except by claiming the key. Those two stay with the machine
+# that makes the noise, next to the alert thresholds already there for the same reason.
 FLEET_ONLY_SHARED = frozenset({
     "teams_webhook_url", "teams_webhook_urls", "teams_webhook_channels",
     "smtp_host", "smtp_port", "smtp_user", "smtp_password",
-    "email_from", "email_to",
-    "zalo_oa_access_token", "zalo_recipient_user_id",
+    "email_from",
+    "zalo_oa_access_token",
 })
 
 # What a downloadable/shareable config leaves out: secrets, this host's identity, and

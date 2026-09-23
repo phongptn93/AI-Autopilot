@@ -493,3 +493,105 @@ def test_the_ado_step_moves_to_the_end_on_the_jira_branch(tmp_path):
     assert "Kết nối Jira" in jira
     assert jira[-2] == "Kết nối Azure DevOps · tuỳ chọn"
     assert jira.index("Kết nối Jira") < jira.index("Mã nguồn") < len(jira) - 2
+
+
+def test_the_workspace_section_belongs_entirely_to_the_machine():
+    """One editable field beside two the central put back is the worst state a settings
+    page can be in: you change a value, it saves, and minutes later it is the old one.
+
+    Everything else describing this machine's checkout was already local —
+    `workspace_directory`, `workspaces`, `workspace_map`, `repos`, `allowed_repos`,
+    `default_workspace_name` — so `base_branch` and `repo_descriptions` were the only
+    path by which a central could contradict a machine about its own repo.
+    """
+    worker = Settings(fleet_role="worker", fleet_central_url="http://c", fleet_token="t")
+    section = [f for f in sf.FIELDS if f.section == "Workspace & Repository"]
+    assert section, "the section was renamed — update this test, do not delete it"
+    central = [f.key for f in section if sf.owner_of(f.key, worker) == sf.OWNER_CENTRAL]
+    assert not central, f"a central still overwrites this machine's own checkout: {central}"
+
+
+def test_base_branch_is_local_because_the_deploy_watcher_queries_it():
+    """StateSync._check_deploys asks ADO for builds on `deploy_branch or base_branch`.
+
+    A central serving a branch name that does not exist in this machine's repo makes
+    that query return nothing, so every merged item sits in its merge state forever and
+    the only trace is one info-level "deploy stage found no successful build".
+    """
+    assert "base_branch" in sf.MACHINE_LOCAL
+    document, _ = fleet.config_document(Settings(base_branch="development"))
+    assert "base_branch" not in document
+
+
+def test_nothing_that_names_a_person_is_served_by_the_central():
+    """A central deciding WHO reviews your PRs, and WHO may drive your machine, is the
+    one class of setting it is worst placed to decide.
+
+    `pr_extra_reviewer_ids` holds ADO identity GUIDs, and a GUID belongs to ONE
+    organization — a machine pointed at a second org cannot resolve the ids it is
+    handed, so every PR it opens silently fails to add the reviewers the settings page
+    claims it adds. The bot's own identity was already local; the humans it invites
+    were not.
+    """
+    worker = Settings(fleet_role="worker", fleet_central_url="http://c", fleet_token="t")
+    for key in (
+        "pr_extra_reviewer_ids",        # ADO identity GUIDs of real people
+        "pr_add_assignee_as_reviewer",  # the switch over that list
+        "pr_reviewers_required",        # …and whether it BLOCKS completing the PR
+        "command_users",                # who else may drive this machine
+        "auto_transition_assignee",     # whose items this machine acts on
+    ):
+        assert sf.owner_of(key, worker) == sf.OWNER_MACHINE, key
+
+
+def test_a_setting_and_the_switch_over_it_have_the_same_owner():
+    """The repeated defect in this file's history: a list goes local, its ON switch
+    stays shared, and the central turns on a feature whose data the machine does not
+    have. Checked as a rule rather than as another hand-written list."""
+    pairs = [
+        # (the data, the switch that acts on it)
+        ("pr_extra_reviewer_ids", "pr_add_assignee_as_reviewer"),
+        ("pr_extra_reviewer_ids", "pr_reviewers_required"),
+        ("assignee_trigger_user", "command_users"),
+        ("assignee_trigger_user", "auto_transition_assignee"),
+        ("workspace_directory", "base_branch"),
+        ("repos", "repo_descriptions"),
+    ]
+    worker = Settings(fleet_role="worker", fleet_central_url="http://c", fleet_token="t")
+    for data, switch in pairs:
+        assert sf.owner_of(data, worker) == sf.owner_of(switch, worker), (
+            f"{switch!r} is decided somewhere other than {data!r}, the thing it acts on"
+        )
+
+
+def test_the_fleet_serves_the_transport_but_not_the_person_it_reaches():
+    """How a machine sends is plumbing; WHO it wakes up is a person.
+
+    The Workflows URL, the SMTP server and the account it authenticates as are identical
+    across a fleet and tedious to paste onto every machine — the central is the right
+    place for them. `email_to` and the Zalo recipient are not plumbing: served centrally,
+    one operator's phone buzzes for every machine in the fleet and the only way to opt a
+    machine out is to claim the key.
+    """
+    worker = Settings(fleet_role="worker", fleet_central_url="http://c", fleet_token="t")
+    for transport in ("teams_webhook_url", "smtp_host", "smtp_user",
+                      "email_from", "zalo_oa_access_token"):
+        assert sf.owner_of(transport, worker) == sf.OWNER_CENTRAL, transport
+    for recipient in ("email_to", "zalo_recipient_user_id"):
+        assert sf.owner_of(recipient, worker) == sf.OWNER_MACHINE, recipient
+
+
+def test_a_recipient_is_dropped_on_arrival_too():
+    """Both ends, like every other machine-local key: a central on an older build that
+    still sends these must not be able to write them."""
+    assert fleet.strip_local({"email_to": "ops@x.com", "zalo_recipient_user_id": "u1"}) == {}
+
+
+def test_the_channels_a_team_shares_still_reach_a_worker():
+    """The point of the fleet document is that nobody pastes a webhook onto ten machines
+    — splitting the recipients out must not take the plumbing with them."""
+    document, _ = fleet.config_document(
+        Settings(fleet_role="central", teams_webhook_url="https://hook", smtp_host="smtp.x")
+    )
+    assert document.get("teams_webhook_url") == "https://hook"
+    assert document.get("smtp_host") == "smtp.x"

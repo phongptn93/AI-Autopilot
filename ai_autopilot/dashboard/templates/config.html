@@ -17,10 +17,18 @@
   .cfg-bar input:focus { outline:none; border-color:var(--accent); }
   .cfg-count { font-size:12px; color:var(--text-dim); margin-left:auto; white-space:nowrap; }
 
-  .cfg-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(380px,1fr)); gap:16px;
-    align-items:start; }
+  /* Multi-column, not grid. A grid sizes each ROW by its tallest card, so a two-row card
+     sitting beside a five-row one left a hole the size of the difference — three of them
+     down the page, which is what the eye lands on first. Columns let each card flow up
+     under the one above it instead. The cost is reading order: top-to-bottom per column
+     rather than left-to-right. Acceptable here because the cards are independent — no
+     card means anything different for having been read after another. */
+  .cfg-grid { column-width:380px; column-gap:16px; }
   .cfg-card { background:var(--bg-card); border:1px solid var(--border); border-radius:14px;
-    overflow:hidden; box-shadow:var(--shadow-sm); }
+    overflow:hidden; box-shadow:var(--shadow-sm);
+    /* `break-inside` alone is not enough: without a block-level inline-block some
+       browsers still split a card across the column boundary. */
+    break-inside:avoid; display:inline-block; width:100%; margin-bottom:16px; }
   .cfg-card h3 { font-size:13.5px; font-weight:650; padding:12px 18px;
     border-bottom:1px solid var(--border-soft); display:flex; align-items:baseline; gap:9px; }
   .cfg-card h3 .n { margin-left:auto; font-size:11.5px; font-weight:600; color:var(--text-dim); }

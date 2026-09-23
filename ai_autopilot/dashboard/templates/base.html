@@ -79,6 +79,20 @@
         .page-header h2 { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
         .page-header p { color: var(--text-muted); font-size: 13.5px; margin-top: 3px; }
 
+        /* The update bar. Accent, not red: a new release is news, not a fault — the
+           red variant is reserved for an update that actually failed. */
+        .up-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+            border: 1px solid var(--border); border-left: 3px solid var(--accent);
+            background: var(--bg-card); border-radius: 10px; padding: 10px 15px;
+            margin-bottom: 18px; font-size: 13px; color: var(--text-muted); }
+        .up-bar b { color: var(--text); }
+        .up-bar.busy { border-left-color: var(--amber); }
+        .up-bar.bad { border-left-color: var(--red); }
+        .up-spacer { flex: 1 1 auto; }
+        .up-dim { color: var(--text-dim); font-size: 12.5px; }
+        .up-link { color: var(--accent-hover); text-decoration: none; font-size: 12.5px; }
+        .up-link:hover { text-decoration: underline; }
+
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-bottom: 24px; }
         .stat-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
             padding: 18px 20px; box-shadow: var(--shadow-sm); transition: border-color .12s, transform .08s; }
@@ -280,6 +294,40 @@
         </div>
     </aside>
     <main class="main">
+        {# A newer release, on every page rather than on one somebody has to think to
+           visit. Only rendered when there IS one — a machine that is up to date carries
+           no chrome for this at all. #}
+        {% if update_job and update_job.running %}
+        <div class="up-bar busy">
+            <b>⬆️ Đang cập nhật lên v{{ update_job.target }}</b>
+            <span>{{ update_job.detail }}</span>
+            <span class="up-dim">Máy sẽ khởi động lại — trang mất kết nối một lát.</span>
+        </div>
+        {% elif update_job and update_job.state == 'failed' %}
+        <div class="up-bar bad">
+            <b>⬆️ Cập nhật thất bại</b>
+            <span>{{ update_job.detail }}</span>
+            <span class="up-dim">Máy vẫn đang chạy bản cũ (v{{ version }}).</span>
+        </div>
+        {% elif update_ready %}
+        <div class="up-bar">
+            <b>⬆️ Có bản v{{ update_version }}</b>
+            <span>máy này đang chạy v{{ version }}</span>
+            {% if update_notes %}<a href="{{ update_notes }}" target="_blank"
+               rel="noopener" class="up-link">Xem có gì mới ↗</a>{% endif %}
+            <span class="up-spacer"></span>
+            {% if update_block == 'editable' %}
+            <span class="up-dim">Bản cài từ checkout git — cập nhật bằng <code>git pull</code>.</span>
+            {% elif update_block == 'container' %}
+            <span class="up-dim">Chạy trong container — image mới là việc của orchestrator.</span>
+            {% else %}
+            <form method="post" action="/dashboard/update" style="margin:0"
+                  onsubmit="return confirm('Cập nhật lên v{{ update_version }}?\n\nMáy sẽ ngừng nhận việc mới, đợi các task đang chạy xong, rồi cài và khởi động lại.');">
+                <button type="submit" class="btn-save">Cập nhật ngay</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
         {% block content %}{% endblock %}
     </main>
 </div>

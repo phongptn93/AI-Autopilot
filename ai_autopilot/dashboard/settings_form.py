@@ -759,6 +759,25 @@ _BASE_FIELDS: tuple[Field, ...] = (
     Field("fleet_offline_after_minutes", "↳ Coi là offline sau (phút)", "int", "🛰 Fleet",
           "Trung tâm: máy im lặng lâu hơn mức này sẽ hiện đỏ trên trang Fleet.",
           show_when_key="fleet_role", show_when_values=("central",)),
+    # ── ⬆️ Cập nhật ──
+    Field("update_check_enabled", "⬆️ Kiểm tra bản mới", "bool", "⬆️ Cập nhật",
+          "Hỏi GitHub Releases xem có bản mới hơn không, và hiện một nút để cập nhật. "
+          "KHÔNG bao giờ tự cài — luôn cần bạn bấm. Tắt = không hỏi, không hiện gì."),
+    Field("update_repo", "↳ Repo phát hành", "text", "⬆️ Cập nhật",
+          "Dạng owner/repo. Đổi khi bạn chạy một bản fork riêng."),
+    Field("update_check_interval_hours", "↳ Hỏi mỗi (giờ)", "int", "⬆️ Cập nhật",
+          "GitHub cho 60 lượt/giờ/IP với truy cập ẩn danh, nên đừng đặt quá dày. "
+          "Mặc định 6 giờ."),
+    Field("update_drain_timeout_minutes", "↳ Chờ task đang chạy tối đa (phút)", "int",
+          "⬆️ Cập nhật",
+          "Cập nhật sẽ ngừng nhận việc mới rồi đợi các task hiện tại xong. Quá hạn này "
+          "thì HUỶ cập nhật chứ không cắt ngang — restart giữa chừng sẽ đánh mọi run "
+          "đang chạy thành FAILED 'Interrupted (process restarted)'."),
+    Field("update_restart_mode", "↳ Cách khởi động lại", "select", "⬆️ Cập nhật",
+          "auto = tự chọn theo hệ điều hành (khuyến nghị). exec = thay ảnh tiến trình "
+          "(POSIX). spawn = bật tiến trình mới rồi thoát (Windows). exit = chỉ thoát, "
+          "để supervisor (systemd/Docker) dựng lại.",
+          ("auto", "exec", "spawn", "exit")),
     # ── Web / Security ──
     Field("dashboard_auth_password", "Dashboard password", "password", "Web / Security",
           "Password to access this dashboard (HTTP Basic — any username). Stored as a "
@@ -788,6 +807,11 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     "interactive_idle_timeout_minutes": ("execution_mode", ("interactive",)),
     "interactive_resume_on_rework": ("execution_mode", ("interactive",)),
     "claude_session_ttl_hours": ("reuse_claude_session", ("1",)),
+    # ⬆️ Cập nhật — all four are dead weight on a machine that is not checking.
+    "update_repo": ("update_check_enabled", ("1",)),
+    "update_check_interval_hours": ("update_check_enabled", ("1",)),
+    "update_drain_timeout_minutes": ("update_check_enabled", ("1",)),
+    "update_restart_mode": ("update_check_enabled", ("1",)),
     # 🧪 Quality gates
     "lessons_max_injected": ("learning_loop_enabled", ("1",)),
     "test_commands": ("test_gate_enabled", ("1",)),
@@ -1077,6 +1101,12 @@ MACHINE_LOCAL = frozenset({
     # FALLS BACK TO when it is blank — so leaving it blank on a worker handed the choice
     # of whose items this machine acts on to the central.
     "command_users", "auto_transition_assignee",
+    # ⬆️ Self-update — properties of the INSTALL sitting on this disk. Whether this
+    # machine can take a wheel at all depends on how it was installed (editable checkout,
+    # wheel, container) and how it comes back depends on what launched it, so a central
+    # serving one answer would be serving the wrong one to most of the fleet.
+    "update_check_enabled", "update_repo", "update_check_interval_hours",
+    "update_drain_timeout_minutes", "update_restart_mode",
     "teams_agent_enabled",
     "pr_bot_identity",         # the identity of THIS machine's PAT
     # 💬 Teams bot — the whole section. The bot runs on whichever machine holds the

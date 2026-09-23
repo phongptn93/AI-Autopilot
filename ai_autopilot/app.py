@@ -28,6 +28,7 @@ from ai_autopilot.services import (
     ProcessHealthService,
     ReviewerTrackerService,
     StateSyncService,
+    UpdaterService,
 )
 from ai_autopilot.teams_agent import build_agent as build_teams_agent
 from ai_autopilot.teams_agent import cancel_background_work as cancel_teams_background_work
@@ -252,6 +253,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 reviewer_tracker,
                 LoopScheduler(container),
                 ProcessHealthService(container),
+                UpdaterService(container),
                 # Worker machines only: report in and pull the shared config. A central
                 # or standalone install starts nothing, so this is inert by default.
                 *(
@@ -270,6 +272,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # on demand, so it needs the instance, not another copy: a second
                     # scheduler would double-fire every job it registered.
                     app.state.loop_scheduler = svc
+                if isinstance(svc, UpdaterService):
+                    # The banner reads its cached result, and the "update now" button
+                    # applies through THIS instance — a second one would check twice and
+                    # could race two pip installs against each other.
+                    app.state.updater = svc
                 if isinstance(svc, FleetAgentService):
                     # The Fleet page's "sync now" button beats through THIS instance —
                     # a second agent would report a second machine under the same name.

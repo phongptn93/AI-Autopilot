@@ -139,6 +139,11 @@ class AdoPollerService:
         self._comment_capped: set[int] = set()   # items we've told the human hit the cap
         self._pending_comment: dict[int, str] = {}
         self._inflight: set[int] = set()
+        # Set while the machine is on its way down (a self-update). Nothing new is picked
+        # up, but whatever is already running is left alone to finish — a restart marks
+        # every RUNNING execution FAILED "Interrupted (process restarted)", so cutting in
+        # loses the work AND writes a lie into its history.
+        self.draining: bool = False
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
         self._comment_task: asyncio.Task | None = None
@@ -248,7 +253,12 @@ class AdoPollerService:
 
         while True:
             try:
-                await self._poll_and_process()
+                if self.draining:
+                    # Taking one more item here would restart on top of it.
+                    self._log.info("poll skipped — draining for an update",
+                                   in_flight=len(self._inflight), live=len(self._live))
+                else:
+                    await self._poll_and_process()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
@@ -263,6 +273,17 @@ class AdoPollerService:
             # poller from leaking over weeks.
             self._bound_tracking()
             await asyncio.sleep(cfg.poll_interval_seconds)
+
+    @property
+    def is_idle(self) -> bool:
+        """Is nothing being worked on right now?
+
+        Both sets matter and they mean different things: ``_inflight`` is headless runs
+        this process is awaiting, ``_live`` is interactive sessions whose result file has
+        not landed yet. Asking about only the first would call a machine idle while a
+        console is still open on a work item.
+        """
+        return not self._inflight and not self._live
 
     def _bound_tracking(self, cap: int = 5000) -> None:
         """Trim the per-item comment-loop caches to their most-recently-inserted

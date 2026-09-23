@@ -3042,7 +3042,12 @@ def create_dashboard_router() -> APIRouter:
         # Claude memory, which the run loads by itself via setting_sources — so THIS is
         # the primary channel now, and the brief injection below is the escape hatch.
         memory_file = str(lessons_mod.memory_path(workspace)) if workspace else ""
-        memory_body = lessons_mod.render_memory(workspace) if workspace else ""
+        memory_body = lessons_mod.render_rules(workspace) if workspace else ""
+        # What the brief will actually say, from the same function the executor
+        # calls — so the page cannot describe a pointer the agent never gets.
+        memory_pointer = (
+            lessons_mod.lessons_pointer(workspace, repos).strip() if workspace else ""
+        )
         memory_live = lessons_mod.memory_is_live(workspace)
         shared_lines = preview.get(lessons_mod.SHARED_BUCKET, [])
         shared_keys = {lessons_mod.normalize(line) for line in shared_lines}
@@ -3093,6 +3098,7 @@ def create_dashboard_router() -> APIRouter:
                 preview=preview, shared_bucket=lessons_mod.SHARED_BUCKET,
                 shared_lines=shared_lines, preview_own=preview_own,
                 memory_file=memory_file, memory_body=memory_body,
+                memory_pointer=memory_pointer,
                 memory_live=memory_live,
                 total=sum(len(rows) for _, rows in groups),
                 authored=authored,
@@ -3376,22 +3382,46 @@ def create_dashboard_router() -> APIRouter:
         # shape for changing ONE thing and the wrong shape for the first hour. Opening
         # Settings on a fresh machine said nothing about where to start.
         by_key = {f.key: f for f in settings_form.FIELDS}
-        setup_steps = _setup_flow(_setup_role(cfg), _setup_source(request, cfg))
+        setup_role = _setup_role(cfg)
+        setup_steps = _setup_flow(setup_role, _setup_source(request, cfg))
         essential_keys = [
             key for _sid, _title, keys in setup_steps for key in keys if key in by_key
         ]
+        # What "not configured yet" means, and what it does NOT mean.
+        #
+        # This used to ask settings_form.has_value() over every key in every wizard
+        # step, which was wrong twice over. has_value answers "did somebody DECIDE this,
+        # or is it sitting at its default" — it exists to hide fields that do not apply,
+        # and a setting resting on a perfectly good default reads as unset. And the
+        # wizard's key lists are DISPLAY groupings, not requirements: they say which
+        # fields a step shows, not which a machine cannot run without.
+        #
+        # Between them, a fully configured central was told it had two steps left
+        # because `fleet_offline_after_minutes` was 30 — the default, and the right
+        # value. A setup banner that will not go away teaches people to ignore banners.
+        #
+        # So: a short, explicit list of what genuinely has no working default, checked
+        # for being BLANK rather than for being unchanged.
+        required: list[str] = ["workspace_directory"]
+        if (_setup_source(request, cfg) or "ado") != "jira":
+            # A Jira team configures its tracker on the workspace, not here; doctor's
+            # own check_workspaces covers that, and guessing at it from root settings is
+            # how this banner would start lying in the other direction.
+            required += ["ado_organization", "ado_project", "ado_pat"]
+        if setup_role == "worker":
+            required += ["fleet_central_url", "fleet_token"]
 
-        def _step_done(keys: tuple[str, ...]) -> bool:
-            return all(
-                settings_form.has_value(by_key[k], current, secrets_set, defaults)
-                for k in keys if k in by_key
-            )
+        def _blank(key: str) -> bool:
+            if key in settings_form.SECRET_KEYS:
+                return not secrets_set.get(key)      # secrets never reach `current`
+            value = getattr(cfg, key, None)
+            if isinstance(value, (bool, int, float)):
+                return False                          # a number or a switch IS an answer
+            return not str(value or "").strip() if not isinstance(value, (list, dict, tuple)) \
+                else not value
 
-        # Steps carrying no settings keys of their own (the tracker question, the Jira
-        # step — it writes a workspace, not a root setting) cannot be judged from the
-        # settings store, so they are not counted rather than guessed at.
         setup_todo = [
-            title for _sid, title, keys in setup_steps if keys and not _step_done(keys)
+            (by_key[k].label if k in by_key else k) for k in required if _blank(k)
         ]
         # Read-only overview of every ADO tag the autopilot writes/reads — so the
         # whole tag vocabulary is visible in one place (not scattered across fields).

@@ -608,7 +608,7 @@ def test_an_unconfigured_machine_is_told_which_steps_remain(tmp_path):
     )
     with TestClient(create_app(settings)) as client:
         body = client.get("/dashboard/settings").text
-    assert "chưa cấu hình xong" in body
+    assert "chưa chạy được" in body
     assert "/dashboard/setup" in body                  # and where to go about it
 
 
@@ -641,3 +641,41 @@ def test_the_scope_filter_hides_nothing_from_the_form(tmp_path):
     # A non-essential field still has its input rendered inside the form.
     assert 'name="zalo_recipient_user_id"' in body
     assert 'id="zalo_recipient_user_id"' in body
+
+
+def test_a_default_that_is_a_good_value_does_not_read_as_unconfigured(tmp_path):
+    """A configured central was told it had two steps left because
+    `fleet_offline_after_minutes` was 30 — the default, and the right value.
+
+    The banner asked `settings_form.has_value()`, which answers "did somebody DECIDE
+    this, or is it sitting at its default". That question exists to hide fields that do
+    not apply; as a completeness test it marks every sensible default as missing. And it
+    asked it over the WIZARD's key lists, which are display groupings — which fields a
+    step shows — not requirements. A setup banner that will not go away teaches people
+    to ignore banners.
+    """
+    settings = Settings(
+        dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 'done.db'}",
+        dashboard_auth_password_hash="", dashboard_auth_token="",
+        # A machine that really is configured…
+        ado_organization="https://dev.azure.com/acme", ado_project="Proj",
+        ado_pat="a-pat", workspace_directory=str(tmp_path),
+        # …whose fleet knobs are all still on their (perfectly good) defaults.
+        fleet_role="central", fleet_token="shared",
+    )
+    with TestClient(create_app(settings)) as client:
+        body = client.get("/dashboard/settings").text
+    assert "chưa chạy được" not in body, "a configured machine was told to go and configure it"
+
+
+def test_a_genuinely_missing_essential_is_still_named(tmp_path):
+    settings = Settings(
+        dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 'miss.db'}",
+        dashboard_auth_password_hash="", dashboard_auth_token="",
+        ado_organization="https://dev.azure.com/acme", ado_project="Proj",
+        ado_pat="a-pat",                       # …but no workspace directory
+    )
+    with TestClient(create_app(settings)) as client:
+        body = client.get("/dashboard/settings").text
+    assert "chưa chạy được" in body
+    assert "Workspace directory" in body       # named, not just counted

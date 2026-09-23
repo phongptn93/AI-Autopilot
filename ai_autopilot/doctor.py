@@ -340,13 +340,23 @@ def check_default_profile_is_not_a_doorway(config: Settings) -> list[Finding]:
 
 
 def check_sdlc_needs_headless(config: Settings) -> list[Finding]:
-    """The closed-loop engine is switched on, and the execution mode never calls it.
+    """Interactive runs the relay, but not the gates around it.
 
-    In interactive mode the poller dispatches a Remote-Control session and returns; the
-    engine that gates, revises, escalates and hands off is headless-only. The role's
-    stages still scope the session's brief, so runs look right — they are just one-shot.
-    Nothing says so at runtime, and the Settings checkbox says "Headless only" in help
-    text three lines below the tick, which is exactly where nobody reads it.
+    Worth being exact, because this finding was overstating the loss and pushing people
+    to change a working setup. In interactive mode the relay DOES work: the role's
+    stages scope the session's brief (``poller._dispatch_interactive``), and when the
+    session finishes the item is handed to the next role
+    (``poller._apply_sdlc_handoff``, reached from the interactive finalise path — see
+    the comment there, which records that the relay used to stop one step short and no
+    longer does).
+
+    What is genuinely headless-only is the quality machinery in
+    :mod:`ai_autopilot.execution.sdlc_loop` — the test gate, the advance/revise decision
+    under a shared iteration budget, and the escalation to a human. The interactive path
+    calls none of them.
+
+    So this is not "the engine never runs". It is "the engine runs without its gates",
+    which for a team that works by steering may be exactly the trade they want.
 
     Offline: both values are config.
     """
@@ -355,13 +365,15 @@ def check_sdlc_needs_headless(config: Settings) -> list[Finding]:
     if (config.execution_mode or "").strip().lower() != "interactive":
         return []
     return [Finding(
-        WARN, "SDLC loop is on, but execution_mode is interactive — the engine never runs",
-        "Interactive dispatches a steerable session and stops there. The role still "
-        "scopes what the session is asked to do, so the run looks correct; what you do "
-        "not get is the closed loop — the quality gate, the revise budget, the escalation "
-        "to a human and the automatic hand-off to the next role.",
-        "Set execution_mode to headless if you want the loop, or untick the SDLC loop "
-        "and keep interactive if you prefer to steer each run yourself.",
+        WARN, "SDLC roles run, but without the quality gates around them",
+        "Interactive mode still relays: the role scopes the session's brief, and the "
+        "item is handed to the next role when the session finishes. What it does not "
+        "run is the closed loop's quality machinery — the auto test gate, the "
+        "advance / revise decision under an iteration budget, and the automatic "
+        "escalation to a human when a stage keeps failing. Those are headless-only.",
+        "Nothing is broken: if your team works by steering each run, this is a "
+        "reasonable setup and you can leave it. Switch execution_mode to headless only "
+        "if you want the gates to run without somebody watching.",
     )]
 
 

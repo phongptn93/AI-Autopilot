@@ -722,16 +722,28 @@ def test_standalone_says_nothing_about_fleet():
     assert check_fleet(Settings()) == []
 
 
-def test_the_sdlc_loop_with_interactive_execution_is_flagged():
-    """Interactive dispatches a session and stops — the gate, the revise budget, the
-    escalation and the hand-off never happen, and the runs still look correct."""
+def test_the_sdlc_loop_with_interactive_execution_names_only_what_is_missing():
+    """The finding used to say the hand-off to the next role never happens. It does:
+    the interactive finalise path calls `_apply_sdlc_handoff` (poller.py), which was
+    added precisely because the relay stopped one step short. Saying otherwise pushed
+    people to change a setup that was working.
+
+    What IS headless-only is the quality machinery in `sdlc_loop`: the test gate, the
+    advance/revise decision under an iteration budget, and the escalation to a human.
+    """
     from ai_autopilot.doctor import check_sdlc_needs_headless
 
     found = check_sdlc_needs_headless(
         Settings(sdlc_loop_enabled=True, execution_mode="interactive")
     )
     assert [f.level for f in found] == [doctor.WARN]
-    assert "never runs" in found[0].title
+    body = f"{found[0].title} {found[0].detail} {found[0].fix}".lower()
+    # Names the real losses…
+    for missing in ("test gate", "revise", "escalation"):
+        assert missing in body, missing
+    # …and does not claim the relay itself is broken.
+    assert "never runs" not in body
+    assert "hand" in body and "does not run" not in found[0].title.lower()
 
 
 def test_headless_with_the_loop_on_says_nothing():

@@ -209,30 +209,47 @@
 {# ── Brief kế tiếp mang gì ─────────────────────────────────────────────────
    Dựng từ chính lessons.recent() mà executor gọi, nên không thể lệch với thứ
    agent thật sự nhận. #}
-{# The primary channel: the workspace's own Claude memory, which every run loads by
-   itself. Shown before anything else because it is what the agent actually reads. #}
+{# What the agent actually gets, in the two shapes it gets it. Shown before anything
+   else on the page because everything below is inventory and this is the output. #}
 <div class="card">
   <div class="card-header">
     <h3>Agent đọc gì</h3>
     <span class="dim" style="font-size:12.5px">
-      {% if memory_live %}Claude tự nạp file này ở mỗi run — cùng cách nó nạp các rule khác
-      của workspace{% else %}chưa có gì để nạp{% endif %}
+      {% if memory_live %}chỉ thị thì luôn nạp · phỏng đoán thì gọi khi đúng repo
+      {% else %}chưa có gì để nạp{% endif %}
     </span>
   </div>
   <div class="card-body brief-body">
     {% if memory_live %}
-    <div class="mem-path">{{ memory_file }}</div>
-    <p class="dim" style="font-size:12.5px;margin:8px 0 10px">
-      File này <b>do máy ghi</b> từ danh sách bên dưới, và nằm cạnh các rule khác trong
-      <code>.claude/rules/</code> — nên commit được vào git và review như code.
-      Claude chọn dùng khi task có liên quan, thay vì bị nhồi vào mọi brief.
-    </p>
-    <div class="brief">{{ memory_body }}</div>
+    <div class="brief-group">
+      <div class="brief-label">1 · Luôn nạp mỗi run
+        <span class="brief-n">{{ memory_file }}</span>
+      </div>
+      <p class="dim" style="font-size:12.5px;margin:0 0 8px">
+        Quy tắc <b>do người viết</b> — ngắn, là chỉ thị, và người ta gõ ra chính vì muốn
+        nó luôn có hiệu lực. Nằm cạnh các rule khác trong <code>.claude/rules/</code> nên
+        commit được vào git và review như code.
+      </p>
+      <div class="brief">{{ memory_body }}</div>
+    </div>
+    {% if memory_pointer %}
+    <div class="brief-group">
+      <div class="brief-label">2 · Brief sẽ nói gì
+        <span class="brief-n">chỉ gọi skill của repo mà work item chạm tới</span>
+      </div>
+      <p class="dim" style="font-size:12.5px;margin:0 0 8px">
+        Bài học <b>máy tự rút</b> nằm trong skill riêng từng repo, <b>không</b> tốn
+        context cho tới khi được gọi. Autopilot chọn giúp — nó biết work item chạm repo
+        nào — nên model không phải tự đoán.
+      </p>
+      <div class="brief">{{ memory_pointer }}</div>
+    </div>
+    {% endif %}
     {% else %}
     <p class="dim" style="font-size:13px;margin:0">
-      Chưa có bài học nào. Khi có, máy sẽ ghi vào
-      <code>.claude/rules/autopilot-lessons.md</code> trong workspace và trỏ một dòng từ
-      <code>CLAUDE.md</code> — Claude nạp file đó như mọi rule khác.
+      Chưa có bài học nào. Khi có: quy tắc bạn nhập ghi vào
+      <code>.claude/rules/autopilot-lessons.md</code> (luôn nạp), còn bài học máy tự rút
+      thành skill <code>.claude/skills/autopilot-lessons-&lt;repo&gt;/</code> (gọi khi cần).
     </p>
     {% endif %}
   </div>

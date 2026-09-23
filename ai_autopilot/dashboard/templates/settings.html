@@ -344,7 +344,7 @@
    this page and change one thing. The step list comes from the wizard itself. #}
 {% if setup_todo %}
 <div class="own-split setup-todo">
-  <b>Máy này chưa cấu hình xong.</b> Còn {{ setup_todo|length }} bước:
+  <b>Máy này chưa chạy được.</b> Còn {{ setup_todo|length }} mục chưa đặt:
   {% for t in setup_todo %}<span class="todo-chip">{{ t }}</span>{% endfor %}
   <a class="btn-save setup-go" href="/dashboard/setup">Bắt đầu cài đặt →</a>
 </div>

@@ -152,13 +152,14 @@ def test_lessons_are_written_where_claude_already_looks(tmp_path):
     lessons.record_lessons(ws, "Backend", ["[High] null check missing"], now=_NOW_MEM)
 
     rule = tmp_path / ".claude" / "rules" / "autopilot-lessons.md"
-    assert rule.is_file(), "the agent reads .claude/rules — that is where lessons belong"
+    assert rule.is_file(), "the agent reads .claude/rules — that is where instructions belong"
     body = rule.read_text(encoding="utf-8")
+    # The human's rule is IN the always-loaded file: they typed it so it would always hold.
     assert "Validate every DTO before mapping" in body
-    assert "[High] null check missing" in body
-    # A rule somebody typed and a guess the machine made must not read as equally settled.
     assert "Quy tắc do người viết" in body
-    assert "Máy tự rút" in body
+    # The machine's guess is NOT — it is named, and its body lives in a skill.
+    assert "[High] null check missing" not in body
+    assert "autopilot-lessons-backend" in body
 
 
 def test_deleting_a_lesson_takes_it_out_of_what_the_agent_reads(tmp_path):
@@ -200,3 +201,89 @@ def test_writing_the_memory_twice_changes_nothing(tmp_path):
     lessons.sync_memory(str(tmp_path))
     lessons.sync_memory(str(tmp_path))
     assert (tmp_path / "CLAUDE.md").read_bytes() == first
+
+
+# ── rules vs skills: instructions are pushed, guesses are pulled ─────────────
+
+def test_a_humans_rule_is_always_loaded_and_a_machine_guess_is_not(tmp_path):
+    """The split that makes this cheap AND reliable.
+
+    A rule somebody typed is an instruction — short, and typed precisely so that it
+    holds on every run, which is what `.claude/rules` does. A line the machine inferred
+    from one bad run is a guess: it accumulates, it is situational, and most of it has
+    nothing to do with any given task. That goes to a skill, whose body costs nothing
+    until something opens it.
+    """
+    ws = str(tmp_path)
+    lessons.add(ws, "Backend", "Validate every DTO before mapping")
+    lessons.record_lessons(ws, "Backend", ["[High] null check on CustomerId"], now=_NOW_MEM)
+
+    rule = (tmp_path / ".claude" / "rules" / "autopilot-lessons.md").read_text(encoding="utf-8")
+    skill = (tmp_path / ".claude" / "skills" / "autopilot-lessons-backend"
+             / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "Validate every DTO before mapping" in rule     # instruction: always loaded
+    assert "null check on CustomerId" not in rule          # guess: not in the always-loaded file
+    assert "null check on CustomerId" in skill             # …it is here
+    assert "autopilot-lessons-backend" in rule             # and the rule names where
+
+
+def test_the_skill_frontmatter_can_stand_on_its_own(tmp_path):
+    """Belt and braces: the brief names this skill outright, but somebody running the
+    agent by hand only has the description to go on."""
+    ws = str(tmp_path)
+    lessons.record_lessons(ws, "Backend", ["Không gọi SaveChanges trong vòng lặp"], now=_NOW_MEM)
+    skill = (tmp_path / ".claude" / "skills" / "autopilot-lessons-backend"
+             / "SKILL.md").read_text(encoding="utf-8")
+    head = skill.split("---")[1]
+    assert "name: autopilot-lessons-backend" in head
+    assert "Backend" in head and "PR" in head              # names the repo and when to read it
+    assert "SaveChanges" in head                           # and what is actually in it
+
+
+def test_the_brief_names_only_the_skills_for_this_work_items_repos(tmp_path):
+    """The selection nobody has to guess at: the autopilot knows which repos a work item
+    touches, so it names those skills and no others."""
+    ws = str(tmp_path)
+    lessons.record_lessons(ws, "Backend", ["backend lesson"], now=_NOW_MEM)
+    lessons.record_lessons(ws, "Frontend", ["frontend lesson"], now=_NOW_MEM)
+
+    pointer = lessons.lessons_pointer(ws, ["Backend"])
+    assert "autopilot-lessons-backend" in pointer
+    assert "autopilot-lessons-frontend" not in pointer, "named a skill for an unrelated repo"
+    # …and it points, it does not paste.
+    assert "backend lesson" not in pointer
+
+
+def test_the_shared_bucket_rides_along_with_every_repo(tmp_path):
+    """A reopen or a rejection is attached to a work item, not to one repo — it has to
+    reach a run whatever repo that run touches."""
+    ws = str(tmp_path)
+    lessons.record_lessons(ws, lessons.SHARED_BUCKET, ["an unattributable lesson"], now=_NOW_MEM)
+    assert "autopilot-lessons-workspace" in lessons.lessons_pointer(ws, ["AnyRepo"])
+
+
+def test_a_repo_whose_lessons_are_all_deleted_loses_its_skill(tmp_path):
+    """Otherwise the skill sits on disk advertising knowledge that no longer exists, and
+    the brief goes on naming it."""
+    ws = str(tmp_path)
+    lessons.record_lessons(ws, "Backend", ["a wrong lesson"], now=_NOW_MEM)
+    skill = tmp_path / ".claude" / "skills" / "autopilot-lessons-backend"
+    assert skill.is_dir()
+
+    lessons.delete(ws, "Backend", "a wrong lesson")
+    assert not skill.exists()
+    assert "autopilot-lessons-backend" not in lessons.lessons_pointer(ws, ["Backend"])
+
+
+def test_a_hand_written_skill_is_never_touched(tmp_path):
+    """Pruning only ever removes directories this module owns."""
+    ws = str(tmp_path)
+    mine = tmp_path / ".claude" / "skills" / "deploy-to-k8s"
+    mine.mkdir(parents=True)
+    (mine / "SKILL.md").write_text("---\nname: deploy-to-k8s\n---\n", encoding="utf-8")
+
+    lessons.record_lessons(ws, "Backend", ["x"], now=_NOW_MEM)
+    lessons.delete(ws, "Backend", "x")
+
+    assert (mine / "SKILL.md").is_file(), "pruned a skill it did not write"

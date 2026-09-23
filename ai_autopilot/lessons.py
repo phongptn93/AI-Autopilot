@@ -14,6 +14,7 @@ operator sees is exactly what the next brief will carry.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -200,7 +201,30 @@ def _write(workspace: str, repo: str, items: list[Lesson]) -> bool:
 #
 # So the loop writes into the memory Claude already reads, and the injection stays only
 # as an escape hatch (``lessons_max_injected``, now 0 by default).
+# Two destinations, split on the line the store already draws.
+#
+# A rule a human typed is an INSTRUCTION: short, meant to hold on every run, and the
+# reason somebody typed it was so it would always apply. It stays in `.claude/rules`,
+# which the runtime loads whole, every time.
+#
+# A line the machine inferred from one bad run is a GUESS. It accumulates (50 per repo),
+# it is situational, and most of it has nothing to do with any given task. It becomes a
+# SKILL — indexed by name and description, body read only when invoked.
+#
+# What makes the skill reliable is that nothing has to guess whether to open it. The
+# brief builder already knows which repos a work item touches (`lessons.recent` has
+# always been repo-scoped), so it names the exact skill for those repos in one line. The
+# model is told, not left to discover — and `_build_prompt` already had the precedent of
+# instructing a skill run.
+#
+# What this does NOT do, plainly: inside one repo there is no semantic selection. Open
+# the skill and you get that repo's lessons, ordered by recency and by how often the
+# thing has actually recurred. Keyword matching over free-text lessons in two languages
+# would be wrong more often than right, and embedding retrieval is a new subsystem for
+# fifty items. The count ("đã gặp 8 lần") is the honest cheap signal.
 MEMORY_FILE = Path(".claude") / "rules" / "autopilot-lessons.md"
+_SKILLS_SUBDIR = Path(".claude") / "skills"
+_SKILL_PREFIX = "autopilot-lessons"
 #: Markers around the one line this module owns inside CLAUDE.md. A pointer rather than
 #: the content: CLAUDE.md is hand-written and large, and generated text merged into it is
 #: how somebody loses an afternoon to a conflict.
@@ -228,56 +252,188 @@ def memory_is_live(workspace: str) -> bool:
         return False
 
 
-def render_memory(workspace: str) -> str:
-    """The lesson store as one Claude rule file — '' when there is nothing to say.
+def _label(repo: str) -> str:
+    return "mọi repo" if repo == SHARED_BUCKET else repo
 
-    Authored and learned lines are kept apart on purpose. A rule a human typed is a
-    standing instruction; a line the machine inferred from one bad run is a guess, and
-    presenting the two as one list asks the model to treat them as equally settled.
+
+def skill_name(repo: str) -> str:
+    """The skill that holds ``repo``'s machine-learned lessons.
+
+    A skill name is read by people and quoted in briefs, so the shared bucket's internal
+    ``_workspace`` is spelled out rather than leaked: ``autopilot-lessons-_workspace``
+    reads like a slip. Underscores and dots elsewhere become dashes for the same reason.
+    """
+    if repo == SHARED_BUCKET:
+        return f"{_SKILL_PREFIX}-workspace"
+    safe = re.sub(r"[^a-z0-9]+", "-", repo.lower()).strip("-")
+    return f"{_SKILL_PREFIX}-{safe or 'repo'}"
+
+
+def skill_dir(workspace: str, repo: str) -> Path:
+    return Path(workspace) / _SKILLS_SUBDIR / skill_name(repo)
+
+
+_GENERATED_NOTE = (
+    "> ⚠️ **Do AI-Autopilot sinh ra và ghi đè.** Sửa tay ở đây sẽ mất ở lần ghi kế "
+    "tiếp — sửa trên trang Learning của dashboard (`/dashboard/learning`).\n"
+    "> Nguồn: `.autopilot/lessons/*.md`"
+)
+
+
+def render_rules(workspace: str) -> str:
+    """The lines a HUMAN wrote, as one always-loaded rule file. '' when there are none.
+
+    Only pinned lines (typed here, or approved at the fleet centre) go in. They are
+    short, they are instructions, and the reason somebody typed one was so that it would
+    hold on every run — which is exactly what `.claude/rules` does. The machine's own
+    inferences do not belong in a file that is loaded whole, every time; they go to a
+    skill (see :func:`render_skill`), and this file points at it.
     """
     blocks: list[str] = []
+    pointers: list[str] = []
     for repo in list_repos(workspace):
         items = _read(workspace, repo)
-        if not items:
-            continue
         pinned = [le for le in items if le.pinned]
         learned = [le for le in items if not le.pinned]
-        lines = [f"## {'Mọi repo' if repo == SHARED_BUCKET else repo}", ""]
         if pinned:
-            lines.append("**Quy tắc do người viết — áp dụng như mọi convention khác:**")
-            lines += [f"- {le.text}" for le in pinned]
-            lines.append("")
-        if learned:
-            lines.append(
-                "**Máy tự rút từ review / rework của run trước** — suy luận từ một lần "
-                "hỏng, không phải quy tắc đã chốt; cân nhắc theo ngữ cảnh:"
+            blocks.append(
+                f"## {_label(repo)}\n\n"
+                + "\n".join(f"- {le.text}" for le in pinned)
             )
-            lines += [
-                f"- {f'(đã gặp {le.count} lần) ' if le.count > 1 else ''}{le.text}"
-                for le in learned
-            ]
-            lines.append("")
-        blocks.append("\n".join(lines))
-    if not blocks:
+        if learned:
+            pointers.append(
+                f"- **{_label(repo)}** — {len(learned)} bài học máy tự rút: "
+                f"chạy skill `{skill_name(repo)}`"
+            )
+    if not blocks and not pointers:
         return ""
+    out = [f"# Tri thức AI-Autopilot\n\n{_GENERATED_NOTE}\n"]
+    if blocks:
+        out.append(
+            "## Quy tắc do người viết\n\n"
+            "Áp dụng như mọi convention khác của workspace.\n\n"
+            + "\n\n".join(blocks).replace("## ", "### ", 1).replace("\n## ", "\n### ")
+        )
+    if pointers:
+        # Named, not pasted. The bodies live in skills so they cost nothing until a run
+        # actually touches that repo — and the brief names the right one (see
+        # `lessons_pointer`), so opening it is never left to chance.
+        out.append(
+            "## Bài học máy tự rút\n\n"
+            "Đây là **suy luận từ một lần hỏng**, không phải quy tắc đã chốt. Khi làm "
+            "việc trên repo tương ứng, đọc skill của nó trước khi mở PR:\n\n"
+            + "\n".join(pointers)
+        )
+    return "\n\n".join(out) + "\n"
+
+
+def render_skill(workspace: str, repo: str) -> str:
+    """One repo's machine-learned lessons as a SKILL.md. '' when it has none.
+
+    The frontmatter is what decides whether this is ever useful on its own, so the
+    description names the repo and what the lessons are about rather than describing the
+    mechanism. It is belt and braces: the brief names this skill outright for the repos
+    in scope, and a description that stands up on its own covers the case where somebody
+    runs the agent by hand.
+    """
+    learned = [le for le in _read(workspace, repo) if not le.pinned]
+    if not learned:
+        return ""
+    # Newest first: the same order the store shows a human, and the order in which a
+    # reader who stops halfway has read the most useful half.
+    learned = list(reversed(learned))
+    repeated = [le for le in learned if le.count > 1]
+    topic = "; ".join(le.text[:60].rstrip() for le in (repeated or learned)[:3])
+    desc = (
+        f"Bài học AI-Autopilot đã rút ra khi làm việc trên {_label(repo)} — "
+        f"{len(learned)} mục từ review và rework của các run trước. "
+        f"ĐỌC TRƯỚC KHI mở PR trên repo này để không lặp lại. Gồm: {topic}."
+    )
+    body = "\n".join(
+        f"- {f'**Đã gặp {le.count} lần.** ' if le.count > 1 else ''}{le.text}"
+        for le in learned
+    )
     return (
-        "# Bài học từ các run trước (AI-Autopilot tự ghi)\n\n"
-        "> ⚠️ **File này do máy sinh ra và ghi đè.** Sửa tay ở đây sẽ mất ở lần ghi kế "
-        "tiếp — sửa trên trang Learning của dashboard (`/dashboard/learning`).\n"
-        "> Nguồn: `.autopilot/lessons/*.md`\n\n"
-        + "\n".join(blocks)
+        "---\n"
+        f"name: {skill_name(repo)}\n"
+        f"description: {desc}\n"
+        "---\n\n"
+        f"# Bài học từ các run trước — {_label(repo)}\n\n"
+        f"{_GENERATED_NOTE}\n\n"
+        "Mỗi dòng dưới đây là suy luận từ **một lần hỏng thật**, không phải quy tắc đã "
+        "chốt — cân nhắc theo ngữ cảnh. Số lần gặp là tín hiệu đáng tin nhất về mức độ "
+        "nghiêm trọng: cái gì lặp lại nhiều là cái đang cắn liên tục.\n\n"
+        f"{body}\n"
     )
 
 
-def sync_memory(workspace: str) -> bool:
-    """Write the rule file (and the CLAUDE.md pointer). Best-effort, never raises.
+def lessons_pointer(workspace: str, repos: list[str]) -> str:
+    """The brief's one line per repo naming the skill to open. '' when there is none.
 
-    Returns True when the file is now on disk. An empty store removes it rather than
-    leaving an empty rule for the agent to read and wonder about.
+    This is what replaces pasting the lessons themselves. The work item's repos are
+    already known here, so the selection is made by the autopilot on a fact — which repo
+    — instead of being left to the model to infer from a description it may never read.
+    """
+    if not workspace:
+        return ""
+    seen: set[str] = set()
+    lines: list[str] = []
+    for repo in [*repos, SHARED_BUCKET]:
+        if repo in seen:
+            continue
+        seen.add(repo)
+        learned = [le for le in _read(workspace, repo) if not le.pinned]
+        if learned:
+            lines.append(
+                f"- `{skill_name(repo)}` — {len(learned)} bài học cho **{_label(repo)}**"
+            )
+    if not lines:
+        return ""
+    return (
+        "\n⚠️ Bài học từ các run trước trên chính codebase này. **Chạy các skill dưới "
+        "đây TRƯỚC KHI mở PR** và đừng lặp lại những gì chúng nêu:\n" + "\n".join(lines)
+    )
+
+
+def _sync_skills(workspace: str) -> None:
+    """Write one skill per repo that has machine-learned lessons, and remove the rest.
+
+    Pruning matters as much as writing: a repo whose lessons were all deleted would
+    otherwise keep a skill on disk advertising knowledge that no longer exists, and the
+    brief would go on naming it.
+    """
+    root = Path(workspace) / _SKILLS_SUBDIR
+    wanted: set[str] = set()
+    for repo in list_repos(workspace):
+        body = render_skill(workspace, repo)
+        if not body:
+            continue
+        wanted.add(skill_name(repo))
+        target = skill_dir(workspace, repo) / "SKILL.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "w", encoding="utf-8", newline="") as fh:
+            fh.write(body)
+    if not root.is_dir():
+        return
+    for child in root.iterdir():
+        # Only ever touch directories this module owns — never a hand-written skill.
+        if (child.is_dir() and child.name.startswith(f"{_SKILL_PREFIX}-")
+                and child.name not in wanted):
+            with contextlib.suppress(OSError):
+                (child / "SKILL.md").unlink(missing_ok=True)
+                child.rmdir()
+
+
+def sync_memory(workspace: str) -> bool:
+    """Write the rule file, the per-repo skills, and the CLAUDE.md pointer.
+
+    Best-effort, never raises. Returns True when the rule file is now on disk.
     """
     if not workspace:
         return False
-    body = render_memory(workspace)
+    with contextlib.suppress(OSError):
+        _sync_skills(workspace)
+    body = render_rules(workspace)
     path = memory_path(workspace)
     try:
         if not body:

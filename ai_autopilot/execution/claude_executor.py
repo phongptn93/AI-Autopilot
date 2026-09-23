@@ -1542,12 +1542,23 @@ class ClaudeExecutor:
                 f"they conflict:\n\n{item.pending_comment}"
             )
         if self._config.learning_loop_enabled:
-            past = lessons.lessons_brief(
-                self._config.workspace_directory, repos,
-                limit=self._config.lessons_max_injected,
-            )
-            if past:
-                lines.append(past)
+            # Name the skill, do not paste the lessons. The repos in scope are known
+            # here, so the autopilot makes the selection on a FACT — which repo this
+            # work item touches — and the model is told which skill to open rather than
+            # left to notice a description. Costs one line per repo instead of N
+            # lessons, and the bodies cost nothing on a run that never opens them.
+            pointer = lessons.lessons_pointer(self._config.workspace_directory, repos)
+            if pointer:
+                lines.append(pointer)
+            # The escape hatch, off by default: paste the lines themselves as well, for
+            # when you need them in front of the model whatever it decides to read.
+            if self._config.lessons_max_injected:
+                past = lessons.lessons_brief(
+                    self._config.workspace_directory, repos,
+                    limit=self._config.lessons_max_injected,
+                )
+                if past:
+                    lines.append(past)
         if stages:
             steps = "\n".join(
                 f"{i}. **{st.name}**" + (f" ({st.role})" if st.role else "") + f" - {st.goal}"

@@ -85,6 +85,13 @@
   .brief { font-family:var(--mono); font-size:12.5px; line-height:1.65; white-space:pre-wrap;
     background:var(--bg-input,rgba(0,0,0,.18)); border:1px solid var(--border);
     border-radius:9px; padding:11px 13px; word-break:break-word; }
+  /* The shared lines are printed once and each repo shows only what it ADDS, so the
+     groups need to read as one stack rather than as unrelated code blocks. */
+  .brief-group + .brief-group { margin-top:13px; }
+  .brief-label { display:flex; align-items:baseline; gap:9px; margin-bottom:6px;
+    font-size:12.5px; font-weight:650; }
+  .brief-n { font-weight:500; color:var(--text-dim); font-size:11.5px; }
+  .stat-sub { color:var(--text-muted); font-size:12px; margin-top:4px; }
   .edit-form { display:none; gap:8px; margin-top:7px; }
   .edit-form.on { display:flex; }
   /* Inside a grid cell an input with no min-width refuses to shrink and blows the
@@ -96,7 +103,12 @@
      so the tail is what the reader is actually scanning. */
   .ctx { display:block; margin-top:3px; color:var(--text-dim); font-size:12px;
     font-family:var(--mono); }
-  .inj { color:var(--accent-hover,#818cf8); font-size:12px; white-space:nowrap; cursor:help; }
+  /* A row that never reaches a brief is inventory, not instruction — it recedes, and
+     says why on hover. The injected ones need no chip at all: they are the normal case. */
+  .krow.off > * { opacity:.5; }
+  .krow.off:hover > * { opacity:.8; }
+  .noinj { color:var(--text-dim); font-size:11px; white-space:nowrap; cursor:help;
+    border:1px solid var(--border); border-radius:999px; padding:1px 7px; }
   .x-btn { background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; }
   .x-btn:hover { color:var(--red,#e5484d); }
   .repo-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -126,38 +138,33 @@
 </div>
 {% endif %}
 
-<div class="stats-grid">
+{# Ba con số, không phải bốn. Ô thứ tư ("đã nạp trong 30 ngày") đứng yên ở 0 trên mọi
+   máy chưa chạy run nào, nên nó chiếm một phần tư hàng đầu trang để nói "chưa có gì" —
+   thông tin đó giờ nằm trong dòng phụ của ô "Mỗi brief mang", đúng chỗ người đọc đang
+   hỏi "thế agent có thật sự nhận không?". #}
+<div class="stats-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Bạn nạp vào</span><div class="stat-card-icon">📌</div></div>
+    <div class="stat-card-header"><span class="stat-card-label">Bạn nạp vào</span></div>
     <div class="stat-card-value">{{ authored }}</div>
-    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
-      {% if authored %}luôn vào brief trước{% else %}chưa có — hộp bên trên{% endif %}
+    <div class="stat-sub">
+      {% if authored %}luôn được xếp trước{% else %}chưa có — dùng hộp bên dưới{% endif %}
     </div>
   </div>
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Máy tự học</span><div class="stat-card-icon">🤖</div></div>
+    <div class="stat-card-header"><span class="stat-card-label">Máy tự học</span></div>
     <div class="stat-card-value">{{ total - authored }}</div>
-    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
-      {% if occurrences > (total - authored) %}gộp từ {{ occurrences }} lần xảy ra{% else %}qua {{ repos|length }} repo{% endif %}
+    <div class="stat-sub">
+      {% if occurrences > (total - authored) %}gộp từ {{ occurrences }} lần xảy ra
+      {% else %}qua {{ repos|length }} repo{% endif %}
     </div>
   </div>
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Suất mỗi brief</span><div class="stat-card-icon">💉</div></div>
+    <div class="stat-card-header"><span class="stat-card-label">Mỗi brief mang</span></div>
     <div class="stat-card-value">{{ max_injected }}</div>
-    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
-      {% if max_injected %}xem chính xác nội dung ở khối bên dưới
-      {% else %}đang tắt — chỉ ghi, không nạp{% endif %}
-    </div>
-  </div>
-  {# Hai con số này từng đứng cạnh nhau và mâu thuẫn ra mặt: "8 / mỗi run" bên cạnh
-     "0 trong 0 run". Chúng đo hai thứ khác nhau — một là hạn mức cấu hình, một là
-     lịch sử run có ghi số liệu — nên giờ nói rõ khi chưa có run nào. #}
-  <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Đã nạp ({{ days }} ngày)</span><div class="stat-card-icon">🧠</div></div>
-    <div class="stat-card-value">{{ injected_total }}</div>
-    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">
-      {% if injected_runs %}qua {{ injected_runs }} run
-      {% else %}chưa run nào trong {{ days }} ngày qua — nên chưa nạp lần nào{% endif %}
+    <div class="stat-sub">
+      {% if not max_injected %}đang tắt — chỉ ghi, không nạp
+      {% elif injected_runs %}đã nạp {{ injected_total }} dòng qua {{ injected_runs }} run ({{ days }} ngày)
+      {% else %}chưa run nào trong {{ days }} ngày qua{% endif %}
     </div>
   </div>
 </div>
@@ -167,7 +174,7 @@
    làm được, và trước đây nó không tồn tại — trang chỉ cho xoá và quên. #}
 <div class="card add-box">
   <div class="card-header">
-    <h3>📌 Nạp tri thức của bạn</h3>
+    <h3>Nạp tri thức của bạn</h3>
     <span class="dim" style="font-size:12.5px">mỗi dòng là một điều agent phải biết ·
       luôn được nạp <b>trước</b> bài học máy tự rút</span>
   </div>
@@ -201,22 +208,32 @@
 {% if preview %}
 <div class="card">
   <div class="card-header">
-    <h3>💉 Brief kế tiếp sẽ mang</h3>
+    <h3>Brief kế tiếp sẽ mang</h3>
     <span class="dim" style="font-size:12.5px">đúng những dòng này, theo đúng thứ tự này</span>
   </div>
   <div class="card-body brief-body">
-    {% for repo, lines in preview.items() %}
+    {% if shared_lines %}
+    <div class="brief-group">
+      <div class="brief-label">Mọi repo <span class="brief-n">{{ shared_lines|length }} dòng</span></div>
+      <div class="brief">{% for line in shared_lines %}{{ line }}
+{% endfor %}</div>
+    </div>
+    {% endif %}
+    {% for repo, lines in preview_own.items() %}
       {% if lines %}
-      <div style="margin-bottom:{{ '14px' if not loop.last else '0' }}">
-        <div class="dim" style="font-size:12.5px;margin-bottom:6px">
-          📁 <b>{{ repo }}</b> · {{ lines|length }}/{{ max_injected }} suất đã dùng
+      <div class="brief-group">
+        <div class="brief-label">{{ repo }}
+          <span class="brief-n">+{{ lines|length }} dòng · tổng {{ preview[repo]|length }}/{{ max_injected }} suất</span>
         </div>
-        <div class="brief">⚠️ Lessons from past runs on this codebase — do NOT repeat these:
-{% for line in lines %}- {{ line }}
+        <div class="brief">{% for line in lines %}{{ line }}
 {% endfor %}</div>
       </div>
       {% endif %}
     {% endfor %}
+    <p class="dim" style="font-size:12px;margin-top:12px">
+      Brief của một repo = phần <b>mọi repo</b> cộng phần riêng của repo đó, tối đa
+      {{ max_injected }} dòng. Tri thức bạn nhập và tri thức đội duyệt luôn được xếp trước.
+    </p>
   </div>
 </div>
 {% endif %}
@@ -227,7 +244,7 @@
 {% if is_central %}
 <div class="card">
   <div class="card-header">
-    <h3>🌐 Tri thức đội gửi về</h3>
+    <h3>Tri thức đội gửi về</h3>
     <span class="dim" style="font-size:12.5px">
       {% if auto_promote %}tự duyệt khi có <b>{{ auto_promote }}</b> máy khác nhau cùng báo ·
       {% endif %}duyệt rồi mới phát ngược cho các máy
@@ -248,7 +265,7 @@
         </span>
         <span class="kwhat">
           {{ row.text }}
-          <span class="ctx">📁 {{ row.repo or '—' }} · từ {{ row.origins | join(', ') or '—' }}</span>
+          <span class="ctx">{{ row.repo or '—' }} · từ {{ row.origins | join(', ') or '—' }}</span>
         </span>
         <span class="kmark">
           <span class="rep" title="{{ row.origins | length }} máy độc lập cùng báo · tổng {{ row.occurrences }} lần">
@@ -285,8 +302,9 @@
 
 {% if series %}
 <div class="card">
-  <div class="card-header"><h3>📉 New lessons per day</h3>
-    <span class="dim" style="font-size:12.5px">peak {{ peak }}/day · a falling tail means the loop is working</span>
+  <div class="card-header"><h3>Bài học mới mỗi ngày</h3>
+    <span class="dim" style="font-size:12.5px">cao nhất {{ peak }}/ngày ·
+      đuôi đi xuống nghĩa là agent thôi mắc lại lỗi cũ</span>
   </div>
   <div class="card-body" style="padding:15px 20px 18px">
     <div class="chart">
@@ -304,42 +322,41 @@
 </div>
 {% endif %}
 
-{% for repo, items in groups %}
+{% for repo, rows in groups %}
 <div class="card">
   <div class="card-header repo-head">
-    <h3>📁 {{ repo }}</h3>
-    <span class="dim" style="font-size:12.5px">{{ items|length }} lesson(s) ·
-      newest {{ injected_from[repo] }} feed the next brief on this repo</span>
+    <h3>{{ 'Mọi repo' if repo == shared_bucket else repo }}</h3>
+    <span class="dim" style="font-size:12.5px">{{ rows|length }} mục ·
+      {{ injected_from[repo] }} đang vào brief</span>
     <span style="flex:1"></span>
     <form method="post" action="/dashboard/learning/compact" style="margin:0">
       <button class="btn-ghost" type="submit"
-              title="Gộp các dòng trùng nghĩa, bỏ bài học không hành động được">🧹 Dọn gọn</button>
+              title="Gộp các dòng trùng nghĩa, bỏ bài học không hành động được">Dọn gọn</button>
     </form>
     <form method="post" action="/dashboard/learning/clear" style="margin:0"
-          onsubmit="return confirm('Xoá TOÀN BỘ bài học của {{ repo }}?');">
+          onsubmit="return confirm('Xoá TOÀN BỘ tri thức của {{ repo }}?');">
       <input type="hidden" name="repo" value="{{ repo }}"/>
       <button class="btn-ghost" type="submit"
-              style="border-color:var(--red,#e5484d);color:var(--red,#e5484d)">🗑 Forget repo</button>
+              style="border-color:var(--red,#e5484d);color:var(--red,#e5484d)">Xoá hết</button>
     </form>
   </div>
   <div class="card-body" style="padding:0">
     <div class="ktable">
       <div class="khead">
         <span>Ngày</span><span>Nguồn</span><span>Nội dung</span>
-        <span style="text-align:right">Lần / Nạp</span><span></span>
+        <span style="text-align:right">Lần / Suất</span><span></span>
       </div>
-      {% for lesson in items %}
+      {% for lesson, live in rows %}
       {% set rid = repo | replace('.','_') | replace('-','_') ~ '_' ~ loop.index %}
-      {% set live = loop.index <= injected_from[repo] %}
-      <div class="krow {{ 'live' if live else '' }}">
+      <div class="krow {{ 'live' if live else 'off' }}">
         <span class="kwhen">{{ lesson.date or '—' }}</span>
         <span class="ksrc">
           {% if lesson.authored %}
-            <span class="src man" title="Bạn nhập — luôn được nạp trước, và không bị xoá bớt khi file đầy">📌 bạn nhập</span>
+            <span class="src man" title="Bạn nhập — luôn được nạp trước, và không bị xoá bớt khi file đầy">bạn nhập</span>
           {% elif lesson.source == 'fleet' %}
-            <span class="src man" title="Trung tâm đã duyệt và phát cho cả đội — cũng được ghim như tri thức bạn nhập">🌐 từ đội</span>
+            <span class="src man" title="Trung tâm đã duyệt và phát cho cả đội — cũng được ghim như tri thức bạn nhập">từ đội</span>
           {% else %}
-            <span class="src bot" title="Máy tự rút ra từ review / rework của run trước">🤖 máy học</span>
+            <span class="src bot" title="Máy tự rút ra từ review / rework của run trước">máy học</span>
           {% endif %}
         </span>
         <span class="kwhat">
@@ -356,7 +373,13 @@
         <span class="kmark">
           {% if lesson.count > 1 %}<span class="rep"
             title="Đã xảy ra {{ lesson.count }} lần — trước đây nằm thành {{ lesson.count }} dòng riêng và chiếm {{ lesson.count }} suất nạp">×{{ lesson.count }}</span>{% endif %}
-          {% if live %}<span class="inj" title="Dòng này đang được nạp vào brief của run kế tiếp">💉</span>{% endif %}
+          {# Mark the EXCEPTION, not the rule. Marking every injected row put the same
+             chip on all four rows of a four-row table — four labels carrying no
+             difference. Most rows do reach the brief, so the one worth a word is the one
+             that does NOT: it is sitting in the file doing nothing, and that is the fact
+             an operator has to act on (prune, or raise the cap). #}
+          {% if not live %}<span class="noinj"
+            title="Quá suất — dòng này KHÔNG vào brief. Xoá bớt dòng cũ, hoặc tăng lessons_max_injected ở Settings.">ngoài suất</span>{% endif %}
         </span>
         <span class="kact">
           <button class="x-btn" type="button" title="Sửa câu chữ, giữ nguyên ngày và số lần"
@@ -376,7 +399,7 @@
 {% else %}
 <div class="card">
   <div class="empty-state">
-    <p>Chưa có tri thức nào. Dùng hộp <b>📌 Nạp tri thức của bạn</b> ở trên để tự nạp —
+    <p>Chưa có tri thức nào. Dùng hộp <b>Nạp tri thức của bạn</b> ở trên để tự nạp —
       không cần đợi máy học.
       {% if enabled %}Máy cũng sẽ tự ghi thêm khi auto-review flag một run.
       {% else %}Bật learning loop ở Settings để máy tự ghi thêm.{% endif %}

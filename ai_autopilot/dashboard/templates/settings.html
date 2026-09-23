@@ -28,6 +28,10 @@
   .set-find .n{font-size:11.5px;color:var(--text-dim);white-space:nowrap;min-width:64px}
   .set-nav.searching .set-tab{display:none}
   .field.hide,.card.hide{display:none}
+  .own-split{border:1px solid var(--border);border-left:3px solid var(--accent);
+    border-radius:10px;padding:11px 15px;margin:0 0 16px;font-size:13px;
+    color:var(--text-muted);background:var(--bg-card);line-height:1.6}
+  .own-split b{color:var(--text)}
   .set-empty{padding:26px 20px;text-align:center;color:var(--text-muted);font-size:13px}
 
   /* tags overview */
@@ -88,13 +92,31 @@
   .field .form-help{margin-top:6px}
   .field .form-input input[type=text],.field .form-input input[type=password],
   .field .form-input input[type=number],.field .form-input select,.field .form-input textarea{max-width:100%}
-  .field.bool{display:flex;flex-direction:row;align-items:flex-start;gap:11px;justify-content:space-between}
-  /* The label is the part that grows: a checkbox is 13px wide and never needs the
+  /* Three items on this row — label, checkbox, description — but the markup nests the
+     last two inside `.form-input`, so only TWO were ever flex items. The rule below that
+     gives the description its own full-width line (`flex-basis:100%`) was therefore dead
+     code: it was not a flex item, it was a paragraph inside one. What the browser
+     actually laid out was `label | form-input(checkbox + paragraph)`, and since the
+     paragraph makes that second item wide, the label was squeezed to ~95px and rendered
+     as a two-line stub — "Learning / loop", "Auto- / test-gate" — with its checkbox
+     stranded mid-row. Bool fields with no description have nothing to make `.form-input`
+     wide, so they looked correct; that is why this read as one odd setting rather than
+     as a rule that was broken for 32 of the 40 rows that have a description.
+     `display:contents` hands the checkbox and the paragraph straight to this flex
+     container — the same trick the `<fieldset>` rule above uses, and for the same
+     reason — so the order/basis rules below finally describe real flex items. */
+  .field.bool{display:flex;flex-direction:row;flex-wrap:wrap;align-items:flex-start;
+    gap:11px;justify-content:space-between}
+  /* The label is the part that grows: a checkbox is 18px wide and never needs the
      spare room, while the label now carries chips that stacked one per line when it
      was left to shrink. */
   .field.bool > label{margin-bottom:0;order:1;flex:1 1 auto;min-width:0}
-  .field.bool .form-input{order:2}
-  .field.bool .form-input input[type=checkbox]{margin-top:1px}
+  .field.bool .form-input{display:contents}
+  /* `margin-left:auto` keeps the box on the right even on the few rows whose label is
+     long enough (a trailing "chỉ khi X đang bật" chip will not shrink) to take the whole
+     first line and push the box onto its own — it stays in the column the eye is already
+     scanning instead of jumping to the left margin. */
+  .field.bool input[type=checkbox]{order:2;flex:0 0 auto;margin-top:1px;margin-left:auto}
   .field.bool .form-help{flex-basis:100%;order:3;margin-top:2px}
 
 
@@ -303,6 +325,17 @@
     {% endfor %}
   </div>
 </div>
+
+{# On a worker most of this page is put away behind the per-section toggles. Say so once,
+   here, rather than leaving the reader to discover it section by section. #}
+{% if is_worker and owned_central %}
+<div class="own-split">
+  <b>Máy này là worker.</b> {{ owned_here }}/{{ owned_here + owned_central }} thiết lập do
+  <b>máy này</b> quyết định — số còn lại ({{ owned_central }}) do trung tâm phát và được
+  <b>cất trong từng mục</b>; mở bằng nút <i>“⌄ … do trung tâm quản lý”</i> ở đầu mục.
+  Cần tự quyết một mục nào đó thì bấm <i>Giành quyền</i> ngay cạnh nó — trung tâm sẽ thôi ghi đè.
+</div>
+{% endif %}
 
 <form method="post" action="/dashboard/settings">
   <!-- section quick-nav (navigation only; Save lives in the sticky bar below) -->

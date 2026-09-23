@@ -69,3 +69,56 @@ def test_page_warns_when_the_loop_is_off(tmp_path):
     with TestClient(create_app(settings)) as client:
         body = client.get("/dashboard/learning").text
     assert "Learning loop đang TẮT" in body           # never a silently empty page
+
+
+def test_over_the_cap_the_page_marks_the_lines_the_brief_really_carries(tmp_path):
+    """The syringe markers must come from `lessons.recent()`, not from "newest N".
+
+    The two rules only agree while the file is under the cap. Over it they diverged in
+    the worst direction: `recent()` puts a human-typed rule FIRST and keeps it forever,
+    while "newest N" dropped it for being old. Measured on a 13-line file, the page told
+    the operator that a standing rule was NOT reaching the agent (it was) and that a
+    machine line WAS (it was not) — on the one page whose whole promise is that it shows
+    what the agent gets told.
+    """
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cap = 8
+    # One rule a human typed, older than everything else.
+    lessons.add(str(workspace), "Repo", "RULE: validate every DTO before mapping")
+    for i in range(12):                                   # then bury it under the cap
+        lessons.record_lessons(
+            str(workspace), "Repo", [f"learned line {i}"],
+            now=datetime(2026, 9, 10 + (i // 5), 12, i % 60),
+        )
+    settings = Settings(
+        dry_run=True,
+        workspace_directory=str(workspace),
+        learning_loop_enabled=True,
+        lessons_max_injected=cap,
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'cap.db'}",
+    )
+    with TestClient(create_app(settings)) as client:
+        body = client.get("/dashboard/learning").text
+
+    injected = lessons.recent(str(workspace), ["Repo"], limit=cap)
+    assert "RULE: validate every DTO before mapping" in injected   # the rule is carried
+
+    # Every row the page dims as "ngoài suất" must be one the brief really leaves out,
+    # and nothing the brief carries may be dimmed. Rows are rendered newest-first, so
+    # slicing the rendered order is enough to tell which row got which class.
+    rows = body.split('class="krow')[1:]
+    # Guard the guard: if the page ever stops rendering rows (a redirect to login, a
+    # renamed class) the loop below iterates nothing and this test passes while proving
+    # nothing. It did exactly that once.
+    assert len(rows) == 13, f"expected 13 rendered rows, got {len(rows)}"
+    classes = [r.split(">", 1)[0].strip().strip('"') for r in rows]
+    assert any(c.endswith("off") for c in classes), "no row is over the cap — test is vacuous"
+    assert any(c.endswith("live") for c in classes), "no row is injected — test is vacuous"
+
+    for row in rows:
+        dimmed = row.split(">", 1)[0].strip().strip('"').endswith("off")
+        carried = any(line in row for line in injected)
+        assert dimmed != carried, (
+            "a row is dimmed as 'ngoài suất' while the brief carries it, or vice versa"
+        )

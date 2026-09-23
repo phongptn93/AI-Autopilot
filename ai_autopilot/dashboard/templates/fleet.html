@@ -26,6 +26,9 @@
   .fl-f { display:flex; flex-direction:column; gap:4px; min-width:0; }
   .fl-f label { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); }
   .fl-f .val { font-size:13px; }
+  /* Stale figures read as history, not as status. */
+  .fl-f .val.fl-stale { color:var(--text-muted); }
+  .fl-when { color:var(--text-dim); font-size:11.5px; white-space:nowrap; }
   .fl-tags { display:flex; flex-wrap:wrap; gap:5px; }
   .fl-tag { font-family:var(--mono,monospace); font-size:11px; padding:1px 7px; border-radius:6px;
             background:var(--bg,#0d0d12); border:1px solid var(--border,#23232b); color:var(--text-dim); }
@@ -101,16 +104,20 @@
     <div class="fl-f">
       <label>Đồng bộ lần cuối</label>
       <div class="val">
-        {% if w.synced_ago is not none %}{{ fmt_duration(w.synced_ago) }} trước
+        {% if w.synced_ago is not none %}{{ fmt_ago(w.synced_ago) }} trước
         {% else %}<span style="color:var(--text-dim)">chưa lần nào</span>{% endif %}
       </div>
     </div>
 
+    {# Figures from a machine that has gone quiet are not today's figures. Re-label
+       rather than hide: "0 xong" under "Hôm nay" on a machine last seen three days ago
+       is a lie, but the last thing it managed to report is still worth seeing. #}
     <div class="fl-f">
-      <label>Hôm nay</label>
-      <div class="val">
-        ✅ {{ w.done_today }} xong
-        {% if w.failed_today %} · <span style="color:var(--red,#e5484d)">❌ {{ w.failed_today }} lỗi</span>{% endif %}
+      <label>{{ 'Hôm nay' if w.stats_today else 'Lần báo cuối' }}</label>
+      <div class="val{{ '' if w.stats_today else ' fl-stale' }}">
+        {{ w.done_today }} xong
+        {% if w.failed_today %} · <span style="color:var(--red,#e5484d)">{{ w.failed_today }} lỗi</span>{% endif %}
+        {% if not w.stats_today %}<span class="fl-when">· {{ fmt_ago(w.quiet) }} trước</span>{% endif %}
       </div>
     </div>
 
@@ -131,7 +138,7 @@
   </div>
 
   <div class="fl-foot">
-    <span>Heartbeat cuối: {{ fmt_duration(w.quiet) }} trước</span>
+    <span>Heartbeat cuối: {{ fmt_ago(w.quiet) }} trước</span>
     <span class="fl-spacer"></span>
     <form method="post" action="/dashboard/fleet/forget"
           onsubmit="return confirm('Xoá máy {{ w.name }} khỏi danh sách? Máy vẫn tự xuất hiện lại nếu còn gọi về.')">

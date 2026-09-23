@@ -527,11 +527,44 @@ def _mmss(seconds: float) -> str:
 
 
 def _fmt_duration(seconds: float) -> str:
+    """How LONG something took. Stays precise: a run's duration is a measurement."""
     if seconds < 60:
         return f"{seconds:.0f}s"
     if seconds < 3600:
         return f"{seconds / 60:.1f}m"
     return f"{seconds / 3600:.1f}h"
+
+
+def _fmt_ago(seconds: float) -> str:
+    """How long AGO something happened — a different question from how long it took.
+
+    Both used :func:`_fmt_duration`, which stops at hours and keeps one decimal, so the
+    fleet page reported a machine last seen three days ago as "74.1h trước". That is a
+    measurement pretending to be a fact about the world: nobody counts past a day in
+    hours, and the .1 implies a precision that means nothing at that distance — a
+    machine quiet for 74 hours is not meaningfully different from one quiet for 75.
+
+    Precision therefore falls off with distance, the way people actually speak: seconds
+    while it is live, then minutes, hours, days, weeks.
+    """
+    seconds = max(0.0, seconds)
+    if seconds < 45:
+        return "vài giây"
+    if seconds < 90:
+        return "1 phút"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.0f} phút"
+    hours = minutes / 60
+    if hours < 24:
+        return f"{hours:.0f} giờ"
+    days = hours / 24
+    if days < 7:
+        return f"{days:.0f} ngày"
+    weeks = days / 7
+    if weeks < 5:
+        return f"{weeks:.0f} tuần"
+    return f"{days / 30:.0f} tháng"
 
 
 # PR-outcome figures are an ADO round-trip per repo per status — cache them briefly
@@ -742,6 +775,7 @@ def create_dashboard_router() -> APIRouter:
             "fleet_role": getattr(cfg, "fleet_role", "") if cfg else "",
             "mmss": _mmss,
             "fmt_duration": _fmt_duration,
+            "fmt_ago": _fmt_ago,
             "category_badge": _category_badge,
             "status_class": _status_class,
             "model_label": _model_label,
@@ -2696,6 +2730,13 @@ def create_dashboard_router() -> APIRouter:
                 "running": _json_list(row.running),
                 "done_today": row.done_today,
                 "failed_today": row.failed_today,
+                # These two are whatever the machine last REPORTED, and the central keeps
+                # showing them after it goes quiet. Under a heading reading "Hôm nay" that
+                # is simply false: a machine last heard from three days ago was presenting
+                # Wednesday's "10 lỗi" as today's, which is the kind of number somebody
+                # acts on. Say whether the figures are actually from today; the template
+                # re-labels them when they are not.
+                "stats_today": seen.astimezone().date() == now.astimezone().date(),
             })
         return _TEMPLATES.TemplateResponse(
             request, "fleet.html",
@@ -2905,15 +2946,54 @@ def create_dashboard_router() -> APIRouter:
         workspace = cfg.workspace_directory
         days = max(1, min(days, 180))
         repos = lessons_mod.list_repos(workspace)
-        groups = [(repo, lessons_mod.entries(workspace, repo)) for repo in repos]
         limit = max(0, cfg.lessons_max_injected)
-        # Per repo: how many of ITS newest lessons a brief on that repo carries.
-        injected_from = {repo: min(len(items), limit) for repo, items in groups}
         # The exact lines the next brief will carry, from the SAME function the
         # executor calls. A page that recomputes its own idea of "what gets injected"
         # is a page that will eventually disagree with the agent and be believed.
         preview = {
             repo: lessons_mod.recent(workspace, [repo], limit=limit) for repo in repos
+        }
+        # Which ROWS those lines are. This used to be "the newest N of this repo", which
+        # is not the rule `recent()` follows: it puts authored/fleet lines first and only
+        # then the newest learned ones. Over the cap the two disagreed in the worst
+        # possible direction — measured on a 13-line file: the standing rule a human had
+        # typed WAS injected and showed no marker, while a machine line that was NOT
+        # injected showed one. The page's whole claim is that it shows what the agent is
+        # told, so it has to ask the same function, then match on meaning (normalize())
+        # rather than on the exact string, which is how `recent()` dedups across repos.
+        injected_keys = {
+            repo: {lessons_mod.normalize(line) for line in lines}
+            for repo, lines in preview.items()
+        }
+        groups = [
+            (
+                repo,
+                [
+                    (le, lessons_mod.normalize(le.text) in injected_keys[repo])
+                    for le in lessons_mod.entries(workspace, repo)
+                ],
+            )
+            for repo in repos
+        ]
+        # How many of THIS repo's own rows feed its brief (the rest of a brief's budget
+        # is filled from the shared bucket, which is a different card on the page).
+        injected_from = {
+            repo: sum(1 for _, live in rows if live) for repo, rows in groups
+        }
+        # The shared bucket rides along in EVERY repo's brief, so rendering each brief
+        # whole printed the same three lines once per repo — on a two-repo workspace the
+        # biggest block on the page was half duplicates, and the reader had to diff three
+        # near-identical code blocks by eye to find the part that actually differed.
+        # Split once here: what every brief carries, then what each repo adds on top.
+        shared_lines = preview.get(lessons_mod.SHARED_BUCKET, [])
+        shared_keys = {lessons_mod.normalize(line) for line in shared_lines}
+        preview_own = {
+            repo: [
+                line for line in lines
+                if lessons_mod.normalize(line) not in shared_keys
+            ]
+            for repo, lines in preview.items()
+            if repo != lessons_mod.SHARED_BUCKET
         }
         flash = _take_flash(request)
         series = lessons_mod.per_day(workspace)[-days:]
@@ -2924,7 +3004,7 @@ def create_dashboard_router() -> APIRouter:
         except Exception:  # noqa: BLE001 — the page must render without history
             records = []
         authored = sum(
-            1 for _, items in groups for le in items if le.authored
+            1 for _, rows in groups for le, _ in rows if le.authored
         )
         # The central's review queue. Only a central has one: a worker contributes and
         # receives, but it is not the place decisions get made — one machine approving
@@ -2952,7 +3032,8 @@ def create_dashboard_router() -> APIRouter:
                 enabled=cfg.learning_loop_enabled, workspace=workspace,
                 repos=repos, groups=groups, injected_from=injected_from,
                 preview=preview, shared_bucket=lessons_mod.SHARED_BUCKET,
-                total=sum(len(items) for _, items in groups),
+                shared_lines=shared_lines, preview_own=preview_own,
+                total=sum(len(rows) for _, rows in groups),
                 authored=authored,
                 # Repeats are collapsed now, so this counts the occurrences BEHIND the
                 # lines — "11 lessons" hid the fact that five of them were one event
@@ -2961,7 +3042,7 @@ def create_dashboard_router() -> APIRouter:
                 # say "gộp từ 10 lần xảy ra" about a tile labelled "máy tự học", when
                 # three of those ten were rules somebody typed once.
                 occurrences=sum(
-                    le.count for _, items in groups for le in items if not le.authored
+                    le.count for _, rows in groups for le, _ in rows if not le.authored
                 ),
                 pooled=pooled, is_central=is_central,
                 auto_promote=cfg.fleet_knowledge_auto_promote,
@@ -3105,9 +3186,85 @@ def create_dashboard_router() -> APIRouter:
 
     @router.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request):
+        """Every live setting, read-only, generated from the SAME registry Settings edits.
+
+        It used to be a hand-written page listing the rows somebody thought were worth
+        showing, which meant it could only ever be a stale copy: measured at 61 of 180
+        fields, with whole sections — alerts, PR review & feedback, the Teams bot, fleet,
+        quality gates — absent entirely, because each was added to Settings and nobody
+        remembered to add it here too. Deriving it from ``settings_form.FIELDS`` makes
+        that drift impossible rather than merely fixed once.
+
+        The page also answers the question people actually open it for. "What is this
+        machine set to" is 180 rows nobody reads; "what does this machine do DIFFERENTLY
+        from a fresh install" is usually a dozen, and it is the list you send someone
+        when a machine misbehaves. So every row is marked against its default and the
+        page opens on the changed ones.
+        """
         c: Container = request.app.state.container
+        cfg = c.config
+        defaults = settings_form.model_defaults(cfg)
+        secrets_set = {
+            key: bool(getattr(cfg, key, "")) for key in settings_form.SECRET_KEYS
+        }
+        secrets_set["dashboard_auth_password"] = bool(
+            getattr(cfg, "dashboard_auth_password_hash", "")
+        )
+        current = {
+            f.key: getattr(cfg, f.key, None)
+            for f in settings_form.FIELDS
+            if f.key not in settings_form.SECRET_KEYS
+        }
+
+        def _display(f) -> tuple[str, str]:
+            """(text, kind-hint) for one field — never the secret itself."""
+            if f.kind == "password":
+                return ("đã đặt", "set") if secrets_set.get(f.key) else ("chưa đặt", "unset")
+            value = getattr(cfg, f.key, None)
+            if isinstance(value, bool):
+                return ("bật", "on") if value else ("tắt", "off")
+            if isinstance(value, (list, tuple)):
+                return (", ".join(str(v) for v in value), "chips") if value else ("—", "empty")
+            if isinstance(value, dict):
+                return (
+                    (" · ".join(f"{k} → {v}" for k, v in value.items()), "chips")
+                    if value else ("—", "empty")
+                )
+            text = "" if value is None else str(value)
+            return (text, "text") if text.strip() else ("—", "empty")
+
+        groups = []
+        changed_total = 0
+        for section, fields in settings_form.sections():
+            rows = []
+            for f in fields:
+                text, hint = _display(f)
+                # A secret has no readable default to compare against, so "changed"
+                # means "somebody set one" — which is the only fact the page can honestly
+                # report about it anyway.
+                if f.kind == "password":
+                    changed = bool(secrets_set.get(f.key))
+                else:
+                    changed = f.key in defaults and getattr(cfg, f.key, None) != defaults[f.key]
+                rows.append({
+                    "key": f.key, "label": f.label, "help": f.help,
+                    "text": text, "hint": hint, "changed": changed,
+                    # A setting that does nothing on a machine configured like this one
+                    # is noise on a page whose job is to say what this machine does.
+                    "applies": settings_form.applies(f, current),
+                })
+                changed_total += bool(changed)
+            groups.append({
+                "section": section, "rows": rows,
+                "changed": sum(1 for r in rows if r["changed"]),
+            })
         return _TEMPLATES.TemplateResponse(
-            request, "config.html", _ctx(request, "config", cfg=c.config)
+            request, "config.html",
+            _ctx(
+                request, "config", cfg=cfg, groups=groups,
+                total=sum(len(g["rows"]) for g in groups),
+                changed_total=changed_total,
+            ),
         )
 
     @router.get("/capabilities", response_class=HTMLResponse)
@@ -3229,6 +3386,19 @@ def create_dashboard_router() -> APIRouter:
                 owners={
                     f.key: settings_form.owner_of(f.key, cfg) for f in settings_form.FIELDS
                 },
+                # The split, stated once at the top. On a worker most of this page is put
+                # away behind per-section toggles — measured at 131 of 180 — and until the
+                # page says so, opening Settings on a worker looks like a page that lost
+                # its content. One sentence turns "where did everything go" into "this is
+                # the part this machine decides".
+                owned_here=sum(
+                    1 for f in settings_form.FIELDS
+                    if settings_form.owner_of(f.key, cfg) != settings_form.OWNER_CENTRAL
+                ),
+                owned_central=sum(
+                    1 for f in settings_form.FIELDS
+                    if settings_form.owner_of(f.key, cfg) == settings_form.OWNER_CENTRAL
+                ),
                 is_worker=(cfg.fleet_role or "") == fleet_mod.ROLE_WORKER,
                 restart_keys=settings_form.RESTART_REQUIRED,
                 flash=flash,

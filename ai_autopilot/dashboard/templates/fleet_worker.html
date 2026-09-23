@@ -101,7 +101,7 @@
     <div class="fl-f">
       <label>Lần gọi gần nhất</label>
       <div class="val">
-        {% if beat_ago is not none %}{{ fmt_duration(beat_ago) }} trước
+        {% if beat_ago is not none %}{{ fmt_ago(beat_ago) }} trước
         {% else %}<span style="color:var(--text-dim)">chưa lần nào</span>{% endif %}
       </div>
     </div>

@@ -34,6 +34,10 @@ class _FakeAdo:
         self.children: dict[int, list[WorkItemInfo]] = {}
         self.tagged: list[WorkItemInfo] = []
         self.builds: list[dict] = []
+        # Per-branch builds for multi-workspace tests. None = the flat `builds` list
+        # answers every branch, which is what the single-workspace tests expect.
+        self.builds_by_branch: dict[str, list[dict]] | None = None
+        self.queried_branches: list[str] = []
         # PR id → linked work item ids, as ADO holds them. The merge transition asks
         # ADO first and only falls back to the branch name, so a branch with no id in
         # it still finds its item.
@@ -43,6 +47,11 @@ class _FakeAdo:
         self.reject_state: set[str] | None = None
 
     async def get_successful_builds(self, definition_id, branch):
+        # Which branch was asked about is itself under test now: the deploy stage used to
+        # ask once, on the root config's branch, for an instance serving several.
+        self.queried_branches.append(branch)
+        if self.builds_by_branch is not None:
+            return self.builds_by_branch.get(branch, [])
         return self.builds
 
     async def get_repositories(self):
@@ -603,3 +612,93 @@ async def test_the_summary_groups_by_reason_instead_of_growing_with_the_backlog(
     assert "(12): #8000, #8001, #8002, #8003, #8004…" in tagless
     # A branch merged many times fills the sample once, not six times.
     assert line["branches"] == ["feat/same-branch", "other"]
+
+
+# ── deploy scopes: one instance, several workspaces ──────────────────────────
+def _two_workspaces(**over):
+    """A instance serving two projects that ship from DIFFERENT branches."""
+    from ai_autopilot.config import WorkspaceConfig
+
+    cfg = Settings(
+        auto_transition_enabled=True, trigger_tag="autopilot",
+        ado_project="ProjA", base_branch="development",
+        on_merge_state="Ready to Deploy", on_deploy_state="Deployed",
+        workspaces=[
+            WorkspaceConfig(name="A", ado_projects=["ProjA"],
+                            workspace_directory="/a", base_branch="development"),
+            WorkspaceConfig(name="B", ado_projects=["ProjB"],
+                            workspace_directory="/b", base_branch="main"),
+        ],
+        **over,
+    )
+    c = SimpleNamespace(config=cfg, ado=_FakeAdo())
+    return StateSyncService(c), c
+
+
+def _in(wid, project, state="Ready to Deploy"):
+    item = _wi(wid, state=state, tags=["autopilot"])
+    item.project = project
+    return item
+
+
+async def test_a_deploy_on_one_workspace_never_ships_the_others_items():
+    """The damaging half of the old single-scope behaviour, and the silent one.
+
+    One `get_successful_builds` call on the ROOT branch decided the fate of every tagged
+    item in every project: a build on workspace A's branch moved workspace B's items to
+    "Deployed" and commented "🚀 Deployed — deploy pipeline succeeded" on them. A board
+    claiming code shipped when it never shipped is worse than a board that lags, because
+    nobody goes looking for it.
+    """
+    svc, c = _two_workspaces()
+    c.ado.builds_by_branch = {"development": [{"id": 100}], "main": [{"id": 200}]}
+    c.ado.tagged = [_in(1, "ProjA"), _in(2, "ProjB")]
+    await svc._check_deploys()                       # baseline both scopes
+    assert c.ado.states == []
+
+    c.ado.builds_by_branch["development"] = [{"id": 101}]   # only A ships
+    await svc._check_deploys()
+    assert (1, "Deployed") in c.ado.states
+    assert not any(wid == 2 for wid, _ in c.ado.states), "B shipped nothing; its item moved"
+
+
+async def test_every_workspace_branch_is_actually_queried():
+    """The quiet half: workspace B's branch was never asked about, so its deploys were
+    never seen and its items queued in their merge state indefinitely."""
+    svc, c = _two_workspaces()
+    c.ado.builds_by_branch = {"development": [{"id": 100}], "main": [{"id": 200}]}
+    await svc._check_deploys()
+    assert set(c.ado.queried_branches) == {"development", "main"}
+
+
+async def test_the_second_workspace_ships_on_its_own_build():
+    svc, c = _two_workspaces()
+    c.ado.builds_by_branch = {"development": [{"id": 100}], "main": [{"id": 200}]}
+    c.ado.tagged = [_in(1, "ProjA"), _in(2, "ProjB")]
+    await svc._check_deploys()
+    c.ado.builds_by_branch["main"] = [{"id": 201}]          # now B ships
+    await svc._check_deploys()
+    assert (2, "Deployed") in c.ado.states
+    assert not any(wid == 1 for wid, _ in c.ado.states)
+
+
+async def test_a_single_workspace_install_keeps_its_existing_watermark_row():
+    """Upgrading must not replay old builds: the root scope keeps the unsuffixed marker
+    name it has been writing all along."""
+    svc, c = _svc_shared(on_deploy_state="Deployed", base_branch="development")
+    assert svc._marker_name(svc._deploy_key(c.config)) == "last_deploy_build"
+
+
+async def test_two_workspaces_sharing_a_branch_are_one_scope():
+    """They genuinely ship together; separate watermarks would just delay one of them."""
+    from ai_autopilot.config import WorkspaceConfig
+
+    cfg = Settings(
+        auto_transition_enabled=True, base_branch="main",
+        workspaces=[
+            WorkspaceConfig(name="A", ado_projects=["ProjA"], workspace_directory="/a"),
+            WorkspaceConfig(name="B", ado_projects=["ProjB"], workspace_directory="/b"),
+        ],
+    )
+    svc = StateSyncService(SimpleNamespace(config=cfg, ado=_FakeAdo()))
+    assert len(svc._deploy_scopes()) == 1

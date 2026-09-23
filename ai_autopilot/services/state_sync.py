@@ -149,8 +149,10 @@ class StateSyncService:
         self._parent_targets: dict[int, str] = {}  # parent id → last state we rolled it to
         # Newest deploy build seen. None = "not known yet" and is NOT the same as 0:
         # it is what makes the first sighting a baseline instead of a transition.
-        # Restored from disk in _run — see _DEPLOY_MARKER.
-        self._last_deploy_build: int | None = None
+        # Per deploy scope (pipeline+branch), restored from disk in _run. One number for
+        # the whole instance let a build on one workspace's branch advance another
+        # workspace's items — see _check_deploys.
+        self._last_deploy_build: dict[str, int] = {}
         self._task: asyncio.Task | None = None
         # Merged PRs this loop walked past, already explained once. Every gate below
         # used to return in silence, so "it was merged and the card never moved" left
@@ -159,7 +161,10 @@ class StateSyncService:
         # of completed PRs that are none of our business) while still answering it.
         self._skipped: set[int] = set()
         self._skipped_new: list[tuple[str, str]] = []
-        self._warned_no_builds = False   # deploy stage: complain once, not every 90s
+        # Deploy scopes that have already complained about finding no build: once each,
+        # not every 90s, and not once for the instance — two workspaces can be wrong for
+        # two different reasons and each has to say so.
+        self._warned_no_builds: set[str] = set()
         # Persisted dedup (survives restarts). Optional so tests can omit it.
         self._sync_repo = getattr(c, "sync_repo", None)
 
@@ -216,10 +221,21 @@ class StateSyncService:
             self._merged = await self._sync_repo.seen_merged_prs()
             self._log.info("state-sync: restored merged-PR memory", count=len(self._merged))
         with contextlib.suppress(Exception):
-            self._last_deploy_build = await self._sync_repo.get_marker(_DEPLOY_MARKER)
-            if self._last_deploy_build is not None:
+            for key, _scoped in self._deploy_scopes():
+                mark = await self._sync_repo.get_marker(self._marker_name(key))
+                if mark is None and self._marker_name(key) != _DEPLOY_MARKER:
+                    # A scope that has never run gets seeded from the instance-wide
+                    # watermark this install used before deploys were tracked per scope.
+                    # Without that it would baseline on its next scan — which is safe —
+                    # but seeding also stops it treating a months-old build as new if its
+                    # pipeline has not run since.
+                    mark = await self._sync_repo.get_marker(_DEPLOY_MARKER)
+                if mark is not None:
+                    self._last_deploy_build[key] = mark
+            if self._last_deploy_build:
                 self._log.info("state-sync: restored deploy watermark",
-                               build=self._last_deploy_build)
+                               scopes=len(self._last_deploy_build),
+                               builds=sorted(self._last_deploy_build.values()))
 
     async def _scan(self) -> None:
         c, cfg = self._c, self._config
@@ -265,35 +281,114 @@ class StateSyncService:
         with contextlib.suppress(Exception):  # best-effort — never block the loop
             await self._sync_repo.prune_merged_prs(self._MERGED_CAP)
 
+    def _marker_name(self, key: str) -> str:
+        """The ``sync_markers`` row holding one scope's watermark.
+
+        The scope the ROOT config resolves to keeps the original, unsuffixed name — so
+        every install that has not split into workspaces reads the watermark it already
+        had, and upgrading to per-scope tracking replays nothing. Extra scopes get a row
+        of their own.
+        """
+        if key == self._deploy_key(self._config):
+            return _DEPLOY_MARKER
+        return f"{_DEPLOY_MARKER}:{key}"
+
+    @staticmethod
+    def _deploy_key(scoped) -> str:
+        """The pipeline+branch a scope watches, as one stable string.
+
+        Two workspaces that deploy from the same pipeline and branch are one scope —
+        they genuinely do ship together, and giving them separate watermarks would make
+        the second one advance its items a scan late for no reason.
+        """
+        branch = (getattr(scoped, "deploy_branch", "")
+                  or getattr(scoped, "base_branch", "") or "").strip().lower()
+        return f"{getattr(scoped, 'deploy_pipeline_id', 0) or 0}|{branch}"
+
+    def _deploy_scopes(self) -> list[tuple[str, object]]:
+        """Every distinct pipeline+branch this instance must watch, with its config.
+
+        The root config plus one per enabled workspace. Derived from configuration, not
+        from the items currently awaiting a deploy: a scope with nothing waiting still
+        has to move its watermark, or the next build to arrive would look "new" relative
+        to an ancient one and ship a batch of items that merged long after it.
+        """
+        cfg = self._config
+        candidates = [cfg]
+        for ws in (getattr(cfg, "workspaces", None) or []):
+            if not getattr(ws, "enabled", True):
+                continue
+            projects = getattr(ws, "ado_projects", None) or []
+            if projects:
+                # One project is enough: a workspace's overrides are the same for every
+                # project routed to it.
+                candidates.append(cfg.scoped_for_project(projects[0]))
+        out: list[tuple[str, object]] = []
+        seen: set[str] = set()
+        for scoped in candidates:
+            key = self._deploy_key(scoped)
+            if key not in seen:
+                seen.add(key)
+                out.append((key, scoped))
+        return out
+
     async def _check_deploys(self) -> None:
-        c, cfg = self._c, self._config
+        """Advance items that shipped — per deploy scope, not per instance.
+
+        This used to ask for builds ONCE, on the root config's pipeline and branch, and
+        then advance every tagged item sitting in its merge state regardless of which
+        project it belonged to. On an instance serving two workspaces that is wrong in
+        both directions at once, and the damaging direction is the silent one:
+
+          * the second workspace's branch was never queried, so its deploys were never
+            seen; and
+          * a build on the FIRST workspace's branch marked the second workspace's items
+            "Deployed" — and commented "🚀 Deployed — deploy pipeline succeeded" on them.
+
+        Measured on a two-workspace config (A on `development`, B on `main`): one build
+        on `development` moved both items, and `main` was never asked about. A board
+        saying "shipped" about code that never shipped is worse than a board that lags,
+        because nobody goes looking for it.
+        """
+        for key, scoped in self._deploy_scopes():
+            await self._check_deploy_scope(key, scoped)
+
+    async def _check_deploy_scope(self, key: str, cfg) -> None:
+        c = self._c
         branch = cfg.deploy_branch or cfg.base_branch
         builds = await c.ado.get_successful_builds(cfg.deploy_pipeline_id, branch)
         ids = [b.get("id") for b in builds if isinstance(b.get("id"), int)]
         if not ids:
-            # Once, then quiet. A deploy stage configured against the wrong branch or a
-            # pipeline that has never gone green looks identical to "nothing shipped
-            # today", and the items simply queue up in their merge state.
-            if not self._warned_no_builds:
-                self._warned_no_builds = True
+            # Once per scope, then quiet. A deploy stage configured against the wrong
+            # branch or a pipeline that has never gone green looks identical to "nothing
+            # shipped today", and the items simply queue up in their merge state.
+            if key not in self._warned_no_builds:
+                self._warned_no_builds.add(key)
                 self._log.info(
                     "deploy stage found no successful build", branch=branch,
                     pipeline=cfg.deploy_pipeline_id or "any",
                     hint="check the deploy branch and pipeline id under Auto transitions",
                 )
             return
-        self._warned_no_builds = False
+        self._warned_no_builds.discard(key)
         newest = max(ids)
-        if self._last_deploy_build is None:
+        last = self._last_deploy_build.get(key)
+        if last is None:
             # Baseline: a fresh install must not replay every old build. Persisted, so
             # this happens ONCE in the life of the instance and not once per restart.
-            await self._remember_deploy(newest)
-            self._log.info("deploy watermark baselined", build=newest)
+            await self._remember_deploy(key, newest)
+            self._log.info("deploy watermark baselined", build=newest, branch=branch)
             return
-        if newest <= self._last_deploy_build:
+        if newest <= last:
             return  # no new successful build since last check
-        await self._remember_deploy(newest)
+        await self._remember_deploy(key, newest)
         tagged = await c.ado.get_all_tagged_work_items()
+        # Only the items whose OWN project resolves to this scope. Without this filter
+        # the loop below is the false-transition described in _check_deploys.
+        tagged = [
+            item for item in tagged
+            if self._deploy_key(self._cfg_for(item)) == key
+        ]
         awaiting = set(items_awaiting_deploy(tagged, cfg, self._cfg_for))
         if not awaiting:
             self._log.info(
@@ -322,16 +417,16 @@ class StateSyncService:
                 )
             self._log.info("marked deployed", id=item.id, state=target, build=newest)
 
-    async def _remember_deploy(self, build_id: int) -> None:
-        """Move the deploy watermark, in memory and on disk.
+    async def _remember_deploy(self, key: str, build_id: int) -> None:
+        """Move one scope's deploy watermark, in memory and on disk.
 
         Both writes matter: the in-memory one stops this process transitioning twice,
         the persisted one stops the NEXT process baselining over a deploy it never saw.
         """
-        self._last_deploy_build = build_id
+        self._last_deploy_build[key] = build_id
         if self._sync_repo is not None:
             with contextlib.suppress(Exception):  # best-effort — never block the loop
-                await self._sync_repo.set_marker(_DEPLOY_MARKER, build_id)
+                await self._sync_repo.set_marker(self._marker_name(key), build_id)
 
     def _cfg_for(self, item: WorkItemInfo):
         """Config as the item's OWN project sees it.

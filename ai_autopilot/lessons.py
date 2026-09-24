@@ -15,6 +15,7 @@ operator sees is exactly what the next brief will carry.
 from __future__ import annotations
 
 import contextlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -711,6 +712,11 @@ def delete(workspace: str, repo: str, text: str) -> bool:
     kept = [le for le in items if le.text != target]
     if len(kept) == len(items):
         return False
+    # Deleting a line the centre sent is a REFUSAL, not a tidy-up. Applied again on the
+    # next beat it would be back within minutes, which taught operators that the delete
+    # button on this page does not work.
+    if any(le.text == target and le.source == SOURCE_FLEET for le in items):
+        decline_fleet(workspace, target)
     return _write(workspace, repo, kept)
 
 
@@ -758,7 +764,125 @@ def per_day(workspace: str, *, today: str = "") -> list[tuple[str, int]]:
     return out
 
 
-def apply_fleet(workspace: str, items: list[tuple[str, str]]) -> int:
+# ── What the centre may put on this machine ──────────────────────────────────
+#
+# The centre approving a line used to be the same event as the line appearing here: the
+# next beat wrote it in, pinned and uncapped, and an operator who deleted it got it back
+# minutes later. Measured: delete, beat, and the line is on disk again. So a worker had
+# no way to refuse — the centre commanded. The asymmetry was the bug: the centre already
+# had a human gate (approve / reject), and the machine that has to live with the line
+# had none.
+#
+# A decline is therefore recorded HERE and is permanent. Both state files are kept out
+# of the ``*.md`` glob ``list_repos`` reads, so neither can be mistaken for a repo.
+_DECLINED_FILE = "declined.txt"
+_OFFERS_FILE = "offers.json"
+
+#: How this machine takes what the centre approved.
+ACCEPT_AUTO = "auto"       # apply on arrival — but a decline still sticks, forever
+ACCEPT_MANUAL = "manual"   # queue it; somebody here presses Nhận
+
+
+def _state_path(workspace: str, name: str) -> Path:
+    return _lessons_dir(workspace) / name
+
+
+def declined_keys(workspace: str) -> set[str]:
+    """Normalised keys this machine has refused. Never applied, never offered again."""
+    if not workspace:
+        return set()
+    try:
+        raw = _state_path(workspace, _DECLINED_FILE).read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    return {ln.strip() for ln in raw.splitlines() if ln.strip()}
+
+
+def decline_fleet(workspace: str, text: str) -> bool:
+    """Refuse a line from the centre, for good. True when it was newly refused."""
+    key = normalize(text)
+    if not workspace or not key:
+        return False
+    keys = declined_keys(workspace)
+    if key in keys:
+        return False
+    keys.add(key)
+    path = _state_path(workspace, _DECLINED_FILE)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write("\n".join(sorted(keys)) + "\n")
+    except OSError:
+        return False
+    drop_offer(workspace, text)
+    return True
+
+
+def offers(workspace: str) -> list[tuple[str, str]]:
+    """(repo, text) the centre approved that this machine has not answered yet."""
+    if not workspace:
+        return []
+    try:
+        raw = _state_path(workspace, _OFFERS_FILE).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return []
+    out: list[tuple[str, str]] = []
+    for row in data if isinstance(data, list) else []:
+        if not isinstance(row, dict):
+            continue
+        repo, text = str(row.get("repo") or ""), str(row.get("text") or "")
+        if text.strip():
+            out.append((repo or SHARED_BUCKET, text))
+    return out
+
+
+def _write_offers(workspace: str, rows: list[tuple[str, str]]) -> None:
+    path = _state_path(workspace, _OFFERS_FILE)
+    try:
+        if not rows:
+            path.unlink(missing_ok=True)
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        body = json.dumps(
+            [{"repo": r, "text": t} for r, t in rows], ensure_ascii=False, indent=1
+        )
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(body + "\n")
+    except OSError:
+        return
+
+
+def drop_offer(workspace: str, text: str) -> None:
+    """Take one line out of the queue without deciding either way."""
+    key = normalize(text)
+    if not workspace or not key:
+        return
+    rows = [(r, t) for r, t in offers(workspace) if normalize(t) != key]
+    _write_offers(workspace, rows)
+
+
+def accept_offer(workspace: str, text: str) -> bool:
+    """Take one queued line into this machine's store. True when it landed."""
+    key = normalize(text)
+    match = [(r, t) for r, t in offers(workspace) if normalize(t) == key]
+    if not match:
+        return False
+    repo, real = match[0]
+    record_lessons(
+        workspace, repo, [real],
+        now=datetime.now(), source=SOURCE_FLEET,  # noqa: DTZ005 — local day
+    )
+    drop_offer(workspace, real)
+    return True
+
+
+def apply_fleet(
+    workspace: str, items: list[tuple[str, str]], mode: str = ACCEPT_AUTO
+) -> int:
     """Store knowledge the central approved. ``items`` is (repo, text) pairs.
 
     Written with :data:`SOURCE_FLEET` so the page can say where a line came from, and
@@ -771,12 +895,37 @@ def apply_fleet(workspace: str, items: list[tuple[str, str]]) -> int:
     """
     if not workspace:
         return 0
+    refused = declined_keys(workspace)
     added = 0
     now = datetime.now()  # noqa: DTZ005 — local day, same clock the rest of the file uses
     by_repo: dict[str, list[str]] = {}
     for repo, text in items:
-        if str(text or "").strip():
-            by_repo.setdefault(str(repo or SHARED_BUCKET), []).append(str(text).strip())
+        clean = str(text or "").strip()
+        # A line this machine refused is never applied and never queued again. Without
+        # it, "delete" on a fleet line lasted until the next beat — which is not a
+        # decision, it is a delay.
+        if clean and normalize(clean) not in refused:
+            by_repo.setdefault(str(repo or SHARED_BUCKET), []).append(clean)
+
+    if (mode or ACCEPT_AUTO) == ACCEPT_MANUAL:
+        # Queue rather than apply: the centre proposes, somebody here accepts.
+        known_here = {
+            normalize(le.text)
+            for known_repo in list_repos(workspace)
+            for le in _read(workspace, known_repo)
+        }
+        pending = list(offers(workspace))
+        queued = {normalize(t) for _r, t in pending}
+        for repo, texts in by_repo.items():
+            for text in texts:
+                key = normalize(text)
+                if key not in known_here and key not in queued:
+                    pending.append((repo, text))
+                    queued.add(key)
+                    added += 1
+        _write_offers(workspace, pending)
+        return added
+
     for repo, texts in by_repo.items():
         known = {normalize(le.text) for le in _read(workspace, repo)}
         added += sum(1 for t in texts if normalize(t) not in known)

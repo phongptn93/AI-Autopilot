@@ -756,6 +756,12 @@ _BASE_FIELDS: tuple[Field, ...] = (
     Field("fleet_sync_interval_minutes", "↳ Chu kỳ đồng bộ (phút)", "int", "🛰 Fleet",
           "Máy trạm gọi về mỗi bấy nhiêu phút. Tối thiểu 1 phút.",
           show_when_key="fleet_role", show_when_values=("worker",)),
+    Field("fleet_knowledge_accept", "↳ Nhận tri thức từ trung tâm", "select", "🛰 Fleet",
+          "auto = áp dụng ngay khi trung tâm duyệt. manual = xếp hàng chờ, bạn bấm Nhận "
+          "trên trang Tri thức. Dù chọn cách nào, khi bạn XOÁ một dòng của đội thì đó là "
+          "từ chối vĩnh viễn — nó không quay lại ở nhịp đồng bộ sau.",
+          ("auto", "manual"),
+          show_when_key="fleet_role", show_when_values=("worker",)),
     Field("fleet_offline_after_minutes", "↳ Coi là offline sau (phút)", "int", "🛰 Fleet",
           "Trung tâm: máy im lặng lâu hơn mức này sẽ hiện đỏ trên trang Fleet.",
           show_when_key="fleet_role", show_when_values=("central",)),
@@ -1101,6 +1107,10 @@ MACHINE_LOCAL = frozenset({
     # FALLS BACK TO when it is blank — so leaving it blank on a worker handed the choice
     # of whose items this machine acts on to the central.
     "command_users", "auto_transition_assignee",
+    # Whether THIS machine takes approved knowledge on sight or queues it for a person
+    # here. Not a secret and not an identity — it is the machine's own policy about what
+    # it accepts, which is exactly what this group is for.
+    "fleet_knowledge_accept",
     # ⬆️ Self-update — properties of the INSTALL sitting on this disk. Whether this
     # machine can take a wheel at all depends on how it was installed (editable checkout,
     # wheel, container) and how it comes back depends on what launched it, so a central

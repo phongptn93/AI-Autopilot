@@ -292,6 +292,44 @@
 </div>
 {% endif %}
 
+{# Worker side: the centre proposes, this machine decides. Only ever non-empty in
+   manual mode — on auto an approved line is applied on arrival (and a refusal is still
+   permanent, so deleting one below is a decision, not a delay). #}
+{% if pending_offers %}
+<div class="card">
+  <div class="card-header">
+    <h3>Đội gửi xuống — chờ bạn nhận</h3>
+    <span class="dim" style="font-size:12.5px">{{ pending_offers|length }} mục ·
+      trung tâm đã duyệt, máy này chưa trả lời</span>
+  </div>
+  <div class="card-body" style="padding:0">
+    <div class="ktable" style="grid-template-columns:104px minmax(0,1fr) 150px">
+      <div class="khead">
+        <span>Repo</span><span>Nội dung</span><span></span>
+      </div>
+      {% for repo, text in pending_offers %}
+      <div class="krow">
+        <span class="ksrc"><span class="src bot">{{ 'mọi repo' if repo == shared_bucket else repo }}</span></span>
+        <span class="kwhat">{{ text }}</span>
+        <span class="kact">
+          <form method="post" action="/dashboard/learning/offer/accept" style="display:inline">
+            <input type="hidden" name="text" value="{{ text }}"/>
+            <button class="btn-ghost" type="submit" style="font-size:12px;padding:3px 9px">Nhận</button>
+          </form>
+          <form method="post" action="/dashboard/learning/offer/decline" style="display:inline"
+                onsubmit="return confirm('Từ chối vĩnh viễn dòng này? Nó sẽ không được gửi lại.');">
+            <input type="hidden" name="text" value="{{ text }}"/>
+            <button class="btn-ghost" type="submit"
+                    style="font-size:12px;padding:3px 9px;border-color:var(--red,#e5484d);color:var(--red,#e5484d)">Bỏ</button>
+          </form>
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ── Tri thức các máy trong đội gửi về (chỉ máy trung tâm) ────────────────────
    Không tự động phát ngược: một máy học sai mà auto-merge thì cả đội nhiễm ngay ở
    nhịp kế tiếp, và bài học sai được dạy lại ở MỌI run. #}

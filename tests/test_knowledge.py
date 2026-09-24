@@ -488,3 +488,44 @@ def test_a_named_repo_cuts_from_its_own_branch():
     assert cfg.branch_for_repo("Micro-Frontend") == "main"
     assert cfg.branch_for_repo("micro-frontend") == "main"      # folder vs typed case
     assert cfg.branch_for_repo("Backend-Fresh") == "development"
+
+
+# ── the worker's own accept / decline ────────────────────────────────────────
+
+def test_the_offer_buttons_actually_work(tmp_path):
+    """Ruff caught a NameError here that the unit tests could not: the route used
+    `lessons_mod` without importing it, so both buttons would have 500'd. Exercise the
+    HTTP path, not just the module."""
+    lessons.apply_fleet(str(tmp_path), [("Backend", "một dòng đội gửi")],
+                        mode=lessons.ACCEPT_MANUAL)
+    with _client(tmp_path) as client:
+        page = client.get("/dashboard/learning").text
+        assert "Đội gửi xuống" in page and "một dòng đội gửi" in page
+
+        resp = client.post("/dashboard/learning/offer/accept",
+                           data={"text": "một dòng đội gửi"}, follow_redirects=False)
+        assert resp.status_code == 303
+
+    assert [le.text for le in lessons.entries(str(tmp_path), "Backend")] == ["một dòng đội gửi"]
+    assert lessons.offers(str(tmp_path)) == []
+
+
+def test_declining_through_the_page_is_permanent(tmp_path):
+    lessons.apply_fleet(str(tmp_path), [("Backend", "dòng không muốn")],
+                        mode=lessons.ACCEPT_MANUAL)
+    with _client(tmp_path) as client:
+        resp = client.post("/dashboard/learning/offer/decline",
+                           data={"text": "dòng không muốn"}, follow_redirects=False)
+        assert resp.status_code == 303
+
+    # The centre keeps approving it; this machine keeps refusing it.
+    lessons.apply_fleet(str(tmp_path), [("Backend", "dòng không muốn")],
+                        mode=lessons.ACCEPT_MANUAL)
+    assert lessons.offers(str(tmp_path)) == []
+    assert lessons.entries(str(tmp_path), "Backend") == []
+
+
+def test_an_unknown_decision_is_not_an_action(tmp_path):
+    with _client(tmp_path) as client:
+        assert client.post("/dashboard/learning/offer/maybe",
+                           data={"text": "x"}, follow_redirects=False).status_code == 404

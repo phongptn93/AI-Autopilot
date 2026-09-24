@@ -1193,6 +1193,11 @@ class Settings(BaseSettings):
     # worker contributes on each beat and takes back what the centre has APPROVED —
     # see `fleet.KnowledgeResponse` for why this is not part of the config document.
     fleet_knowledge_sync: bool = True
+    # How this machine takes what the centre approved. "auto" applies it on arrival;
+    # "manual" queues it and somebody here presses Nhận. Either way a REFUSAL is
+    # permanent — deleting a fleet line used to last until the next beat, which is a
+    # delay, not a decision.
+    fleet_knowledge_accept: str = "auto"      # auto | manual
     # Central: how many SEPARATE machines must independently report the same lesson
     # before it is served to the fleet without anybody approving it. One machine
     # tripping over something is an anecdote; several is corroboration. 0 disables

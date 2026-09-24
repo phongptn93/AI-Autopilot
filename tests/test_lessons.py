@@ -287,3 +287,80 @@ def test_a_hand_written_skill_is_never_touched(tmp_path):
     lessons.delete(ws, "Backend", "x")
 
     assert (mine / "SKILL.md").is_file(), "pruned a skill it did not write"
+
+
+# ── the centre proposes, this machine decides ───────────────────────────────
+
+def test_deleting_a_line_the_centre_sent_is_a_refusal_not_a_delay(tmp_path):
+    """Measured before this existed: delete it, wait one beat, and it is back on disk.
+
+    The centre already had a human gate (approve / reject). The machine that has to live
+    with the line had none — so "delete" on this page taught operators that the button
+    does not work.
+    """
+    ws = str(tmp_path)
+    text = "Luôn dùng ILogger thay cho Console.WriteLine"
+    lessons.apply_fleet(ws, [("Backend", text)])
+    assert len(lessons.entries(ws, "Backend")) == 1
+
+    lessons.delete(ws, "Backend", text)
+    lessons.apply_fleet(ws, [("Backend", text)])      # the next beat
+    lessons.apply_fleet(ws, [("Backend", text)])      # and the one after
+
+    assert lessons.entries(ws, "Backend") == []
+    assert lessons.normalize(text) in lessons.declined_keys(ws)
+
+
+def test_a_locally_learned_line_is_deleted_without_being_refused(tmp_path):
+    """Only the centre's lines become refusals — deleting one of this machine's own
+    guesses must not blacklist the sentence for good."""
+    ws = str(tmp_path)
+    lessons.record_lessons(ws, "Backend", ["a local guess"], now=_NOW_MEM)
+    lessons.delete(ws, "Backend", "a local guess")
+    assert lessons.declined_keys(ws) == set()
+
+
+def test_manual_mode_queues_instead_of_applying(tmp_path):
+    ws = str(tmp_path)
+    text = "Không gọi SaveChanges trong vòng lặp"
+    lessons.apply_fleet(ws, [("Backend", text)], mode=lessons.ACCEPT_MANUAL)
+
+    assert lessons.entries(ws, "Backend") == []        # nothing applied behind our back
+    assert lessons.offers(ws) == [("Backend", text)]
+
+    assert lessons.accept_offer(ws, text) is True
+    assert [le.text for le in lessons.entries(ws, "Backend")] == [text]
+    assert lessons.offers(ws) == []                    # and the queue is emptied
+
+
+def test_a_queued_line_is_not_offered_twice(tmp_path):
+    ws = str(tmp_path)
+    for _ in range(3):
+        lessons.apply_fleet(ws, [("Backend", "x")], mode=lessons.ACCEPT_MANUAL)
+    assert len(lessons.offers(ws)) == 1
+
+
+def test_declining_a_queued_line_takes_it_out_and_keeps_it_out(tmp_path):
+    ws = str(tmp_path)
+    text = "một dòng máy này không muốn"
+    lessons.apply_fleet(ws, [("Backend", text)], mode=lessons.ACCEPT_MANUAL)
+    assert lessons.decline_fleet(ws, text) is True
+    assert lessons.offers(ws) == []
+
+    lessons.apply_fleet(ws, [("Backend", text)], mode=lessons.ACCEPT_MANUAL)
+    assert lessons.offers(ws) == [], "a refused line was offered again"
+
+
+def test_the_state_files_are_never_mistaken_for_a_repo(tmp_path):
+    """They live beside the per-repo markdown, so a glob that caught them would invent
+    a repo called "declined" with one nonsense lesson in it."""
+    ws = str(tmp_path)
+    lessons.decline_fleet(ws, "nope")
+    lessons.apply_fleet(ws, [("Backend", "queued")], mode=lessons.ACCEPT_MANUAL)
+    assert lessons.list_repos(ws) == []
+
+
+def test_accept_mode_is_the_machines_own_call():
+    from ai_autopilot.dashboard import settings_form as sf
+
+    assert "fleet_knowledge_accept" in sf.MACHINE_LOCAL

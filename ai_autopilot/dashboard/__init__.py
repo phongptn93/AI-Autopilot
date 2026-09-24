@@ -180,6 +180,9 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                                  "không ghi đè nữa, và bạn sửa được ngay tại chỗ."),
     "setting_released": ("green", "🛰 Đã trả thiết lập đó về cho trung tâm — lần đồng bộ "
                                   "tới máy này sẽ nhận lại giá trị chung."),
+    "offer_accepted": ("green", "✅ Đã nhận vào tri thức của máy này."),
+    "offer_declined": ("amber", "🚫 Đã từ chối — dòng này sẽ KHÔNG quay lại ở nhịp "
+                                "đồng bộ sau."),
     # ⬆️ Self-update. "Started" is not "done": the process is about to go away and come
     # back, so the banner has to describe a thing in progress, not a result.
     "update_started": ("green", "⬆️ Đang cập nhật. Máy sẽ ngừng nhận việc mới, đợi các "
@@ -3074,6 +3077,10 @@ def create_dashboard_router() -> APIRouter:
         # receives, but it is not the place decisions get made — one machine approving
         # for the whole fleet from wherever it happens to be is how a wrong lesson
         # spreads before anyone with context sees it.
+        # What the centre has approved and this machine has not answered. Only a
+        # worker in manual mode ever has any: on auto they are applied on arrival.
+        pending_offers = lessons_mod.offers(workspace) if workspace else []
+        declined_count = len(lessons_mod.declined_keys(workspace)) if workspace else 0
         pooled: list[dict] = []
         is_central = (cfg.fleet_role or "") == fleet_mod.ROLE_CENTRAL
         if is_central:
@@ -3112,6 +3119,7 @@ def create_dashboard_router() -> APIRouter:
                     le.count for _, rows in groups for le, _ in rows if not le.authored
                 ),
                 pooled=pooled, is_central=is_central,
+                pending_offers=pending_offers, declined_count=declined_count,
                 auto_promote=cfg.fleet_knowledge_auto_promote,
                 max_injected=limit, series=series,
                 peak=max((n for _, n in series), default=0),
@@ -3153,6 +3161,37 @@ def create_dashboard_router() -> APIRouter:
         )
         _log.info("knowledge added via dashboard", repo=repo, lines=added)
         return _flash("/dashboard/learning", "lesson_added")
+
+    @router.post("/learning/offer/{decision}")
+    async def learning_offer_decide(request: Request, decision: str):
+        """Take, or refuse, one line the centre approved.
+
+        A refusal is permanent and is recorded HERE. Before this, deleting a line the
+        centre had sent lasted until the next beat put it back — so the only machine
+        that had no say about what it was told was the one that had to live with it.
+        """
+        if decision not in ("accept", "decline"):
+            raise HTTPException(status_code=404, detail="unknown decision")
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        workspace = c.config.workspace_directory
+        form = await request.form()
+        text = str(form.get("text", "")).strip()
+        if not workspace or not text:
+            return _flash("/dashboard/learning", "lesson_none_added")
+        if decision == "accept":
+            ok = lessons_mod.accept_offer(workspace, text)
+        else:
+            ok = lessons_mod.decline_fleet(workspace, text)
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard",
+            action=f"knowledge.{decision}ed", target=text[:300],
+        )
+        return _flash(
+            "/dashboard/learning",
+            f"offer_{decision}ed" if ok else "lesson_none_added",
+        )
 
     @router.post("/learning/pool/{decision}")
     async def learning_pool_decide(request: Request, decision: str):

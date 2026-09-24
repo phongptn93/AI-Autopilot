@@ -160,7 +160,7 @@ class FleetAgentService:
                 for row in (body.get("items") or [])
             ]
             self.knowledge_pending = int(body.get("pending") or 0)
-            added = lessons.apply_fleet(workspace, incoming)
+            added = lessons.apply_fleet(workspace, incoming, mode=cfg.fleet_knowledge_accept)
             if added:
                 self._log.info("fleet knowledge applied", new=added, total=len(incoming))
             return added

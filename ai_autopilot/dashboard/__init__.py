@@ -583,10 +583,26 @@ def _fmt_ago(seconds: float) -> str:
     return f"{days / 30:.0f} tháng"
 
 
-# PR-outcome figures are an ADO round-trip per repo per status — cache them briefly
-# so Overview refreshes don't hammer the API. Module-level: one cache per process.
+# PR-outcome figures are an ADO round-trip per repo per status — cache them so Overview
+# refreshes don't hammer the API. Module-level: one cache per process.
+#
+# The TTL is minutes, not seconds, on purpose: the scan is 1 + 3N list requests plus one
+# link lookup per PR whose branch carries no work-item id, and "how many PRs have we
+# merged" is not a figure anybody reads to the second. A short TTL bought nothing and
+# cost a full re-scan every minute.
 _PR_OUTCOME_CACHE: dict = {"at": 0.0, "data": None}
-_PR_OUTCOME_TTL = 60.0
+_PR_OUTCOME_TTL = 300.0
+# Single-flight: without it, N concurrent page loads on a cold cache each started their
+# own full scan — the load that made the page hang also throttled ADO into 429s, whose
+# backoff sleeps then made the next load slower still.
+_PR_OUTCOME_LOCK = asyncio.Lock()
+# Strong reference to the in-flight refresh. A bare create_task() may be garbage
+# collected mid-flight, which would silently abandon the scan.
+_PR_OUTCOME_TASK: asyncio.Task | None = None
+# How many ADO reads the scan may have in the air at once. Bounded rather than
+# unbounded: the fallback link lookups are one request per PR and can number in the
+# hundreds, which is a denial of service aimed at ourselves.
+_PR_SCAN_CONCURRENCY = 8
 
 # The Reviews board scans every repo × active PR × reviewers on each load — cache the
 # assembled view briefly so refreshes don't hammer ADO (the tracker updates state on its
@@ -642,6 +658,116 @@ def _feed_key(raw: str) -> str:
     return raw if _FEED_KEY_RE.match(raw) else ""
 
 
+def _pr_outcomes_pending() -> dict:
+    """Placeholder served while the very first scan is still running.
+
+    Distinct from a FAILED scan (``ok`` False): "we have not counted yet" and "we asked
+    ADO and it would not answer" are different things to a reader, and showing the
+    error wording for a cold cache would have people chasing an outage that is not
+    happening.
+    """
+    return {"merged": 0, "active": 0, "abandoned": 0, "ok": True,
+            "pending": True, "merge_rate": None}
+
+
+async def _scan_pr_outcomes(c: Container) -> dict:
+    """The actual ADO scan behind :func:`_pr_outcomes`. Never called on the request path.
+
+    Every read runs under one semaphore, so the cost is bounded by concurrency rather
+    than by how many PRs the organization happens to have. It used to be strictly
+    sequential: 1 + 3N list requests, and then ONE MORE request per PR whose branch
+    name carries no work-item id — which on a real org is most of them, because humans
+    do not name branches ``<prefix>/<id>-<slug>``. At ~200 ms a round trip that is a
+    minute of dead time, which is exactly what made /dashboard/ look hung.
+    """
+    counts: dict = {"merged": 0, "active": 0, "abandoned": 0, "ok": True, "pending": False}
+    gate = asyncio.Semaphore(_PR_SCAN_CONCURRENCY)
+
+    async def guarded(coro_factory):
+        async with gate:
+            return await coro_factory()
+
+    try:
+        ours = await c.execution_repo.work_item_ids()
+        repo_ids = [r["id"] for r in await c.ado.get_repositories() if r.get("id")]
+        jobs = [
+            (key, rid, fetch)
+            for rid in repo_ids
+            for key, fetch in (
+                ("merged", c.ado.get_completed_pull_requests),
+                ("active", c.ado.get_active_pull_requests),
+                ("abandoned", c.ado.get_abandoned_pull_requests),
+            )
+        ]
+        lists = await asyncio.gather(
+            *(guarded(lambda f=fetch, r=rid: f(r)) for _, rid, fetch in jobs),
+            return_exceptions=True,
+        )
+
+        # Pass 1 — everything the branch name already answers, for free. Branch name
+        # FIRST here, unlike everywhere else: every PR the autopilot opened is named
+        # `<prefix>/<id>-<slug>`, so link-first would add a request per PR to compute a
+        # percentage. The fallback below still closes the gap it is here for.
+        unresolved: list[tuple[str, str, int]] = []   # (key, repo_id, pr_id)
+        for (key, rid, _), prs in zip(jobs, lists, strict=True):
+            if isinstance(prs, BaseException):
+                raise prs
+            for pr in prs:
+                wid = parse_work_item_id(pr.get("sourceRefName", ""))
+                if wid is None:
+                    unresolved.append((key, rid, pr.get("pullRequestId") or 0))
+                elif wid in ours:
+                    counts[key] += 1
+
+        # Pass 2 — ask ADO for the link only for the PRs the name could not answer, and
+        # ask for all of them at once. Memoised client-side (see
+        # AdoClient.get_pull_request_work_items), so a warm process mostly skips this.
+        if unresolved:
+            linked = await asyncio.gather(
+                *(guarded(lambda r=rid, i=pid: c.ado.get_pull_request_work_items(r, i))
+                  for _, rid, pid in unresolved),
+                return_exceptions=True,
+            )
+            for (key, _, _), ids in zip(unresolved, linked, strict=True):
+                if isinstance(ids, BaseException):
+                    raise ids
+                if ids and ids[0] in ours:
+                    counts[key] += 1
+    except Exception as exc:  # noqa: BLE001 — metrics must never break the page
+        _log.warning("pr outcome scan failed", error=describe_exc(exc))
+        counts["ok"] = False
+    decided = counts["merged"] + counts["abandoned"]
+    counts["merge_rate"] = round(100 * counts["merged"] / decided) if decided else None
+    return counts
+
+
+def _log_refresh_failure(task: asyncio.Task) -> None:
+    """Drain a background refresh's exception so it is logged, not GC-reported."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        _log.warning("pr outcome refresh crashed", error=describe_exc(exc))
+
+
+async def _refresh_pr_outcomes(c: Container) -> None:
+    """Run one scan and publish it, under the single-flight lock."""
+    async with _PR_OUTCOME_LOCK:
+        # Somebody else may have refreshed while we waited for the lock.
+        if (_PR_OUTCOME_CACHE["data"] is not None
+                and time.monotonic() - _PR_OUTCOME_CACHE["at"] < _PR_OUTCOME_TTL):
+            return
+        counts = await _scan_pr_outcomes(c)
+        # A failed scan never becomes a FRESH answer: the next load must retry rather
+        # than serve zeros for a full TTL.
+        if counts["ok"]:
+            _PR_OUTCOME_CACHE.update(at=time.monotonic(), data=counts)
+        elif _PR_OUTCOME_CACHE["data"] is None:
+            # Nothing good to fall back on — publish the failure (leaving ``at`` at 0 so
+            # it counts as stale) rather than leaving the page on "pending" forever.
+            _PR_OUTCOME_CACHE["data"] = counts
+
+
 async def _pr_outcomes(c: Container) -> dict:
     """Merged / active / abandoned counts of the autopilot's OWN PRs, across every repo —
     the denominator for "is this actually shipping work, and at what cost".
@@ -656,50 +782,26 @@ async def _pr_outcomes(c: Container) -> dict:
       * an agent-chosen prefix that isn't on the list (``dxfac/feature/6526-…``) was skipped
         even though it was ours.
 
-    ``ok`` is False when the scan itself failed. Returning silent zeros made a throttled ADO
-    look identical to "you have never shipped anything" — 1 + 3N requests per uncached load
-    is enough that this does happen.
+    **This never blocks the page.** A stale figure is refreshed in the BACKGROUND and the
+    caller is handed what we already have, because the alternative — waiting out a scan
+    of every PR in the organization before a single byte of HTML is written — is what
+    made the Overview appear to hang. Five stat cards are not worth a minute of a blank
+    browser tab.
+
+    ``ok`` is False when the scan itself failed; ``pending`` is True on a cold cache,
+    where we have no answer YET but nothing has gone wrong.
     """
-    now = time.monotonic()
-    if _PR_OUTCOME_CACHE["data"] is not None and now - _PR_OUTCOME_CACHE["at"] < _PR_OUTCOME_TTL:
-        return _PR_OUTCOME_CACHE["data"]
-    counts: dict = {"merged": 0, "active": 0, "abandoned": 0, "ok": True}
-    try:
-        ours = await c.execution_repo.work_item_ids()
-        for repo in await c.ado.get_repositories():
-            rid = repo.get("id")
-            if not rid:
-                continue
-            for key, fetch in (
-                ("merged", c.ado.get_completed_pull_requests),
-                ("active", c.ado.get_active_pull_requests),
-                ("abandoned", c.ado.get_abandoned_pull_requests),
-            ):
-                for pr in await fetch(rid):
-                    # Branch name FIRST here, unlike everywhere else, and only asking
-                    # ADO for the link when the name carries no id. Precedence is
-                    # flipped on purpose: this scan already costs 1 + 3N requests, and
-                    # every PR the autopilot opened is named `<prefix>/<id>-<slug>`, so
-                    # link-first would add one request per PR — hundreds — to compute a
-                    # percentage. The fallback still closes the gap it is here for: a
-                    # PR whose branch was named without an id is no longer invisible.
-                    wid = parse_work_item_id(pr.get("sourceRefName", ""))
-                    if wid is None:
-                        linked = await c.ado.get_pull_request_work_items(
-                            rid, pr.get("pullRequestId") or 0)
-                        wid = linked[0] if linked else None
-                    if wid in ours:
-                        counts[key] += 1
-    except Exception as exc:  # noqa: BLE001 — metrics must never break the page
-        _log.warning("pr outcome scan failed", error=describe_exc(exc))
-        counts["ok"] = False
-    decided = counts["merged"] + counts["abandoned"]
-    counts["merge_rate"] = round(100 * counts["merged"] / decided) if decided else None
-    # A failed scan is not cached: the next load should retry rather than serve zeros for
-    # a full minute.
-    if counts["ok"]:
-        _PR_OUTCOME_CACHE.update(at=now, data=counts)
-    return counts
+    global _PR_OUTCOME_TASK
+    cached = _PR_OUTCOME_CACHE["data"]
+    fresh = (cached is not None
+             and time.monotonic() - _PR_OUTCOME_CACHE["at"] < _PR_OUTCOME_TTL)
+    if not fresh and (_PR_OUTCOME_TASK is None or _PR_OUTCOME_TASK.done()):
+        _PR_OUTCOME_TASK = asyncio.create_task(_refresh_pr_outcomes(c))
+        # Nobody awaits this task, so an escaping exception would surface as asyncio's
+        # "Task exception was never retrieved" at GC time — a stack trace with no
+        # request attached to it. Consume it here instead.
+        _PR_OUTCOME_TASK.add_done_callback(_log_refresh_failure)
+    return cached if cached is not None else _pr_outcomes_pending()
 
 
 # How long a run may go without producing an event before the page calls it out. The

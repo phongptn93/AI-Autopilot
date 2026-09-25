@@ -6,7 +6,9 @@ network except the ADO health check (which fails gracefully → 503).
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import time
 from pathlib import Path
 
 import pytest
@@ -928,14 +930,13 @@ class _FakeExecRepoIds:
 
 
 async def _outcomes(ado, ids) -> dict:
+    """Drive the SCAN directly. `_pr_outcomes` no longer performs it on the request path
+    (it hands back what is cached and refreshes behind the page), so the counting rules
+    below are tested where the counting actually happens."""
     from types import SimpleNamespace
-    dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)   # module-level cache
-    try:
-        return await dashboard._pr_outcomes(
-            SimpleNamespace(ado=ado, execution_repo=_FakeExecRepoIds(ids))
-        )
-    finally:
-        dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+    return await dashboard._scan_pr_outcomes(
+        SimpleNamespace(ado=ado, execution_repo=_FakeExecRepoIds(ids))
+    )
 
 
 async def test_only_prs_for_items_this_autopilot_ran_are_counted():
@@ -983,7 +984,20 @@ async def test_a_failed_scan_is_reported_not_shown_as_zero():
     counts = await _outcomes(_FakeAdoPRs(boom=True), ids={1})
     assert counts["ok"] is False
     assert counts["merged"] == 0                 # nothing counted…
-    assert dashboard._PR_OUTCOME_CACHE["data"] is None   # …and NOT cached, so it retries
+
+
+async def test_a_failed_scan_stays_stale_so_the_next_load_retries():
+    from types import SimpleNamespace
+    dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+    try:
+        await dashboard._refresh_pr_outcomes(SimpleNamespace(
+            ado=_FakeAdoPRs(boom=True), execution_repo=_FakeExecRepoIds({1})))
+        # The failure is published so the page can SAY so, but `at` is left at 0 — it
+        # must never be served as a fresh answer for a whole TTL.
+        assert dashboard._PR_OUTCOME_CACHE["data"]["ok"] is False
+        assert dashboard._PR_OUTCOME_CACHE["at"] == 0.0
+    finally:
+        dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
 
 
 async def test_a_successful_scan_is_cached():
@@ -992,10 +1006,11 @@ async def test_a_successful_scan_is_cached():
     try:
         c = SimpleNamespace(ado=_FakeAdoPRs(completed=["feature/1-a"]),
                             execution_repo=_FakeExecRepoIds({1}))
-        await dashboard._pr_outcomes(c)
+        await dashboard._refresh_pr_outcomes(c)
         assert dashboard._PR_OUTCOME_CACHE["data"]["merged"] == 1
         # A second call must not re-scan — swap in an ADO that would raise.
         c.ado = _FakeAdoPRs(boom=True)
+        await dashboard._refresh_pr_outcomes(c)
         assert (await dashboard._pr_outcomes(c))["merged"] == 1
     finally:
         dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
@@ -1003,11 +1018,39 @@ async def test_a_successful_scan_is_cached():
 
 def test_overview_says_so_when_the_pr_scan_failed(tmp_path, monkeypatch):
     settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
-    monkeypatch.setitem(dashboard._PR_OUTCOME_CACHE, "data", None)
+    failed = {"merged": 0, "active": 0, "abandoned": 0, "ok": False,
+              "pending": False, "merge_rate": None}
+    monkeypatch.setitem(dashboard._PR_OUTCOME_CACHE, "data", failed)
     with TestClient(create_app(settings)) as client:
         client.app.state.container.ado.get_repositories = _FakeAdoPRs(boom=True).get_repositories
         text = client.get("/dashboard").text
     assert "couldn&#39;t reach Azure DevOps" in text or "couldn't reach Azure DevOps" in text
+
+
+def test_overview_does_not_wait_for_the_pr_scan(tmp_path, monkeypatch):
+    """The defect: /dashboard/ rendered nothing until a scan of EVERY PR in the org had
+    finished — 1 + 3N list requests plus a link lookup per PR whose branch carries no id,
+    strictly sequential. On a real org that is a minute of blank browser tab, which is
+    what "hệ thống bị treo" actually was. Five stat cards must never cost a page load."""
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    monkeypatch.setitem(dashboard._PR_OUTCOME_CACHE, "data", None)
+    monkeypatch.setitem(dashboard._PR_OUTCOME_CACHE, "at", 0.0)
+
+    hung = asyncio.Event()
+
+    async def never_answers():
+        hung.set()
+        await asyncio.sleep(3600)       # an ADO that simply does not come back
+
+    with TestClient(create_app(settings)) as client:
+        client.app.state.container.ado.get_repositories = never_answers
+        started = time.monotonic()
+        response = client.get("/dashboard")
+        elapsed = time.monotonic() - started
+
+    assert response.status_code == 200
+    assert elapsed < 5                              # not "a minute or two"
+    assert "đang quét Azure DevOps" in response.text    # …and it says why the cards are blank
 
 
 def test_teams_is_configured_in_exactly_one_place(tmp_path, monkeypatch):

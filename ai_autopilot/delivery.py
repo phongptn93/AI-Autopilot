@@ -50,6 +50,8 @@ FLOW_BANDS: tuple[tuple[str, str], ...] = (
 )
 
 # Action kinds, most urgent first. The order here IS the display order.
+# A conflicted PR leads: it cannot be merged at all, whatever its votes say.
+KIND_CONFLICT_PR = "conflict_pr"
 KIND_BLOCKED_PR = "blocked_pr"
 KIND_MERGE_READY = "merge_ready"
 KIND_REVIEW_WAITING = "review_waiting"
@@ -58,12 +60,13 @@ KIND_STALE = "stale"
 KIND_FAILED = "failed"
 
 _KIND_ORDER = {
-    KIND_BLOCKED_PR: 0,
-    KIND_MERGE_READY: 1,
-    KIND_REVIEW_WAITING: 2,
-    KIND_NEEDS_HUMAN: 3,
-    KIND_STALE: 4,
-    KIND_FAILED: 5,
+    KIND_CONFLICT_PR: 0,
+    KIND_BLOCKED_PR: 1,
+    KIND_MERGE_READY: 2,
+    KIND_REVIEW_WAITING: 3,
+    KIND_NEEDS_HUMAN: 4,
+    KIND_STALE: 5,
+    KIND_FAILED: 6,
 }
 
 
@@ -107,11 +110,17 @@ class PrView:
     blocked: int = 0
     pending: int = 0
     pending_reviewers: tuple[str, ...] = ()
+    # ADO's test merge into the target failed on conflicts. Such a PR is not "ready to
+    # merge" however it was voted: reporting it as "just press merge" sent people to a
+    # button that does not work.
+    conflicts: bool = False
 
     @property
     def is_ready_to_merge(self) -> bool:
-        """At least one approval, nothing rejecting, nobody still to vote."""
-        return self.approved >= 1 and self.blocked == 0 and self.pending == 0
+        """At least one approval, nothing rejecting, nobody still to vote, and it can
+        actually be merged."""
+        return (self.approved >= 1 and self.blocked == 0 and self.pending == 0
+                and not self.conflicts)
 
     @property
     def ready_since(self) -> datetime | None:
@@ -368,6 +377,14 @@ def _pr_actions(
             owner=pr.author, project=pr.project, url=pr.url,
             title=pr.title or f"PR !{pr.id}",
         )
+        if pr.conflicts:
+            actions.append(ActionItem(
+                kind=KIND_CONFLICT_PR,
+                age_hours=_hours(now, pr.created_at),
+                detail="Merge conflict với nhánh đích — không merge được cho tới khi giải",
+                **common,
+            ))
+            continue
         if pr.blocked:
             actions.append(ActionItem(
                 kind=KIND_BLOCKED_PR,

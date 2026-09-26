@@ -647,6 +647,56 @@ class LoopReport(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class PrConflict(Base):
+    """A pull request whose merge into its target is blocked by conflicts.
+
+    One row per PR, kept after it is resolved: "how long did PRs sit unmergeable, and
+    who fixed them" is a question about history, and the row is also what makes every
+    side effect happen ONCE — the PR comment, the notification, and the resolution
+    attempt against a given target commit.
+    """
+
+    __tablename__ = "pr_conflicts"
+    __table_args__ = (
+        UniqueConstraint("repo_id", "pr_id", name="uq_pr_conflicts_repo_pr"),
+        Index("ix_pr_conflicts_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    repo_id: Mapped[str] = mapped_column(String(100), default="")
+    repo_name: Mapped[str] = mapped_column(String(200), default="")
+    pr_id: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String(400), default="")
+    author: Mapped[str] = mapped_column(String(200), default="")
+    url: Mapped[str] = mapped_column(String(600), default="")
+    source_branch: Mapped[str] = mapped_column(String(300), default="")
+    target_branch: Mapped[str] = mapped_column(String(300), default="")
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0)
+    owned: Mapped[bool] = mapped_column(Boolean, default=False)   # bot branch prefix
+    is_draft: Mapped[bool] = mapped_column(Boolean, default=False)
+    # open | resolving | escalated | resolved | closed — see ai_autopilot.pr_conflicts
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    files_json: Mapped[str] = mapped_column(Text, default="[]")
+    first_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_by: Mapped[str] = mapped_column(String(40), default="")  # agent|clean|external
+    # The target commit ADO last test-merged against, and the one the last attempt ran
+    # on: equal means "already tried these exact inputs".
+    target_commit: Mapped[str] = mapped_column(String(64), default="")
+    attempt_target: Mapped[str] = mapped_column(String(64), default="")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    checks_json: Mapped[str] = mapped_column(Text, default="{}")
+    merge_commit: Mapped[str] = mapped_column(String(64), default="")
+    notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The /resolve comment already answered, as "thread:comment" — so a restart never
+    # runs the same request twice.
+    handled_command: Mapped[str] = mapped_column(String(60), default="")
+    cost_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class SecurityScan(Base):
     """One run of the security scanner — from the CLI, a scan loop, the pre-PR gate or
     the Security page. The trend chart is drawn from these rows, which is why counts are

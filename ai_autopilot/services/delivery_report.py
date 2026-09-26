@@ -19,6 +19,7 @@ from urllib.parse import quote
 from ai_autopilot import delivery
 from ai_autopilot.data.entities import ExecutionStatus, PipelineState
 from ai_autopilot.logging_config import describe_exc, get_logger
+from ai_autopilot.pr_conflicts import is_conflicted
 from ai_autopilot.services.pr_feedback import parse_work_item_id
 
 _log = get_logger("services.delivery_report")
@@ -149,6 +150,7 @@ async def collect_prs(container, project_of: dict[int, str]) -> list[delivery.Pr
                 (r.get("displayName") or "").strip()
                 for r, v in votes if v == 0 and r.get("displayName")
             ),
+            conflicts=is_conflicted(pr),
         ))
     return out
 

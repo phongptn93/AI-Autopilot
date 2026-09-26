@@ -26,6 +26,7 @@ from ai_autopilot.data.entities import (
     PipelineState,
     PlannedRun,
     PrCommandState,
+    PrConflict,
     PrReviewBudget,
     PrReviewerState,
     QualityEvent,
@@ -865,19 +866,34 @@ class QualityRepository:
         except Exception:  # noqa: BLE001 — measurement must never break the measured run
             get_logger("data.quality").warning("quality write failed", kind=kind)
 
+    @staticmethod
+    def _filtered(q, kind: str, work_item_id: int, since: datetime | None):
+        if kind:
+            q = q.where(QualityEvent.kind == kind)
+        if work_item_id:
+            q = q.where(QualityEvent.work_item_id == work_item_id)
+        if since is not None:
+            q = q.where(QualityEvent.at >= since)
+        return q
+
     async def recent(
-        self, limit: int = 200, kind: str = "", work_item_id: int = 0, since: datetime | None = None
+        self, limit: int = 200, kind: str = "", work_item_id: int = 0,
+        since: datetime | None = None, offset: int = 0,
     ) -> list[QualityEvent]:
-        """Newest-first events, optionally filtered."""
+        """Newest-first events, optionally filtered; ``offset`` pages through them."""
         async with self._db.session() as session:
-            q = select(QualityEvent).order_by(QualityEvent.at.desc()).limit(max(1, limit))
-            if kind:
-                q = q.where(QualityEvent.kind == kind)
-            if work_item_id:
-                q = q.where(QualityEvent.work_item_id == work_item_id)
-            if since is not None:
-                q = q.where(QualityEvent.at >= since)
+            q = select(QualityEvent).order_by(QualityEvent.at.desc(), QualityEvent.id.desc())
+            q = self._filtered(q, kind, work_item_id, since)
+            q = q.offset(max(0, offset)).limit(max(1, limit))
             return list((await session.execute(q)).scalars().all())
+
+    async def count(
+        self, kind: str = "", work_item_id: int = 0, since: datetime | None = None,
+    ) -> int:
+        """How many events match — the pager's total."""
+        async with self._db.session() as session:
+            q = self._filtered(select(func.count(QualityEvent.id)), kind, work_item_id, since)
+            return int((await session.execute(q)).scalar() or 0)
 
     async def rework_rows(self, since: datetime | None = None) -> list[ReworkRow]:
         """Per-item tallies, worst rework first.
@@ -1973,6 +1989,111 @@ class ScanUpsert:
     reopened: int = 0
     fixed: int = 0
     suppressed: int = 0
+
+
+class PrConflictRepository:
+    """Tracked PR merge conflicts (see ``PrConflict``)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def get(self, conflict_id: int) -> PrConflict | None:
+        async with self._db.session() as session:
+            return await session.get(PrConflict, conflict_id)
+
+    async def by_pr(self, repo_id: str, pr_id: int) -> PrConflict | None:
+        async with self._db.session() as session:
+            rows = await session.execute(select(PrConflict).where(
+                PrConflict.repo_id == repo_id, PrConflict.pr_id == pr_id))
+            return rows.scalars().first()
+
+    async def observe(self, repo_id: str, pr_id: int, **fields) -> tuple[PrConflict, bool]:
+        """Record that this PR is in conflict NOW. Returns ``(row, is_new_episode)``.
+
+        A new episode is a PR not seen in conflict before, or one that had been resolved
+        or closed — it gets its own comment and notification. An ongoing one only has
+        its details refreshed, so a scan every five minutes is silent after the first.
+        """
+        now = datetime.now(UTC)
+        async with self._db.session() as session:
+            rows = await session.execute(select(PrConflict).where(
+                PrConflict.repo_id == repo_id, PrConflict.pr_id == pr_id))
+            row = rows.scalars().first()
+            fresh = row is None or row.status in ("resolved", "closed")
+            if row is None:
+                row = PrConflict(repo_id=repo_id, pr_id=pr_id)
+                session.add(row)
+            if fresh:
+                row.status, row.first_seen, row.notified = "open", now, False
+                row.resolved_at, row.resolved_by, row.last_error = None, "", ""
+                row.attempts, row.attempt_target, row.merge_commit = 0, "", ""
+                row.checks_json = "{}"
+            for key, value in fields.items():
+                if key == "files":
+                    row.files_json = json.dumps(list(value or []))
+                elif hasattr(row, key):
+                    setattr(row, key, value)
+            row.last_seen = now
+            await session.commit()
+            await session.refresh(row)
+            return row, fresh
+
+    async def update(self, conflict_id: int, **fields) -> None:
+        async with self._db.session() as session:
+            row = await session.get(PrConflict, conflict_id)
+            if row is None:
+                return
+            for key, value in fields.items():
+                if key in ("files", "checks"):
+                    setattr(row, f"{key}_json", json.dumps(value or ([] if key == "files" else {})))
+                elif hasattr(row, key):
+                    setattr(row, key, value)
+            await session.commit()
+
+    async def claim_attempt(self, conflict_id: int, target_commit: str, max_attempts: int) -> bool:
+        """Atomically take the right to run one resolution. False when one is already
+        running, or these exact inputs (target commit) already used the allowance."""
+        async with self._db.session() as session:
+            row = await session.get(PrConflict, conflict_id)
+            if row is None or row.status in ("resolving", "resolved", "closed"):
+                return False
+            same = bool(target_commit) and row.attempt_target == target_commit
+            if same and row.attempts >= max(1, max_attempts):
+                return False
+            row.attempts = (row.attempts + 1) if same else 1
+            row.attempt_target = target_commit
+            row.status = "resolving"
+            row.last_attempt_at = datetime.now(UTC)
+            await session.commit()
+            return True
+
+    async def active(self) -> list[PrConflict]:
+        async with self._db.session() as session:
+            rows = await session.execute(select(PrConflict).where(
+                PrConflict.status.in_(("open", "resolving", "escalated"))))
+            return list(rows.scalars().all())
+
+    async def recent(self, limit: int = 200, status: str = "") -> list[PrConflict]:
+        async with self._db.session() as session:
+            query = select(PrConflict)
+            if status == "active":
+                query = query.where(PrConflict.status.in_(("open", "resolving", "escalated")))
+            elif status:
+                query = query.where(PrConflict.status == status)
+            rows = await session.execute(
+                query.order_by(PrConflict.last_seen.desc()).limit(limit))
+            return list(rows.scalars().all())
+
+    async def reset_stuck(self) -> int:
+        """``resolving`` rows left by a process that died mid-run go back to ``open`` —
+        otherwise a crash leaves a PR that no attempt may ever claim again."""
+        async with self._db.session() as session:
+            rows = (await session.execute(
+                select(PrConflict).where(PrConflict.status == "resolving"))).scalars().all()
+            for row in rows:
+                row.status = "open"
+            await session.commit()
+            return len(rows)
 
 
 class SecurityRepository:

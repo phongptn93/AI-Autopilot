@@ -26,6 +26,7 @@ from ai_autopilot.data import (
     NotificationHoldRepository,
     PlannedRunRepository,
     PrCommandRepository,
+    PrConflictRepository,
     PrReviewerRepository,
     QualityRepository,
     SchedulerHistoryRepository,
@@ -99,6 +100,7 @@ class Container:
         self.loop_report_repo = LoopReportRepository(self.database)
         # Security findings with a lifecycle (scan CLI, scan loops, pre-PR gate, page).
         self.security_repo = SecurityRepository(self.database)
+        self.pr_conflict_repo = PrConflictRepository(self.database)
         # The append-only table, wrapped by the funnel that also feeds the learning
         # loop — every call site records through the funnel, never the bare repo.
         self.quality_events = QualityRepository(self.database)

@@ -45,6 +45,9 @@ from ai_autopilot import (
     markdown_lite,
 )
 from ai_autopilot import (
+    pr_conflicts as pr_conflicts_mod,
+)
+from ai_autopilot import (
     reports as reports_mod,
 )
 from ai_autopilot import (
@@ -189,6 +192,11 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                                 "task hiện tại xong rồi cài và khởi động lại — trang này "
                                 "sẽ mất kết nối một lát, tải lại sau ít phút."),
     "update_none": ("amber", "Không có bản mới nào để cài."),
+    "update_found": ("green", "⬆️ Có bản mới — xem khung <b>Cập nhật</b> bên dưới để cài."),
+    "update_uptodate": ("green", "✅ Đang chạy bản mới nhất."),
+    "update_check_failed": ("red", "⛔ Không hỏi được GitHub Releases (mạng, proxy, hoặc giới "
+                                   "hạn 60 lượt/giờ). Thử lại sau ít phút."),
+    "update_unavailable": ("red", "⛔ Dịch vụ cập nhật không chạy trong tiến trình này."),
     "update_busy": ("amber", "Một lượt cập nhật đang chạy rồi."),
     "update_blocked_editable": ("amber", "Bản cài này là <code>pip install -e .</code> từ "
                                          "một checkout git — cập nhật bằng "
@@ -216,6 +224,17 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "sec_scan_started": ("green", "▶ Đang quét ở nền — làm mới trang sau ít phút."),
     "sec_scan_busy": ("amber", "⏳ Repo này đang được quét — chờ lượt hiện tại xong."),
     "err_sec_reason": ("red", "⛔ Suppress cần lý do."),
+    "err_sec_repo_required": ("red", "⛔ Nhập hoặc chọn đường dẫn repo cần quét."),
+    "err_sec_repo_invalid": ("red", "⛔ Đường dẫn repo không tồn tại trên máy chạy autopilot — "
+                                    "kiểm tra lại (đường dẫn tuyệt đối, trên chính máy này)."),
+    "conflict_resolve_started": ("green", "🔧 Đang giải conflict ở nền — kết quả hiện ở dòng "
+                                          "tương ứng và trong comment trên PR."),
+    "conflict_scan_started": ("green", "🔄 Đang quét PR — làm mới trang sau ít giây."),
+    "conflict_not_resolvable": ("amber", "⏳ PR này đang được giải, hoặc đã hết conflict."),
+    "err_conflict_missing": ("red", "⛔ Không tìm thấy conflict."),
+    "err_conflict_service": ("red", "⛔ Dịch vụ theo dõi conflict không chạy trong tiến trình "
+                                    "này — bật <code>pr_conflict_tracking_enabled</code> rồi "
+                                    "khởi động lại."),
     "sec_settings_saved": ("green", "✅ Đã lưu cấu hình quét và áp dụng ngay."),
     "sec_verify_started": ("green", "🧪 Đang dựng PoC trong worktree tách biệt — làm mới trang "
                                     "sau vài phút; kết quả hiện ở nhãn verified/unconfirmed."),
@@ -735,6 +754,7 @@ class _ScanCache:
 # Label + colour tone per action kind, in the order the report already sorts them.
 # Kept here rather than in delivery.py so the pure module stays free of presentation.
 _ACTION_LABELS: dict[str, tuple[str, str]] = {
+    delivery.KIND_CONFLICT_PR: ("PR bị conflict", "red"),
     delivery.KIND_BLOCKED_PR: ("PR bị từ chối", "red"),
     delivery.KIND_MERGE_READY: ("Chờ merge", "red"),
     delivery.KIND_REVIEW_WAITING: ("Chờ review", "amber"),
@@ -1031,6 +1051,16 @@ def create_dashboard_router() -> APIRouter:
             "update_notes": (updater.latest.notes_url if updater and updater.latest else ""),
             "update_block": (updater.blocked() if updater and updater.available else ""),
             "update_job": (updater.job if updater else None),
+            # For the manual check on Settings: what the last check found (even when it is
+            # not newer) and when — "up to date" is only true as of a time.
+            "update_latest": (updater.latest.version if updater and updater.latest else ""),
+            "update_checked_at": (
+                datetime.fromtimestamp(updater.checked_at).strftime("%Y-%m-%d %H:%M")
+                if updater and updater.checked_at else ""
+            ),
+            "update_installable": bool(updater and updater.latest
+                                       and getattr(updater.latest, "installable", False)),
+            "update_service": updater is not None,
             # The Fleet page only means anything on the central VM — a worker's own
             # table is empty by definition, and a link to an empty page reads as a bug.
             "fleet_role": getattr(cfg, "fleet_role", "") if cfg else "",
@@ -2031,6 +2061,17 @@ def create_dashboard_router() -> APIRouter:
                 sev_counts[r.severity] = sev_counts.get(r.severity, 0) + 1
         prog = _scan_progress(repo)
         running_row = next((s for s in scans if s.status == "running"), None)
+        # Repos the form can offer: every one already scanned, plus the git repos found
+        # in each configured workspace — so the first scan is a pick, not a path to type.
+        suggestions = list(repos)
+        with contextlib.suppress(Exception):
+            from ai_autopilot.workspace import discover_repos
+            for ws in workspaces_mod.resolve(cfg):
+                root = getattr(ws, "directory", "") or ""
+                for name in discover_repos(root):
+                    full = str(Path(root) / name)
+                    if full not in suggestions:
+                        suggestions.append(full)
         flash = _take_flash(request)
         response = _TEMPLATES.TemplateResponse(
             request, "security.html",
@@ -2042,7 +2083,10 @@ def create_dashboard_router() -> APIRouter:
                  status_counts={k: sum(v.values()) for k, v in counts.items()},
                  severities=reports_mod.SEVERITIES, scans=scans, trend=trend,
                  new_since=new_since, sec=sec, sec_enabled=sec.enabled, ai_mode=sec.ai_mode,
-                 can_scan=bool(repo) and sec.enabled and prog is None,
+                 # Not tied to a known repo: the path is typed or picked in the form
+                 # and validated on submit. Tying it to the query string disabled the
+                 # button on every fresh install, and typing a path never re-enabled it.
+                 can_scan=sec.enabled and prog is None, suggestions=suggestions,
                  can_file=bool(cfg.ado_pat) and cfg.autonomy_level != "report",
                  can_verify=bool(cfg.use_worktrees),
                  item_link=work_item_link_base(cfg), tool_summary=_tool_summary,
@@ -2065,11 +2109,14 @@ def create_dashboard_router() -> APIRouter:
         sec = cfg.security_scan
         if key in _SCANS_RUNNING or progress.get(key) is not None:
             return False
+        # Registered BEFORE the redirect, so the page the browser lands on already shows
+        # the progress bar — the task itself may not have started running yet.
+        progress.start(key, "dashboard")
+        _SCANS_RUNNING.add(key)
 
         async def _go() -> None:
             from ai_autopilot.security_scan.runner import ScanRequest, run_scan
 
-            _SCANS_RUNNING.add(key)
             sec_view = sec.model_copy(update={"verify_enabled": verify or sec.verify_enabled})
             try:
                 await run_scan(
@@ -2106,10 +2153,12 @@ def create_dashboard_router() -> APIRouter:
         c: Container = request.app.state.container
         cfg = c.config
         form = await request.form()
-        target = repo or cfg.repo_working_directory
+        target = (repo or "").strip().strip('"') or cfg.repo_working_directory
         if not target:
-            return _flash("/dashboard/security", "err_sec_missing")
+            return _flash("/dashboard/security", "err_sec_repo_required")
         key = str(Path(target).resolve())  # noqa: ASYNC240 — local path math
+        if not Path(key).is_dir():  # noqa: ASYNC240 — one local stat
+            return _flash(f"/dashboard/security?repo={quote(key)}", "err_sec_repo_invalid")
         tools = [t for t in form.getlist("tools") if t]
         ai_mode = ai if ai in ("off", "fast", "deep") else cfg.security_scan.ai_mode
         if not _start_scan(c, key, tools=tools, ai_mode=ai_mode, scope=scope, verify=bool(verify)):
@@ -2680,9 +2729,7 @@ def create_dashboard_router() -> APIRouter:
             approved = sum(1 for r in reviewers if r["vote"] >= 5)
             blocked = sum(1 for r in reviewers if r["vote"] < 0)
             pending = sum(1 for r in reviewers if r["vote"] == 0)
-            # mergeStatus: 3 = succeeded; 2 = conflicts; else queued/unknown.
-            ms = pr.get("mergeStatus")
-            conflicts = ms == "conflicts" or ms == 2
+            conflicts = pr_conflicts_mod.is_conflicted(pr)
             out.append({
                 "id": pr_id,
                 "title": pr.get("title") or "",
@@ -2704,6 +2751,74 @@ def create_dashboard_router() -> APIRouter:
                 "status": _pr_status(pr, approved, blocked, pending, conflicts),
             })
         return out
+
+    # ── PR merge conflicts ───────────────────────────────────────────────────
+    @router.get("/conflicts", response_class=HTMLResponse)
+    async def conflicts_page(request: Request, status: str = "active"):
+        """Every PR that could not merge because of conflicts — open ones first, with
+        since-when, files, what was tried and why it stopped; history below."""
+        c: Container = request.app.state.container
+        cfg = c.config
+        status = status if status in ("active", "all", *pr_conflicts_mod.STATUSES) else "active"
+        rows = await c.pr_conflict_repo.recent(limit=300, status="" if status == "all" else status)
+        every = await c.pr_conflict_repo.recent(limit=2000)
+        counts = {s: sum(1 for r in every if r.status == s) for s in pr_conflicts_mod.STATUSES}
+        now = datetime.now(UTC).replace(tzinfo=None)
+        view = []
+        for r in rows:
+            since = r.first_seen.replace(tzinfo=None) if r.first_seen else None
+            end = (r.resolved_at.replace(tzinfo=None) if r.resolved_at else now)
+            view.append({
+                "row": r, "files": json.loads(r.files_json or "[]"),
+                "checks": json.loads(r.checks_json or "{}"),
+                "age_hours": ((end - since).total_seconds() / 3600) if since else 0.0,
+            })
+        svc = getattr(request.app.state, "pr_conflicts", None)
+        flash = _take_flash(request)
+        response = _TEMPLATES.TemplateResponse(
+            request, "conflicts.html",
+            _ctx(request, "conflicts", items=view, status=status, counts=counts, flash=flash,
+                 tracking=cfg.pr_conflict_tracking_enabled, service_live=svc is not None,
+                 autoresolve=cfg.pr_conflict_autoresolve,
+                 command=cfg.pr_conflict_command, max_files=cfg.pr_conflict_max_files,
+                 item_link=work_item_link_base(cfg),
+                 active_statuses=pr_conflicts_mod.ACTIVE_STATUSES),
+        )
+        if flash:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/conflicts/{conflict_id}/resolve")
+    async def conflicts_resolve(request: Request, conflict_id: int):
+        """▶ Resolve — a person asking, so it applies to any PR (not only the bot's)."""
+        c: Container = request.app.state.container
+        svc = getattr(request.app.state, "pr_conflicts", None)
+        row = await c.pr_conflict_repo.get(conflict_id)
+        if row is None:
+            return _flash("/dashboard/conflicts", "err_conflict_missing")
+        if svc is None:
+            return _flash("/dashboard/conflicts", "err_conflict_service")
+        if row.status not in pr_conflicts_mod.ACTIVE_STATUSES or row.status == "resolving":
+            return _flash("/dashboard/conflicts", "conflict_not_resolvable")
+        task = asyncio.create_task(svc.resolve(conflict_id, requested_by="dashboard"))
+        _BACKGROUND_RUNS.add(task)
+        task.add_done_callback(_BACKGROUND_RUNS.discard)
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="pr.conflict_resolve_requested",
+            target=f"PR !{row.pr_id}",
+        )
+        return _flash("/dashboard/conflicts", "conflict_resolve_started")
+
+    @router.post("/conflicts/scan")
+    async def conflicts_scan(request: Request):
+        """Scan now instead of waiting for the next cycle."""
+        svc = getattr(request.app.state, "pr_conflicts", None)
+        if svc is None:
+            return _flash("/dashboard/conflicts", "err_conflict_service")
+        task = asyncio.create_task(svc.scan())
+        _BACKGROUND_RUNS.add(task)
+        task.add_done_callback(_BACKGROUND_RUNS.discard)
+        return _flash("/dashboard/conflicts", "conflict_scan_started")
 
     @router.get("/reviews", response_class=HTMLResponse)
     async def reviews(request: Request):
@@ -3345,23 +3460,120 @@ def create_dashboard_router() -> APIRouter:
             _ctx(request, "audit", events=events, action=action, actions=actions),
         )
 
+    _QUALITY_PER = (25, 50, 100)
+
+    def _pager(total: int, page: int, per: int) -> dict:
+        """Page maths for one table: clamped page, the slice, and a short window of page
+        numbers (1 ... 4 5 [6] 7 8 ... 20) so a long table never renders a wall of links."""
+        pages = max(1, -(-total // per))
+        page = min(max(1, page), pages)
+        start = (page - 1) * per
+        window = sorted({1, pages, *range(max(1, page - 2), min(pages, page + 2) + 1)})
+        nums: list[int | None] = []
+        for n in window:
+            if nums and n - (nums[-1] or 0) > 1:
+                nums.append(None)          # the gap, rendered as an ellipsis
+            nums.append(n)
+        return {"page": page, "pages": pages, "per": per, "total": total,
+                "start": start, "end": min(total, start + per), "nums": nums}
+
     @router.get("/quality", response_class=HTMLResponse)
-    async def quality_page(request: Request, days: int = 30, kind: str = ""):
-        """Rework & review quality: how often each item had to be redone, and what
-        humans voted — read from the append-only log that outlives every budget."""
+    async def quality_page(
+        request: Request, days: int = 30, kind: str = "", view: str = "all", q: str = "",
+        sort: str = "rework", page: int = 1, per: int = 25, epage: int = 1, eper: int = 25,
+        item: int = 0,
+    ):
+        """Rework & review quality: how often each item had to be redone, why, and what
+        humans voted — read from the append-only log that outlives every budget.
+
+        Both tables page on the server: the per-item table is aggregated in Python and
+        sliced, the event log pages in SQL (offset + count), so a year's window stays a
+        25-row page rather than a 2 000-row one.
+        """
         c: Container = request.app.state.container
         days = max(1, min(days, 365))
+        per = per if per in _QUALITY_PER else 25
+        eper = eper if eper in _QUALITY_PER else 25
+        view = view if view in ("all", "reworked", "blocked", "clean") else "all"
+        sort = sort if sort in ("rework", "last", "vote", "id") else "rework"
         since = datetime.now() - timedelta(days=days)
-        rows = await c.quality_events.rework_rows(since=since)
+        all_rows = await c.quality_events.rework_rows(since=since)
         totals = await c.quality_events.kind_totals(since=since)
-        events = await c.quality_events.recent(limit=200, kind=kind, since=since)
         titles = {s.work_item_id: s.title for s in await c.state_repo.all()}
+
+        # Headline numbers are over the WHOLE window — filters narrow the table, never
+        # the answer to "how are we doing".
+        items = len(all_rows)
+        reworked = sum(1 for r in all_rows if r.rework)
+        causes = {
+            "retries": sum(r.retries for r in all_rows),
+            "pr_revisions": sum(r.pr_revisions for r in all_rows),
+            "sdlc_iterations": sum(r.sdlc_iterations for r in all_rows),
+            "reopens": sum(r.reopens for r in all_rows),
+        }
+        total_rework = sum(causes.values())
+        kpis = {
+            "rework": total_rework, "item_count": items, "reworked": reworked,
+            "per_item": (total_rework / items) if items else 0.0,
+            "first_pass": ((items - reworked) / items * 100) if items else 0.0,
+            "blocked": sum(1 for r in all_rows if r.worst_vote < 0),
+            "block_votes": sum(r.rejections for r in all_rows),
+            "tests": totals.get("test_failed", 0),
+        }
+        counts = {
+            "all": items, "reworked": reworked, "clean": items - reworked,
+            "blocked": kpis["blocked"],
+        }
+
+        rows = all_rows
+        if view == "reworked":
+            rows = [r for r in rows if r.rework]
+        elif view == "clean":
+            rows = [r for r in rows if not r.rework]
+        elif view == "blocked":
+            rows = [r for r in rows if r.worst_vote < 0]
+        needle = q.strip().lower().lstrip("#")
+        if needle:
+            rows = [r for r in rows if needle in str(r.work_item_id)
+                    or needle in (titles.get(r.work_item_id, "") or "").lower()]
+        epoch = datetime.min
+        if sort == "last":
+            rows = sorted(rows, key=lambda r: r.last_at or epoch, reverse=True)
+        elif sort == "vote":
+            rows = sorted(rows, key=lambda r: (r.worst_vote, -r.rework))
+        elif sort == "id":
+            rows = sorted(rows, key=lambda r: -r.work_item_id)
+        rp = _pager(len(rows), page, per)
+        page_rows = rows[rp["start"]:rp["end"]]
+
+        etotal = await c.quality_events.count(kind=kind, work_item_id=item, since=since)
+        ep = _pager(etotal, epage, eper)
+        events = await c.quality_events.recent(
+            limit=eper, kind=kind, work_item_id=item, since=since, offset=ep["start"],
+        )
+
+        params = {"days": days, "kind": kind, "view": view, "q": q, "sort": sort,
+                  "page": rp["page"], "per": per, "epage": ep["page"], "eper": eper,
+                  "item": item}
+        defaults = {"days": 30, "view": "all", "sort": "rework", "page": 1, "epage": 1,
+                    "per": 25, "eper": 25}
+
+        def url(anchor: str = "", **over) -> str:
+            """This page's URL with some parameters changed — every link on the page is
+            built here, so changing one filter never silently drops another."""
+            merged = {**params, **over}
+            keep = {k: v for k, v in merged.items()
+                    if v not in ("", 0, None) and defaults.get(k) != v}
+            return "/dashboard/quality" + (("?" + urlencode(keep)) if keep else "") + anchor
+
         return _TEMPLATES.TemplateResponse(
             request, "quality.html",
             _ctx(
-                request, "quality", rows=rows, totals=totals, events=events,
-                titles=titles, days=days, kind=kind,
+                request, "quality", rows=page_rows, rp=rp, ep=ep, events=events,
+                totals=totals, titles=titles, days=days, kind=kind, view=view, q=q,
+                sort=sort, item=item, kpis=kpis, causes=causes, counts=counts,
                 kinds=sorted(totals), rework_kinds=set(QualityKind.REWORK),
+                per_options=_QUALITY_PER, url=url,
             ),
         )
 
@@ -3689,6 +3901,24 @@ def create_dashboard_router() -> APIRouter:
             name="update-apply",
         )
         return _flash("/dashboard/settings", "update_started")
+
+    @router.post("/update/check")
+    async def check_update(request: Request):
+        """Ask GitHub now, instead of waiting out the interval (or when the periodic check
+        is switched off). Only a check — installing is still the separate, confirmed
+        "Cập nhật ngay" press."""
+        updater = getattr(request.app.state, "updater", None)
+        back = "/dashboard/settings#update-panel"
+        if updater is None:
+            return _flash(back, "update_unavailable")
+        try:
+            release = await asyncio.wait_for(updater.check(), timeout=25)
+        except Exception as exc:  # noqa: BLE001 — network trouble is a message, not a 500
+            _log.info("manual update check failed", error=describe_exc(exc))
+            return _flash(back, "update_check_failed")
+        if release is None:
+            return _flash(back, "update_check_failed")
+        return _flash(back, "update_found" if updater.available else "update_uptodate")
 
     @router.post("/fleet/sync")
     async def fleet_sync(request: Request):

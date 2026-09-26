@@ -1209,6 +1209,32 @@ class AdoClient:
             return []
         return resp.json().get("value") or []
 
+    async def get_pull_request_conflicts(self, repo_id: str, pr_id: int) -> list[dict[str, Any]]:
+        """The files ADO's test merge could not combine, as ``[{"path", "type"}]``.
+
+        ADO computes this alongside ``mergeStatus == "conflicts"``; the path is the one
+        a reviewer would open (leading ``/`` stripped). Best-effort: ``[]`` on any error —
+        the conflict is still known from ``mergeStatus``, only its file list is missing.
+        """
+        url = self._git_url(
+            f"git/repositories/{repo_id}/pullRequests/{pr_id}/conflicts?{_API}"
+        )
+        try:
+            resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        except httpx.HTTPError as exc:
+            self._log.warning("get_pull_request_conflicts error", pr=pr_id, error=describe_exc(exc))
+            return []
+        if resp.status_code >= 400:
+            self._log.warning("get_pull_request_conflicts failed", pr=pr_id,
+                              status=resp.status_code)
+            return []
+        out: list[dict[str, Any]] = []
+        for c in resp.json().get("value") or []:
+            path = str(c.get("conflictPath") or "").lstrip("/")
+            if path:
+                out.append({"path": path, "type": str(c.get("conflictType") or "")})
+        return out
+
     async def add_pull_request_comment(
         self, repo_id: str, pr_id: int, text: str, *, active: bool = False
     ) -> bool:

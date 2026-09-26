@@ -24,6 +24,7 @@ from ai_autopilot.services import (
     DeliveryTrackerService,
     FleetAgentService,
     LoopScheduler,
+    PrConflictService,
     PrMonitorService,
     ProcessHealthService,
     ReviewerTrackerService,
@@ -253,6 +254,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for svc in (
                 AdoPollerService(container),
                 PrMonitorService(container),
+                PrConflictService(container),
                 StateSyncService(container),
                 DeliveryTrackerService(container),
                 reviewer_tracker,
@@ -270,6 +272,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 started.append(svc)
                 if isinstance(svc, PrMonitorService):
                     app.state.pr_monitor = svc  # webhook fast-path targets it directly
+                if isinstance(svc, PrConflictService):
+                    app.state.pr_conflicts = svc  # the Conflicts page's ▶ Resolve
                 if isinstance(svc, AdoPollerService):
                     app.state.poller = svc      # the board asks it about live sessions
                 if isinstance(svc, LoopScheduler):

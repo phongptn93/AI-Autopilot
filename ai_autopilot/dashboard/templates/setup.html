@@ -4,7 +4,9 @@
    save path as the Settings page, so leaving halfway keeps what you answered and
    coming back is just opening this page again. #}
 <style>
-  .main{max-width:920px}
+  /* Full width: the steps, chips and doctor findings are wide content, and a 920px
+     column left most of a desktop screen empty while wrapping every line twice. */
+  .main{max-width:none}
   .wz-head{margin-bottom:6px}
   .wz-head h1{font-size:23px;font-weight:750;letter-spacing:-.02em}
   .wz-sub{color:var(--text-muted);font-size:13px;margin-bottom:18px}
@@ -25,6 +27,11 @@
   /* State chips, the same picker the Settings page uses. Colours come from the shared
      tokens rather than a copy — see the control rule in base.html. */
   .wz-chips{display:flex;flex-wrap:wrap;gap:6px}
+  .wz-more{margin-top:10px}
+  .wz-more summary{cursor:pointer;font-size:12.5px;color:var(--accent-hover);list-style:none;display:inline-flex;gap:6px;align-items:center}
+  .wz-more summary::-webkit-details-marker{display:none}
+  .wz-more[open] summary{margin-bottom:6px}
+  .wz-more input{width:100%;max-width:640px}
   .wz-chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:5px 9px;
     border:1px solid var(--border);border-radius:999px;background:var(--bg-input);
     font-size:12.5px;color:var(--text)}
@@ -271,9 +278,15 @@
           </label>{% endif %}{% endfor %}
         </div>
         {% endif %}
-        <textarea name="{{ f.key }}__manual" rows="1"
-                  placeholder="{{ 'Thêm state khác (phẩy hoặc xuống dòng)' if candidates else 'Chưa đọc được state từ ADO — gõ tên state, cách nhau bằng dấu phẩy' }}"
-                  style="margin-top:8px"></textarea>
+        {# The chips come from the board, so a free-text box is only for the exception
+           (a state the board did not report). Folded away behind one link when chips
+           exist — an always-open box read as a required field — and open by itself
+           when ADO gave no states, because then it is the only way in. #}
+        <details class="wz-more" {% if not candidates %}open{% endif %}>
+          <summary>＋ Thêm state không có trong danh sách</summary>
+          <input type="text" name="{{ f.key }}__manual" autocomplete="off"
+                 placeholder="{{ 'Tên state, cách nhau bằng dấu phẩy — vd: Ready for Dev, QA' if candidates else 'Chưa đọc được state từ ADO — gõ tên state, cách nhau bằng dấu phẩy' }}">
+        </details>
         {% else %}
         <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}">
         {% endif %}

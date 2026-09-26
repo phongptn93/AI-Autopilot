@@ -576,6 +576,7 @@ def _pr_link(cfg, repo: str, pr_id: int, label: str = "") -> str:
 # Icon per action kind, so the most urgent rows stay scannable in a chat client where
 # there is no colour to work with.
 _ACTION_ICON = {
+    delivery.KIND_CONFLICT_PR: "🔴",
     delivery.KIND_BLOCKED_PR: "🔴",
     delivery.KIND_MERGE_READY: "🔴",
     delivery.KIND_REVIEW_WAITING: "🟠",
@@ -584,6 +585,7 @@ _ACTION_ICON = {
     delivery.KIND_FAILED: "❌",
 }
 _ACTION_LABEL = {
+    delivery.KIND_CONFLICT_PR: "PR bị conflict",
     delivery.KIND_BLOCKED_PR: "PR bị từ chối",
     delivery.KIND_MERGE_READY: "Chờ merge",
     delivery.KIND_REVIEW_WAITING: "Chờ review",

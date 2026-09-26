@@ -202,7 +202,7 @@ async def test_quality_page_renders_with_data(tmp_path: Path):
 
         body = client.get("/dashboard/quality").text
         assert "#7812" in body
-        assert "blocked (-10)" in body        # worst vote pill
+        assert "rejected (-10)" in body       # worst vote pill (ADO -10 = rejected)
         assert "approved" in body             # the other item's pill
         assert "3 failed" in body             # event-log detail
         # 3 rework events on 7812 + 0 on 99, over 2 items → the headline ratio.

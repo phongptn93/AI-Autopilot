@@ -20,6 +20,18 @@
   .set-tab:hover{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
   /* Which section am I in? Twenty identical pills answered "somewhere". */
   .set-tab.on{color:var(--accent-hover);border-color:rgba(99,102,241,.5);background:var(--accent-bg)}
+  /* Anchor jumps land BELOW the sticky tab bar instead of under it. */
+  .card[id^="sec-"]{scroll-margin-top:84px}
+  .up-panel{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:stretch}
+  .up-cell{display:flex;flex-direction:column;gap:3px;min-width:150px;padding:9px 13px;border:1px solid var(--border);
+    border-radius:9px;background:var(--bg-input)}
+  .up-cell b{font-family:var(--mono);font-size:14px}
+  .up-k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)}
+  .up-new,.up-ok{font-size:10px;font-family:var(--mono);font-weight:700;padding:1px 6px;border-radius:5px;align-self:flex-start}
+  .up-new{color:var(--amber);border:1px solid rgba(245,166,35,.45);background:rgba(245,166,35,.12)}
+  .up-ok{color:var(--green);border:1px solid rgba(46,204,113,.45);background:var(--green-bg)}
+  .up-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto}
+  .up-actions .btn-ghost:disabled{opacity:.45;cursor:not-allowed}
   /* ~100 settings across 20 sections: scrolling for one is the slowest way to find it. */
   .set-find{margin-left:auto;display:flex;align-items:center;gap:8px}
   .set-find input{background:var(--bg-input);color:var(--text);border:1px solid var(--border);
@@ -427,6 +439,44 @@
          common case — carries no extra chrome at all. #}
       <button type="button" class="na-toggle" data-na-toggle hidden aria-expanded="false"></button>
     </div>
+
+    {# The update controls live WITH the update settings: the banner only appears once a
+       newer release was already found, so on a machine whose periodic check is off (or
+       has not run yet) there was no way at all to ask, or to see what is running.
+       Buttons use formaction — this card sits inside the settings form, and a nested
+       <form> is invalid HTML that browsers silently flatten. #}
+    {% if section == '⬆️ Cập nhật' %}
+    <div class="fleet-block" id="update-panel">
+      <div class="up-panel">
+        <div class="up-cell"><span class="up-k">Đang chạy</span><b>v{{ version }}</b></div>
+        <div class="up-cell"><span class="up-k">Bản mới nhất</span>
+          <b>{% if update_latest %}v{{ update_latest }}{% else %}—{% endif %}</b>
+          {% if update_ready %}<span class="up-new">mới hơn</span>{% elif update_latest %}<span class="up-ok">đã mới nhất</span>{% endif %}</div>
+        <div class="up-cell"><span class="up-k">Kiểm tra lần cuối</span>
+          <b>{{ update_checked_at or 'chưa kiểm tra' }}</b></div>
+        <div class="up-actions">
+          <button type="submit" class="btn-ghost" formaction="/dashboard/update/check" formmethod="post"
+                  formnovalidate {% if not update_service %}disabled title="Dịch vụ cập nhật không chạy"{% endif %}>🔄 Kiểm tra ngay</button>
+          {% if update_job and update_job.running %}
+            <span class="up-k">⏳ Đang cập nhật lên v{{ update_job.target }} — {{ update_job.detail }}</span>
+          {% elif update_ready and update_block == 'editable' %}
+            <span class="up-k">Bản cài từ checkout git — cập nhật bằng <code>git pull</code> rồi khởi động lại.</span>
+          {% elif update_ready and update_block == 'container' %}
+            <span class="up-k">Chạy trong container — cập nhật bằng image mới.</span>
+          {% elif update_ready %}
+          <button type="submit" class="btn-save" formaction="/dashboard/update" formmethod="post" formnovalidate
+                  onclick="return confirm('Cập nhật lên v{{ update_version }}?\n\nMáy sẽ ngừng nhận việc mới, đợi các task đang chạy xong, rồi cài và khởi động lại.');">⬆️ Cập nhật lên v{{ update_version }}</button>
+          {% endif %}
+          {% if update_notes %}<a class="up-link" href="{{ update_notes }}" target="_blank" rel="noopener">Có gì mới ↗</a>{% endif %}
+        </div>
+      </div>
+      <div class="form-help" style="margin:8px 0 0">
+        Cài tay (vd máy không cho tự cập nhật):
+        <code>pip install --upgrade https://github.com/{{ current.get('update_repo') or 'phongptn93/AI-Autopilot' }}/releases/latest/download/ai_autopilot-{{ update_latest or version }}-py3-none-any.whl</code>
+        rồi khởi động lại autopilot.
+      </div>
+    </div>
+    {% endif %}
 
     {# What this connection is FOR. Someone configuring Jira comes looking here first —
        it is the page that says "Azure DevOps" — and the answer is on another page. #}
@@ -946,18 +996,45 @@
     var watched = cards.concat(
       document.getElementById('sec-repos') ? [document.getElementById('sec-repos')] : []
     );
-    if (!('IntersectionObserver' in window) || !watched.length) return;
-    var seen = {};
-    var spy = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) { seen[e.target.id] = e.isIntersecting; });
-      var active = null;
-      for (var i = 0; i < watched.length; i++) {
-        if (seen[watched[i].id]) { active = watched[i].id; break; }
-      }
-      tabs.forEach(function (t) { t.classList.remove('on'); });
-      if (active && byId[active]) byId[active].classList.add('on');
-    }, { rootMargin: '-64px 0px -70% 0px' });
-    watched.forEach(function (c) { spy.observe(c); });
+    if (!watched.length) return;
+    // Two rules the old observer missed, which made the LAST sections unselectable:
+    //  1. A clicked tab stays selected. The page may be unable to scroll a short last
+    //     section up to the "reading line", so the spy would immediately hand the
+    //     highlight back to whatever section sits there (Fleet). A click pins it until
+    //     the user scrolls by hand.
+    //  2. At the bottom of the page the last section is the one being read, whether or
+    //     not it ever reached the reading line.
+    var pinned = null;
+    function mark(id) {
+      tabs.forEach(function (t) { t.classList.toggle('on', t.getAttribute('href') === '#' + id); });
+    }
+    function current() {
+      var visible = watched.filter(function (c) { return c.offsetParent !== null; });
+      if (!visible.length) return null;
+      var atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      if (atBottom) return visible[visible.length - 1].id;
+      var line = 96, active = visible[0].id;   // just under the sticky tab bar
+      visible.forEach(function (c) { if (c.getBoundingClientRect().top <= line) active = c.id; });
+      return active;
+    }
+    var ticking = false;
+    window.addEventListener('scroll', function () {
+      if (pinned || ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () { ticking = false; var id = current(); if (id) mark(id); });
+    }, { passive: true });
+    ['wheel', 'touchmove', 'keydown'].forEach(function (ev) {
+      window.addEventListener(ev, function (e) {
+        if (ev === 'keydown' && !/^(Arrow|Page|Home|End| )/.test(e.key || '')) return;
+        pinned = null;
+      }, { passive: true });
+    });
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () { pinned = t.getAttribute('href').slice(1); mark(pinned); });
+    });
+    var start = (location.hash || '').slice(1);
+    if (start && byId[start]) { pinned = start; mark(start); }
+    else { var id0 = current(); if (id0) mark(id0); }
   })();
 
   // Progressive enhancement: the panel starts hidden, so if this never runs the toggle

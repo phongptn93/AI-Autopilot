@@ -1,151 +1,265 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .q-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
-  .q-tile { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px; padding:14px 16px; }
-  .q-tile .n { font-size:26px; font-weight:600; line-height:1.1; }
-  .q-tile .l { color:var(--text-dim); font-size:12px; margin-top:4px; }
-  .q-table { width:100%; border-collapse:collapse; font-size:13px; }
-  .q-table th, .q-table td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border,#23232b); vertical-align:top; }
-  .q-table td.n, .q-table th.n { text-align:right; font-variant-numeric:tabular-nums; }
-  .q-title { max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .q-detail { color:var(--text-dim); max-width:460px; }
-  .q-kind { font-family:ui-monospace,Consolas,monospace; font-size:12px; white-space:nowrap; }
-  .q-zero { color:var(--text-dim); }
-  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid; }
-  .pill-bad  { color:#f87171; border-color:#7f1d1d; background:#7f1d1d22; }
-  .pill-warn { color:#fbbf24; border-color:#78350f; background:#78350f22; }
-  .pill-ok   { color:#34d399; border-color:#065f46; background:#065f4622; }
-  .q-sub { color:var(--text-dim); font-size:12px; margin-top:2px; }
+  /* ── Rework & review quality (scoped) ──
+     Read top to bottom as three questions: how much rework is there (KPIs, over the
+     whole window — filters never change them), why (the cause bar), and which items
+     (the table, filtered/sorted/paged). The event log below is the evidence. */
+  .main { max-width:none; }
+  .qa-top { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px 18px; margin-bottom:6px; }
+  .qa-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+  .qa-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:110ch; margin:0 0 16px; }
+  .qa-period { display:flex; gap:4px; margin-left:auto; flex-wrap:wrap; }
+  .seg { font-size:12px; font-family:var(--mono); padding:5px 11px; border-radius:8px; border:1px solid var(--border);
+    background:var(--bg-input); color:var(--text-dim); text-decoration:none; white-space:nowrap; }
+  .seg:hover { color:var(--text); border-color:var(--accent); }
+  .seg.on { color:var(--accent-hover); border-color:rgba(99,102,241,.55); background:var(--accent-bg); }
+  .seg .n { opacity:.7; margin-left:4px; }
+
+  .qa-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:14px; }
+  .kpi { display:block; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+    padding:14px 16px; text-decoration:none; color:inherit; position:relative; }
+  a.kpi:hover { border-color:var(--accent); }
+  .kpi .v { font-size:26px; font-weight:750; letter-spacing:-.02em; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .kpi .l { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); margin-top:6px; }
+  .kpi .h { font-size:11.5px; color:var(--text-muted); margin-top:4px; line-height:1.45; }
+  .kpi.good .v { color:var(--green); } .kpi.warn .v { color:var(--amber); } .kpi.bad .v { color:var(--red); }
+
+  .qa-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:16px; }
+  .qa-hd { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--border-soft); }
+  .qa-hd h3 { font-size:14px; font-weight:650; }
+  .qa-hd .sub { color:var(--text-dim); font-size:12px; }
+  .qa-hd .r { margin-left:auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+
+  .cause { padding:14px 18px; }
+  .cause-bar { display:flex; height:12px; border-radius:6px; overflow:hidden; background:var(--bg-input); }
+  .cause-bar span { display:block; height:100%; }
+  .cause-legend { display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:10px; font-size:12px; color:var(--text-muted); }
+  .cause-legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px; vertical-align:-1px; }
+  .c-retry { background:#f59e0b; } .c-ai { background:#6366f1; } .c-sdlc { background:#06b6d4; } .c-reopen { background:#ef4444; }
+
+  .qa-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 18px; border-bottom:1px solid var(--border-soft); }
+  .qa-tools .lbl { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); margin-left:6px; }
+  .qa-tools form { display:flex; gap:6px; margin-left:auto; }
+  .qa-in { background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:var(--radius-sm);
+    padding:6px 10px; font-size:12.5px; font-family:inherit; }
+  .qa-in[type=search] { width:240px; }
+
+  .qa-tbl { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .qa-tbl th { position:sticky; top:0; z-index:1; background:var(--bg-card); text-align:left; font-size:9.5px; font-weight:700;
+    text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); padding:9px 12px; border-bottom:1px solid var(--border-soft); white-space:nowrap; }
+  .qa-tbl th a { color:inherit; text-decoration:none; } .qa-tbl th a:hover, .qa-tbl th a.on { color:var(--accent-hover); }
+  .qa-tbl td { padding:10px 12px; border-bottom:1px solid var(--border-soft); vertical-align:middle; }
+  .qa-tbl tr:last-child td { border-bottom:0; }
+  .qa-tbl tr:hover td { background:rgba(127,127,127,.04); }
+  .qa-tbl .n { text-align:right; font-variant-numeric:tabular-nums; }
+  .qa-tbl .dim { color:var(--text-dim); }
+  .it a { font-family:var(--mono); font-weight:650; color:var(--text); text-decoration:none; }
+  .it a:hover { color:var(--accent-hover); }
+  .it .t { color:var(--text-muted); font-size:12px; max-width:52ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
+  .mix { display:flex; height:6px; width:120px; border-radius:3px; overflow:hidden; background:var(--bg-input); margin-top:5px; }
+  .mix span { display:block; height:100%; }
+  .badge { display:inline-block; min-width:26px; text-align:center; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:700;
+    font-variant-numeric:tabular-nums; border:1px solid; }
+  .b-bad { color:var(--red); border-color:rgba(240,82,106,.5); background:var(--red-bg); }
+  .b-warn { color:var(--amber); border-color:rgba(245,166,35,.5); background:rgba(245,166,35,.12); }
+  .b-ok { color:var(--green); border-color:rgba(46,204,113,.45); background:var(--green-bg); }
+  .b-zero { color:var(--text-dim); border-color:var(--border); background:transparent; font-weight:500; }
+  .kind { font-family:var(--mono); font-size:11.5px; white-space:nowrap; }
+  .detail { color:var(--text-muted); max-width:70ch; line-height:1.5; }
+  .detail.clip { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+
+  .pager { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:10px 18px; border-top:1px solid var(--border-soft); font-size:12px; color:var(--text-dim); }
+  .pager .pg { display:flex; gap:4px; }
+  .pager a, .pager span.cur, .pager span.gap { min-width:30px; text-align:center; padding:4px 8px; border-radius:7px; font-family:var(--mono); }
+  .pager a { border:1px solid var(--border); color:var(--text-muted); text-decoration:none; background:var(--bg-input); }
+  .pager a:hover { border-color:var(--accent); color:var(--text); }
+  .pager span.cur { border:1px solid rgba(99,102,241,.55); background:var(--accent-bg); color:var(--accent-hover); font-weight:700; }
+  .pager span.off { opacity:.35; border:1px solid var(--border); padding:4px 8px; border-radius:7px; }
+  .pager .per { margin-left:auto; display:flex; gap:4px; align-items:center; }
+  .qa-empty { padding:24px 18px; color:var(--text-dim); font-size:12.5px; line-height:1.7; }
+  .qa-empty code, .qa-lede code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input); padding:1px 6px; border-radius:5px; }
 </style>
 
-<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
-  <div>
-    <h2>🔁 Rework &amp; review quality</h2>
-    <p>How often each work item had to be redone, and what humans voted. Append-only —
-       unlike the budgets it is built from, nothing here is ever reset when an item finishes.</p>
+{% macro pager(p, page_key, per_key, anchor) -%}
+  {% if p.total %}
+  <div class="pager">
+    <span>{{ p.start + 1 }}–{{ p.end }} / {{ p.total }}</span>
+    <div class="pg">
+      {% if p.page > 1 %}<a href="{{ url(anchor, **{page_key: p.page - 1}) }}" aria-label="Previous page">‹</a>{% else %}<span class="off">‹</span>{% endif %}
+      {% for n in p.nums %}
+        {% if n is none %}<span class="gap">…</span>
+        {% elif n == p.page %}<span class="cur">{{ n }}</span>
+        {% else %}<a href="{{ url(anchor, **{page_key: n}) }}">{{ n }}</a>{% endif %}
+      {% endfor %}
+      {% if p.page < p.pages %}<a href="{{ url(anchor, **{page_key: p.page + 1}) }}" aria-label="Next page">›</a>{% else %}<span class="off">›</span>{% endif %}
+    </div>
+    <div class="per">Mỗi trang
+      {% for n in per_options %}<a href="{{ url(anchor, **{per_key: n, page_key: 1}) }}" {% if n == p.per %}style="border-color:rgba(99,102,241,.55);color:var(--accent-hover)"{% endif %}>{{ n }}</a>{% endfor %}
+    </div>
   </div>
-  <form method="get" action="/dashboard/quality" style="display:flex;gap:6px;align-items:center">
-    <select name="days" class="btn-ghost" style="padding:6px 10px">
-      {% for d in [7, 30, 90, 365] %}
-        <option value="{{ d }}" {{ 'selected' if days == d else '' }}>Last {{ d }} days</option>
-      {% endfor %}
-    </select>
-    <select name="kind" class="btn-ghost" style="padding:6px 10px">
-      <option value="">All events</option>
-      {% for k in kinds %}
-        <option value="{{ k }}" {{ 'selected' if kind == k else '' }}>{{ k }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="btn-ghost">Apply</button>
-  </form>
-</div>
+  {% endif %}
+{%- endmacro %}
 
-{% set total_rework = rows | sum(attribute='rework') %}
-{% set total_reject = rows | sum(attribute='rejections') %}
-<div class="q-tiles">
-  <div class="q-tile">
-    <div class="n">{{ total_rework }}</div>
-    <div class="l">Rework events — retries, revise rounds, reopens</div>
-  </div>
-  <div class="q-tile">
-    <div class="n">{{ rows | length }}</div>
-    <div class="l">Work items with any signal</div>
-  </div>
-  <div class="q-tile">
-    <div class="n">{{ '%.2f' | format(total_rework / rows | length) if rows else '0.00' }}</div>
-    <div class="l">Rework per item — the number to drive down</div>
-  </div>
-  <div class="q-tile">
-    <div class="n">{{ total_reject }}</div>
-    <div class="l">Human votes that blocked a PR</div>
-  </div>
-  <div class="q-tile">
-    <div class="n">{{ totals.get('test_failed', 0) }}</div>
-    <div class="l">Test-gate failures</div>
+<div class="qa-top">
+  <h2>🔁 Rework &amp; review quality</h2>
+  <div class="qa-period">
+    {% for d in [7, 30, 90, 365] %}<a class="seg {{ 'on' if days == d else '' }}" href="{{ url('', days=d, page=1, epage=1) }}">{{ d }} ngày</a>{% endfor %}
   </div>
 </div>
+<p class="qa-lede">
+  Mỗi work item phải làm lại bao nhiêu lần, vì sao, và người review đã vote gì. Số liệu lấy
+  từ log <b>chỉ ghi thêm</b> — không bao giờ bị reset khi item xong, khác với các ngân sách retry
+  mà nó được dựng lên từ đó. Các chỉ số trên cùng tính trên <b>toàn bộ {{ days }} ngày</b>; bộ lọc
+  chỉ thu hẹp bảng.
+</p>
 
-<h3 style="margin:22px 0 10px">Per work item</h3>
-{% if rows %}
-<div class="card" style="padding:4px 8px">
-  <table class="q-table">
-    <thead>
+{# ── How much ── #}
+<div class="qa-kpis">
+  <div class="kpi {{ 'good' if kpis.first_pass >= 80 else ('warn' if kpis.first_pass >= 50 else 'bad') if kpis.item_count else '' }}">
+    <div class="v">{{ '%.0f' | format(kpis.first_pass) }}%</div>
+    <div class="l">Đạt ngay lần đầu</div>
+    <div class="h">{{ kpis.item_count - kpis.reworked }}/{{ kpis.item_count }} item không phải làm lại</div>
+  </div>
+  <div class="kpi {{ 'good' if kpis.per_item < 0.3 else ('warn' if kpis.per_item < 1 else 'bad') if kpis.item_count else '' }}">
+    <div class="v">{{ '%.2f' | format(kpis.per_item) }}</div>
+    <div class="l">Rework / item</div>
+    <div class="h">con số cần kéo xuống</div>
+  </div>
+  <a class="kpi {{ 'warn' if kpis.reworked else '' }}" href="{{ url('#items', view='reworked', page=1) }}">
+    <div class="v">{{ kpis.rework }}</div>
+    <div class="l">Lượt làm lại</div>
+    <div class="h">trên {{ kpis.reworked }} item — bấm để lọc</div>
+  </a>
+  <a class="kpi {{ 'bad' if kpis.blocked else 'good' }}" href="{{ url('#items', view='blocked', page=1) }}">
+    <div class="v">{{ kpis.blocked }}</div>
+    <div class="l">Item bị reviewer chặn</div>
+    <div class="h">{{ kpis.block_votes }} vote từ chối / chờ tác giả</div>
+  </a>
+  <a class="kpi {{ 'bad' if kpis.tests else 'good' }}" href="{{ url('#log', kind='test_failed', epage=1) }}">
+    <div class="v">{{ kpis.tests }}</div>
+    <div class="l">Test gate fail</div>
+    <div class="h">bấm để xem log</div>
+  </a>
+</div>
+
+{# ── Why ── #}
+{% set total_c = causes.retries + causes.pr_revisions + causes.sdlc_iterations + causes.reopens %}
+<div class="qa-card">
+  <div class="qa-hd"><h3>Vì sao phải làm lại</h3><span class="sub">tỷ lệ theo nguyên nhân, {{ total_c }} lượt</span></div>
+  <div class="cause">
+    {% if total_c %}
+    <div class="cause-bar" role="img" aria-label="rework by cause">
+      {% for key, cls in [('retries','c-retry'), ('pr_revisions','c-ai'), ('sdlc_iterations','c-sdlc'), ('reopens','c-reopen')] %}
+        {% if causes[key] %}<span class="{{ cls }}" style="width:{{ (causes[key] / total_c * 100)|round(2) }}%" title="{{ causes[key] }}"></span>{% endif %}
+      {% endfor %}
+    </div>
+    <div class="cause-legend">
+      <span><i class="c-retry"></i>Retry sau lỗi <b>{{ causes.retries }}</b></span>
+      <span><i class="c-ai"></i>Vòng <code>/ai</code> sửa PR <b>{{ causes.pr_revisions }}</b></span>
+      <span><i class="c-sdlc"></i>Vòng lặp SDLC <b>{{ causes.sdlc_iterations }}</b></span>
+      <span><i class="c-reopen"></i>Bị mở lại (reopen) <b>{{ causes.reopens }}</b></span>
+    </div>
+    {% else %}<div class="qa-empty" style="padding:4px 0">Không có lượt làm lại nào trong {{ days }} ngày. ✅</div>{% endif %}
+  </div>
+</div>
+
+{# ── Which ── #}
+<div class="qa-card" id="items">
+  <div class="qa-hd"><h3>Theo work item</h3><span class="sub">{{ rp.total }} item{% if q %} khớp “{{ q }}”{% endif %}</span></div>
+  <div class="qa-tools">
+    {% for v, label in [('all','Tất cả'), ('reworked','Phải làm lại'), ('blocked','Bị chặn'), ('clean','Đạt ngay')] %}
+      <a class="seg {{ 'on' if view == v else '' }}" href="{{ url('#items', view=v, page=1) }}">{{ label }}<span class="n">{{ counts[v] }}</span></a>
+    {% endfor %}
+    <form method="get" action="/dashboard/quality#items">
+      {% for k, v in [('days', days), ('view', view), ('sort', sort), ('per', rp.per), ('kind', kind), ('eper', ep.per), ('item', item)] %}
+        {% if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}
+      {% endfor %}
+      <input class="qa-in" type="search" name="q" value="{{ q }}" placeholder="Tìm #id hoặc tiêu đề…" aria-label="Search work items">
+    </form>
+  </div>
+  {% if rows %}
+  <div style="overflow-x:auto">
+  <table class="qa-tbl">
+    <thead><tr>
+      <th><a class="{{ 'on' if sort == 'id' }}" href="{{ url('#items', sort='id', page=1) }}">Work item{{ ' ↓' if sort == 'id' }}</a></th>
+      <th class="n"><a class="{{ 'on' if sort == 'rework' }}" href="{{ url('#items', sort='rework', page=1) }}">Làm lại{{ ' ↓' if sort == 'rework' }}</a></th>
+      <th class="n">Retry</th><th class="n">/ai</th><th class="n">SDLC</th><th class="n">Reopen</th>
+      <th class="n">Findings</th><th class="n">Test fail</th>
+      <th><a class="{{ 'on' if sort == 'vote' }}" href="{{ url('#items', sort='vote', page=1) }}">Vote{{ ' ↓' if sort == 'vote' }}</a></th>
+      <th><a class="{{ 'on' if sort == 'last' }}" href="{{ url('#items', sort='last', page=1) }}">Tín hiệu cuối{{ ' ↓' if sort == 'last' }}</a></th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
       <tr>
-        <th>Item</th>
-        <th class="n">Rework</th>
-        <th class="n">Retries</th>
-        <th class="n">/ai rounds</th>
-        <th class="n">SDLC iters</th>
-        <th class="n">Reopens</th>
-        <th class="n">Findings</th>
-        <th class="n">Tests failed</th>
-        <th>Human vote</th>
-        <th>Last signal</th>
+        <td class="it">
+          <a href="/dashboard/task/{{ r.work_item_id }}">#{{ r.work_item_id }}</a>
+          {% set t = titles.get(r.work_item_id, '') %}{% if t %}<div class="t" title="{{ t }}">{{ t }}</div>{% endif %}
+          {% if r.rework %}
+          <div class="mix" title="retry {{ r.retries }} · /ai {{ r.pr_revisions }} · sdlc {{ r.sdlc_iterations }} · reopen {{ r.reopens }}">
+            {% for n, cls in [(r.retries,'c-retry'), (r.pr_revisions,'c-ai'), (r.sdlc_iterations,'c-sdlc'), (r.reopens,'c-reopen')] %}{% if n %}<span class="{{ cls }}" style="width:{{ (n / r.rework * 100)|round(2) }}%"></span>{% endif %}{% endfor %}
+          </div>
+          {% endif %}
+        </td>
+        <td class="n"><span class="badge {{ 'b-bad' if r.rework >= 3 else ('b-warn' if r.rework else 'b-zero') }}">{{ r.rework }}</span></td>
+        <td class="n {{ 'dim' if not r.retries }}">{{ r.retries or '·' }}</td>
+        <td class="n {{ 'dim' if not r.pr_revisions }}">{{ r.pr_revisions or '·' }}</td>
+        <td class="n {{ 'dim' if not r.sdlc_iterations }}">{{ r.sdlc_iterations or '·' }}</td>
+        <td class="n {{ 'dim' if not r.reopens }}">{{ r.reopens or '·' }}</td>
+        <td class="n {{ 'dim' if not r.findings }}">{{ r.findings or '·' }}</td>
+        <td class="n {{ 'dim' if not r.test_failures }}">{{ r.test_failures or '·' }}</td>
+        <td>{% if r.worst_vote < 0 %}<span class="badge b-bad" title="{{ r.rejections }} vote từ chối">{{ 'rejected' if r.worst_vote <= -10 else 'waiting author' }} ({{ r.worst_vote }})</span>
+            {% elif r.approvals %}<span class="badge b-ok">approved</span>
+            {% else %}<span class="dim">—</span>{% endif %}</td>
+        <td class="dim" style="white-space:nowrap">{{ r.last_at.strftime('%Y-%m-%d %H:%M') if r.last_at else '' }}</td>
+        <td><a class="seg" href="{{ url('#log', item=r.work_item_id, epage=1) }}" title="Chỉ xem sự kiện của item này">log →</a></td>
       </tr>
-    </thead>
-    <tbody>
-      {% for r in rows %}
-        <tr>
-          <td>
-            <a href="/dashboard/task/{{ r.work_item_id }}">#{{ r.work_item_id }}</a>
-            <div class="q-title q-sub">{{ titles.get(r.work_item_id, '') }}</div>
-          </td>
-          <td class="n">
-            {% if r.rework >= 3 %}<span class="pill pill-bad">{{ r.rework }}</span>
-            {% elif r.rework >= 1 %}<span class="pill pill-warn">{{ r.rework }}</span>
-            {% else %}<span class="q-zero">0</span>{% endif %}
-          </td>
-          <td class="n">{{ r.retries or '' }}</td>
-          <td class="n">{{ r.pr_revisions or '' }}</td>
-          <td class="n">{{ r.sdlc_iterations or '' }}</td>
-          <td class="n">{{ r.reopens or '' }}</td>
-          <td class="n">{{ r.findings or '' }}</td>
-          <td class="n">{{ r.test_failures or '' }}</td>
-          <td>
-            {% if r.worst_vote < 0 %}<span class="pill pill-bad">blocked ({{ r.worst_vote }})</span>
-            {% elif r.approvals %}<span class="pill pill-ok">approved</span>
-            {% else %}<span class="q-zero">—</span>{% endif %}
-          </td>
-          <td style="white-space:nowrap;color:var(--text-dim)">
-            {{ r.last_at.strftime('%Y-%m-%d %H:%M') if r.last_at else '' }}
-          </td>
-        </tr>
-      {% endfor %}
+    {% endfor %}
     </tbody>
   </table>
+  </div>
+  {{ pager(rp, 'page', 'per', '#items') }}
+  {% else %}
+  <div class="qa-empty">
+    {% if kpis.item_count %}Không item nào khớp bộ lọc này. <a class="table-link" href="{{ url('#items', view='all', q='', page=1) }}">Bỏ lọc</a>
+    {% else %}Chưa có tín hiệu chất lượng nào trong {{ days }} ngày. Dữ liệu bắt đầu ghi ở lần retry, vòng <code>/ai</code>, vote của reviewer, test fail hoặc reopen tiếp theo.{% endif %}
+  </div>
+  {% endif %}
 </div>
-{% else %}
-<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">
-  No quality signal recorded in the last {{ days }} days. Events start accruing on the next
-  retry, <code>/ai</code> revise round, reviewer vote, test failure, or reopen.
-</div></div>
-{% endif %}
 
-<h3 style="margin:26px 0 10px">Event log{% if kind %} — <code>{{ kind }}</code>{% endif %}</h3>
-{% if events %}
-<div class="card" style="padding:4px 8px">
-  <table class="q-table">
-    <thead><tr><th>When (UTC)</th><th>Item</th><th>Kind</th><th class="n">Value</th><th>Stage</th><th>Actor</th><th>Detail</th></tr></thead>
+{# ── Evidence ── #}
+<div class="qa-card" id="log">
+  <div class="qa-hd"><h3>Nhật ký sự kiện</h3>
+    <span class="sub">{{ ep.total }} sự kiện{% if item %} của <b>#{{ item }}</b>{% endif %}{% if kind %} loại <code>{{ kind }}</code>{% endif %}</span>
+    {% if item or kind %}<div class="r"><a class="seg" href="{{ url('#log', item=0, kind='', epage=1) }}">✕ Bỏ lọc log</a></div>{% endif %}
+  </div>
+  <div class="qa-tools">
+    <a class="seg {{ 'on' if not kind }}" href="{{ url('#log', kind='', epage=1) }}">Tất cả</a>
+    {% for k in kinds %}<a class="seg {{ 'on' if kind == k }}" href="{{ url('#log', kind=k, epage=1) }}">{{ k }}<span class="n">{{ totals.get(k, 0) }}</span></a>{% endfor %}
+  </div>
+  {% if events %}
+  <div style="overflow-x:auto">
+  <table class="qa-tbl">
+    <thead><tr><th>Thời điểm (UTC)</th><th>Item</th><th>Loại</th><th class="n">Giá trị</th><th>Stage</th><th>Ai</th><th>Chi tiết</th></tr></thead>
     <tbody>
-      {% for e in events %}
-        <tr>
-          <td style="white-space:nowrap;color:var(--text-dim)">{{ e.at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-          <td><a href="/dashboard/task/{{ e.work_item_id }}">#{{ e.work_item_id }}</a></td>
-          <td class="q-kind">
-            {% if e.kind in rework_kinds %}<span class="pill pill-warn">{{ e.kind }}</span>
-            {% else %}{{ e.kind }}{% endif %}
-          </td>
-          <td class="n">{{ e.value if e.value else '' }}</td>
-          <td>{{ e.stage }}</td>
-          <td>{{ e.actor }}</td>
-          <td class="q-detail">{{ e.detail }}</td>
-        </tr>
-      {% endfor %}
+    {% for e in events %}
+      <tr>
+        <td class="dim" style="white-space:nowrap">{{ e.at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        <td class="it"><a href="/dashboard/task/{{ e.work_item_id }}">#{{ e.work_item_id }}</a></td>
+        <td class="kind">{% if e.kind in rework_kinds %}<span class="badge b-warn">{{ e.kind }}</span>{% elif e.kind == 'review_vote' and e.value < 0 %}<span class="badge b-bad">{{ e.kind }}</span>{% else %}{{ e.kind }}{% endif %}</td>
+        <td class="n">{{ e.value if e.value else '' }}</td>
+        <td>{{ e.stage }}</td>
+        <td>{{ e.actor }}</td>
+        <td><div class="detail clip" title="{{ e.detail }}">{{ e.detail }}</div></td>
+      </tr>
+    {% endfor %}
     </tbody>
   </table>
+  </div>
+  {{ pager(ep, 'epage', 'eper', '#log') }}
+  {% else %}
+  <div class="qa-empty">Không có sự kiện nào{% if kind %} loại <code>{{ kind }}</code>{% endif %}{% if item %} cho #{{ item }}{% endif %} trong {{ days }} ngày.</div>
+  {% endif %}
 </div>
-{% else %}
-<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">No events{% if kind %} of kind <code>{{ kind }}</code>{% endif %} in this window.</div></div>
-{% endif %}
 {% endblock %}

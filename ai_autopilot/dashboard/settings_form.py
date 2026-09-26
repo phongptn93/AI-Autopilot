@@ -382,6 +382,26 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Bot added as PR reviewer → structured AI review + vote. Re-arms on new commits."),
 
 
+    Field("pr_conflict_tracking_enabled", "⚔️ Track PR merge conflicts", "bool",
+          "🔁 PR review & feedback",
+          "Detect active PRs ADO reports as conflicted: one PR comment + one notification per "
+          "episode, the Conflicts page, and a delivery-report row. Read-only. Restart required."),
+    Field("pr_conflict_autoresolve", "↳ Auto-resolve on autopilot PRs", "bool",
+          "🔁 PR review & feedback",
+          "On PRs from the bot's branches: merge the target in (never rebase / force-push), "
+          "let the agent settle the hunks, and push ONLY if no marker is left, no other file "
+          "was touched, and tests + the security gate pass. Otherwise abort and ask a person."),
+    Field("pr_conflict_command", "↳ Resolve command", "text", "🔁 PR review & feedback",
+          "PR comment that asks for a resolution on ANY PR (allowlisted users). Blank = off."),
+    Field("pr_conflict_max_files", "↳ Max conflicted files", "int", "🔁 PR review & feedback",
+          "Above this many conflicted files it is a structural collision — escalate without "
+          "spending a token."),
+    Field("pr_conflict_max_attempts", "↳ Attempts per target commit", "int",
+          "🔁 PR review & feedback",
+          "Automatic attempts against the SAME target commit (same inputs → same conflict). "
+          "A new push to the target, or a person asking, allows another."),
+    Field("pr_conflict_poll_minutes", "↳ Scan every (minutes)", "int", "🔁 PR review & feedback",
+          "How often active PRs are checked for conflicts."),
     Field("pr_advisory_max_per_commit", "↳ Max advisory reviews / commit", "int",
           "🔁 PR review & feedback",
           "How often /review (and other comment-only commands) may run against the SAME "
@@ -837,6 +857,11 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     # 🔁 PR review & feedback
     "max_revisions": ("feedback_loop_enabled", ("1",)),
     "pr_auto_review_on_added": ("pr_reviewer_tracking_enabled", ("1",)),
+    "pr_conflict_autoresolve": ("pr_conflict_tracking_enabled", ("1",)),
+    "pr_conflict_command": ("pr_conflict_tracking_enabled", ("1",)),
+    "pr_conflict_max_files": ("pr_conflict_tracking_enabled", ("1",)),
+    "pr_conflict_max_attempts": ("pr_conflict_tracking_enabled", ("1",)),
+    "pr_conflict_poll_minutes": ("pr_conflict_tracking_enabled", ("1",)),
     "max_comment_rounds": ("comment_reprocess_enabled", ("1",)),
     # 🚚 Delivery — the history switch is what starts the clock at all.
     "delivery_history_interval_minutes": ("delivery_history_enabled", ("1",)),

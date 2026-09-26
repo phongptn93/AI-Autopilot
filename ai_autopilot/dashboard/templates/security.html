@@ -47,6 +47,10 @@
   .sc-chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-family:var(--mono); border:1px solid var(--border); background:var(--bg-input); color:var(--text-dim); border-radius:7px; padding:4px 8px; cursor:pointer; white-space:nowrap; }
   .sc-chip.on { color:var(--accent-hover); border-color:rgba(99,102,241,.5); background:var(--accent-bg); }
   .sc-chip input { accent-color:var(--accent); margin:0; }
+  /* A disabled button must LOOK disabled: this one used to render exactly like an
+     active one, so pressing it and seeing nothing happen read as "scan is broken". */
+  .btn-save:disabled, .btn-ghost:disabled { opacity:.45; cursor:not-allowed; filter:grayscale(.4); }
+  .sc-pick { cursor:pointer; }
   .sc-prog { display:flex; align-items:center; gap:10px; padding:10px 18px; font-size:12.5px; border-top:1px solid var(--border-soft); background:var(--accent-bg); }
   .sc-prog .spin { width:12px; height:12px; border:2px solid var(--accent); border-right-color:transparent; border-radius:50%; animation:sc-spin .9s linear infinite; }
   @keyframes sc-spin { to { transform:rotate(360deg); } }
@@ -126,8 +130,16 @@
       <div class="sc-form">
         <div class="sc-f" style="grid-column:1/-1">
           <label>Repository (absolute path)</label>
-          <input class="sc-in mono" type="text" name="repo" value="{{ repo }}" placeholder="C:\\ws\\Backend-Fresh" list="sc-repos">
-          <datalist id="sc-repos">{% for r in repos %}<option value="{{ r }}">{% endfor %}</datalist>
+          <input class="sc-in mono" type="text" name="repo" value="{{ repo }}" required autocomplete="off"
+                 placeholder="{{ suggestions[0] if suggestions else 'C:\\ws\\Backend-Fresh' }}" list="sc-repos">
+          <datalist id="sc-repos">{% for r in suggestions %}<option value="{{ r }}">{% endfor %}</datalist>
+          {% if suggestions %}
+          <div class="sc-chips" style="margin-top:6px">
+            {% for r in suggestions[:8] %}
+            <button type="button" class="sc-chip sc-pick{{ ' on' if r == repo else '' }}" data-repo="{{ r }}" title="{{ r }}">{{ r.replace('\\', '/').rsplit('/', 1)[-1] }}</button>
+            {% endfor %}
+          </div>
+          {% endif %}
         </div>
         <div class="sc-f" style="grid-column:1/-1">
           <label>Tools</label>
@@ -147,7 +159,7 @@
           <select class="sc-in" name="scope"><option value="full">full repository</option><option value="diff">diff vs base branch</option></select></div>
         <div class="sc-f"><label>PoC verify</label>
           <label class="sc-chip {{ 'on' if sec.verify_enabled else '' }}" title="{{ 'Build a PoC for each new high+ finding in an isolated worktree' if can_verify else 'needs use_worktrees: true' }}"><input type="checkbox" name="verify" value="1" {% if sec.verify_enabled %}checked{% endif %} {% if not can_verify %}disabled{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">verify new high+</label></div>
-        <div class="sc-f"><button class="btn-save" type="submit" {% if not can_scan %}disabled{% endif %} title="{{ 'Runs in the background; this page shows progress' if can_scan else ('scan already running' if progress else 'enter a repository path') }}">▶ Scan now</button></div>
+        <div class="sc-f"><button class="btn-save" type="submit" {% if not can_scan %}disabled{% endif %} title="{{ 'Runs in the background; this page shows progress' if can_scan else ('a scan is already running for this repo' if progress else 'scanning is disabled — enable it in Scan settings') }}">▶ Scan now</button></div>
       </div>
     </form>
     {% if progress or running_row %}
@@ -335,6 +347,24 @@
 </div>
 
 <script>
+(function () {
+  // Picking a suggested repo fills the path field — one click instead of typing a path.
+  document.querySelectorAll('.sc-pick').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var input = document.querySelector('input[name="repo"]');
+      if (input) { input.value = b.dataset.repo; input.focus(); }
+      document.querySelectorAll('.sc-pick').forEach(function (x) { x.classList.toggle('on', x === b); });
+    });
+  });
+  // Pressed = say so: a request that looks like nothing happened gets pressed twice.
+  var form = document.querySelector('form[action="/dashboard/security/rescan"]');
+  if (form) {
+    form.addEventListener('submit', function () {
+      var btn = form.querySelector('button[type="submit"]');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Đang bắt đầu…'; }
+    });
+  }
+})();
 (function () {
   var box = document.getElementById('sc-prog');
   if (!box) { return; }

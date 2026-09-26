@@ -147,6 +147,19 @@ allowed_skills: []
 auto_decompose: true
 feedback_loop_enabled: false
 max_revisions: 3
+
+# ── PR merge conflicts (/dashboard/conflicts) ──
+# Tracking is read-only: one PR comment + one notification per conflict episode, a
+# delivery-report row, the Conflicts page. Resolution merges the target INTO the PR branch
+# (never rebase / force-push) and pushes only when no marker is left, no other file was
+# touched, and tests + the security gate pass — otherwise it aborts and asks a person.
+pr_conflict_tracking_enabled: true
+pr_conflict_poll_minutes: 5
+pr_conflict_comment: true
+pr_conflict_autoresolve: false     # true = resolve automatically on the autopilot's own PRs
+pr_conflict_command: /resolve      # comment on ANY PR (allowlisted users) to ask for one
+pr_conflict_max_attempts: 1        # per target commit; a new target push allows another
+pr_conflict_max_files: 15          # more = structural collision → straight to a person
 auto_review_enabled: true
 block_on_severity: "Critical,High"
 

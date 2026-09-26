@@ -1357,6 +1357,28 @@ class Settings(BaseSettings):
     # same files, at the cost of a merge ORDER. Independent = merge in any order.
     batch_stacked_prs: bool = True
 
+    # ── PR merge conflicts ──
+    # Track every active in-scope PR whose test merge ADO reports as "conflicts": since
+    # when, which files, who is on it. Read-only by itself — detection, a PR comment,
+    # one notification, the /dashboard/conflicts page and a delivery-report row.
+    pr_conflict_tracking_enabled: bool = True
+    pr_conflict_poll_minutes: int = 5
+    # Post ONE comment on the PR when a conflict is first seen (files + how to resolve).
+    pr_conflict_comment: bool = True
+    # Resolve automatically on PRs the autopilot owns (bot branch prefix): merge the
+    # target in, let the agent settle the hunks, verify, push. Off by default — it writes
+    # to branches. Anyone's PR can still be resolved on request (`/resolve` comment by an
+    # allowlisted user, or the dashboard button); that is a person deciding.
+    pr_conflict_autoresolve: bool = False
+    # The PR comment that asks for a resolution. Blank disables the command.
+    pr_conflict_command: str = "/resolve"
+    # Attempts per PR against the SAME target commit. The same inputs reproduce the same
+    # conflict, so retrying them burns tokens; a new push to the target resets it.
+    pr_conflict_max_attempts: int = 1
+    # More conflicted files than this is a structural collision, not a merge to settle
+    # hunk by hunk — hand it to a person without spending a token.
+    pr_conflict_max_files: int = 15
+
     # ── Feedback loop / PR babysitter ──
     feedback_loop_enabled: bool = False
     max_revisions: int = 3

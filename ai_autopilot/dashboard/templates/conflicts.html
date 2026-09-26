@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  /* ── PR merge conflicts (scoped) ──
+     One question per visit: which PRs cannot merge, since when, and is anyone on it.
+     Open rows lead; each says what was tried and why it stopped, and offers the one
+     action that moves it (Resolve) next to the one that always works (open the PR). */
+  .main { max-width:none; }
+  .cf-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; margin-bottom:5px; }
+  .cf-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+  .cf-top form { margin-left:auto; }
+  .cf-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:112ch; margin:0 0 14px; }
+  .cf-lede code, .cf-card code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input); padding:1px 6px; border-radius:5px; }
+  .cf-flash { padding:11px 16px; margin-bottom:14px; border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-card); font-size:12.5px; }
+  .cf-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); }
+  .cf-flash.warn { border-color:rgba(245,166,35,.45); color:var(--amber); }
+  .cf-flash.bad { border-color:rgba(240,82,106,.45); color:var(--red); }
+  .cf-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:16px; }
+  .cf-mode { display:flex; flex-wrap:wrap; gap:8px 18px; padding:12px 18px; font-size:12.5px; border-bottom:1px solid var(--border-soft); }
+  .cf-mode b { font-weight:650; }
+  .cf-filter { display:flex; flex-wrap:wrap; gap:6px; padding:10px 18px; border-bottom:1px solid var(--border-soft); }
+  .cf-filter a { font-size:11px; font-family:var(--mono); padding:4px 9px; border-radius:7px; border:1px solid var(--border); background:var(--bg-input); color:var(--text-dim); text-decoration:none; }
+  .cf-filter a.on { color:var(--accent-hover); border-color:rgba(99,102,241,.5); background:var(--accent-bg); }
+  .cf-filter .n { opacity:.7; margin-left:3px; }
+  .cf-tbl { width:100%; border-collapse:collapse; }
+  .cf-tbl th { text-align:left; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); padding:9px 14px; border-bottom:1px solid var(--border-soft); }
+  .cf-tbl td { padding:11px 14px; border-bottom:1px solid var(--border-soft); font-size:12.5px; vertical-align:top; }
+  .cf-tbl tr:last-child td { border-bottom:0; }
+  .cf-tbl a.t { color:var(--text); font-weight:650; text-decoration:none; }
+  .cf-tbl a.t:hover { color:var(--accent-hover); }
+  .cf-br { font-family:var(--mono); font-size:11.5px; color:var(--text-muted); }
+  .cf-files { margin:4px 0 0; padding-left:16px; font-family:var(--mono); font-size:11px; color:var(--text-muted); }
+  .cf-err { color:var(--red); font-size:11.5px; margin-top:4px; max-width:62ch; line-height:1.5; }
+  .cf-checks { font-size:11px; color:var(--text-dim); margin-top:3px; }
+  .st { display:inline-block; font-size:10px; font-family:var(--mono); font-weight:700; padding:1px 7px; border-radius:5px; white-space:nowrap; }
+  .st.open { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+  .st.resolving { background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.4); }
+  .st.escalated { background:rgba(245,166,35,.14); color:var(--amber); border:1px solid rgba(245,166,35,.45); }
+  .st.resolved { background:var(--green-bg); color:var(--green); border:1px solid rgba(46,204,113,.45); }
+  .st.closed { background:var(--bg-input); color:var(--text-dim); border:1px solid var(--border); }
+  .tag { display:inline-block; font-size:10px; font-family:var(--mono); padding:1px 6px; border-radius:5px; border:1px solid var(--border); color:var(--text-dim); margin-right:3px; }
+  .cf-act form { display:inline; }
+  .cf-act button { font-size:11px; padding:3px 9px; }
+  .cf-empty { padding:24px 18px; color:var(--text-dim); font-size:12.5px; line-height:1.7; }
+  .cf-how { padding:12px 18px; font-size:12px; color:var(--text-muted); line-height:1.7; }
+  .cf-how ol { margin:4px 0 0 18px; padding:0; }
+</style>
+
+<div class="cf-top">
+  <h2>⚔️ PR conflicts</h2>
+  <form method="post" action="/dashboard/conflicts/scan"><button class="btn-ghost" type="submit" {% if not service_live %}disabled{% endif %}>🔄 Scan now</button></form>
+</div>
+<p class="cf-lede">
+  Pull requests ADO cannot merge because their branch conflicts with the target. A
+  conflicted PR is <b>not</b> "ready to merge" however it was voted — it leads the delivery
+  report instead. Resolution <b>merges the target into the PR branch</b> (never a rebase,
+  never a force-push, so reviewed commits and comments stay put) and pushes only after
+  objective checks pass; otherwise the merge is aborted and the branch is left exactly as it was.
+</p>
+
+{% if flash %}<div class="cf-flash {{ 'ok' if flash[0] == 'green' else ('warn' if flash[0] == 'amber' else 'bad') }}">{{ flash[1]|safe }}</div>{% endif %}
+{% if not tracking %}<div class="cf-flash bad">Tracking is off (<code>pr_conflict_tracking_enabled: false</code>) — nothing below updates.</div>
+{% elif not service_live %}<div class="cf-flash bad">The conflict service is not running in this process — restart the autopilot.</div>{% endif %}
+
+<div class="cf-card">
+  <div class="cf-mode">
+    <span><b>Auto-resolve</b> on autopilot PRs: {{ '✅ on' if autoresolve else '⏸ off' }}</span>
+    <span><b>On request</b> (any PR): {% if command %}comment <code>{{ command }}</code> or press Resolve{% else %}Resolve button only{% endif %}</span>
+    <span><b>Escalates when</b> &gt; {{ max_files }} files, lock/binary files, markers left, other files touched, tests or security gate fail</span>
+    <span style="margin-left:auto"><a class="table-link" href="/dashboard/settings">Settings → 🔁 PR review &amp; feedback</a></span>
+  </div>
+  <div class="cf-filter">
+    <a href="/dashboard/conflicts?status=active" class="{{ 'on' if status == 'active' else '' }}">active<span class="n">{{ counts.open + counts.resolving + counts.escalated }}</span></a>
+    {% for s in ('open', 'resolving', 'escalated', 'resolved', 'closed') %}
+    <a href="/dashboard/conflicts?status={{ s }}" class="{{ 'on' if status == s else '' }}">{{ s }}<span class="n">{{ counts[s] }}</span></a>
+    {% endfor %}
+    <a href="/dashboard/conflicts?status=all" class="{{ 'on' if status == 'all' else '' }}">all</a>
+  </div>
+
+  {% if items %}
+  <div style="overflow-x:auto">
+  <table class="cf-tbl">
+    <thead><tr><th>Status</th><th>Pull request</th><th>Branches</th><th>Conflicted files</th><th>For</th><th>Attempts</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for it in items %}{% set r = it.row %}
+    <tr>
+      <td><span class="st {{ r.status }}">{{ r.status }}</span>
+          {% if r.resolved_by %}<div class="cf-checks">by {{ r.resolved_by }}</div>{% endif %}</td>
+      <td>{% if r.url %}<a class="t" href="{{ r.url }}" target="_blank" rel="noopener">!{{ r.pr_id }} {{ r.title }}</a>{% else %}<b>!{{ r.pr_id }}</b> {{ r.title }}{% endif %}
+          <div><span class="tag">{{ r.repo_name }}</span>{% if r.owned %}<span class="tag" title="branch from the autopilot">🤖 autopilot</span>{% endif %}{% if r.is_draft %}<span class="tag">draft</span>{% endif %}
+          {% if r.author %}<span class="tag">{{ r.author }}</span>{% endif %}
+          {% if r.work_item_id %}{% if item_link %}<a class="tag" href="{{ item_link }}/{{ r.work_item_id }}" target="_blank" rel="noopener">#{{ r.work_item_id }}</a>{% else %}<span class="tag">#{{ r.work_item_id }}</span>{% endif %}{% endif %}</div>
+          {% if r.last_error and r.status == 'escalated' %}<div class="cf-err">🙋 {{ r.last_error }}</div>{% endif %}
+          {% if it.checks %}<div class="cf-checks">{% for k, v in it.checks.items() %}{{ '✅' if v == 'ok' or v.startswith(('skipped', 'already')) else '❌' }} {{ k }}{% if v != 'ok' %}: {{ v }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+          {% if r.merge_commit %}<div class="cf-checks">merge commit <code>{{ r.merge_commit[:10] }}</code></div>{% endif %}</td>
+      <td class="cf-br">{{ r.source_branch }}<br>→ {{ r.target_branch }}</td>
+      <td>{% if it.files %}<ul class="cf-files">{% for f in it.files[:6] %}<li>{{ f }}</li>{% endfor %}{% if it.files|length > 6 %}<li>… +{{ it.files|length - 6 }}</li>{% endif %}</ul>{% else %}<span class="cf-checks">not listed by ADO</span>{% endif %}</td>
+      <td class="cf-br" title="first seen {{ r.first_seen.strftime('%Y-%m-%d %H:%M') if r.first_seen else '' }}">{% if it.age_hours >= 48 %}{{ (it.age_hours / 24)|round|int }}d{% elif it.age_hours >= 1 %}{{ it.age_hours|round|int }}h{% else %}{{ (it.age_hours * 60)|round|int }}m{% endif %}</td>
+      <td class="cf-br">{{ r.attempts }}{% if r.cost_tokens %}<div class="cf-checks">{{ '{:,}'.format(r.cost_tokens) }} tok</div>{% endif %}</td>
+      <td class="cf-act">
+        {% if r.status in ('open', 'escalated') %}
+        <form method="post" action="/dashboard/conflicts/{{ r.id }}/resolve"><button class="btn-save" type="submit" {% if not service_live %}disabled{% endif %} title="Merge {{ r.target_branch }} into {{ r.source_branch }}, settle the hunks, verify, push">▶ Resolve</button></form>
+        {% elif r.status == 'resolving' %}<span class="st resolving">working…</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="cf-empty">{% if status == 'active' %}No PR is in conflict right now. ✅{% else %}Nothing in this status.{% endif %}</div>
+  {% endif %}
+  <div class="cf-how">
+    <b>What a resolution checks before it pushes</b>
+    <ol>
+      <li>No <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> / <code>=======</code> / <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> marker left in any conflicted file, and git reports no unmerged path.</li>
+      <li>Nothing outside the conflicted files was edited.</li>
+      <li>No security finding that <i>neither</i> side of the merge had.</li>
+      <li>The repo's tests pass (when the test gate is on).</li>
+      <li>Push without <code>--force</code> — if the branch moved meanwhile, it stops instead of overwriting.</li>
+    </ol>
+  </div>
+</div>
+{% endblock %}

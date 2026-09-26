@@ -74,6 +74,49 @@ class GitError(RuntimeError):
     """Raised when a git command exits non-zero."""
 
 
+class _TaskReentrantLock:
+    """An ``asyncio.Lock`` the task already holding it may take again.
+
+    Other tasks still wait, exactly as before — this only removes self-deadlock, where
+    one task nests two sections guarded by the same repo lock. Same surface as
+    ``asyncio.Lock`` (``async with``, ``acquire``/``release``, ``locked``), so no call
+    site changes. Note it is per TASK: a child task spawned while the lock is held is a
+    different owner and waits, as it should.
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._owner: asyncio.Task | None = None
+        self._depth = 0
+
+    async def acquire(self) -> bool:
+        me = asyncio.current_task()
+        if me is not None and self._owner is me:
+            self._depth += 1
+            return True
+        await self._lock.acquire()
+        self._owner, self._depth = me, 1
+        return True
+
+    def release(self) -> None:
+        if self._depth <= 0:
+            raise RuntimeError("release of an unheld lock")
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner = None
+            self._lock.release()
+
+    def locked(self) -> bool:
+        return self._lock.locked()
+
+    async def __aenter__(self) -> _TaskReentrantLock:
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self.release()
+
+
 def pretrust_claude_dir(path: str) -> bool:
     """Pre-accept Claude Code's workspace-trust dialog for ``path``.
 
@@ -189,7 +232,12 @@ class ClaudeExecutor:
         # Serialise git worktree bookkeeping per source repo: two concurrent tasks
         # touching the SAME repo must not run `worktree add`/`prune` at once (they
         # write the same .git and would collide on locks). Keyed by repo path.
-        self._repo_locks: dict[str, asyncio.Lock] = {}
+        self._repo_locks: dict[str, _TaskReentrantLock] = {}
+        # One lock per PR branch, keyed (repo_id, branch), SHARED by every service that
+        # writes to a PR branch — the babysitter's /ai revise and the conflict resolver.
+        # Each used to keep its own, so a conflict merge and a revise could push to the
+        # same branch at once and one would lose (or worse, both "succeed" out of order).
+        self.branch_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
     @property
     def _config(self) -> Settings:
@@ -217,15 +265,29 @@ class ClaudeExecutor:
         finally:
             _run_settings.reset(token)
 
-    def _repo_lock(self, repo_path: str) -> asyncio.Lock:
+    def branch_lock(self, repo_id: str, branch: str) -> asyncio.Lock:
+        """Get-or-create the shared lock for one PR branch (see ``branch_locks``)."""
+        key = (repo_id, branch)
+        lock = self.branch_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self.branch_locks[key] = lock
+        return lock
+
+    def _repo_lock(self, repo_path: str) -> _TaskReentrantLock:
         """Get-or-create the lock guarding git bookkeeping for one source repo.
+
+        Reentrant for the task that holds it (see ``_TaskReentrantLock``): workspace
+        mode holds this lock for a whole run, and the checkout inside that run asks for
+        it again (``_worktree_holding_branch``). With a plain ``asyncio.Lock`` that second
+        request waited on the first forever — every workspace-mode PR revise hung.
 
         Safe without its own lock: there is no ``await`` here, so concurrent
         coroutines never interleave inside this method (cooperative scheduling).
         """
         lock = self._repo_locks.get(repo_path)
         if lock is None:
-            lock = asyncio.Lock()
+            lock = _TaskReentrantLock()
             self._repo_locks[repo_path] = lock
         return lock
 

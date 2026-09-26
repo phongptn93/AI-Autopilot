@@ -65,7 +65,12 @@ class PrMonitorService:
         # concurrently on the same branch corrupts the run (worktree mode: second
         # `worktree add -B` fails "already checked out"; workspace mode: stale fetch).
         # Serialise per (repo, branch) — different branches still run in parallel.
-        self._branch_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # The executor's registry, not a private one: the conflict resolver writes to the
+        # same PR branches and must wait on the same lock (see ClaudeExecutor.branch_locks).
+        shared = getattr(getattr(c, "executor", None), "branch_locks", None)
+        self._branch_locks: dict[tuple[str, str], asyncio.Lock] = (
+            shared if isinstance(shared, dict) else {}
+        )
         # Hot lane: PRs the bot recently engaged, re-polled fast so follow-up replies
         # feel chat-like even with no webhook (localhost). (repo_id, pr_id) →
         # (expires_at_monotonic, repo_name, minimal pr dict).
@@ -370,10 +375,11 @@ class PrMonitorService:
         self._revision_counts = {
             k: v for k, v in self._revision_counts.items() if k in active_items
         }
-        self._branch_locks = {
-            k: v for k, v in self._branch_locks.items()
-            if k in active_branches or v.locked()
-        }
+        # In place — the dict is shared with the executor (and the conflict resolver);
+        # rebinding it here would silently give this loop a private copy again.
+        for k in [k for k, v in self._branch_locks.items()
+                  if k not in active_branches and not v.locked()]:
+            del self._branch_locks[k]
 
     async def _on_pr_published(self, repo_id: str, pr_id: int, source_ref: str) -> None:
         """The author took a draft out of draft: NOW it is ready for review."""

@@ -197,7 +197,12 @@ def test_a_setup_step_writes_through_the_same_path_as_settings(tmp_path, own_con
     cfg = _settings(tmp_path)
     with TestClient(create_app(cfg)) as client:
         client.post("/dashboard/setup", data={
-            "step": "workspace", "base_branch": "develop", "trigger_tag": "box-autopilot",
+            "step": "workspace", "base_branch": "develop",
+        })
+        # The trigger tag moved to its own step: "Mã nguồn" answers where the code is,
+        # "Khi nào autopilot nhận việc" answers when this machine takes work on.
+        client.post("/dashboard/setup", data={
+            "step": "pickup", "trigger_tag": "box-autopilot",
         })
         live = client.app.state.container.config
         assert live.base_branch == "develop"
@@ -679,3 +684,150 @@ def test_a_genuinely_missing_essential_is_still_named(tmp_path):
         body = client.get("/dashboard/settings").text
     assert "chưa chạy được" in body
     assert "Workspace directory" in body       # named, not just counted
+
+
+# ── The wizard has to ask for everything a machine needs to pick work up ─────
+#
+# doctor's rule (check_trigger) is that an item is a candidate when it carries a
+# trigger TAG or sits in a trigger STATE. The wizard asked only for the tag — and
+# asked for it on the step about source code — so a machine set up entirely through
+# the wizard could still report "Nothing can ever be picked up". The run-now tag had
+# the same problem from the other side: it is the answer to "how do I make THIS item
+# go now", and it lived only in Settings, 180 fields down.
+
+
+def _step_keys(role: str, source: str = "ado") -> dict:
+    """{step id: field keys} for a role, read out of the wizard's own flow."""
+    from ai_autopilot import dashboard
+
+    router = dashboard.create_dashboard_router()
+    flow = None
+    for route in router.routes:
+        fn = getattr(route, "endpoint", None)
+        for cell in (fn.__closure__ or ()) if fn else ():
+            try:
+                candidate = cell.cell_contents
+            except ValueError:
+                continue
+            if getattr(candidate, "__name__", "") == "_setup_flow":
+                flow = candidate
+    assert flow is not None, "_setup_flow not found in the router"
+    return {sid: keys for sid, _title, keys in flow(role, source)}
+
+
+def test_the_wizard_asks_how_work_is_picked_up():
+    """Both halves of doctor's candidate rule, plus the run-now tag."""
+    steps = _step_keys("standalone")
+    assert "pickup" in steps, "the wizard never asks when this machine takes work on"
+    assert set(steps["pickup"]) == {"trigger_tag", "trigger_states", "stage_entry_tag"}
+
+
+def test_the_source_code_step_is_only_about_source_code():
+    steps = _step_keys("standalone")
+    assert set(steps["workspace"]) == {"workspace_directory", "base_branch"}
+
+
+def test_a_worker_is_not_offered_settings_its_central_serves():
+    """On a worker, trigger_states and stage_entry_tag are central-owned: a step
+    offering them would save nothing and the next heartbeat would put the central's
+    values back. A green "saved" for a change that vanishes is worse than no box."""
+    from ai_autopilot.config import Settings
+    from ai_autopilot.dashboard import settings_form
+
+    worker = Settings(fleet_role="worker", fleet_central_url="http://c", fleet_token="t")
+    assert not settings_form.writable_here("trigger_states", worker)
+    assert not settings_form.writable_here("stage_entry_tag", worker)
+
+    offered = {k for keys in _step_keys("worker").values() for k in keys}
+    assert "trigger_states" not in offered
+    assert "stage_entry_tag" not in offered
+    assert "trigger_tag" in offered          # this one IS the machine's own
+
+
+def test_the_pickup_step_comes_after_the_tracker_connection():
+    """Its state list is read from the project. Asking which states mean "start here"
+    before we can name them leaves the operator typing them from memory."""
+    from ai_autopilot import dashboard
+
+    router = dashboard.create_dashboard_router()
+    flow = None
+    for route in router.routes:
+        fn = getattr(route, "endpoint", None)
+        for cell in (fn.__closure__ or ()) if fn else ():
+            try:
+                candidate = cell.cell_contents
+            except ValueError:
+                continue
+            if getattr(candidate, "__name__", "") == "_setup_flow":
+                flow = candidate
+    ids = [sid for sid, _t, _k in flow("standalone", "ado")]
+    assert ids.index("ado") < ids.index("pickup")
+
+
+def test_the_pickup_step_renders_the_projects_real_states(tmp_path, own_config):
+    cfg = _settings(tmp_path)
+    with TestClient(create_app(cfg)) as client:
+        async def states():
+            return ["New", "Active", "Ready for Review", "Closed"]
+
+        client.app.state.container.ado.get_states = states
+        page = client.get("/dashboard/setup?step=pickup").text
+    assert "Ready for Review" in page
+    assert 'name="trigger_states__Active"' in page
+    assert 'name="trigger_states__manual"' in page      # offline / custom states
+
+
+def test_the_pickup_step_still_works_when_ado_cannot_be_reached(tmp_path, own_config):
+    """A machine reaching this step before its PAT works must still see and edit the
+    states it already has — an unreachable ADO costs the SUGGESTIONS, not the field."""
+    cfg = _settings(tmp_path)
+    with TestClient(create_app(cfg)) as client:
+        async def boom():
+            raise RuntimeError("ADO unreachable")
+
+        client.app.state.container.ado.get_states = boom
+        page = client.get("/dashboard/setup?step=pickup").text
+    assert 'name="trigger_states__manual"' in page
+    for state in cfg.effective_trigger_states:          # own values still shown, ticked
+        assert f'name="trigger_states__{state}"' in page
+
+
+def test_with_no_states_at_all_the_step_says_to_type_them(tmp_path, own_config):
+    """The genuinely empty case: nothing from ADO and nothing configured. An empty box
+    with no placeholder reads as "this field does not apply to me"."""
+    cfg = _settings(tmp_path)
+    cfg.trigger_states = []
+    with TestClient(create_app(cfg)) as client:
+        async def none():
+            return []
+
+        client.app.state.container.ado.get_states = none
+        page = client.get("/dashboard/setup?step=pickup").text
+    assert "gõ tên state" in page
+
+
+def test_the_wizard_refuses_a_run_now_tag_that_would_strip_the_board(tmp_path, own_config):
+    """The destructive one. The run-now sweep REMOVES the tag it matched on, so setting
+    the run-now tag to the trigger tag makes the first sweep strip ownership off every
+    item the autopilot has — silently, and unrecoverable by waiting. The Settings page
+    already refused this; the wizard did not, and a wizard is exactly where somebody
+    types the same tag twice."""
+    cfg = _settings(tmp_path)
+    with TestClient(create_app(cfg)) as client:
+        live = client.app.state.container.config
+        before = live.stage_entry_tag
+        client.post("/dashboard/setup", data={
+            "step": "pickup", "stage_entry_tag": live.trigger_tag,
+        }, follow_redirects=False)
+        assert live.stage_entry_tag == before          # refused, nothing written
+
+
+def test_the_wizard_accepts_a_run_now_tag_that_does_not_collide(tmp_path, own_config):
+    cfg = _settings(tmp_path)
+    with TestClient(create_app(cfg)) as client:
+        live = client.app.state.container.config
+        client.post("/dashboard/setup", data={
+            "step": "pickup", "trigger_tag": live.trigger_tag,
+            "stage_entry_tag": f"{live.trigger_tag}-run",
+        }, follow_redirects=False)
+        assert live.stage_entry_tag == f"{live.trigger_tag}-run"

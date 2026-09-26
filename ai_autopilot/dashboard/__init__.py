@@ -1903,9 +1903,31 @@ def create_dashboard_router() -> APIRouter:
                  selected=loop, severities=reports_mod.SEVERITIES),
         )
 
-    # What a finding can be filed as. Deliberately short: these are the types every ADO
-    # process template has, so the picker cannot offer something the project will reject.
+    # Fallback only, for when ADO cannot be reached. Work-item types are a property of
+    # the project's PROCESS TEMPLATE, not of Azure DevOps: Agile defines User Story and
+    # no Product Backlog Item, Scrum the reverse, CMMI defines Requirement. This list
+    # was the whole offer, so the picker named types half the projects would reject —
+    # which is what the report screen was doing on TLCL-DxFac.
     _WORK_ITEM_TYPES = ("Bug", "Task", "Issue", "User Story")
+
+    async def _types_by_project(c: Container, projects: list[str]) -> dict[str, list[str]]:
+        """``{project: [work-item type]}`` for the picker, one request per project.
+
+        Concurrent, and best-effort per project: one unreachable project falls back to
+        the static list rather than emptying the dropdown for every other project too.
+        """
+        wanted = list(dict.fromkeys(p for p in projects if p)) or [""]
+        found = await asyncio.gather(
+            *(c.ado.get_work_item_types(p) for p in wanted), return_exceptions=True
+        )
+        out: dict[str, list[str]] = {}
+        for project, types in zip(wanted, found, strict=True):
+            if isinstance(types, BaseException):
+                _log.warning("work-item types unavailable", project=project,
+                             error=describe_exc(types))
+                types = []
+            out[project] = list(types) or list(_WORK_ITEM_TYPES)
+        return out
 
     @router.get("/reports/{report_id}", response_class=HTMLResponse)
     async def report_detail(request: Request, report_id: int):
@@ -1919,6 +1941,10 @@ def create_dashboard_router() -> APIRouter:
         except (ValueError, TypeError):
             findings = []       # a malformed row must still render its text
         flash = _take_flash(request)
+        views = workspaces_mod.resolve(cfg)
+        types_by_project = await _types_by_project(
+            c, [p for ws in views if ws.enabled for p in ws.projects]
+        )
         response = _TEMPLATES.TemplateResponse(
             request, "report_detail.html",
             _ctx(request, "reports", row=row, findings=findings, flash=flash,
@@ -1930,7 +1956,11 @@ def create_dashboard_router() -> APIRouter:
                  body_html=markdown_lite.render(
                      reports_mod.strip_findings_block(row.body_md or "")
                  ),
-                 workspaces=workspaces_mod.resolve(cfg),
+                 workspaces=views,
+                 # Per PROJECT, because that is what decides them. The template swaps
+                 # the Loại options when the Project dropdown changes, so the two can
+                 # never disagree.
+                 types_by_project=types_by_project,
                  item_types=_WORK_ITEM_TYPES,
                  severities=reports_mod.SEVERITIES),
         )
@@ -1959,8 +1989,16 @@ def create_dashboard_router() -> APIRouter:
         picked = {str(v) for v in form.getlist("finding")}
         project = str(form.get("project") or "").strip()
         item_type = str(form.get("item_type") or "Bug").strip()
-        if item_type not in _WORK_ITEM_TYPES:
-            raise HTTPException(status_code=422, detail="unknown work item type")
+        # Validate against the project that will actually receive the item, not against
+        # a list of types someone hoped every template has. Falls back to that list when
+        # ADO cannot be reached, so an outage cannot make filing impossible.
+        allowed = (await _types_by_project(c, [project]))[project or ""]
+        if item_type not in allowed:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{item_type!r} is not a work item type in "
+                       f"{project or cfg.ado_project!r}",
+            )
         if not picked:
             return _flash(f"/dashboard/reports/{report_id}", "file_none_picked")
         try:
@@ -4085,6 +4123,19 @@ def create_dashboard_router() -> APIRouter:
     # keys of its own — `_setup_save_jira` writes the workspace instead.
     _SETUP_STEP_JIRA = ("jira", "Kết nối Jira", ())
     _SETUP_STEP_SOURCE = ("source", "Nguồn work item", ())
+    # The wizard asked only for the trigger TAG, and asked for it on the step about
+    # source code. Both were wrong. doctor's own rule is that an item is picked up when
+    # it carries a trigger tag OR sits in a trigger state — leave the states blank and
+    # half the ways in simply do not exist, which is the ERROR it reports as "Nothing
+    # can ever be picked up". And the run-now tag is the answer to "how do I make THIS
+    # item go now", a question every new operator asks on day one; it lived only in
+    # Settings, 180 fields down, so people never learned it was there.
+    #
+    # Its own step rather than three more boxes under "Mã nguồn": this is a different
+    # question. One is where the code is, this is when the machine takes work on.
+    _SETUP_STEP_PICKUP = ("pickup", "Khi nào autopilot nhận việc", (
+        "trigger_tag", "trigger_states", "stage_entry_tag",
+    ))
 
     def _setup_flow(role: str, source: str) -> list[tuple[str, str, tuple[str, ...]]]:
         """The steps for this machine, in the order the answers depend on each other.
@@ -4119,7 +4170,11 @@ def create_dashboard_router() -> APIRouter:
         steps = [
             _SETUP_STEP_SOURCE,
             *tracker,
-            ("workspace", "Mã nguồn", ("workspace_directory", "base_branch", "trigger_tag")),
+            ("workspace", "Mã nguồn", ("workspace_directory", "base_branch")),
+            # After the tracker connection, because its state list is read from the
+            # project — asking which states mean "start here" before we can name them
+            # leaves the operator typing them from memory.
+            _SETUP_STEP_PICKUP,
         ]
         if role == "central":
             steps.append(
@@ -4183,6 +4238,15 @@ def create_dashboard_router() -> APIRouter:
         current = want if want in ids else "role"
         step = next((s for s in steps if s[0] == current), None)
         index = ids.index(current)
+        # Only for a step that actually shows a state picker. Reading the states costs
+        # 1 + N requests to ADO (cached, but still), and every other step in the wizard
+        # would have been paying for a list it does not render.
+        step_keys = step[2] if step else ()
+        ado_states: list[str] = []
+        if any(by_key[k].kind in ("stateset", "stateone")
+               for k in step_keys if k in by_key):
+            with contextlib.suppress(Exception):   # offline → type them by hand
+                ado_states = await c.ado.get_states()
         secrets_set = {
             key: bool(getattr(cfg, key, "")) for key in settings_form.SECRET_KEYS
         }
@@ -4193,7 +4257,8 @@ def create_dashboard_router() -> APIRouter:
                 request, "setup",
                 role=role, source=source, steps=steps, step_id=current, flash=flash,
                 heading=step[1] if step else "",
-                step_fields=[by_key[k] for k in (step[2] if step else ()) if k in by_key],
+                step_fields=[by_key[k] for k in step_keys if k in by_key],
+                ado_states=ado_states,
                 check=_SETUP_CHECKS.get(current, ""),
                 index=index, total=len(ids) - 1,
                 next_id=ids[index + 1] if index + 1 < len(ids) else "done",
@@ -4340,6 +4405,18 @@ def create_dashboard_router() -> APIRouter:
                     continue            # blank = keep what is stored
                 if settings_form.writable_here(key, cfg):
                     updates[key] = parsed[key]
+
+        # The same refusal the Settings page makes, for the same reason — and it has to
+        # be HERE too, not only there, now that the wizard can set this field. The
+        # run-now sweep removes the tag it matched on; set it to the trigger tag and the
+        # first sweep strips ownership off every item the autopilot has, silently and
+        # unrecoverably. A wizard is exactly where somebody types the same tag twice.
+        if "stage_entry_tag" in updates:
+            why = settings_form.run_now_tag_conflict(updates["stage_entry_tag"], cfg)
+            if why:
+                _log.error("setup rejected: run-now tag collides", reason=why,
+                           tag=updates["stage_entry_tag"], step=step_id)
+                return _flash(f"/dashboard/setup?step={step_id}", "err_run_tag_clash")
 
         if updates:
             raw = updates.pop("dashboard_auth_password", None)

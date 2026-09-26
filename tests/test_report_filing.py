@@ -162,3 +162,106 @@ def test_an_unknown_work_item_type_is_refused(tmp_path):
     finally:
         client.__exit__(None, None, None)
     assert created == []
+
+
+# ── The type picker belongs to the PROJECT, not to Azure DevOps ──────────────
+#
+# Work-item types come from the project's PROCESS TEMPLATE: Agile defines User Story
+# and no Product Backlog Item, Scrum the reverse, CMMI defines Requirement. The picker
+# offered one fixed Bug/Task/Issue/User Story for every project, so on TLCL-DxFac it
+# named types the project would reject — and validation checked the same fixed tuple,
+# so the rejection arrived later as an opaque 400, once per finding.
+
+TYPES_BY_TEMPLATE = {
+    "DxFactory": ["Bug", "Product Backlog Item", "Impediment"],      # Scrum
+    "Khatoco": ["Bug", "Task", "User Story", "Issue"],               # Agile
+}
+
+
+def _typed_client(cfg, created: list[dict], *, boom: bool = False) -> TestClient:
+    client = _client(cfg, created)
+    asked: list[str] = []
+
+    async def fake_types(project=""):
+        if boom:
+            raise RuntimeError("ADO unreachable")
+        asked.append(project)
+        return list(TYPES_BY_TEMPLATE.get(project, []))
+
+    client.app.state.container.ado.get_work_item_types = fake_types
+    client.asked = asked          # noqa: SLF001 — test handle
+    return client
+
+
+def test_each_project_is_offered_its_own_work_item_types(tmp_path):
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    client = _typed_client(cfg, [])
+    try:
+        page = client.get(f"/dashboard/reports/{report_id}").text
+        # Both templates reach the page, keyed by project, so switching the Project
+        # dropdown switches what Loại offers.
+        assert "Product Backlog Item" in page and "Impediment" in page
+        assert "User Story" in page
+        assert '"DxFactory"' in page and '"Khatoco"' in page
+        assert set(client.asked) == {"DxFactory", "Khatoco"}
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_filing_refuses_a_type_that_project_does_not_define(tmp_path):
+    """"User Story" passed validation on a Scrum project because the check was against
+    a hardcoded tuple. The project rejected it afterwards, per finding, as a 400 the
+    operator never saw."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _typed_client(cfg, created)
+    try:
+        answer = client.post(
+            f"/dashboard/reports/{report_id}/file",
+            data={"finding": ["0"], "project": "DxFactory", "item_type": "User Story"},
+        )
+        assert answer.status_code == 422
+        assert created == []                    # and nothing was filed
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_filing_accepts_a_type_that_project_does_define(tmp_path):
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _typed_client(cfg, created)
+    try:
+        answer = client.post(
+            f"/dashboard/reports/{report_id}/file",
+            data={"finding": ["0"], "project": "DxFactory",
+                  "item_type": "Product Backlog Item"},
+            follow_redirects=True,
+        )
+        assert answer.status_code == 200
+    finally:
+        client.__exit__(None, None, None)
+    assert [k["item_type"] for k in created] == ["Product Backlog Item"]
+
+
+def test_an_unreachable_ado_still_lets_you_file(tmp_path):
+    """An outage must not make filing impossible: fall back to the types every process
+    template has rather than offering an empty dropdown and refusing every submission."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _typed_client(cfg, created, boom=True)
+    try:
+        page = client.get(f"/dashboard/reports/{report_id}").text
+        assert "Bug" in page
+        answer = client.post(
+            f"/dashboard/reports/{report_id}/file",
+            data={"finding": ["0"], "project": "DxFactory", "item_type": "Bug"},
+            follow_redirects=True,
+        )
+        assert answer.status_code == 200
+    finally:
+        client.__exit__(None, None, None)
+    assert [k["item_type"] for k in created] == ["Bug"]

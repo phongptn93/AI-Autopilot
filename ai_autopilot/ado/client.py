@@ -105,11 +105,15 @@ class AdoClient:
         # (repo_id, pr_id) → (fetched_at, linked work-item ids). See
         # get_pull_request_work_items.
         self._pr_items: dict[tuple[str, int], tuple[float, tuple[int, ...]]] = {}
+        # project → (fetched_at, type names). Separate from _type_states on purpose:
+        # see get_work_item_types.
+        self._wi_types: dict[str, tuple[float, list[str]]] = {}
 
     def refresh(self) -> None:
         """Re-read the organization URL after a live config change."""
         self._base = self._config.ado_organization.rstrip("/")
         self._type_states = {}  # a different org/project has different types
+        self._wi_types = {}
         self._item_projects = {}
         self._pr_items = {}
 
@@ -1207,6 +1211,47 @@ class AdoClient:
         return True
 
     # ── Work-item states (for the Settings picker + the Flow editor) ─────────
+
+    async def get_work_item_types(self, project: str = "") -> list[str]:
+        """The work-item types this PROJECT actually defines, in template order.
+
+        Deliberately NOT ``_type_state_map(project).keys()``. That walks the states of
+        every type, which is 1 + N requests (19 on a stock template) — a page that only
+        needs to fill a dropdown must not pay for nineteen round trips it will throw
+        away. This is the ONE request that answers the question.
+
+        Empty on any failure, so a caller can fall back to a manual list rather than
+        offering nothing.
+
+        Types are per-project because the PROCESS TEMPLATE is: an Agile project has
+        User Story and no Product Backlog Item, Scrum has the reverse, and CMMI has
+        Requirement. Offering one fixed list meant the picker named types half the
+        projects would reject.
+        """
+        project = (project or self._config.ado_project or "").strip()
+        cached = self._wi_types.get(project.lower())
+        if cached is not None and time.monotonic() - cached[0] < _TYPE_STATE_TTL_SECONDS:
+            return list(cached[1])
+        try:
+            resp = await self._send(
+                "GET",
+                self._url(f"wit/workitemtypes?{_API}", project),
+                headers=await self._auth.get_auth_header(),
+            )
+        except httpx.HTTPError as exc:
+            self._log.warning("work-item type request error", error=describe_exc(exc))
+            return []
+        if resp.status_code >= 400:
+            self._log.warning("list work-item types failed", status=resp.status_code,
+                              project=project, detail=_terse(resp.text))
+            return []
+        names = [
+            t["name"]
+            for t in (resp.json().get("value") or [])
+            if t.get("name") and not t.get("isDisabled")
+        ]
+        self._wi_types[project.lower()] = (time.monotonic(), names)
+        return list(names)
 
     async def _type_state_map(self, project: str = "") -> dict[str, list[dict]]:
         """``{work-item type: [raw state dicts]}`` for one project, briefly cached.

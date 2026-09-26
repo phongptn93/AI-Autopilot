@@ -160,10 +160,12 @@
       </select>
 
       <label>Project</label>
-      <select name="project" id="projectPick"></select>
+      <select name="project" id="projectPick" onchange="syncTypes()"></select>
 
       <label>Loại</label>
-      <select name="item_type">
+      {# Filled by syncProjects() from the selected project's own process template.
+         Rendered non-empty so the form still works with scripting off. #}
+      <select name="item_type" id="typePick">
         {% for kind in item_types %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}
       </select>
 
@@ -177,6 +179,25 @@
   <script>
     // Project list follows the chosen workspace: a project from another workspace is
     // one this connection may not even be able to write to.
+    /* Work-item types belong to the project's process template, not to Azure DevOps:
+       Agile has User Story, Scrum has Product Backlog Item, CMMI has Requirement. The
+       picker used to offer one fixed list, so on a project whose template lacks those
+       types it named types the project would reject. */
+    const TYPES_BY_PROJECT = {{ types_by_project | tojson }};
+    const FALLBACK_TYPES = {{ item_types | list | tojson }};
+
+    function syncTypes() {
+      const project = document.getElementById('projectPick').value;
+      const target = document.getElementById('typePick');
+      const wanted = TYPES_BY_PROJECT[project] || FALLBACK_TYPES;
+      const previous = target.value;
+      target.innerHTML = '';
+      wanted.forEach(t => target.add(new Option(t, t)));
+      /* Keep the operator's choice across a project change when it still exists —
+         re-picking "Bug" every time you switch project is a papercut. */
+      if (wanted.indexOf(previous) !== -1) { target.value = previous; }
+    }
+
     function syncProjects() {
       const ws = document.getElementById('wsPick');
       const target = document.getElementById('projectPick');
@@ -187,6 +208,7 @@
         target.add(new Option('(project mặc định của máy)', ''));
       }
       projects.forEach(p => target.add(new Option(p, p)));
+      syncTypes();
     }
     document.getElementById('pickAll').addEventListener('change', function () {
       document.querySelectorAll('.pick').forEach(c => { c.checked = this.checked; });

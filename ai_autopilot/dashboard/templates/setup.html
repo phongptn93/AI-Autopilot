@@ -22,6 +22,13 @@
   .wz-f:last-child{border-bottom:none}
   .wz-f>label{display:block;font-size:13px;font-weight:600;margin-bottom:7px}
   .wz-f .form-help{margin-top:6px}
+  /* State chips, the same picker the Settings page uses. Colours come from the shared
+     tokens rather than a copy — see the control rule in base.html. */
+  .wz-chips{display:flex;flex-wrap:wrap;gap:6px}
+  .wz-chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;padding:5px 9px;
+    border:1px solid var(--border);border-radius:999px;background:var(--bg-input);
+    font-size:12.5px;color:var(--text)}
+  .wz-chip.on{border-color:var(--accent);color:var(--accent-hover)}
   .wz-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
            padding:13px 20px;border-top:1px solid var(--border);background:var(--bg)}
   .wz-spacer{flex:1}
@@ -245,6 +252,28 @@
         <input type="number" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}">
         {% elif f.kind == 'bool' %}
         <input type="checkbox" id="{{ f.key }}" name="{{ f.key }}" {% if current.get(f.key) %}checked{% endif %}>
+        {% elif f.kind == 'stateset' %}
+        {# Same shape the Settings page uses, and the same field names — `parse_form`
+           reads `<key>__<state>` checkboxes plus a `<key>__manual` list, so the two
+           ways into this setting cannot parse differently. The manual box is not a
+           nicety: a machine reaching this step before its PAT works, or an ADO that
+           will not answer, still has to be able to name its own states. #}
+        {% set selected = current.get(f.key) or [] %}
+        {% set candidates = (ado_states or []) + selected %}
+        {% set seen = [] %}
+        <input type="hidden" name="_all_states__{{ f.key }}" value="{{ candidates|join(',') }}">
+        {% if candidates %}
+        <div class="wz-chips">
+          {% for st in candidates %}{% if st not in seen %}{% set _ = seen.append(st) %}
+          <label class="wz-chip {{ 'on' if st in selected else '' }}">
+            <input type="checkbox" name="{{ f.key }}__{{ st }}" class="chk"
+                   {% if st in selected %}checked{% endif %}> {{ st }}
+          </label>{% endif %}{% endfor %}
+        </div>
+        {% endif %}
+        <textarea name="{{ f.key }}__manual" rows="1"
+                  placeholder="{{ 'Thêm state khác (phẩy hoặc xuống dòng)' if candidates else 'Chưa đọc được state từ ADO — gõ tên state, cách nhau bằng dấu phẩy' }}"
+                  style="margin-top:8px"></textarea>
         {% else %}
         <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}">
         {% endif %}

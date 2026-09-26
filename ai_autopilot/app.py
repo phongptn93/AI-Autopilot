@@ -17,7 +17,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from ai_autopilot import fleet, health, security
 from ai_autopilot.config import Settings, load_settings
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import create_dashboard_router
+from ai_autopilot.dashboard import create_dashboard_router, forget_scans
 from ai_autopilot.logging_config import configure_logging, get_logger
 from ai_autopilot.services import (
     AdoPollerService,
@@ -208,6 +208,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _keep_listener_alive_on_accept_error(log)
         container = Container(config)
         app.state.container = container
+        # The dashboard's scan caches are module-level (one per PROCESS, not per app).
+        # A fresh app must not inherit the previous one's view of Azure DevOps — in a
+        # real deployment that is a no-op, but it is what keeps a test client from
+        # being handed the board another test populated.
+        forget_scans()
         started: list = []  # services successfully .start()ed — torn down in reverse
         teams_digest_task = None
 

@@ -186,6 +186,10 @@ class TaskRoomService:
                 if url not in urls:
                     urls.append(url)
         views: list[PrView] = []
+        # The repo list is one request for the WHOLE page, not one per PR. It used to be
+        # fetched inside _decorate_from_ado, i.e. inside this loop: a task with five PRs
+        # asked Azure DevOps for the same repo list five times to read one dict.
+        repos = await self._repo_guids()
         for url in urls:
             parsed = parse_pr_url(url)
             if parsed is None:
@@ -195,7 +199,7 @@ class TaskRoomService:
             view.branch = next(
                 (r.branch_name for r in room.runs if r.pr_url == url and r.branch_name), ""
             )
-            await self._decorate_from_ado(view)
+            await self._decorate_from_ado(view, repos)
             if with_diff and view.branch:
                 repo_dir = str(Path(scoped.workspace_directory or "") / repo_name)
                 view.diff, view.diff_error = await _diff_for_branch(
@@ -206,13 +210,20 @@ class TaskRoomService:
             views.append(view)
         return views
 
-    async def _decorate_from_ado(self, view: PrView) -> None:
-        """Status and title come from ADO; missing them costs a label, not the diff."""
+    async def _repo_guids(self) -> dict[str, str]:
+        """``{repo name (lowercased): guid}``, or empty when ADO cannot be reached."""
         try:
-            repos = {
+            return {
                 (r.get("name") or "").lower(): str(r.get("id") or "")
                 for r in await self._c.ado.get_repositories()
             }
+        except Exception as exc:  # noqa: BLE001 — labels are not worth failing the page
+            _log.info("task room: repo list failed", error=describe_exc(exc))
+            return {}
+
+    async def _decorate_from_ado(self, view: PrView, repos: dict[str, str]) -> None:
+        """Status and title come from ADO; missing them costs a label, not the diff."""
+        try:
             repo_guid = repos.get(view.repo.lower())
             if not repo_guid:
                 return

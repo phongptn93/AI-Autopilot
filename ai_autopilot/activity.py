@@ -74,15 +74,30 @@ def append(workspace: str, item_id: int | str, line: str) -> None:
 
 
 def read(workspace: str, item_id: int | str) -> str:
-    """Return the tail of the activity log, or '' if none."""
+    """Return the tail of the activity log, or '' if none.
+
+    SEEKS to the tail rather than reading the file and throwing most of it away. The
+    old form read the whole feed into memory to keep its last few KB — on the activity
+    page, which re-polls this every three seconds, that is the entire log of a long run
+    read off disk twenty times a minute per open tab. ``last_event`` in this same module
+    already did it the right way.
+    """
     path = _path(workspace, item_id)
     if path is None:
         return ""
     try:
-        data = path.read_text(encoding="utf-8", errors="replace")
+        with path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - _MAX_BYTES))
+            data = f.read().decode("utf-8", "replace")
     except OSError:
         return ""
-    return data[-_MAX_BYTES:] if len(data) > _MAX_BYTES else data
+    # The seek almost certainly landed mid-line; drop that fragment rather than show it.
+    if size > _MAX_BYTES:
+        cut = data.find(chr(10))
+        data = data[cut + 1:] if cut != -1 else data
+    return data
 
 
 def last_event(workspace: str, item_id: int | str) -> tuple[str, float | None]:

@@ -424,3 +424,71 @@ async def test_cap_warns_only_when_it_can_have_lost_a_transition():
     batch = [_item(5, now + timedelta(minutes=20)), _item(6, now - timedelta(days=2))]
     await svc.record_once()
     assert warned == []
+
+
+# ── collect_prs: the request fan-out, not the arithmetic ─────────────────────
+
+
+class _CountingAdo:
+    """Records how many link lookups happened and how many overlapped."""
+
+    def __init__(self, repos=2, prs_per_repo=3, boom=False):
+        self._repos = [{"id": f"r{i}", "name": f"repo{i}"} for i in range(repos)]
+        self._per = prs_per_repo
+        self._boom = boom
+        self.link_calls = 0
+        self.max_in_flight = 0
+        self._in_flight = 0
+
+    async def get_repositories(self):
+        return list(self._repos)
+
+    async def get_active_pull_requests(self, repo_id):
+        if self._boom:
+            raise RuntimeError("ADO throttled")
+        return [
+            {"pullRequestId": int(repo_id[1:]) * 100 + n,
+             "sourceRefName": "refs/heads/fix/no-id-here",
+             "targetRefName": "refs/heads/main",
+             "title": f"pr {n}", "createdBy": {"displayName": "someone"},
+             "creationDate": "2026-08-17T10:00:00Z", "reviewers": []}
+            for n in range(self._per)
+        ]
+
+    async def get_pull_request_work_items(self, _repo_id, _pr_id):
+        import asyncio
+        self.link_calls += 1
+        self._in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        await asyncio.sleep(0.02)
+        self._in_flight -= 1
+        return []
+
+
+def _delivery_container(ado):
+    from ai_autopilot.config import Settings
+    return SimpleNamespace(ado=ado, config=Settings(), pr_reviewer_repo=None)
+
+
+async def test_collect_prs_overlaps_its_link_lookups():
+    """This used to walk repo-by-repo and, inside that, PR-by-PR for each work-item
+    link - a page load that grew linearly with how many pull requests the organization
+    happens to have open."""
+    from ai_autopilot.services.delivery_report import collect_prs
+
+    ado = _CountingAdo(repos=2, prs_per_repo=3)
+    out = await collect_prs(_delivery_container(ado), {})
+    assert len(out) == 6
+    assert ado.link_calls == 6          # exactly one per PR
+    assert ado.max_in_flight > 1        # ...and they overlapped
+
+
+async def test_collect_prs_raises_rather_than_returning_a_short_list():
+    """A delivery report that silently drops the repos it could not reach shows less
+    work in flight than there is, which reads as progress."""
+    import pytest
+
+    from ai_autopilot.services.delivery_report import collect_prs
+
+    with pytest.raises(RuntimeError):
+        await collect_prs(_delivery_container(_CountingAdo(boom=True)), {})

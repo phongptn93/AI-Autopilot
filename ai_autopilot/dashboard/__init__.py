@@ -583,26 +583,131 @@ def _fmt_ago(seconds: float) -> str:
     return f"{days / 30:.0f} tháng"
 
 
-# PR-outcome figures are an ADO round-trip per repo per status — cache them so Overview
-# refreshes don't hammer the API. Module-level: one cache per process.
-#
-# The TTL is minutes, not seconds, on purpose: the scan is 1 + 3N list requests plus one
-# link lookup per PR whose branch carries no work-item id, and "how many PRs have we
-# merged" is not a figure anybody reads to the second. A short TTL bought nothing and
-# cost a full re-scan every minute.
-_PR_OUTCOME_CACHE: dict = {"at": 0.0, "data": None}
-_PR_OUTCOME_TTL = 300.0
-# Single-flight: without it, N concurrent page loads on a cold cache each started their
-# own full scan — the load that made the page hang also throttled ADO into 429s, whose
-# backoff sleeps then made the next load slower still.
-_PR_OUTCOME_LOCK = asyncio.Lock()
-# Strong reference to the in-flight refresh. A bare create_task() may be garbage
-# collected mid-flight, which would silently abandon the scan.
-_PR_OUTCOME_TASK: asyncio.Task | None = None
-# How many ADO reads the scan may have in the air at once. Bounded rather than
-# unbounded: the fallback link lookups are one request per PR and can number in the
-# hundreds, which is a denial of service aimed at ourselves.
+# How many ADO reads a page-level scan may have in the air at once. Bounded rather
+# than unbounded: the PR link lookups are one request per pull request and can number
+# in the hundreds, which is a denial of service aimed at ourselves.
 _PR_SCAN_CONCURRENCY = 8
+
+
+class _ScanCache:
+    """A page's expensive scan, held so the page does not pay for it.
+
+    Three dashboard pages (Overview, Reviews, Delivery) and the Board each used to run
+    an Azure DevOps fan-out INSIDE the request handler, and each had grown its own
+    half of the same answer — one had a TTL and no single-flight, one had neither, one
+    cached its own failures as though they were data. Writing that four times is how
+    they drifted, so it is written once here.
+
+    Two ways to read it, because the pages genuinely differ:
+
+    * :meth:`background` — hand back whatever we have and refresh BEHIND the render.
+      For figures nobody reads to the second. The page never waits, not even when ADO
+      does not answer at all.
+    * :meth:`blocking` — wait for a value, but share ONE in-flight scan between every
+      concurrent caller. For a view that must be current the moment it is asked for
+      (the Board, right after somebody moved a card).
+
+    A failed scan is never published as data and never marked fresh: the next reader
+    retries instead of being served a silently short list. ``failed`` is how a page
+    tells "we could not reach ADO" apart from "we have not counted yet", which are
+    different sentences to whoever is reading the screen.
+    """
+
+    def __init__(self, name: str, ttl: float) -> None:
+        self._name = name
+        self._ttl = ttl
+        self._at = 0.0
+        self._value = None
+        # Single-flight. Without it, N concurrent loads on a cold cache each started a
+        # scan of their own — the load that made a page hang also throttled ADO into
+        # 429s, whose backoff sleeps then made the next load slower still.
+        self._lock = asyncio.Lock()
+        # Strong reference to the in-flight background refresh: a bare create_task()
+        # may be garbage collected mid-flight, silently abandoning the scan.
+        self._task: asyncio.Task | None = None
+        # A scan running right now, for coalesced(): shared, never stored.
+        self._inflight: asyncio.Task | None = None
+        self.failed = False
+
+    @property
+    def fresh(self) -> bool:
+        return self._value is not None and time.monotonic() - self._at < self._ttl
+
+    @property
+    def value(self):
+        return self._value
+
+    def invalidate(self) -> None:
+        """Drop freshness — the next read re-scans. For after a MUTATION: the Board
+        showing the card where it used to be is not a stale figure, it is a wrong one."""
+        self._at = 0.0
+
+    def reset(self) -> None:
+        """Forget everything, including the failure flag. Tests and config reloads."""
+        self._at, self._value, self.failed = 0.0, None, False
+        self._inflight = None
+
+    async def _run(self, loader) -> None:
+        async with self._lock:
+            if self.fresh:
+                return          # somebody refreshed while we waited for the lock
+            try:
+                self._value = await loader()
+                self._at = time.monotonic()
+                self.failed = False
+            except Exception as exc:  # noqa: BLE001 — a panel is not worth the page
+                self.failed = True
+                _log.warning(f"{self._name} scan failed", error=describe_exc(exc))
+
+    def _drain(self, task: asyncio.Task) -> None:
+        """Consume a background task's exception so it is logged here rather than
+        surfacing as asyncio's "Task exception was never retrieved" at GC time."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            _log.warning(f"{self._name} refresh crashed", error=describe_exc(exc))
+
+    def background(self, loader):
+        """``(value, pending)``. Never awaits the loader.
+
+        ``value`` is None only before the first scan has produced anything; ``pending``
+        says that is because one is still running rather than because it failed.
+        """
+        if not self.fresh and (self._task is None or self._task.done()):
+            self._task = asyncio.create_task(self._run(loader))
+            self._task.add_done_callback(self._drain)
+        return self._value, (self._value is None and not self.failed)
+
+    async def blocking(self, loader):
+        """Wait for a value, sharing one scan across concurrent callers."""
+        if not self.fresh:
+            await self._run(loader)
+        return self._value
+
+    async def coalesced(self, loader):
+        """Join a scan already in flight rather than starting a second one.
+
+        Deliberately NOT caching. The Board is the page people watch to see the agent
+        move work, and the agent moves it in ADO directly — not only through this
+        dashboard's own buttons. A TTL there would hold the board behind the autopilot's
+        own hand-offs, which is a board showing a move that already happened. So the
+        only thing shared here is a scan that is still running: concurrent tabs and
+        users collapse onto one request, and nobody is shown anything older than the
+        scan that was in flight when they asked.
+        """
+        task = self._inflight
+        if task is None or task.done():
+            task = self._inflight = asyncio.ensure_future(loader())
+            task.add_done_callback(self._settle_inflight)
+        # Shielded: a reader who disconnects must not cancel the scan the others joined.
+        return await asyncio.shield(task)
+
+    def _settle_inflight(self, task: asyncio.Task) -> None:
+        if self._inflight is task:
+            self._inflight = None
+        if not task.cancelled() and task.exception() is not None:
+            pass    # every awaiter receives it; retrieving here only silences the GC
 
 # The Reviews board scans every repo × active PR × reviewers on each load — cache the
 # assembled view briefly so refreshes don't hammer ADO (the tracker updates state on its
@@ -637,8 +742,36 @@ def work_item_link_base(cfg) -> str:
     return f"{org}/_workitems/edit"
 
 
-_REVIEWS_CACHE: dict = {"at": 0.0, "data": None}
-_REVIEWS_TTL = 30.0
+# The Reviews board is a scan of every repo × active PR × its reviewers. Held so a
+# filter change — which is a question about data we already have — does not re-ask ADO.
+_REVIEWS = _ScanCache("reviews", ttl=60.0)
+
+# The board's work-item list: one WIQL plus a batched detail fetch, re-run by the page's
+# own 15-second auto-refresh. Every open tab paid for its own, so N tabs on one board
+# meant N identical scans; they are collapsed into one.
+#
+# ttl=0 is the point, not an oversight. A first attempt cached this for 12 seconds and a
+# test caught what that costs: the board changes because the AUTOPILOT moves items in
+# ADO, not only when somebody presses a button here, so a TTL holds the board behind the
+# agent's own hand-offs. Only a scan that is still running is shared — see
+# _ScanCache.coalesced.
+_BOARD_ITEMS = _ScanCache("board items", ttl=0.0)
+
+def forget_scans() -> None:
+    """Drop every cached scan.
+
+    Called when the process's view of Azure DevOps changes underneath us — a config
+    reload that repoints the organization, or that changes which projects are polled.
+    Holding a board of the PREVIOUS project's items for the rest of the TTL is not a
+    stale figure, it is somebody else's board.
+
+    Also called at app startup, which is what keeps these process-wide caches from
+    leaking between apps in one process (every test client builds its own app).
+    """
+    # Looked up at CALL time, not bound at import: _PR_OUTCOMES is declared further
+    # down this module, next to the scan it caches.
+    for cache in (_PR_OUTCOMES, _REVIEWS, _BOARD_ITEMS):
+        cache.reset()
 
 # The three shapes we mint: a work-item id, ``pr-<id>``, and ``loop-<slug>`` for a
 # scheduled agent (see ``activity.loop_key``). The slug charset is deliberately narrow —
@@ -658,6 +791,34 @@ def _feed_key(raw: str) -> str:
     return raw if _FEED_KEY_RE.match(raw) else ""
 
 
+# "How many PRs have we merged" is not a figure anybody reads to the second, and the
+# scan behind it is 1 + 3N list requests plus a link lookup per PR whose branch carries
+# no work-item id. Minutes, not seconds: a 60s TTL bought nothing and paid for a full
+# re-scan every minute.
+_PR_OUTCOMES = _ScanCache("pr outcomes", ttl=300.0)
+
+
+async def _gather_scan(coros) -> list:
+    """Run scan reads concurrently under one semaphore, results in call order.
+
+    Raises the FIRST failure rather than returning a short list — a page that quietly
+    drops the repos it could not reach reports less work in flight than there is, which
+    reads as progress. Every coroutine is still awaited before we raise, so none is left
+    to surface later as an unretrieved exception.
+    """
+    gate = asyncio.Semaphore(_PR_SCAN_CONCURRENCY)
+
+    async def guarded(coro):
+        async with gate:
+            return await coro
+
+    out = await asyncio.gather(*(guarded(c) for c in coros), return_exceptions=True)
+    for item in out:
+        if isinstance(item, BaseException):
+            raise item
+    return list(out)
+
+
 def _pr_outcomes_pending() -> dict:
     """Placeholder served while the very first scan is still running.
 
@@ -670,6 +831,11 @@ def _pr_outcomes_pending() -> dict:
             "pending": True, "merge_rate": None}
 
 
+def _pr_outcomes_failed() -> dict:
+    return {"merged": 0, "active": 0, "abandoned": 0, "ok": False,
+            "pending": False, "merge_rate": None}
+
+
 async def _scan_pr_outcomes(c: Container) -> dict:
     """The actual ADO scan behind :func:`_pr_outcomes`. Never called on the request path.
 
@@ -679,96 +845,54 @@ async def _scan_pr_outcomes(c: Container) -> dict:
     name carries no work-item id — which on a real org is most of them, because humans
     do not name branches ``<prefix>/<id>-<slug>``. At ~200 ms a round trip that is a
     minute of dead time, which is exactly what made /dashboard/ look hung.
+
+    Raises on failure rather than returning zeros: the cache must not publish a short
+    count as though it were an answer.
     """
     counts: dict = {"merged": 0, "active": 0, "abandoned": 0, "ok": True, "pending": False}
-    gate = asyncio.Semaphore(_PR_SCAN_CONCURRENCY)
-
-    async def guarded(coro_factory):
-        async with gate:
-            return await coro_factory()
-
-    try:
-        ours = await c.execution_repo.work_item_ids()
-        repo_ids = [r["id"] for r in await c.ado.get_repositories() if r.get("id")]
-        jobs = [
-            (key, rid, fetch)
-            for rid in repo_ids
-            for key, fetch in (
-                ("merged", c.ado.get_completed_pull_requests),
-                ("active", c.ado.get_active_pull_requests),
-                ("abandoned", c.ado.get_abandoned_pull_requests),
-            )
-        ]
-        lists = await asyncio.gather(
-            *(guarded(lambda f=fetch, r=rid: f(r)) for _, rid, fetch in jobs),
-            return_exceptions=True,
+    ours = await c.execution_repo.work_item_ids()
+    repo_ids = [r["id"] for r in await c.ado.get_repositories() if r.get("id")]
+    jobs = [
+        (key, rid, fetch)
+        for rid in repo_ids
+        for key, fetch in (
+            ("merged", c.ado.get_completed_pull_requests),
+            ("active", c.ado.get_active_pull_requests),
+            ("abandoned", c.ado.get_abandoned_pull_requests),
         )
+    ]
+    lists = await _gather_scan(fetch(rid) for _, rid, fetch in jobs)
 
-        # Pass 1 — everything the branch name already answers, for free. Branch name
-        # FIRST here, unlike everywhere else: every PR the autopilot opened is named
-        # `<prefix>/<id>-<slug>`, so link-first would add a request per PR to compute a
-        # percentage. The fallback below still closes the gap it is here for.
-        unresolved: list[tuple[str, str, int]] = []   # (key, repo_id, pr_id)
-        for (key, rid, _), prs in zip(jobs, lists, strict=True):
-            if isinstance(prs, BaseException):
-                raise prs
-            for pr in prs:
-                wid = parse_work_item_id(pr.get("sourceRefName", ""))
-                if wid is None:
-                    unresolved.append((key, rid, pr.get("pullRequestId") or 0))
-                elif wid in ours:
-                    counts[key] += 1
+    # Pass 1 — everything the branch name already answers, for free. Branch name FIRST
+    # here, unlike everywhere else: every PR the autopilot opened is named
+    # `<prefix>/<id>-<slug>`, so link-first would add a request per PR to compute a
+    # percentage. The fallback below still closes the gap it is here for.
+    unresolved: list[tuple[str, str, int]] = []   # (key, repo_id, pr_id)
+    for (key, rid, _), prs in zip(jobs, lists, strict=True):
+        for pr in prs:
+            wid = parse_work_item_id(pr.get("sourceRefName", ""))
+            if wid is None:
+                unresolved.append((key, rid, pr.get("pullRequestId") or 0))
+            elif wid in ours:
+                counts[key] += 1
 
-        # Pass 2 — ask ADO for the link only for the PRs the name could not answer, and
-        # ask for all of them at once. Memoised client-side (see
-        # AdoClient.get_pull_request_work_items), so a warm process mostly skips this.
-        if unresolved:
-            linked = await asyncio.gather(
-                *(guarded(lambda r=rid, i=pid: c.ado.get_pull_request_work_items(r, i))
-                  for _, rid, pid in unresolved),
-                return_exceptions=True,
-            )
-            for (key, _, _), ids in zip(unresolved, linked, strict=True):
-                if isinstance(ids, BaseException):
-                    raise ids
-                if ids and ids[0] in ours:
-                    counts[key] += 1
-    except Exception as exc:  # noqa: BLE001 — metrics must never break the page
-        _log.warning("pr outcome scan failed", error=describe_exc(exc))
-        counts["ok"] = False
+    # Pass 2 — ask ADO for the link only for the PRs the name could not answer, and ask
+    # for all of them at once. Memoised client-side (see
+    # AdoClient.get_pull_request_work_items), so a warm process mostly skips this.
+    if unresolved:
+        linked = await _gather_scan(
+            c.ado.get_pull_request_work_items(rid, pid) for _, rid, pid in unresolved
+        )
+        for (key, _, _), ids in zip(unresolved, linked, strict=True):
+            if ids and ids[0] in ours:
+                counts[key] += 1
+
     decided = counts["merged"] + counts["abandoned"]
     counts["merge_rate"] = round(100 * counts["merged"] / decided) if decided else None
     return counts
 
 
-def _log_refresh_failure(task: asyncio.Task) -> None:
-    """Drain a background refresh's exception so it is logged, not GC-reported."""
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        _log.warning("pr outcome refresh crashed", error=describe_exc(exc))
-
-
-async def _refresh_pr_outcomes(c: Container) -> None:
-    """Run one scan and publish it, under the single-flight lock."""
-    async with _PR_OUTCOME_LOCK:
-        # Somebody else may have refreshed while we waited for the lock.
-        if (_PR_OUTCOME_CACHE["data"] is not None
-                and time.monotonic() - _PR_OUTCOME_CACHE["at"] < _PR_OUTCOME_TTL):
-            return
-        counts = await _scan_pr_outcomes(c)
-        # A failed scan never becomes a FRESH answer: the next load must retry rather
-        # than serve zeros for a full TTL.
-        if counts["ok"]:
-            _PR_OUTCOME_CACHE.update(at=time.monotonic(), data=counts)
-        elif _PR_OUTCOME_CACHE["data"] is None:
-            # Nothing good to fall back on — publish the failure (leaving ``at`` at 0 so
-            # it counts as stale) rather than leaving the page on "pending" forever.
-            _PR_OUTCOME_CACHE["data"] = counts
-
-
-async def _pr_outcomes(c: Container) -> dict:
+def _pr_outcomes(c: Container) -> dict:
     """Merged / active / abandoned counts of the autopilot's OWN PRs, across every repo —
     the denominator for "is this actually shipping work, and at what cost".
 
@@ -785,23 +909,12 @@ async def _pr_outcomes(c: Container) -> dict:
     **This never blocks the page.** A stale figure is refreshed in the BACKGROUND and the
     caller is handed what we already have, because the alternative — waiting out a scan
     of every PR in the organization before a single byte of HTML is written — is what
-    made the Overview appear to hang. Five stat cards are not worth a minute of a blank
-    browser tab.
-
-    ``ok`` is False when the scan itself failed; ``pending`` is True on a cold cache,
-    where we have no answer YET but nothing has gone wrong.
+    made the Overview appear to hang. Five stat cards are not worth a page load.
     """
-    global _PR_OUTCOME_TASK
-    cached = _PR_OUTCOME_CACHE["data"]
-    fresh = (cached is not None
-             and time.monotonic() - _PR_OUTCOME_CACHE["at"] < _PR_OUTCOME_TTL)
-    if not fresh and (_PR_OUTCOME_TASK is None or _PR_OUTCOME_TASK.done()):
-        _PR_OUTCOME_TASK = asyncio.create_task(_refresh_pr_outcomes(c))
-        # Nobody awaits this task, so an escaping exception would surface as asyncio's
-        # "Task exception was never retrieved" at GC time — a stack trace with no
-        # request attached to it. Consume it here instead.
-        _PR_OUTCOME_TASK.add_done_callback(_log_refresh_failure)
-    return cached if cached is not None else _pr_outcomes_pending()
+    value, pending = _PR_OUTCOMES.background(lambda: _scan_pr_outcomes(c))
+    if value is not None:
+        return value
+    return _pr_outcomes_pending() if pending else _pr_outcomes_failed()
 
 
 # How long a run may go without producing an event before the page calls it out. The
@@ -1010,7 +1123,7 @@ def create_dashboard_router() -> APIRouter:
         efficiency = await c.execution_repo.get_efficiency(
             trigger_tag=tag_filter, projects=in_scope
         )
-        prs = await _pr_outcomes(c)
+        prs = _pr_outcomes(c)   # cached; refreshes behind the page, never blocks it
         tokens_per_merged = (
             efficiency.total_tokens // prs["merged"] if prs["merged"] else None
         )
@@ -1065,7 +1178,8 @@ def create_dashboard_router() -> APIRouter:
         c: Container = request.app.state.container
         qp = request.query_params
         try:
-            items = await c.ado.get_all_tagged_work_items()
+            # Concurrent tabs and users join one scan instead of each starting their own.
+            items = await _BOARD_ITEMS.coalesced(c.ado.get_all_tagged_work_items) or []
             error = None
         except Exception as exc:  # noqa: BLE001
             items, error = [], str(exc)
@@ -1899,107 +2013,125 @@ def create_dashboard_router() -> APIRouter:
             "file_partial" if failed else "file_created",
         )
 
-    @router.get("/reviews", response_class=HTMLResponse)
-    async def reviews(request: Request):
-        """PR reviewer tracking: every active PR with its reviewers, votes, and
-        reminder status — live ADO data joined with the tracker's memory."""
+    async def _scan_reviews(c: Container) -> list[dict]:
+        """Every active PR in scope with its reviewers and votes — ADO joined with the
+        tracker's memory. Raises on an ADO failure; see :class:`_ScanCache`.
+
+        This used to run INSIDE the request handler, nose-to-tail: the repo list, then
+        each repo's active PRs, then one MORE request per PR for its work-item link.
+        And whatever it had managed to collect when a request failed was then published
+        as though the scan had succeeded — so a throttled ADO showed a reviewer a SHORT
+        list of PRs, silently, for the whole TTL. A list that is quietly missing the PR
+        waiting on you is worse than a page that admits it could not load.
+        """
         from ai_autopilot.services.reviewer_tracker import VOTE_LABELS
 
-        c: Container = request.app.state.container
         cfg = c.config
-        now = time.monotonic()
-        cached = (
-            _REVIEWS_CACHE["data"]
-            if _REVIEWS_CACHE["data"] is not None and now - _REVIEWS_CACHE["at"] < _REVIEWS_TTL
-            else None
-        )
-        if cached is not None:
-            # The cache holds the SCAN (every active PR), not the rendered page: the
-            # filters are a question about that data, and re-scanning ADO to answer a
-            # dropdown change would make the page unusable.
-            return _render_reviews(request, cached, cfg)
         org = cfg.ado_organization.rstrip("/")
         project = quote(cfg.code_project or cfg.ado_project, safe="")
         tracked: dict = {}
         try:
             for snap in await c.pr_reviewer_repo.all_reviewers():
                 tracked[(snap.pr_id, snap.reviewer_id)] = snap
-        except Exception as exc:  # noqa: BLE001 — page must render without the DB
+        except Exception as exc:  # noqa: BLE001 — the DB half may fail on its own
             _log.warning("reviewer state load failed", error=describe_exc(exc))
-        prs: list[dict] = []
-        try:
-            for repo in await c.ado.get_repositories():
-                rid = repo.get("id")
-                if not rid:
-                    continue
-                rname = repo.get("name") or ""
-                for pr in await c.ado.get_active_pull_requests(rid):
-                    target = (pr.get("targetRefName") or "").removeprefix("refs/heads/")
-                    if not cfg.target_in_scope(pr.get("targetRefName", "")):
-                        continue
-                    pr_id = pr.get("pullRequestId")
-                    # ADO's link first, the branch name second — the order the state
-                    # sync and the PR babysitter use. Showing only what the branch name
-                    # spelled left the work-item column blank on every PR named without
-                    # an id, and wrong on any branch whose name merely opens with a
-                    # number. The client memoises the lookup, so a page refresh inside
-                    # the TTL costs nothing.
-                    _links = await c.ado.get_pull_request_work_items(rid, pr_id or 0)
-                    _linked = _links[0] if _links else None
-                    reviewers = []
-                    bot_reviewed = False
-                    for r in pr.get("reviewers") or []:
-                        if not r.get("id") or r.get("isContainer"):
-                            continue
-                        snap = tracked.get((pr_id, str(r["id"])))
-                        vote = int(r.get("vote") or 0)
-                        is_bot = bool(snap.is_bot) if snap else False
-                        if is_bot and snap and snap.reviewed_commit:
-                            bot_reviewed = True
-                        reviewers.append({
-                            "name": r.get("displayName") or r.get("uniqueName") or "?",
-                            "vote": vote,
-                            "vote_label": VOTE_LABELS.get(vote, str(vote)),
-                            "is_bot": is_bot,
-                            "required": bool(r.get("isRequired")),
-                            "added_at": snap.added_at if snap else None,
-                            "reminded": bool(snap.reminded_at) if snap else False,
-                        })
-                    approved = sum(1 for r in reviewers if r["vote"] >= 5)
-                    blocked = sum(1 for r in reviewers if r["vote"] < 0)
-                    pending = sum(1 for r in reviewers if r["vote"] == 0)
-                    # mergeStatus: 3 = succeeded; 2 = conflicts; else queued/unknown.
-                    ms = pr.get("mergeStatus")
-                    conflicts = ms == "conflicts" or ms == 2
-                    prs.append({
-                        "id": pr_id,
-                        "title": pr.get("title") or "",
-                        "repo": rname,
-                        "target": target,
-                        "source": (pr.get("sourceRefName") or "").removeprefix("refs/heads/"),
-                        "author": (pr.get("createdBy") or {}).get("displayName") or "",
-                        "is_draft": bool(pr.get("isDraft")),
-                        "created": pr.get("creationDate") or "",
-                        "age": _pr_age(pr.get("creationDate")),
-                        "conflicts": conflicts,
-                        "work_item": _linked or parse_work_item_id(
-                            pr.get("sourceRefName", "")),
-                        "url": f"{org}/{project}/_git/{quote(rname, safe='')}"
-                               f"/pullrequest/{pr_id}",
-                        "reviewers": reviewers,
-                        "approved": approved,
-                        "pending": pending,
-                        "blocked": blocked,
-                        "bot_reviewed": bot_reviewed,
-                        "status": _pr_status(pr, approved, blocked, pending, conflicts),
-                    })
-        except Exception as exc:  # noqa: BLE001
-            _log.warning("reviews page PR scan failed", error=describe_exc(exc))
-        _REVIEWS_CACHE.update(at=now, data=prs)
-        return _render_reviews(request, prs, cfg)
 
-    def _render_reviews(request: Request, prs: list[dict], cfg) -> HTMLResponse:
-        """Filter the scanned PRs for this request, then group and summarise them."""
+        repos = [(r.get("id"), r.get("name") or "")
+                 for r in await c.ado.get_repositories() if r.get("id")]
+        per_repo = await _gather_scan(c.ado.get_active_pull_requests(rid) for rid, _ in repos)
+
+        # Flatten first, THEN ask for every work-item link at once. One request per PR
+        # is unavoidable (ADO has no bulk endpoint for it) but paying for them one after
+        # another is not.
+        flat: list[tuple[str, str, dict]] = [
+            (rid, rname, pr)
+            for (rid, rname), prs in zip(repos, per_repo, strict=True)
+            for pr in prs
+            if cfg.target_in_scope(pr.get("targetRefName", ""))
+        ]
+        links = await _gather_scan(
+            c.ado.get_pull_request_work_items(rid, pr.get("pullRequestId") or 0)
+            for rid, _, pr in flat
+        )
+
+        out: list[dict] = []
+        for (_rid, rname, pr), linked_ids in zip(flat, links, strict=True):
+            pr_id = pr.get("pullRequestId")
+            # ADO's link first, the branch name second — the order the state sync and
+            # the PR babysitter use. Showing only what the branch name spelled left the
+            # work-item column blank on every PR named without an id, and wrong on any
+            # branch whose name merely opens with a number.
+            _linked = linked_ids[0] if linked_ids else None
+            reviewers = []
+            bot_reviewed = False
+            for r in pr.get("reviewers") or []:
+                if not r.get("id") or r.get("isContainer"):
+                    continue
+                snap = tracked.get((pr_id, str(r["id"])))
+                vote = int(r.get("vote") or 0)
+                is_bot = bool(snap.is_bot) if snap else False
+                if is_bot and snap and snap.reviewed_commit:
+                    bot_reviewed = True
+                reviewers.append({
+                    "name": r.get("displayName") or r.get("uniqueName") or "?",
+                    "vote": vote,
+                    "vote_label": VOTE_LABELS.get(vote, str(vote)),
+                    "is_bot": is_bot,
+                    "required": bool(r.get("isRequired")),
+                    "added_at": snap.added_at if snap else None,
+                    "reminded": bool(snap.reminded_at) if snap else False,
+                })
+            approved = sum(1 for r in reviewers if r["vote"] >= 5)
+            blocked = sum(1 for r in reviewers if r["vote"] < 0)
+            pending = sum(1 for r in reviewers if r["vote"] == 0)
+            # mergeStatus: 3 = succeeded; 2 = conflicts; else queued/unknown.
+            ms = pr.get("mergeStatus")
+            conflicts = ms == "conflicts" or ms == 2
+            out.append({
+                "id": pr_id,
+                "title": pr.get("title") or "",
+                "repo": rname,
+                "target": (pr.get("targetRefName") or "").removeprefix("refs/heads/"),
+                "source": (pr.get("sourceRefName") or "").removeprefix("refs/heads/"),
+                "author": (pr.get("createdBy") or {}).get("displayName") or "",
+                "is_draft": bool(pr.get("isDraft")),
+                "created": pr.get("creationDate") or "",
+                "age": _pr_age(pr.get("creationDate")),
+                "conflicts": conflicts,
+                "work_item": _linked or parse_work_item_id(pr.get("sourceRefName", "")),
+                "url": f"{org}/{project}/_git/{quote(rname, safe='')}/pullrequest/{pr_id}",
+                "reviewers": reviewers,
+                "approved": approved,
+                "pending": pending,
+                "blocked": blocked,
+                "bot_reviewed": bot_reviewed,
+                "status": _pr_status(pr, approved, blocked, pending, conflicts),
+            })
+        return out
+
+    @router.get("/reviews", response_class=HTMLResponse)
+    async def reviews(request: Request):
+        """PR reviewer tracking: every active PR with its reviewers, votes, and
+        reminder status — live ADO data joined with the tracker's memory.
+
+        The scan is cached and refreshed BEHIND the page, like the Overview's figures:
+        the filters are a question about data we already hold, and re-asking ADO to
+        answer a dropdown change made the page unusable.
+        """
+        c: Container = request.app.state.container
+        prs, pending = _REVIEWS.background(lambda: _scan_reviews(c))
+        return _render_reviews(request, prs or [], c.config,
+                               pending=pending, failed=_REVIEWS.failed and prs is None)
+
+    def _render_reviews(request: Request, prs: list[dict], cfg, *,
+                        pending: bool = False, failed: bool = False) -> HTMLResponse:
+        """Filter the scanned PRs for this request, then group and summarise them.
+
+        ``pending`` / ``failed`` travel to the template because an EMPTY board has three
+        different meanings — nothing is awaiting review, we have not scanned yet, or ADO
+        would not answer — and rendering all three as "0 PRs" told a reviewer their queue
+        was clear when it was not.
+        """
         qp = request.query_params
         me = cfg.effective_command_users
         shown = _filter_reviews(prs, qp, me)
@@ -2029,6 +2161,7 @@ def create_dashboard_router() -> APIRouter:
             _ctx(
                 request, "reviews", grouped=grouped, summary=summary,
                 scanned=len(prs), facets=facets, mine_count=mine_n,
+                scan_pending=pending, scan_failed=failed,
                 me=", ".join(me),
                 f={
                     "q": (qp.get("q") or "").strip(),
@@ -3060,6 +3193,7 @@ def create_dashboard_router() -> APIRouter:
         # A workspace may have just switched tracker, or had its Jira details filled in.
         c.build_providers()
         c.ado.refresh()   # the polled project set just changed
+        forget_scans()   # cached scans describe the OLD config
         _log.info(
             "workspaces updated via dashboard",
             names=[v.label for v in views], projects=c.config.effective_ado_projects,
@@ -3760,6 +3894,7 @@ def create_dashboard_router() -> APIRouter:
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
         c.ado.refresh()  # re-read org URL if it changed
+        forget_scans()   # cached scans describe the OLD config
         _log.info("settings updated via dashboard", keys=sorted(updates.keys()))
         await c.audit_repo.record(
             actor="dashboard", source="dashboard", action="config.updated",
@@ -4214,6 +4349,7 @@ def create_dashboard_router() -> APIRouter:
             settings_form.apply_to_config(cfg, updates)
             with contextlib.suppress(Exception):
                 c.ado.refresh()
+                forget_scans()   # cached scans describe the OLD config
             await c.audit_repo.record(
                 actor="dashboard", source="dashboard", action="setup.step_saved",
                 target=step_id, detail=", ".join(sorted(updates))[:300],
@@ -4329,6 +4465,7 @@ def create_dashboard_router() -> APIRouter:
         settings_form.apply_to_config(c.config, plan)
         with contextlib.suppress(Exception):
             c.ado.refresh()
+            forget_scans()   # cached scans describe the OLD config
         _log.warning("settings reset via dashboard", count=len(plan),
                      section=section or "(all)")
         await c.audit_repo.record(
@@ -4405,6 +4542,7 @@ def create_dashboard_router() -> APIRouter:
         c: Container = request.app.state.container
         changed = settings_form.reload_from_file(c.config)
         c.ado.refresh()  # re-read org URL if it changed
+        forget_scans()   # cached scans describe the OLD config
         _log.info("config reloaded from file via dashboard", changed=changed)
         return _flash("/dashboard/settings", "reloaded")
 
@@ -4496,6 +4634,7 @@ def create_dashboard_router() -> APIRouter:
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
         c.ado.refresh()
+        forget_scans()   # cached scans describe the OLD config
         _log.warning("FULL config restored via dashboard", keys=sorted(updates.keys()))
         await c.audit_repo.record(
             actor="dashboard", source="dashboard", action="config.imported_full",
@@ -4522,6 +4661,7 @@ def create_dashboard_router() -> APIRouter:
         settings_form.save_to_yaml(config_file_path(), updates)
         settings_form.apply_to_config(c.config, updates)
         c.ado.refresh()
+        forget_scans()   # cached scans describe the OLD config
         _log.info("config imported via dashboard", keys=sorted(updates.keys()))
         return _flash("/dashboard/settings", "imported")
 

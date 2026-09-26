@@ -271,3 +271,74 @@ def test_latest_pr_records_keeps_the_newest_run_that_opened_one():
     assert picked[7].pr_url == "https://example.invalid/pr/2"
     # An item that never opened a PR simply is not in the index.
     assert latest_pr_records([no_pr]) == {}
+
+
+# ── The board's ADO scan is shared while it runs, and never held after ───────
+
+
+async def test_concurrent_board_loads_share_one_scan():
+    """Every open tab used to pay for its own WIQL + batched detail fetch, so N tabs
+    on one board meant N identical scans a poll."""
+    import asyncio
+
+    from ai_autopilot import dashboard
+
+    cache = dashboard._ScanCache("test board", ttl=0.0)
+    calls = 0
+
+    async def loader():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return [_item(1, ["autopilot"])]
+
+    results = await asyncio.gather(*(cache.coalesced(loader) for _ in range(8)))
+    assert calls == 1                                   # eight tabs, one scan
+    assert all(r[0].id == 1 for r in results)
+
+
+async def test_the_board_is_never_served_from_a_previous_scan():
+    """The board changes because the AUTOPILOT moves items in ADO, not only when
+    somebody presses a button on this dashboard. A first attempt cached this list for
+    12 seconds, which held the board behind the agent's own hand-offs — a board showing
+    a move that already happened. Only an IN-FLIGHT scan may be shared."""
+    from ai_autopilot import dashboard
+
+    cache = dashboard._ScanCache("test board", ttl=0.0)
+    calls = 0
+
+    async def loader():
+        nonlocal calls
+        calls += 1
+        return [_item(calls, ["autopilot"])]
+
+    first = await cache.coalesced(loader)
+    second = await cache.coalesced(loader)
+    assert calls == 2                                   # re-scanned, not replayed
+    assert first[0].id == 1 and second[0].id == 2
+
+
+async def test_a_disconnecting_reader_does_not_cancel_the_shared_scan():
+    """One browser closing its tab must not take the scan away from everyone who
+    joined it."""
+    import asyncio
+    import contextlib
+
+    from ai_autopilot import dashboard
+
+    cache = dashboard._ScanCache("test board", ttl=0.0)
+    started = asyncio.Event()
+
+    async def loader():
+        started.set()
+        await asyncio.sleep(0.1)
+        return ["done"]
+
+    leaver = asyncio.create_task(cache.coalesced(loader))
+    await started.wait()
+    joiner = asyncio.create_task(cache.coalesced(loader))
+    await asyncio.sleep(0)                  # let the joiner attach
+    leaver.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await leaver
+    assert await joiner == ["done"]

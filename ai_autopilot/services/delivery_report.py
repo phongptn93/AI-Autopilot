@@ -12,6 +12,7 @@ arrives. Failures are logged, never raised.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
@@ -41,6 +42,30 @@ def _as_utc(value: datetime | None) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
+# How many ADO reads this report may have in flight at once.
+_SCAN_CONCURRENCY = 8
+
+
+async def _gather_bounded(coros) -> list:
+    """Run reads concurrently under one semaphore, results in call order.
+
+    Raises the first failure rather than returning a short list — a delivery report that
+    silently drops the repos it could not reach shows less work in flight than there is,
+    which reads as progress.
+    """
+    gate = asyncio.Semaphore(_SCAN_CONCURRENCY)
+
+    async def guarded(coro):
+        async with gate:
+            return await coro
+
+    out = await asyncio.gather(*(guarded(c) for c in coros), return_exceptions=True)
+    for item in out:
+        if isinstance(item, BaseException):
+            raise item
+    return list(out)
+
+
 async def collect_prs(container, project_of: dict[int, str]) -> list[delivery.PrView]:
     """Every active PR in scope, reduced to what the report needs.
 
@@ -66,49 +91,65 @@ async def collect_prs(container, project_of: dict[int, str]) -> list[delivery.Pr
             _log.warning("delivery: reviewer state load failed", error=describe_exc(exc))
 
     org = (config.ado_organization or "").rstrip("/")
+    repos = [(r.get("id"), r.get("name") or "")
+             for r in await container.ado.get_repositories() if r.get("id")]
+    # Concurrently, under a bound. This used to walk repo-by-repo and then, inside that,
+    # PR-by-PR for each work-item link — a page load that grew linearly with how many
+    # pull requests the organization happens to have open.
+    per_repo = await _gather_bounded(
+        container.ado.get_active_pull_requests(rid) for rid, _ in repos
+    )
+    # Carry the repo GUID through, not just its name: the link lookup is addressed by
+    # id, and two projects in one organization may hold repos with the same name.
+    flat = [
+        (rid, rname, pr)
+        for (rid, rname), prs in zip(repos, per_repo, strict=True)
+        for pr in prs
+        if not pr.get("isDraft") and config.target_in_scope(pr.get("targetRefName", ""))
+    ]
+    # Flatten first, THEN ask for every link at once: one request per PR is unavoidable
+    # (ADO has no bulk endpoint for it), paying for them one after another is not.
+    links = await _gather_bounded(
+        container.ado.get_pull_request_work_items(rid, pr.get("pullRequestId") or 0)
+        for rid, _, pr in flat
+    )
+
     out: list[delivery.PrView] = []
-    for repo in await container.ado.get_repositories():
-        repo_id, repo_name = repo.get("id"), repo.get("name") or ""
-        if not repo_id:
-            continue
-        for pr in await container.ado.get_active_pull_requests(repo_id):
-            if pr.get("isDraft") or not config.target_in_scope(pr.get("targetRefName", "")):
-                continue
-            pr_id = pr.get("pullRequestId") or 0
-            reviewers = [
-                r for r in (pr.get("reviewers") or [])
-                if r.get("id") and not r.get("isContainer")
-            ]
-            votes = [(r, int(r.get("vote") or 0)) for r in reviewers]
-            # ADO's link first, the branch name second — the same order the state sync
-            # and the PR babysitter use. Reading only the name dropped every PR whose
-            # branch carries no id, so a report meant to show what is in flight quietly
-            # under-counted exactly the PRs nobody had named conventionally.
-            linked = await container.ado.get_pull_request_work_items(repo_id, pr_id)
-            wid = (linked[0] if linked else parse_work_item_id(
-                pr.get("sourceRefName", ""))) or 0
-            item_project = project_of.get(wid, "")
-            code_project = config.code_project_for(item_project)
-            out.append(delivery.PrView(
-                id=pr_id,
-                repo=repo_name,
-                title=pr.get("title") or "",
-                author=(pr.get("createdBy") or {}).get("displayName") or "",
-                url=(
-                    f"{org}/{quote(code_project)}/_git/{quote(repo_name)}/pullrequest/{pr_id}"
-                ) if org and code_project else "",
-                work_item_id=wid,
-                project=item_project,
-                created_at=_parse_iso(pr.get("creationDate")),
-                approved_at=approved_at.get(pr_id),
-                approved=sum(1 for _, v in votes if v >= 5),
-                blocked=sum(1 for _, v in votes if v < 0),
-                pending=sum(1 for _, v in votes if v == 0),
-                pending_reviewers=tuple(
-                    (r.get("displayName") or "").strip()
-                    for r, v in votes if v == 0 and r.get("displayName")
-                ),
-            ))
+    for (_, repo_name, pr), linked in zip(flat, links, strict=True):
+        pr_id = pr.get("pullRequestId") or 0
+        reviewers = [
+            r for r in (pr.get("reviewers") or [])
+            if r.get("id") and not r.get("isContainer")
+        ]
+        votes = [(r, int(r.get("vote") or 0)) for r in reviewers]
+        # ADO's link first, the branch name second — the same order the state sync
+        # and the PR babysitter use. Reading only the name dropped every PR whose
+        # branch carries no id, so a report meant to show what is in flight quietly
+        # under-counted exactly the PRs nobody had named conventionally.
+        wid = (linked[0] if linked else parse_work_item_id(
+            pr.get("sourceRefName", ""))) or 0
+        item_project = project_of.get(wid, "")
+        code_project = config.code_project_for(item_project)
+        out.append(delivery.PrView(
+            id=pr_id,
+            repo=repo_name,
+            title=pr.get("title") or "",
+            author=(pr.get("createdBy") or {}).get("displayName") or "",
+            url=(
+                f"{org}/{quote(code_project)}/_git/{quote(repo_name)}/pullrequest/{pr_id}"
+            ) if org and code_project else "",
+            work_item_id=wid,
+            project=item_project,
+            created_at=_parse_iso(pr.get("creationDate")),
+            approved_at=approved_at.get(pr_id),
+            approved=sum(1 for _, v in votes if v >= 5),
+            blocked=sum(1 for _, v in votes if v < 0),
+            pending=sum(1 for _, v in votes if v == 0),
+            pending_reviewers=tuple(
+                (r.get("displayName") or "").strip()
+                for r, v in votes if v == 0 and r.get("displayName")
+            ),
+        ))
     return out
 
 

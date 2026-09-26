@@ -92,3 +92,66 @@ def test_route_database(router):
     item = router.classify(_item(title="[DB] migration"))
     item.id = 77
     assert router.route(item) == "/sql-migration 77"
+
+
+# ── Task room: the PR decoration fan-out ─────────────────────────────────────
+
+
+class _RepoCountingAdo:
+    """Counts how often the repo list is asked for."""
+
+    def __init__(self):
+        self.repo_calls = 0
+
+    async def get_repositories(self):
+        self.repo_calls += 1
+        return [{"id": "guid-1", "name": "repo1"}]
+
+    async def get_pull_request(self, _repo_id, pr_id, project=""):
+        return {"status": "active", "title": f"PR {pr_id}",
+                "sourceRefName": "refs/heads/feature/1-a"}
+
+
+async def test_task_room_asks_for_the_repo_list_once_not_once_per_pr():
+    """`_decorate_from_ado` fetched the repo list itself, i.e. INSIDE the per-PR loop:
+    a task with several PRs asked Azure DevOps for the same list once per PR, only to
+    read one entry out of a dict."""
+    from types import SimpleNamespace
+
+    from ai_autopilot.config import Settings
+    from ai_autopilot.services.task_room import PrView, TaskRoom, TaskRoomService
+
+    ado = _RepoCountingAdo()
+    c = SimpleNamespace(ado=ado, config=Settings())
+    svc = TaskRoomService(c)
+
+    org = "https://dev.azure.com/org"
+    room = TaskRoom(work_item_id=1)
+    room.runs = [
+        SimpleNamespace(
+            pr_url=f"{org}/proj/_git/repo1/pullrequest/{n}",
+            pr_urls="[]", branch_name="feature/1-a",
+        )
+        for n in (11, 12, 13)
+    ]
+    views = await svc._pull_requests(room, Settings(), with_diff=False)
+    # Assert the loop actually ran: repo_calls == 1 would also hold vacuously if no
+    # PR URL parsed, which would make this test prove nothing.
+    assert len(views) == 3
+    assert all(isinstance(v, PrView) and v.status == "active" for v in views)
+    assert ado.repo_calls == 1          # once for the page, not once per PR
+
+
+async def test_task_room_survives_an_unreachable_repo_list():
+    """A missing label must cost a label, not the page."""
+    from types import SimpleNamespace
+
+    from ai_autopilot.config import Settings
+    from ai_autopilot.services.task_room import TaskRoomService
+
+    class _Boom:
+        async def get_repositories(self):
+            raise RuntimeError("ADO throttled")
+
+    svc = TaskRoomService(SimpleNamespace(ado=_Boom(), config=Settings()))
+    assert await svc._repo_guids() == {}

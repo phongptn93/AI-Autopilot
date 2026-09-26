@@ -129,9 +129,17 @@
     <div class="stat"><div class="n" style="color:var(--text-muted)">{{ summary.drafts }}</div><div class="l">📝 Drafts</div></div>
 </div>
 
+{# An empty board has three meanings and they are not interchangeable: nothing is
+   waiting, we have not scanned yet, or ADO would not answer. Rendering all three as
+   "no active pull requests" told a reviewer their queue was clear when it was not. #}
 {% if not grouped %}
 <div class="rev-card rev-meta">
-    {% if scanned %}
+    {% if scan_pending %}
+    Đang quét Azure DevOps… tải lại sau giây lát.
+    {% elif scan_failed %}
+    <span style="color:var(--amber)">Không đọc được Azure DevOps — danh sách này CHƯA đầy đủ.
+    Thử lại ở lần tải sau.</span>
+    {% elif scanned %}
     No PR matches this filter — {{ scanned }} active PR(s) in scope.
     <a href="/dashboard/reviews" style="color:var(--accent-hover)">Clear the filter</a>.
     {% else %}

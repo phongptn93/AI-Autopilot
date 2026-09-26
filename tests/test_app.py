@@ -981,76 +981,192 @@ async def test_active_and_abandoned_use_the_same_rule():
 
 async def test_a_failed_scan_is_reported_not_shown_as_zero():
     """Silent zeros made a throttled ADO look identical to "nothing has ever shipped"."""
-    counts = await _outcomes(_FakeAdoPRs(boom=True), ids={1})
-    assert counts["ok"] is False
-    assert counts["merged"] == 0                 # nothing counted…
+    with pytest.raises(RuntimeError):
+        await _outcomes(_FakeAdoPRs(boom=True), ids={1})
 
 
-async def test_a_failed_scan_stays_stale_so_the_next_load_retries():
+async def test_a_failed_scan_is_never_published_as_data():
+    """The scan must not become a FRESH answer just because it finished."""
     from types import SimpleNamespace
-    dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+    dashboard._PR_OUTCOMES.reset()
     try:
-        await dashboard._refresh_pr_outcomes(SimpleNamespace(
-            ado=_FakeAdoPRs(boom=True), execution_repo=_FakeExecRepoIds({1})))
-        # The failure is published so the page can SAY so, but `at` is left at 0 — it
-        # must never be served as a fresh answer for a whole TTL.
-        assert dashboard._PR_OUTCOME_CACHE["data"]["ok"] is False
-        assert dashboard._PR_OUTCOME_CACHE["at"] == 0.0
+        c = SimpleNamespace(ado=_FakeAdoPRs(boom=True),
+                            execution_repo=_FakeExecRepoIds({1}))
+        await dashboard._PR_OUTCOMES._run(lambda: dashboard._scan_pr_outcomes(c))
+        assert dashboard._PR_OUTCOMES.failed is True
+        assert dashboard._PR_OUTCOMES.value is None     # nothing published...
+        assert dashboard._PR_OUTCOMES.fresh is False    # ...and the next read retries
+        # ...and the page says "couldn't reach ADO", not "we're still counting".
+        assert dashboard._pr_outcomes(c)["ok"] is False
     finally:
-        dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+        dashboard._PR_OUTCOMES.reset()
 
 
 async def test_a_successful_scan_is_cached():
     from types import SimpleNamespace
-    dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+    dashboard._PR_OUTCOMES.reset()
     try:
         c = SimpleNamespace(ado=_FakeAdoPRs(completed=["feature/1-a"]),
                             execution_repo=_FakeExecRepoIds({1}))
-        await dashboard._refresh_pr_outcomes(c)
-        assert dashboard._PR_OUTCOME_CACHE["data"]["merged"] == 1
-        # A second call must not re-scan — swap in an ADO that would raise.
+        await dashboard._PR_OUTCOMES._run(lambda: dashboard._scan_pr_outcomes(c))
+        assert dashboard._PR_OUTCOMES.value["merged"] == 1
+        # A second read must not re-scan - swap in an ADO that would raise.
         c.ado = _FakeAdoPRs(boom=True)
-        await dashboard._refresh_pr_outcomes(c)
-        assert (await dashboard._pr_outcomes(c))["merged"] == 1
+        assert dashboard._pr_outcomes(c)["merged"] == 1
     finally:
-        dashboard._PR_OUTCOME_CACHE.update(at=0.0, data=None)
+        dashboard._PR_OUTCOMES.reset()
 
 
-def test_overview_says_so_when_the_pr_scan_failed(tmp_path, monkeypatch):
+def test_overview_says_so_when_the_pr_scan_failed(tmp_path):
     settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
-    failed = {"merged": 0, "active": 0, "abandoned": 0, "ok": False,
-              "pending": False, "merge_rate": None}
-    monkeypatch.setitem(dashboard._PR_OUTCOME_CACHE, "data", failed)
-    with TestClient(create_app(settings)) as client:
-        client.app.state.container.ado.get_repositories = _FakeAdoPRs(boom=True).get_repositories
-        text = client.get("/dashboard").text
-    assert "couldn&#39;t reach Azure DevOps" in text or "couldn't reach Azure DevOps" in text
+    try:
+        with TestClient(create_app(settings)) as client:
+            client.app.state.container.ado.get_repositories = (
+                _FakeAdoPRs(boom=True).get_repositories)
+            # After startup, which calls forget_scans() — the flag has to be set on the
+            # cache the running app will actually read.
+            dashboard._PR_OUTCOMES.failed = True   # a scan ran and could not reach ADO
+            text = client.get("/dashboard").text
+        assert ("couldn&#39;t reach Azure DevOps" in text
+                or "couldn't reach Azure DevOps" in text)
+    finally:
+        dashboard._PR_OUTCOMES.reset()
 
 
-def test_overview_does_not_wait_for_the_pr_scan(tmp_path, monkeypatch):
+def test_overview_does_not_wait_for_the_pr_scan(tmp_path):
     """The defect: /dashboard/ rendered nothing until a scan of EVERY PR in the org had
-    finished — 1 + 3N list requests plus a link lookup per PR whose branch carries no id,
+    finished - 1 + 3N list requests plus a link lookup per PR whose branch carries no id,
     strictly sequential. On a real org that is a minute of blank browser tab, which is
-    what "hệ thống bị treo" actually was. Five stat cards must never cost a page load."""
+    what "the system is hanging" actually was. Five stat cards must never cost a page load."""
     settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
-    monkeypatch.setitem(dashboard._PR_OUTCOME_CACHE, "data", None)
-    monkeypatch.setitem(dashboard._PR_OUTCOME_CACHE, "at", 0.0)
-
-    hung = asyncio.Event()
+    dashboard._PR_OUTCOMES.reset()
 
     async def never_answers():
-        hung.set()
         await asyncio.sleep(3600)       # an ADO that simply does not come back
 
-    with TestClient(create_app(settings)) as client:
-        client.app.state.container.ado.get_repositories = never_answers
-        started = time.monotonic()
-        response = client.get("/dashboard")
-        elapsed = time.monotonic() - started
+    try:
+        with TestClient(create_app(settings)) as client:
+            client.app.state.container.ado.get_repositories = never_answers
+            started = time.monotonic()
+            response = client.get("/dashboard")
+            elapsed = time.monotonic() - started
+        assert response.status_code == 200
+        assert elapsed < 5                                  # not "a minute or two"
+        assert "đang quét Azure DevOps" in response.text    # ...and it says why
+    finally:
+        dashboard._PR_OUTCOMES.reset()
 
-    assert response.status_code == 200
-    assert elapsed < 5                              # not "a minute or two"
-    assert "đang quét Azure DevOps" in response.text    # …and it says why the cards are blank
+
+# -- The same anti-pattern on the other pages --------------------------------
+
+async def _async_value(v):
+    return v
+
+
+async def test_scan_cache_shares_one_scan_between_concurrent_callers():
+    """Single-flight. Without it, N concurrent loads on a cold cache each started a
+    scan of their own - the load that made a page hang also throttled ADO into 429s,
+    whose backoff sleeps then made the next load slower still."""
+    cache = dashboard._ScanCache("test", ttl=60.0)
+    calls = 0
+
+    async def loader():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return ["value"]
+
+    results = await asyncio.gather(*(cache.blocking(loader) for _ in range(10)))
+    assert calls == 1                                   # ten readers, one scan
+    assert all(r == ["value"] for r in results)
+
+
+async def test_scan_cache_keeps_the_last_good_value_when_a_refresh_fails():
+    """A page showing the previous scan is right; a page showing a SHORT list is not."""
+    cache = dashboard._ScanCache("test", ttl=0.0)       # always stale
+
+    async def boom():
+        raise RuntimeError("ADO throttled")
+
+    await cache.blocking(lambda: _async_value(["a", "b"]))
+    assert cache.value == ["a", "b"]
+    await cache.blocking(boom)
+    assert cache.value == ["a", "b"]                    # not [] and not None
+    assert cache.failed is True
+
+
+async def test_scan_cache_invalidate_forces_a_rescan():
+    """After a mutation, a cached board is not stale - it is wrong."""
+    cache = dashboard._ScanCache("test", ttl=600.0)
+    assert await cache.blocking(lambda: _async_value(1)) == 1
+    assert await cache.blocking(lambda: _async_value(2)) == 1   # still fresh
+    cache.invalidate()
+    assert await cache.blocking(lambda: _async_value(2)) == 2
+
+
+def _find_closure(router, name):
+    """Pull a closure defined inside create_dashboard_router out of a route handler."""
+    for route in router.routes:
+        fn = getattr(route, "endpoint", None)
+        for cell in (fn.__closure__ or ()) if fn else ():
+            with contextlib.suppress(ValueError):
+                if getattr(cell.cell_contents, "__name__", "") == name:
+                    return cell.cell_contents
+    raise AssertionError(f"{name} not found in router closures")
+
+
+async def _no_reviewers():
+    return []
+
+
+async def test_reviews_scan_asks_for_each_pr_link_once_and_concurrently():
+    """The Reviews board walked repo -> PR -> link nose-to-tail, which is the same
+    defect the Overview had. Its link lookups must overlap, and there must be exactly
+    one per pull request."""
+    from types import SimpleNamespace
+
+    class _Ado(_FakeAdoPRs):
+        def __init__(self):
+            super().__init__(active=["feature/1-a", "nope/no-id"])
+            self.link_calls = 0
+            self.max_in_flight = 0
+            self._in_flight = 0
+
+        async def get_pull_request_work_items(self, _rid, pr_id):
+            self.link_calls += 1
+            self._in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self._in_flight)
+            await asyncio.sleep(0.02)
+            self._in_flight -= 1
+            return []
+
+    ado = _Ado()
+    c = SimpleNamespace(
+        ado=ado,
+        config=Settings(),
+        pr_reviewer_repo=SimpleNamespace(all_reviewers=_no_reviewers),
+    )
+    scan = _find_closure(dashboard.create_dashboard_router(), "_scan_reviews")
+    prs = await scan(c)
+    assert len(prs) == 2
+    assert ado.link_calls == 2              # one per PR, no repeats
+    assert ado.max_in_flight == 2           # ...and they overlapped, not nose-to-tail
+
+
+async def test_reviews_scan_raises_instead_of_publishing_a_short_list():
+    """Whatever the old scan had collected when a request failed was cached as though
+    it had succeeded - so a throttled ADO showed a reviewer a SHORT list of PRs,
+    silently, for a whole TTL. A list quietly missing the PR waiting on you is worse
+    than a page that admits it could not load."""
+    from types import SimpleNamespace
+    c = SimpleNamespace(
+        ado=_FakeAdoPRs(boom=True),
+        config=Settings(),
+        pr_reviewer_repo=SimpleNamespace(all_reviewers=_no_reviewers),
+    )
+    scan = _find_closure(dashboard.create_dashboard_router(), "_scan_reviews")
+    with pytest.raises(RuntimeError):
+        await scan(c)
 
 
 def test_teams_is_configured_in_exactly_one_place(tmp_path, monkeypatch):

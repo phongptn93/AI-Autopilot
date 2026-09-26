@@ -31,6 +31,11 @@
   .rd-tbl .detail { color:var(--text-dim); font-size:11.5px; line-height:1.55; margin-top:3px;
     max-width:86ch; }
   .rd-where { font-family:var(--mono); font-size:11px; color:var(--text-dim); word-break:break-all; }
+  .rd-done { opacity:.72 }
+  .rd-filed { margin-top:5px; font-size:11.5px; color:var(--text-muted);
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap }
+  .rd-filed a { color:var(--accent-hover); font-weight:600 }
+  .rd-refile { display:inline-flex; align-items:center; gap:4px; cursor:pointer }
 
   .sev { display:inline-block; font-size:10px; font-family:var(--mono); font-weight:700;
     padding:1px 7px; border-radius:5px; margin-right:4px; white-space:nowrap; }
@@ -128,17 +133,37 @@
   <form method="post" action="/dashboard/reports/{{ row.id }}/file" id="fileForm">
   <table class="rd-tbl">
     <thead><tr>
-      <th style="width:34px"><input type="checkbox" id="pickAll" title="Chọn tất cả"/></th>
+      <th style="width:34px"><input type="checkbox" id="pickAll" title="Chọn tất cả chưa tạo"/></th>
       <th>Severity</th><th>Finding</th><th>Where</th><th>Agent</th>
     </tr></thead>
     <tbody>
       {% for f in findings %}
-      <tr>
-        <td><input type="checkbox" class="pick" name="finding" value="{{ loop.index0 }}"/></td>
+      {% set wi = filed.get(loop.index0, 0) %}
+      <tr class="{{ 'rd-done' if wi else '' }}">
+        {# A finding that already produced a work item is locked, not hidden: hiding it
+           would make the audit look shorter every time somebody acted on it. The lock
+           opens per row, because "file this one again" is a decision about ONE finding
+           — a global override would re-file eight while you meant one. #}
+        <td>
+          <input type="checkbox" class="pick" name="finding" value="{{ loop.index0 }}"
+                 {% if wi %}disabled data-filed="1"{% endif %}/>
+        </td>
         <td><span class="sev {{ f.severity }}">{{ f.severity }}</span></td>
         <td>
           <div class="title">{{ f.title }}</div>
           {% if f.detail %}<div class="detail">{{ f.detail }}</div>{% endif %}
+          {% if wi %}
+          <div class="rd-filed">
+            ✅ đã tạo
+            {% if item_link %}<a href="{{ item_link }}/{{ wi }}" target="_blank"
+                                 rel="noopener">#{{ wi }}</a>{% else %}#{{ wi }}{% endif %}
+            <label class="rd-refile">
+              <input type="checkbox" name="refile" value="{{ loop.index0 }}"
+                     class="chk-sm" onchange="unlockRow(this, {{ loop.index0 }})"/>
+              tạo lại
+            </label>
+          </div>
+          {% endif %}
         </td>
         <td class="rd-where">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}</td>
         <td class="rd-where">{{ f.agent }}</td>
@@ -162,6 +187,17 @@
       <label>Project</label>
       <select name="project" id="projectPick" onchange="syncTypes()"></select>
 
+      {# Which SHAPE, because the audit produces both kinds. Six sequential-loop
+         findings in one service are one refactor; six items for it is six people
+         reading the same context and three of them rewriting the same method. Six
+         findings in six services are six pieces of work. Only the reader knows which
+         of the two they are looking at. #}
+      <label>Gộp</label>
+      <select name="mode" id="modePick">
+        <option value="each" selected>Mỗi finding một work item</option>
+        <option value="one">Gộp tất cả đã chọn vào MỘT work item</option>
+      </select>
+
       <label>Loại</label>
       {# Filled by syncProjects() from the selected project's own process template.
          Rendered non-empty so the form still works with scripting off. #}
@@ -169,8 +205,8 @@
         {% for kind in item_types %}<option value="{{ kind }}">{{ kind }}</option>{% endfor %}
       </select>
 
-      <button class="btn-save" type="submit">Tạo work item</button>
-      <span class="dim note" style="font-size:12px">Mỗi finding thành một work item riêng —
+        <button class="btn-save" type="submit">Tạo work item</button>
+      <span class="dim note" style="font-size:12px" id="modeNote">Mỗi finding thành một work item riêng —
         chúng được sửa bởi người khác nhau, vào lúc khác nhau.</span>
     </div>
   </div>
@@ -210,9 +246,33 @@
       projects.forEach(p => target.add(new Option(p, p)));
       syncTypes();
     }
+    /* "Chọn tất cả" must not silently tick the locked rows — that is exactly the
+       accidental re-file this lock exists to prevent. */
     document.getElementById('pickAll').addEventListener('change', function () {
-      document.querySelectorAll('.pick').forEach(c => { c.checked = this.checked; });
+      document.querySelectorAll('.pick:not([disabled])').forEach(c => { c.checked = this.checked; });
     });
+
+    /* Ticking "tạo lại" unlocks that ONE row and selects it, so the intent and the
+       selection cannot disagree. Untick and it locks again. */
+    function unlockRow(box, index) {
+      const pick = document.querySelector('.pick[value="' + index + '"]');
+      if (!pick) return;
+      pick.disabled = !box.checked;
+      pick.checked = box.checked;
+    }
+
+    /* The note has to follow the choice: left saying "một work item riêng" while the
+       selector says gộp, it contradicts the control next to it. */
+    (function () {
+      const sel = document.getElementById('modePick');
+      const note = document.getElementById('modeNote');
+      if (!sel || !note) return;
+      const EACH = 'Mỗi finding thành một work item riêng — chúng được sửa bởi người khác nhau, vào lúc khác nhau.';
+      const ONE = 'Tất cả finding đã chọn vào MỘT work item — dùng khi chúng là cùng một việc phải sửa.';
+      sel.addEventListener('change', function () {
+        note.textContent = sel.value === 'one' ? ONE : EACH;
+      });
+    })();
     syncProjects();
   </script>
   {% else %}

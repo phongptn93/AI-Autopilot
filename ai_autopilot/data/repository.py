@@ -1388,6 +1388,42 @@ class LoopReportRepository:
             await session.commit()
             return int(row.id)
 
+    async def mark_findings_filed(
+        self, report_id: int, indices: list[int], work_item_id: int, *,
+        at: datetime | None = None,
+    ) -> int:
+        """Record which work item each of ``indices`` became. Returns how many were marked.
+
+        Written back into the finding's own entry rather than into a side table. A
+        separate ledger would be a second answer to "has this been filed", and the two
+        drift the moment a report is deleted or re-saved — whereas a finding that
+        carries its own work-item id cannot disagree with itself.
+
+        Several indices may share one id: that is the "one work item for all of these"
+        choice, and the mapping is many-to-one by design.
+        """
+        if not indices or work_item_id <= 0:
+            return 0
+        async with self._db.session() as session:
+            row = await session.get(LoopReport, report_id)
+            if row is None:
+                return 0
+            try:
+                findings = json.loads(row.findings_json or "[]")
+            except (ValueError, TypeError):
+                return 0
+            stamp = (at or datetime.now(UTC)).isoformat()
+            marked = 0
+            for index in indices:
+                if 0 <= index < len(findings) and isinstance(findings[index], dict):
+                    findings[index]["work_item_id"] = int(work_item_id)
+                    findings[index]["filed_at"] = stamp
+                    marked += 1
+            if marked:
+                row.findings_json = json.dumps(findings, ensure_ascii=False)
+                await session.commit()
+            return marked
+
     async def recent(self, limit: int = 50, loop_name: str = "") -> list[LoopReport]:
         """Newest runs first, optionally just one loop's."""
         async with self._db.session() as session:

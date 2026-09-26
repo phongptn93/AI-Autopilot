@@ -265,3 +265,181 @@ def test_an_unreachable_ado_still_lets_you_file(tmp_path):
     finally:
         client.__exit__(None, None, None)
     assert [k["item_type"] for k in created] == ["Bug"]
+
+
+# ── What a finding became, and refusing to file it twice ────────────────────
+
+
+def _filed_ids(cfg) -> list[int]:
+    """The work-item id recorded against each finding, read back off the report."""
+    import json
+
+    async def go():
+        db = Database(cfg.database_url)
+        rows = await LoopReportRepository(db).recent(limit=1)
+        data = json.loads(rows[0].findings_json or "[]")
+        await db.dispose()
+        return [int(f.get("work_item_id") or 0) for f in data]
+
+    return asyncio.run(go())
+
+
+def test_a_filed_finding_records_the_work_item_it_became(tmp_path):
+    """Written into the finding's own entry, not a side table: two answers to "has this
+    been filed" drift the moment a report is re-saved, and a finding carrying its own id
+    cannot disagree with itself."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _client(cfg, created)
+    try:
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["0", "2"], "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+    finally:
+        client.__exit__(None, None, None)
+    ids = _filed_ids(cfg)
+    assert ids[0] and ids[2]          # both picked findings carry an id…
+    assert ids[0] != ids[2]           # …a different one each, one item per finding
+    assert ids[1] == 0                # the one nobody picked is untouched
+
+
+def test_the_page_shows_the_work_item_and_locks_the_row(tmp_path):
+    """Locked, not hidden. Hiding acted-on findings would make the audit look shorter
+    every time somebody did something about it."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    client = _client(cfg, [])
+    try:
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["0"], "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+        page = client.get(f"/dashboard/reports/{report_id}").text
+    finally:
+        client.__exit__(None, None, None)
+    import re
+
+    assert "đã tạo" in page
+    assert 'name="refile" value="0"' in page          # the per-row unlock
+
+    def pick_tag(index: int) -> str:
+        found = re.search(rf'<input[^>]*class="pick"[^>]*value="{index}"[^>]*>', page)
+        assert found, f"no pick checkbox rendered for finding {index}"
+        return found.group(0)
+
+    assert "disabled" in pick_tag(0)          # filed → locked
+    assert "disabled" not in pick_tag(1)      # untouched → still selectable
+
+
+def test_filing_the_same_finding_again_is_refused(tmp_path):
+    """Silently re-filing is how an audit ends up with one finding open three times,
+    each with its own half-finished discussion."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _client(cfg, created)
+    try:
+        for _ in range(2):
+            client.post(f"/dashboard/reports/{report_id}/file",
+                        data={"finding": ["0"], "project": "Khatoco", "item_type": "Bug"},
+                        follow_redirects=True)
+    finally:
+        client.__exit__(None, None, None)
+    assert len(created) == 1          # the second POST created nothing
+
+
+def test_refile_is_honoured_when_the_reader_asks_for_it(tmp_path):
+    """The lock is a guard, not a wall: sometimes the first item was wrong."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _client(cfg, created)
+    try:
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["0"], "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["0"], "refile": ["0"],
+                          "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+    finally:
+        client.__exit__(None, None, None)
+    assert len(created) == 2
+    assert _filed_ids(cfg)[0] == 9002      # the row now points at the NEWEST item
+
+
+def test_the_guard_is_server_side_not_only_a_disabled_checkbox(tmp_path):
+    """A disabled input is a suggestion, and the same POST can arrive from curl."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _client(cfg, created)
+    try:
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["0"], "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+        # No `refile`, exactly what a hand-rolled POST bypassing the UI would send.
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["0"], "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+    finally:
+        client.__exit__(None, None, None)
+    assert len(created) == 1
+
+
+# ── One item per finding, or one for all of them ────────────────────────────
+
+
+def test_mode_one_files_a_single_item_for_every_picked_finding(tmp_path):
+    """Six sequential-loop findings in one service are one refactor. Six items for it is
+    six people reading the same context and three of them rewriting the same method."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _client(cfg, created)
+    try:
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["0", "1", "2"], "mode": "one",
+                          "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+    finally:
+        client.__exit__(None, None, None)
+    assert len(created) == 1
+    body = created[0]["description"]
+    for title in ("Hardcoded AES fallback key", "No tenant filter on User CRUD",
+                  "Commented-out OneSignal key"):
+        assert title in body               # every finding is IN the one item
+    # All three rows point at that single item: the mapping is many-to-one by design.
+    assert _filed_ids(cfg) == [9001, 9001, 9001]
+
+
+def test_the_combined_title_carries_the_WORST_severity(tmp_path):
+    """Titled with the mildest of the six, it is an item nobody prioritises correctly."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _client(cfg, created)
+    try:
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["1", "2"], "mode": "one",     # high + low
+                          "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+    finally:
+        client.__exit__(None, None, None)
+    assert created[0]["title"].startswith("[high]")
+    assert "2 finding" in created[0]["title"]
+
+
+def test_mode_defaults_to_one_item_per_finding(tmp_path):
+    """The default must stay the shape the audit screen was built around."""
+    cfg = _settings(tmp_path)
+    report_id = _seed(cfg)
+    created: list[dict] = []
+    client = _client(cfg, created)
+    try:
+        client.post(f"/dashboard/reports/{report_id}/file",
+                    data={"finding": ["0", "1"], "project": "Khatoco", "item_type": "Bug"},
+                    follow_redirects=True)
+    finally:
+        client.__exit__(None, None, None)
+    assert len(created) == 2

@@ -174,12 +174,18 @@ async def run_scan(
     workspace = req.workspace or str(Path(repo).parent)
     prog = progress.start(repo, req.trigger)
     feed_key = activity.security_key(Path(repo).name)
-    activity.clear(workspace, feed_key)
+    # Only a STORED scan streams to the workspace feed — that is the one the dashboard
+    # watches. A `--no-store` run (CI, a one-off check) must leave no files behind, and
+    # without an explicit workspace the fallback is the repo's PARENT directory.
+    feed_ws = workspace if req.store else ""
+    if feed_ws:
+        activity.clear(feed_ws, feed_key)
 
     def say(line: str, stage: str | None = None) -> None:
         if stage:
             prog.stage = stage
-        activity.append(workspace, feed_key, line)
+        if feed_ws:
+            activity.append(feed_ws, feed_key, line)
         if req.on_progress:
             with contextlib.suppress(Exception):
                 req.on_progress(line)

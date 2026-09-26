@@ -63,9 +63,9 @@ async def test_runner_applies_ignores_and_streams_progress(tmp_path):
     assert {f.rule_id for f in result.findings} == {"secret-aws-access-key"}
     joined = "\n".join(lines)
     assert "security scan started" in joined and "builtin:" in joined and "gate FAILED" in joined
-    # The same lines landed in the workspace activity feed under the repo's key …
-    feed = activity.read(str(repo.parent), activity.security_key("app"))
-    assert "gate FAILED" in feed
+    # A store=False run streams to the caller only — nothing is written to the feed
+    # (that is for stored scans the dashboard watches) …
+    assert activity.read(str(repo.parent), activity.security_key("app")) == ""
     # … and the progress registry is clean afterwards.
     assert progress.get(str(repo.resolve())) is None
 
@@ -205,3 +205,13 @@ def test_verify_route_refuses_without_worktrees(tmp_path):
         fid = re.search(r"/dashboard/security/f/(\d+)", listing).group(1)
         r = client.post(f"/dashboard/security/{fid}/verify", follow_redirects=False)
         assert "err_sec_no_worktrees" in r.headers.get("set-cookie", "")
+
+
+async def test_no_store_scan_leaves_no_files_behind(tmp_path):
+    """A --no-store scan (CI) must not write an activity feed into the repo's parent."""
+    repo = tmp_path / "ws" / "app"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "leak.py").write_text(_KEY, encoding="utf-8")
+    await run_scan(ScanRequest(repo=str(repo), tools=["builtin"], ai_mode="off",
+                               store=False, write_html=False))
+    assert not (tmp_path / "ws" / ".autopilot").exists()

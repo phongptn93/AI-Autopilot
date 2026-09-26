@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  /* ── One scan run (scoped) ── what ran, what changed. */
+  .main { max-width:none; }
+  .ss-crumb { font-size:12px; color:var(--text-dim); margin-bottom:6px; }
+  .ss-crumb a { color:var(--accent-hover); text-decoration:none; }
+  .ss-top { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; margin-bottom:12px; }
+  .ss-top h2 { font-size:19px; font-weight:750; letter-spacing:-.02em; }
+  .ss-grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  @media (max-width: 1100px) { .ss-grid { grid-template-columns: 1fr; } }
+  .ss-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:16px; }
+  .ss-hd { display:flex; gap:10px; align-items:baseline; padding:12px 18px; border-bottom:1px solid var(--border-soft); }
+  .ss-hd h3 { font-size:13.5px; font-weight:650; } .ss-hd span { color:var(--text-dim); font-size:12px; margin-left:auto; }
+  .ss-body { padding:12px 18px; font-size:12.5px; line-height:1.6; }
+  .ss-kv { display:grid; grid-template-columns: 120px 1fr; gap:5px 14px; }
+  .ss-kv dt { color:var(--text-dim); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; padding-top:3px; }
+  .ss-kv dd { margin:0; } .ss-kv code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input); padding:1px 6px; border-radius:5px; }
+  .ss-tools { width:100%; border-collapse:collapse; }
+  .ss-tools td { padding:7px 0; border-bottom:1px solid var(--border-soft); font-size:12px; }
+  .ss-tools td:first-child { font-family:var(--mono); width:110px; }
+  .ss-tools tr:last-child td { border-bottom:0; }
+  .ss-tools .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:7px; background:var(--green); }
+  .ss-tools .dot.bad { background:var(--red); } .ss-tools .dot.skip { background:var(--text-dim); }
+  .ss-tiles { display:flex; flex-wrap:wrap; gap:10px; padding:12px 18px; }
+  .ss-tile { min-width:96px; padding:8px 12px; border:1px solid var(--border); border-radius:10px; background:var(--bg-input); }
+  .ss-tile b { display:block; font-size:20px; font-weight:750; } .ss-tile span { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); }
+  .ss-tile.critical b { color:var(--red); } .ss-tile.high b { color:var(--amber); } .ss-tile.new b { color:var(--red); } .ss-tile.fixed b { color:var(--green); }
+  .ss-list { width:100%; border-collapse:collapse; }
+  .ss-list td { padding:8px 14px; border-bottom:1px solid var(--border-soft); font-size:12.5px; vertical-align:top; }
+  .ss-list tr:last-child td { border-bottom:0; }
+  .ss-list a { color:var(--text); text-decoration:none; font-weight:600; } .ss-list a:hover { color:var(--accent-hover); }
+  .ss-where { font-family:var(--mono); font-size:11.5px; color:var(--text-muted); }
+  .sev { display:inline-block; font-size:10px; font-family:var(--mono); font-weight:700; padding:1px 7px; border-radius:5px; white-space:nowrap; }
+  .sev.critical { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+  .sev.high { background:rgba(245,166,35,.14); color:var(--amber); border:1px solid rgba(245,166,35,.45); }
+  .sev.medium { background:rgba(245,166,35,.08); color:var(--amber); border:1px solid rgba(245,166,35,.3); }
+  .sev.low { background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.35); }
+  .sev.info { background:var(--bg-input); color:var(--text-dim); border:1px solid var(--border); }
+  .sev.pass { background:var(--green-bg); color:var(--green); border:1px solid rgba(46,204,113,.45); }
+  .sev.fail { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+  .ss-empty { padding:16px 18px; color:var(--text-dim); font-size:12.5px; }
+</style>
+
+<div class="ss-crumb"><a href="/dashboard/security?repo={{ s.repo|urlencode }}">🔐 Security</a> › {{ repo_name }} › scan #{{ s.id }}</div>
+<div class="ss-top">
+  <h2>Scan #{{ s.id }} — {{ repo_name }}</h2>
+  {% if s.status == 'running' %}<span class="sev info">running</span>{% elif s.error %}<span class="sev fail" title="{{ s.error }}">error</span>{% elif s.gate_passed %}<span class="sev pass">gate passed</span>{% else %}<span class="sev fail">gate failed</span>{% endif %}
+  {% if s.report_id %}<a class="btn-ghost" href="/dashboard/reports/{{ s.report_id }}">📄 full report</a>{% endif %}
+</div>
+
+<div class="ss-grid">
+  <div class="ss-card">
+    <div class="ss-hd"><h3>Run</h3><span>{{ s.trigger }}{% if s.loop_name %} · {{ s.loop_name }}{% endif %}</span></div>
+    <div class="ss-body">
+      <dl class="ss-kv">
+        <dt>Started</dt><dd>{{ s.started_at.strftime('%Y-%m-%d %H:%M:%S') if s.started_at else '' }}{% if s.duration_seconds %} · {{ s.duration_seconds|round|int }}s{% endif %}</dd>
+        <dt>Repository</dt><dd><code>{{ s.repo }}</code></dd>
+        <dt>Scope · AI</dt><dd>{{ s.scope }} · {{ s.ai_mode }}</dd>
+        <dt>Gate</dt><dd>fail on new ≥ <b>{{ s.fail_on }}</b> → {{ 'passed' if s.gate_passed else 'FAILED' }}</dd>
+        {% if s.filtered_count %}<dt>Ignored</dt><dd>{{ s.filtered_count }} by disabled_rules / ignore_paths</dd>{% endif %}
+        {% if s.cost_tokens %}<dt>Tokens</dt><dd>{{ '{:,}'.format(s.cost_tokens) }}</dd>{% endif %}
+        {% if s.error %}<dt>Error</dt><dd style="color:var(--red)">{{ s.error }}</dd>{% endif %}
+        {% if s.html_path %}<dt>HTML</dt><dd><code>{{ s.html_path }}</code></dd>{% endif %}
+      </dl>
+    </div>
+  </div>
+  <div class="ss-card">
+    <div class="ss-hd"><h3>Tools</h3><span>0 findings from a tool that did not run is not "clean"</span></div>
+    <div class="ss-body">
+      {% if tools %}
+      <table class="ss-tools">
+        {% for name, label in tools.items() %}
+        <tr><td><span class="dot {{ 'bad' if label.startswith('error') else ('skip' if label.startswith('skipped') else '') }}"></span>{{ name }}</td><td>{{ label }}</td></tr>
+        {% endfor %}
+      </table>
+      {% else %}<div class="ss-empty">no tool status recorded</div>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="ss-card">
+  <div class="ss-hd"><h3>Result</h3></div>
+  <div class="ss-tiles">
+    {% for sev in severities %}<div class="ss-tile {{ sev }}"><b>{{ s[sev ~ '_count'] }}</b><span>{{ sev }}</span></div>{% endfor %}
+    <div class="ss-tile new"><b>+{{ s.new_count }}</b><span>new</span></div>
+    <div class="ss-tile fixed"><b>−{{ s.fixed_count }}</b><span>fixed</span></div>
+    <div class="ss-tile"><b>{{ s.suppressed_count }}</b><span>suppressed</span></div>
+  </div>
+</div>
+
+<div class="ss-grid">
+  <div class="ss-card">
+    <div class="ss-hd"><h3>New in this scan</h3><span>{{ new_rows|length }}</span></div>
+    {% if new_rows %}
+    <table class="ss-list">{% for f in new_rows %}
+      <tr><td><span class="sev {{ f.severity }}">{{ f.severity }}</span></td>
+          <td><a href="/dashboard/security/f/{{ f.id }}">{{ f.title }}</a><div class="ss-where">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %} · {{ f.tool }}{% if f.cwe %} · {{ f.cwe }}{% endif %}</div></td></tr>
+    {% endfor %}</table>
+    {% else %}<div class="ss-empty">Nothing new — every finding was already known.</div>{% endif %}
+  </div>
+  <div class="ss-card">
+    <div class="ss-hd"><h3>Fixed since the previous scan</h3><span>{{ fixed_rows|length }}</span></div>
+    {% if fixed_rows %}
+    <table class="ss-list">{% for f in fixed_rows %}
+      <tr><td><span class="sev {{ f.severity }}">{{ f.severity }}</span></td>
+          <td><a href="/dashboard/security/f/{{ f.id }}">{{ f.title }}</a><div class="ss-where">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %} · {{ f.tool }}</div></td></tr>
+    {% endfor %}</table>
+    {% else %}<div class="ss-empty">No finding was closed by this scan.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

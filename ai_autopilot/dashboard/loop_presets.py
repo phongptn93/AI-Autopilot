@@ -36,21 +36,47 @@ PRESETS: list[dict] = [
         },
     },
     {
+        "key": "secret-scan-daily",
+        "label": "Quét secret hằng ngày",
+        "why": "Builtin + gitleaks trên toàn cây, không tốn token — key lọt vào repo là biết "
+               "trong ngày.",
+        "loop": {
+            "name": "secret-scan-daily",
+            "mode": "scan",
+            "cron": "3 5 * * *",
+            "agents": [],
+            "prompt": "",
+            "scan_tools": ["builtin", "gitleaks"],
+            "scan_ai_mode": "off",
+        },
+    },
+    {
+        "key": "sca-dependencies-daily",
+        "label": "Dependency CVE hằng ngày",
+        "why": "trivy / dotnet / npm audit / pip-audit — gói có CVE mới là lên bảng Security.",
+        "loop": {
+            "name": "sca-dependencies-daily",
+            "mode": "scan",
+            "cron": "17 4 * * *",
+            "agents": [],
+            "prompt": "",
+            "scan_tools": ["sca"],
+            "scan_ai_mode": "off",
+        },
+    },
+    {
         "key": "security-audit-weekly",
         "label": "Security audit OWASP hằng tuần",
-        "why": "Rà toàn repo theo OWASP API/Web Top 10 — sâu hơn review ngày, chạy cuối tuần.",
+        "why": "SAST đầy đủ (builtin + semgrep) rồi AI deep theo OWASP API/Web Top 10 — "
+               "AI được đưa sẵn kết quả scanner để triage và tìm lỗi logic (BOLA, authz).",
         "loop": {
             "name": "security-audit-weekly",
-            "mode": "report",
+            "mode": "scan",
             "cron": "23 2 * * 6",
             "agents": ["agent-security-reviewer"],
-            "prompt": (
-                "Run a deep security audit of this repository against the OWASP API "
-                "Security Top 10 and the OWASP Top 10 for web. Prioritise authentication "
-                "and authorisation gaps, injection, secrets committed to the tree, unsafe "
-                "deserialisation, and endpoints missing an access check. For each finding "
-                "name the file and line and say what an attacker gets."
-            ),
+            "prompt": "",
+            "scan_tools": ["builtin", "gitleaks", "semgrep", "sca"],
+            "scan_ai_mode": "deep",
         },
     },
     {

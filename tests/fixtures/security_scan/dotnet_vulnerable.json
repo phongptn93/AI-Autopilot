@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "parameters": "--vulnerable --include-transitive",
+  "sources": ["https://api.nuget.org/v3/index.json"],
+  "projects": [
+    {
+      "path": "Presentation/Nois.Api/Nois.Api.csproj",
+      "frameworks": [
+        {
+          "framework": "net8.0",
+          "topLevelPackages": [
+            {
+              "id": "System.Text.Json",
+              "requestedVersion": "8.0.0",
+              "resolvedVersion": "8.0.0",
+              "vulnerabilities": [
+                {"severity": "High", "advisoryurl": "https://github.com/advisories/GHSA-8g4q-xg66-9fp4"}
+              ]
+            }
+          ],
+          "transitivePackages": [
+            {
+              "id": "Newtonsoft.Json",
+              "resolvedVersion": "12.0.1",
+              "vulnerabilities": [
+                {"severity": "Moderate", "advisoryurl": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

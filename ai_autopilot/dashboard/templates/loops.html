@@ -133,7 +133,7 @@
     <div class="lp-loop {{ '' if r.enabled else 'off' }}">
       <div class="lp-loop-hd">
         <b>{{ r.name }}</b>
-        <span class="lp-pill {{ 'ok' if r.mode == 'report' else 'mute' }}">{{ r.mode }}</span>
+        <span class="lp-pill {{ 'ok' if r.mode in ('report', 'scan') else 'mute' }}">{{ r.mode }}</span>
         {% if r.running %}<span class="lp-pill ok">running now</span>
         {% elif not r.enabled %}<span class="lp-pill mute">disabled</span>
         {% elif r.blockers %}<span class="lp-pill bad">⛔ chưa chạy được</span>
@@ -169,9 +169,26 @@
           <label>What it does</label>
           <select class="lp-in" name="loop_{{ row }}_mode">
             <option value="report" {% if r.mode == 'report' %}selected{% endif %}>report — inspect, change nothing</option>
-            <option value="pr" {% if r.mode != 'report' %}selected{% endif %}>pr — change files, open a PR</option>
+            <option value="scan" {% if r.mode == 'scan' %}selected{% endif %}>scan — security scanners (+ optional AI)</option>
+            <option value="pr" {% if r.mode not in ('report', 'scan') %}selected{% endif %}>pr — change files, open a PR</option>
           </select>
           <span class="lp-hint">A report run with the file tools switched off; findings are stored, not committed.</span>
+        </div>
+        <div class="lp-f">
+          <label>Scan (scan mode only)</label>
+          <input type="text" class="lp-in mono" name="loop_{{ row }}_scan_tools"
+                 value="{{ r.scan_tools|join(', ') }}" placeholder="builtin, gitleaks, semgrep, sca">
+          <select class="lp-in" name="loop_{{ row }}_scan_ai">
+            <option value="" {% if not r.scan_ai_mode %}selected{% endif %}>AI: config default</option>
+            <option value="off" {% if r.scan_ai_mode == 'off' %}selected{% endif %}>AI: off</option>
+            <option value="fast" {% if r.scan_ai_mode == 'fast' %}selected{% endif %}>AI: fast</option>
+            <option value="deep" {% if r.scan_ai_mode == 'deep' %}selected{% endif %}>AI: deep</option>
+          </select>
+          <select class="lp-in" name="loop_{{ row }}_scan_scope">
+            <option value="full" {% if r.scan_scope != 'diff' %}selected{% endif %}>scope: full repo</option>
+            <option value="diff" {% if r.scan_scope == 'diff' %}selected{% endif %}>scope: diff vs base</option>
+          </select>
+          <span class="lp-hint">Empty tools = <code>security_scan.tools</code>. Results land on <a href="/dashboard/security">Security</a>.</span>
         </div>
 
         <div class="lp-f">
@@ -276,7 +293,22 @@
           <label>What it does</label>
           <select class="lp-in" name="loop_{{ blank }}_mode">
             <option value="report" selected>report — inspect, change nothing</option>
+            <option value="scan">scan — security scanners (+ optional AI)</option>
             <option value="pr">pr — change files, open a PR</option>
+          </select>
+        </div>
+        <div class="lp-f">
+          <label>Scan (scan mode only)</label>
+          <input type="text" class="lp-in mono" name="loop_{{ blank }}_scan_tools" placeholder="builtin, gitleaks, semgrep, sca">
+          <select class="lp-in" name="loop_{{ blank }}_scan_ai">
+            <option value="" selected>AI: config default</option>
+            <option value="off">AI: off</option>
+            <option value="fast">AI: fast</option>
+            <option value="deep">AI: deep</option>
+          </select>
+          <select class="lp-in" name="loop_{{ blank }}_scan_scope">
+            <option value="full" selected>scope: full repo</option>
+            <option value="diff">scope: diff vs base</option>
           </select>
         </div>
         <div class="lp-f">
@@ -394,6 +426,9 @@
     set('prompt', data.prompt || '');
     var mode = document.querySelector('[name="loop_' + idx + '_mode"]');
     if (mode) { mode.value = data.mode || 'report'; }
+    set('scan_tools', (data.scan_tools || []).join(', '));
+    set('scan_ai', data.scan_ai_mode || '');
+    set('scan_scope', data.scan_scope || 'full');
     document.querySelectorAll('[name="loop_' + idx + '_agents"]').forEach(function (box) {
       box.checked = (data.agents || []).indexOf(box.value) !== -1;
       box.closest('.lp-ag').classList.toggle('on', box.checked);

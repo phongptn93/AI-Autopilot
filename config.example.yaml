@@ -149,6 +149,39 @@ feedback_loop_enabled: false
 max_revisions: 3
 auto_review_enabled: true
 block_on_severity: "Critical,High"
+
+# ── Security scanning (`ai-autopilot scan`, scan loops, pre-PR gate, /dashboard/security) ──
+# SAST + SCA + secrets with a stored baseline: only NEW, unsuppressed findings fail a
+# run. Every scanner is optional — a missing binary is skipped and reported (see
+# `ai-autopilot doctor`); `builtin` is a pure-Python rule set and always runs.
+security_scan:
+  enabled: true
+  tools: [builtin, gitleaks, semgrep, sca]   # sca = trivy | dotnet | npm audit | pip-audit
+  ai_mode: fast                              # off | fast | deep — the model pass (security-review skill)
+  ai_agents: [agent-security-reviewer]
+  semgrep_config: [p/owasp-top-ten, p/secrets, p/csharp, p/typescript]
+  fail_on: high                              # exit 1 when a NEW finding is at/above this
+  pr_gate_tools: [builtin, gitleaks]         # deterministic scanners the pre-PR review also runs on the diff
+  max_findings_per_tool: 500
+  file_bugs: false                           # file ADO Bugs for new findings ≥ file_bugs_from (assisted/unattended only)
+  file_bugs_from: high
+  # Phase 3 — prove a finding with a PoC in an isolated worktree (never merged):
+  verify_enabled: false
+  verify_from: high
+  verify_max_per_scan: 5
+  # Phase 4 — DAST against a RUNNING app you own. Refused unless every gate is set:
+  dast_enabled: false
+  dast_targets: []
+  #   - name: staging
+  #     base_url: https://staging.example.internal
+  #     allowed_hosts: [staging.example.internal]
+  #     owner_confirmed: true          # you are stating this host is yours to test
+  #     auth_env_var: DAST_TOKEN_A     # bearer token, user A
+  #     auth_b_env_var: DAST_TOKEN_B   # user B — lets the probe test IDOR (A reads B's data)
+  #     allow_mutations: false         # GET/HEAD/OPTIONS only unless true
+  #     rate_limit_rps: 5
+# Suppressions (accepted/deferred findings, with reason + expiry) live in the WORKSPACE:
+#   <workspace>/.autopilot/security-suppressions.yaml
 # Reviewers on the PRs the autopilot opens. The assignee of the work item is the
 # person who should look at the code — ADO notifies them once they're added.
 # pr_extra_reviewer_ids takes ADO identity GUIDs (not emails): the reviewers API is
@@ -283,6 +316,12 @@ scheduled_loops: []
 #     prompt: "Find and fix the most recent failing CI check on the base branch."
 #     interval_minutes: 360       # every 6h
 #     base_branch: development
+#   - name: secret-scan-daily   # mode "scan": runs the security scanner, not a prompt
+#     mode: scan
+#     cron: "3 5 * * *"
+#     scan_tools: [builtin, gitleaks]
+#     scan_ai_mode: "off"
+#     prompt: ""
 
 # ── Plugins ──
 plugins_directory: "plugins"

@@ -29,6 +29,14 @@ def pr_key(pr_id: int) -> str:
     return f"pr-{pr_id}"
 
 
+def security_key(repo_name: str) -> str:
+    """Feed key for a security scan of one repo — what the Security page's live view
+    reads. Keyed by repo, not by trigger: the CLI, a loop and the page's ▶ Scan now all
+    scan the same repo and the operator wants ONE place to watch it."""
+    slug = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in repo_name.lower())
+    return f"security-{slug or 'repo'}"
+
+
 def loop_key(name: str) -> str:
     """Feed key for a scheduled loop's run.
 

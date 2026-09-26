@@ -55,13 +55,17 @@ def _ensure_dashboard_password() -> None:
     print("  Giving up after 3 attempts — starting WITHOUT a dashboard password.", file=sys.stderr)
 
 
-_USAGE = """usage: ai-autopilot [doctor | pr-doctor <url> | evals [dir] [--min-pass-rate R]]
+_USAGE = """usage: ai-autopilot [doctor | pr-doctor <url> | evals [dir] [--min-pass-rate R]
+                    | scan [options]]
 
   (no argument)  start the autopilot (poller, PR babysitter, dashboard, webhooks)
   doctor         audit the configuration for coherence and exit
   pr-doctor URL  say why a comment on that pull request did not reach the autopilot
   evals [dir]    run the agent-configuration eval suite (default dir: evals/) and exit
                  non-zero when the pass rate is under --min-pass-rate (default 1.0)
+  scan [...]     security scan (SAST + SCA + secrets, optional AI review) of a repo;
+                 exit 1 when a NEW unsuppressed finding is at/above --fail-on.
+                 `ai-autopilot scan --help` for options.
 """
 
 
@@ -117,6 +121,12 @@ def main() -> None:
             from ai_autopilot import pr_doctor
 
             sys.exit(pr_doctor.run(argv[1] if len(argv) > 1 else ""))
+        if argv[0] in ("scan", "--scan", "security-scan"):
+            # Pipeline-facing: must run with no live autopilot and, with --no-store
+            # --no-ai, with no database and no API key either.
+            from ai_autopilot.security_scan import cli as scan_cli
+
+            sys.exit(scan_cli.run(argv[1:]))
         if argv[0] in ("evals", "--evals"):
             # Same spirit as `doctor`: it must run without a live autopilot, because it
             # is what CI calls on a change to the skills and rules that steer the agent.

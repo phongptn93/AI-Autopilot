@@ -645,3 +645,99 @@ class LoopReport(Base):
     cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class SecurityScan(Base):
+    """One run of the security scanner — from the CLI, a scan loop, the pre-PR gate or
+    the Security page. The trend chart is drawn from these rows, which is why counts are
+    stored: "how many open highs did we have on the 1st" must not need every finding of
+    every scan reparsed."""
+
+    __tablename__ = "security_scans"
+    __table_args__ = (
+        Index("ix_security_scans_repo", "repo"),
+        Index("ix_security_scans_started_at", "started_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    repo: Mapped[str] = mapped_column(String(500), default="")
+    project: Mapped[str] = mapped_column(String(200), default="")
+    trigger: Mapped[str] = mapped_column(String(30), default="cli")  # cli|loop|pr-gate|dashboard
+    loop_name: Mapped[str] = mapped_column(String(200), default="")
+    branch: Mapped[str] = mapped_column(String(300), default="")
+    scope: Mapped[str] = mapped_column(String(20), default="full")   # full | diff
+    ai_mode: Mapped[str] = mapped_column(String(10), default="off")
+    tools_json: Mapped[str] = mapped_column(Text, default="{}")      # {name: status label}
+    status: Mapped[str] = mapped_column(String(20), default="success")
+    # Totals of what this scan REPORTED (after suppression), by severity …
+    critical_count: Mapped[int] = mapped_column(Integer, default=0)
+    high_count: Mapped[int] = mapped_column(Integer, default=0)
+    medium_count: Mapped[int] = mapped_column(Integer, default=0)
+    low_count: Mapped[int] = mapped_column(Integer, default=0)
+    info_count: Mapped[int] = mapped_column(Integer, default=0)
+    # … and how it compared with the baseline.
+    new_count: Mapped[int] = mapped_column(Integer, default=0)
+    fixed_count: Mapped[int] = mapped_column(Integer, default=0)
+    suppressed_count: Mapped[int] = mapped_column(Integer, default=0)
+    gate_passed: Mapped[bool] = mapped_column(Boolean, default=True)
+    fail_on: Mapped[str] = mapped_column(String(10), default="high")
+    report_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # loop_reports.id
+    # Which fingerprints this scan found new / fixed — so the scan's own page can list
+    # them without re-deriving from timestamps (which lie across overlapping scans).
+    new_json: Mapped[str] = mapped_column(Text, default="[]")
+    fixed_json: Mapped[str] = mapped_column(Text, default="[]")
+    filtered_count: Mapped[int] = mapped_column(Integer, default=0)   # dropped by rule/path ignore
+    html_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class SecurityFinding(Base):
+    """A security finding with a LIFE — first seen, last seen, fixed, suppressed, filed.
+
+    One row per (repo, fingerprint). A report loop stores what one run said; this stores
+    what is true about the code now, updated by every scan: still there → ``last_seen``
+    moves, gone from a full scan → ``fixed``, back again → reopened. That is what lets
+    the page answer "what is new since yesterday" and the gate fail only on that.
+    """
+
+    __tablename__ = "security_findings"
+    __table_args__ = (
+        UniqueConstraint("repo", "fingerprint", name="uq_security_findings_repo_fp"),
+        Index("ix_security_findings_status", "status"),
+        Index("ix_security_findings_severity", "severity"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    repo: Mapped[str] = mapped_column(String(500), default="")
+    project: Mapped[str] = mapped_column(String(200), default="")
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    tool: Mapped[str] = mapped_column(String(30), default="")
+    rule_id: Mapped[str] = mapped_column(String(200), default="")
+    severity: Mapped[str] = mapped_column(String(10), default="info")
+    cwe: Mapped[str] = mapped_column(String(20), default="")
+    owasp: Mapped[str] = mapped_column(String(20), default="")
+    confidence: Mapped[str] = mapped_column(String(10), default="")
+    file: Mapped[str] = mapped_column(String(1000), default="")
+    line: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title: Mapped[str] = mapped_column(String(500), default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    snippet: Mapped[str] = mapped_column(String(600), default="")
+    agent: Mapped[str] = mapped_column(String(200), default="")
+    # open | fixed | suppressed | false_positive
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    suppress_reason: Mapped[str] = mapped_column(String(1000), default="")
+    suppress_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    suppressed_by: Mapped[str] = mapped_column(String(200), default="")
+    ado_bug_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Phase 3: PoC verification outcome. None = not attempted.
+    verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    poc_md: Mapped[str] = mapped_column(Text, default="")
+    first_seen: Mapped[datetime] = mapped_column(DateTime)
+    last_seen: Mapped[datetime] = mapped_column(DateTime)
+    fixed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_scan_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    times_seen: Mapped[int] = mapped_column(Integer, default=1)

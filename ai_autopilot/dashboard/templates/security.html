@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  /* ── Security (scoped) ──
+     Three questions, in the order a visit asks them: can I scan (readiness + the scan
+     form), what is open and is it getting better (tiles + trend), what do I do about
+     each one (the work list, worst first, with every decision one click away). */
+  .main { max-width:none; }
+  .sc-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 16px; margin-bottom:5px; }
+  .sc-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+  .sc-top .sc-links { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
+  .sc-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:112ch; margin:0 0 14px; }
+  .sc-lede code, .sc-card code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input); padding:1px 6px; border-radius:5px; }
+  .sc-flash { display:flex; gap:10px; align-items:center; padding:11px 16px; margin-bottom:14px; border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-card); font-size:12.5px; }
+  .sc-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); }
+  .sc-flash.warn { border-color:rgba(245,166,35,.45); color:var(--amber); }
+  .sc-flash.bad { border-color:rgba(240,82,106,.45); color:var(--red); }
+  .sc-grid { display:grid; grid-template-columns: 1.1fr 1fr; gap:16px; margin-bottom:16px; }
+  .sc-grid3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
+  @media (max-width: 1200px) { .sc-grid, .sc-grid3 { grid-template-columns: 1fr; } }
+  .sc-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:16px; }
+  .sc-hd { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:baseline; padding:12px 18px; border-bottom:1px solid var(--border-soft); }
+  .sc-hd h3 { font-size:14px; font-weight:650; }
+  .sc-hd span { color:var(--text-dim); font-size:12px; }
+  .sc-hd .r { margin-left:auto; display:flex; gap:8px; align-items:center; }
+  .sc-body { padding:12px 18px; }
+  .sc-tiles { display:flex; flex-wrap:wrap; gap:10px; padding:14px 18px; }
+  .sc-tile { min-width:104px; padding:9px 13px; border:1px solid var(--border); border-radius:10px; background:var(--bg-input); text-decoration:none; color:inherit; }
+  .sc-tile:hover { border-color:var(--accent); }
+  .sc-tile b { display:block; font-size:22px; font-weight:750; letter-spacing:-.02em; }
+  .sc-tile span { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); }
+  .sc-tile.critical b { color:var(--red); } .sc-tile.high b { color:var(--amber); }
+  .sc-tile.fixed b { color:var(--green); }
+  .sc-ready { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; padding:12px 18px; }
+  .sc-rd { display:flex; gap:8px; align-items:flex-start; font-size:12px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg-input); }
+  .sc-rd .dot { width:9px; height:9px; border-radius:50%; margin-top:5px; flex:none; background:var(--text-dim); }
+  .sc-rd.ok .dot { background:var(--green); } .sc-rd.bad .dot { background:var(--red); } .sc-rd.off .dot { background:var(--border); }
+  .sc-rd b { font-family:var(--mono); font-size:11.5px; display:block; }
+  .sc-rd small { color:var(--text-dim); line-height:1.4; }
+  .sc-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px 14px; padding:12px 18px; align-items:end; }
+  .sc-f { display:flex; flex-direction:column; gap:4px; }
+  .sc-f label { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); }
+  .sc-in { width:100%; background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:var(--radius-sm); padding:6px 9px; font-size:12.5px; font-family:inherit; }
+  .sc-in.mono { font-family:var(--mono); font-size:11.5px; }
+  textarea.sc-in { min-height:54px; resize:vertical; }
+  .sc-chips { display:flex; flex-wrap:wrap; gap:5px; }
+  .sc-chip { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-family:var(--mono); border:1px solid var(--border); background:var(--bg-input); color:var(--text-dim); border-radius:7px; padding:4px 8px; cursor:pointer; white-space:nowrap; }
+  .sc-chip.on { color:var(--accent-hover); border-color:rgba(99,102,241,.5); background:var(--accent-bg); }
+  .sc-chip input { accent-color:var(--accent); margin:0; }
+  .sc-prog { display:flex; align-items:center; gap:10px; padding:10px 18px; font-size:12.5px; border-top:1px solid var(--border-soft); background:var(--accent-bg); }
+  .sc-prog .spin { width:12px; height:12px; border:2px solid var(--accent); border-right-color:transparent; border-radius:50%; animation:sc-spin .9s linear infinite; }
+  @keyframes sc-spin { to { transform:rotate(360deg); } }
+  .sc-filter { display:flex; flex-wrap:wrap; gap:6px; padding:10px 18px; border-bottom:1px solid var(--border-soft); align-items:center; }
+  .sc-filter a { font-size:11px; font-family:var(--mono); padding:4px 9px; border-radius:7px; border:1px solid var(--border); background:var(--bg-input); color:var(--text-dim); text-decoration:none; }
+  .sc-filter a.on { color:var(--accent-hover); border-color:rgba(99,102,241,.5); background:var(--accent-bg); }
+  .sc-filter a.critical.on { color:var(--red); border-color:rgba(240,82,106,.5); background:var(--red-bg); }
+  .sc-filter a.high.on { color:var(--amber); border-color:rgba(245,166,35,.5); background:rgba(245,166,35,.12); }
+  .sc-filter .lbl { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); margin-left:8px; }
+  .sc-filter .n { opacity:.7; margin-left:3px; }
+  .sc-filter form { display:inline-flex; gap:6px; margin-left:auto; }
+  .sc-filter input[type=search] { width:220px; }
+  .sc-tbl { width:100%; border-collapse:collapse; }
+  .sc-tbl th { text-align:left; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); padding:9px 14px; border-bottom:1px solid var(--border-soft); }
+  .sc-tbl td { padding:10px 14px; border-bottom:1px solid var(--border-soft); font-size:12.5px; vertical-align:top; }
+  .sc-tbl tr:last-child td { border-bottom:0; }
+  .sc-tbl tr:hover td { background:rgba(127,127,127,.04); }
+  .sc-tbl a.t { color:var(--text); text-decoration:none; font-weight:650; }
+  .sc-tbl a.t:hover { color:var(--accent-hover); }
+  .sc-where { font-family:var(--mono); font-size:11.5px; color:var(--text-muted); word-break:break-all; }
+  .sc-det { color:var(--text-dim); font-size:11.5px; line-height:1.5; margin-top:3px; max-width:66ch; }
+  .sc-snip { font-family:var(--mono); font-size:11px; background:var(--bg-input); padding:3px 7px; border-radius:5px; margin-top:4px; display:inline-block; max-width:66ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sc-tag { display:inline-block; font-size:10px; font-family:var(--mono); padding:1px 6px; border-radius:5px; border:1px solid var(--border); color:var(--text-dim); margin-right:3px; white-space:nowrap; text-decoration:none; }
+  .sev { display:inline-block; font-size:10px; font-family:var(--mono); font-weight:700; padding:1px 7px; border-radius:5px; white-space:nowrap; }
+  .sev.critical { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+  .sev.high { background:rgba(245,166,35,.14); color:var(--amber); border:1px solid rgba(245,166,35,.45); }
+  .sev.medium { background:rgba(245,166,35,.08); color:var(--amber); border:1px solid rgba(245,166,35,.3); }
+  .sev.low { background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.35); }
+  .sev.info { background:var(--bg-input); color:var(--text-dim); border:1px solid var(--border); }
+  .sev.new, .sev.pass { background:var(--green-bg); color:var(--green); border:1px solid rgba(46,204,113,.45); }
+  .sev.fail { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+  .sc-act { white-space:nowrap; }
+  .sc-act form { display:inline; }
+  .sc-act button { font-size:11px; padding:3px 8px; }
+  .sc-act details { display:inline-block; }
+  .sc-act details summary { cursor:pointer; font-size:11px; color:var(--accent-hover); list-style:none; }
+  .sc-act details div { margin-top:6px; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--bg-input); white-space:normal; min-width:260px; }
+  .sc-act input[type=text], .sc-act input[type=date] { width:100%; margin-bottom:6px; font-size:11.5px; padding:4px 6px; border:1px solid var(--border); border-radius:6px; background:var(--bg-card); color:var(--text); }
+  .sc-trend svg { width:100%; height:130px; display:block; }
+  .sc-legend { display:flex; gap:12px; font-size:10.5px; color:var(--text-dim); padding:0 18px 10px; }
+  .sc-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .sc-scans td { font-family:var(--mono); font-size:11.5px; }
+  .sc-empty { padding:22px 18px; color:var(--text-dim); font-size:12.5px; line-height:1.7; }
+  .sc-steps { padding:14px 18px; font-size:12.5px; line-height:1.7; }
+  .sc-steps ol { margin:6px 0 0 18px; padding:0; }
+  details.sc-adv summary { cursor:pointer; font-size:12px; color:var(--accent-hover); padding:8px 18px; list-style:none; border-top:1px solid var(--border-soft); }
+</style>
+
+<div class="sc-top">
+  <h2>🔐 Security</h2>
+  <div class="sc-links">
+    {% if repo %}
+    <a class="btn-ghost" href="/dashboard/security/export?repo={{ repo|urlencode }}&fmt=sarif&status={{ status }}">⬇ SARIF</a>
+    <a class="btn-ghost" href="/dashboard/security/export?repo={{ repo|urlencode }}&fmt=json&status={{ status }}">⬇ JSON</a>
+    {% endif %}
+    <a class="btn-ghost" href="/dashboard/loops">⏰ Scan loops</a>
+    <a class="btn-ghost" href="/dashboard/reports">🛡️ Reports</a>
+  </div>
+</div>
+<p class="sc-lede">
+  SAST · SCA · secrets · AI review, with a life per finding: the same issue is <b>one row</b>
+  across runs (fingerprint), the gate trips only on what is <b>new</b>, and a decision here
+  (suppress with a reason, false positive, file a Bug) is written to
+  <code>.autopilot/security-suppressions.yaml</code> so CI agrees.
+</p>
+
+{% if flash %}<div class="sc-flash {{ 'ok' if flash[0] == 'green' else ('warn' if flash[0] == 'amber' else 'bad') }}">{{ flash[1]|safe }}</div>{% endif %}
+{% if not sec_enabled %}<div class="sc-flash bad">Scanning is <b>disabled</b> (<code>security_scan.enabled: false</code>) — enable it below.</div>{% endif %}
+
+{# ── Row 1: readiness + scan form ── #}
+<div class="sc-grid">
+  <div class="sc-card">
+    <div class="sc-hd"><h3>▶ Scan now</h3><span>{{ repo_label }}</span>
+      <div class="r">{% if feed_url %}<a class="btn-ghost" href="{{ feed_url }}" style="font-size:11px">watch live</a>{% endif %}</div>
+    </div>
+    <form method="post" action="/dashboard/security/rescan">
+      <div class="sc-form">
+        <div class="sc-f" style="grid-column:1/-1">
+          <label>Repository (absolute path)</label>
+          <input class="sc-in mono" type="text" name="repo" value="{{ repo }}" placeholder="C:\\ws\\Backend-Fresh" list="sc-repos">
+          <datalist id="sc-repos">{% for r in repos %}<option value="{{ r }}">{% endfor %}</datalist>
+        </div>
+        <div class="sc-f" style="grid-column:1/-1">
+          <label>Tools</label>
+          <div class="sc-chips">
+            {% for t in all_tools %}
+            <label class="sc-chip {{ 'on' if t in sec.tools else '' }}"><input type="checkbox" name="tools" value="{{ t }}" {% if t in sec.tools %}checked{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">{{ t }}</label>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="sc-f"><label>AI review</label>
+          <select class="sc-in" name="ai">
+            <option value="off" {% if ai_mode == 'off' %}selected{% endif %}>off — deterministic only</option>
+            <option value="fast" {% if ai_mode == 'fast' %}selected{% endif %}>fast — critical/high, authz, injection</option>
+            <option value="deep" {% if ai_mode == 'deep' %}selected{% endif %}>deep — full OWASP checklist + STRIDE</option>
+          </select></div>
+        <div class="sc-f"><label>Scope</label>
+          <select class="sc-in" name="scope"><option value="full">full repository</option><option value="diff">diff vs base branch</option></select></div>
+        <div class="sc-f"><label>PoC verify</label>
+          <label class="sc-chip {{ 'on' if sec.verify_enabled else '' }}" title="{{ 'Build a PoC for each new high+ finding in an isolated worktree' if can_verify else 'needs use_worktrees: true' }}"><input type="checkbox" name="verify" value="1" {% if sec.verify_enabled %}checked{% endif %} {% if not can_verify %}disabled{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">verify new high+</label></div>
+        <div class="sc-f"><button class="btn-save" type="submit" {% if not can_scan %}disabled{% endif %} title="{{ 'Runs in the background; this page shows progress' if can_scan else ('scan already running' if progress else 'enter a repository path') }}">▶ Scan now</button></div>
+      </div>
+    </form>
+    {% if progress or running_row %}
+    <div class="sc-prog" id="sc-prog" data-repo="{{ repo }}"><span class="spin"></span>
+      <span id="sc-prog-text">{{ progress.label() if progress else 'running (started by another process)' }}</span>
+      {% if feed_url %}<a href="{{ feed_url }}" style="margin-left:auto">live feed →</a>{% endif %}</div>
+    {% endif %}
+  </div>
+
+  <div class="sc-card">
+    <div class="sc-hd"><h3>Readiness</h3><span>what this machine can run — same checks as <code>ai-autopilot doctor</code></span></div>
+    <div class="sc-ready">
+      {% for r in readiness %}
+      <div class="sc-rd {{ 'off' if not r.on else ('ok' if r.ok else 'bad') }}"><span class="dot"></span><div><b>{{ r.name }}</b><small>{{ r.note }}{% if not r.on %} · off{% endif %}</small></div></div>
+      {% endfor %}
+    </div>
+    <details class="sc-adv">
+      <summary>⚙ Scan settings — saved to <code>{{ config_file }}</code>, applied live</summary>
+      <form method="post" action="/dashboard/security/settings">
+        <div class="sc-form">
+          <div class="sc-f"><label>Enabled</label><label class="sc-chip {{ 'on' if sec.enabled else '' }}"><input type="checkbox" name="enabled" value="1" {% if sec.enabled %}checked{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">scanning on</label></div>
+          <div class="sc-f"><label>Default AI mode</label><select class="sc-in" name="ai_mode">{% for m in ('off','fast','deep') %}<option value="{{ m }}" {% if sec.ai_mode == m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+          <div class="sc-f"><label>Gate fails on new ≥</label><select class="sc-in" name="fail_on">{% for m in severities %}<option value="{{ m }}" {% if sec.fail_on == m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+          <div class="sc-f" style="grid-column:1/-1"><label>Default tools</label><div class="sc-chips">{% for t in all_tools %}<label class="sc-chip {{ 'on' if t in sec.tools else '' }}"><input type="checkbox" name="tools" value="{{ t }}" {% if t in sec.tools %}checked{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">{{ t }}</label>{% endfor %}</div></div>
+          <div class="sc-f" style="grid-column:1/-1"><label>Pre-PR gate tools (run on every autopilot PR diff)</label><div class="sc-chips">{% for t in all_tools %}<label class="sc-chip {{ 'on' if t in sec.pr_gate_tools else '' }}"><input type="checkbox" name="pr_gate_tools" value="{{ t }}" {% if t in sec.pr_gate_tools %}checked{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">{{ t }}</label>{% endfor %}</div></div>
+          <div class="sc-f"><label>File ADO Bugs</label><label class="sc-chip {{ 'on' if sec.file_bugs else '' }}"><input type="checkbox" name="file_bugs" value="1" {% if sec.file_bugs %}checked{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">for new findings ≥</label></div>
+          <div class="sc-f"><label>…from severity</label><select class="sc-in" name="file_bugs_from">{% for m in severities %}<option value="{{ m }}" {% if sec.file_bugs_from == m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+          <div class="sc-f"><label>PoC verify by default</label><label class="sc-chip {{ 'on' if sec.verify_enabled else '' }}"><input type="checkbox" name="verify_enabled" value="1" {% if sec.verify_enabled %}checked{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">on</label></div>
+          <div class="sc-f"><label>Max PoCs / scan</label><input class="sc-in mono" type="number" name="verify_max_per_scan" value="{{ sec.verify_max_per_scan }}" min="1" max="50"></div>
+          <div class="sc-f" style="grid-column:1/-1"><label>Disabled rules (comma-separated rule ids — switch a noisy rule off once)</label><input class="sc-in mono" type="text" name="disabled_rules" value="{{ sec.disabled_rules|join(', ') }}" placeholder="ts-target-blank, cfg-http-not-https"></div>
+          <div class="sc-f" style="grid-column:1/-1"><label>Ignore paths (one glob per line — generated / vendored trees)</label><textarea class="sc-in mono" name="ignore_paths">{{ sec.ignore_paths|join('\n') }}</textarea></div>
+          <div class="sc-f"><button class="btn-save" type="submit">Save settings</button></div>
+        </div>
+      </form>
+    </details>
+  </div>
+</div>
+
+{# ── Row 2: open now + trend ── #}
+<div class="sc-grid">
+  <div class="sc-card">
+    <div class="sc-hd"><h3>Open now</h3><span>{{ repo_label }} · click a tile to filter</span></div>
+    <div class="sc-tiles">
+      {% for sev in severities %}
+      <a class="sc-tile {{ sev }}" href="/dashboard/security?repo={{ repo|urlencode }}&status=open&severity={{ sev }}"><b>{{ open_counts.get(sev, 0) }}</b><span>{{ sev }}</span></a>
+      {% endfor %}
+      <a class="sc-tile" href="/dashboard/security?repo={{ repo|urlencode }}&status=suppressed"><b>{{ status_counts.get('suppressed', 0) }}</b><span>suppressed</span></a>
+      <a class="sc-tile fixed" href="/dashboard/security?repo={{ repo|urlencode }}&status=fixed"><b>{{ status_counts.get('fixed', 0) }}</b><span>fixed</span></a>
+    </div>
+  </div>
+  <div class="sc-card">
+    <div class="sc-hd"><h3>Trend</h3><span>findings per scan, oldest → newest · hover for detail · click a bar for that scan</span></div>
+    <div class="sc-body sc-trend">
+      {% if trend %}
+      {% set peak = trend|map(attribute='total')|max or 1 %}
+      <svg viewBox="0 0 {{ trend|length * 16 }} 64" preserveAspectRatio="none" role="img" aria-label="findings per scan">
+        {% for t in trend %}
+          {% set x = loop.index0 * 16 + 2 %}
+          {% set hc = (t.critical / peak * 58)|round(2) %}
+          {% set hh = (t.high / peak * 58)|round(2) %}
+          {% set hm = (t.medium / peak * 58)|round(2) %}
+          {% set hl = (t.low / peak * 58)|round(2) %}
+          <a href="/dashboard/security/scans/{{ t.id }}">
+            <title>scan #{{ t.id }} · {{ t.when }} · {{ t.trigger }} · {{ t.critical }}c {{ t.high }}h {{ t.medium }}m {{ t.low }}l · +{{ t.new }} new / −{{ t.fixed }} fixed · {{ 'gate passed' if t.passed else 'gate FAILED' }}</title>
+            <rect x="{{ x }}" y="{{ 62 - hl }}" width="12" height="{{ hl }}" fill="var(--accent)" opacity=".45"></rect>
+            <rect x="{{ x }}" y="{{ 62 - hl - hm }}" width="12" height="{{ hm }}" fill="var(--amber)" opacity=".45"></rect>
+            <rect x="{{ x }}" y="{{ 62 - hl - hm - hh }}" width="12" height="{{ hh }}" fill="var(--amber)"></rect>
+            <rect x="{{ x }}" y="{{ 62 - hl - hm - hh - hc }}" width="12" height="{{ hc }}" fill="var(--red)"></rect>
+            {% if not t.passed %}<rect x="{{ x }}" y="62" width="12" height="2" fill="var(--red)"></rect>{% endif %}
+          </a>
+        {% endfor %}
+      </svg>
+      <div class="sc-legend"><span><i style="background:var(--red)"></i>critical</span><span><i style="background:var(--amber)"></i>high</span><span><i style="background:var(--amber);opacity:.45"></i>medium</span><span><i style="background:var(--accent);opacity:.45"></i>low</span><span>· red underline = gate failed</span></div>
+      {% else %}
+      <div class="sc-empty" style="padding:4px 0">No completed scans for this repo yet.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ── Findings ── #}
+<div class="sc-card">
+  <div class="sc-hd"><h3>Findings</h3><span>{{ rows|length }} shown · worst first · click a title for the full record</span></div>
+  <div class="sc-filter">
+    <span class="lbl">repo</span>
+    <a href="/dashboard/security?status={{ status }}" class="{{ '' if repo else 'on' }}">all</a>
+    {% for r in repos %}<a href="/dashboard/security?repo={{ r|urlencode }}&status={{ status }}" class="{{ 'on' if repo == r else '' }}" title="{{ r }}">{{ r.rsplit('/', 1)[-1].rsplit('\\', 1)[-1] }}</a>{% endfor %}
+    <span class="lbl">status</span>
+    {% for s in ('open', 'suppressed', 'false_positive', 'fixed', 'all') %}
+    <a href="/dashboard/security?repo={{ repo|urlencode }}&status={{ s }}&tool={{ tool }}&q={{ q|urlencode }}" class="{{ 'on' if status == s else '' }}">{{ s }}{% if s != 'all' and status_counts.get(s) %}<span class="n">{{ status_counts.get(s) }}</span>{% endif %}</a>
+    {% endfor %}
+    <span class="lbl">severity</span>
+    <a href="/dashboard/security?repo={{ repo|urlencode }}&status={{ status }}&tool={{ tool }}&q={{ q|urlencode }}" class="{{ '' if severity else 'on' }}">any</a>
+    {% for s in severities %}<a href="/dashboard/security?repo={{ repo|urlencode }}&status={{ status }}&severity={{ s }}&tool={{ tool }}&q={{ q|urlencode }}" class="{{ s }} {{ 'on' if severity == s else '' }}">{{ s }}<span class="n">{{ sev_counts.get(s, 0) }}</span></a>{% endfor %}
+    <span class="lbl">tool</span>
+    <a href="/dashboard/security?repo={{ repo|urlencode }}&status={{ status }}&severity={{ severity }}&q={{ q|urlencode }}" class="{{ '' if tool else 'on' }}">any</a>
+    {% for t in tools %}<a href="/dashboard/security?repo={{ repo|urlencode }}&status={{ status }}&severity={{ severity }}&tool={{ t }}&q={{ q|urlencode }}" class="{{ 'on' if tool == t else '' }}">{{ t }}</a>{% endfor %}
+    <a href="/dashboard/security?repo={{ repo|urlencode }}&status={{ status }}&severity={{ severity }}&tool={{ tool }}&q={{ q|urlencode }}{{ '' if new_only else '&new=1' }}" class="{{ 'on' if new_only else '' }}" title="first seen in the last 7 days">✦ new (7d)</a>
+    <form method="get" action="/dashboard/security">
+      <input type="hidden" name="repo" value="{{ repo }}"><input type="hidden" name="status" value="{{ status }}">
+      <input type="hidden" name="severity" value="{{ severity }}"><input type="hidden" name="tool" value="{{ tool }}">
+      <input class="sc-in mono" type="search" name="q" value="{{ q }}" placeholder="search title / file / rule / CWE / fingerprint">
+    </form>
+  </div>
+
+  {% if rows %}
+  <div style="overflow-x:auto">
+  <table class="sc-tbl">
+    <thead><tr><th>Sev</th><th>Finding</th><th>Where</th><th>Class</th><th>Seen</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for f in rows %}
+    <tr>
+      <td><span class="sev {{ f.severity }}">{{ f.severity }}</span>
+          {% if f.first_seen and f.first_seen >= new_since %}<br><span class="sev new" title="first seen in the last 7 days">new</span>{% endif %}
+          {% if f.verified %}<br><span class="sev pass" title="PoC verified">verified</span>{% elif f.verified is sameas false %}<br><span class="sev info" title="PoC could not reproduce">unconfirmed</span>{% endif %}</td>
+      <td><a class="t" href="/dashboard/security/f/{{ f.id }}">{{ f.title }}</a>
+          {% if f.detail %}<div class="sc-det">{{ f.detail[:220] }}{% if f.detail|length > 220 %}…{% endif %}</div>{% endif %}
+          {% if f.snippet %}<div class="sc-snip" title="{{ f.snippet }}">{{ f.snippet }}</div>{% endif %}
+          {% if f.status != 'open' %}<div class="sc-det"><b>{{ f.status }}</b>{% if f.suppress_reason %} — {{ f.suppress_reason }}{% endif %}{% if f.suppressed_by %} ({{ f.suppressed_by }}){% endif %}{% if f.suppress_until %} until {{ f.suppress_until.strftime('%Y-%m-%d') }}{% endif %}</div>{% endif %}</td>
+      <td class="sc-where">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}
+          <div><span class="sc-tag">{{ f.tool or 'ai' }}</span>{% if f.rule_id %}<span class="sc-tag">{{ f.rule_id }}</span>{% endif %}{% if f.confidence %}<span class="sc-tag" title="confidence">{{ f.confidence }}</span>{% endif %}</div></td>
+      <td>{% if f.cwe %}<a class="sc-tag" href="https://cwe.mitre.org/data/definitions/{{ f.cwe[4:] }}.html" target="_blank" rel="noopener">{{ f.cwe }}</a>{% endif %}{% if f.owasp %}<span class="sc-tag">{{ f.owasp }}</span>{% endif %}</td>
+      <td class="sc-where">{{ f.times_seen }}× · {{ f.last_seen.strftime('%m-%d %H:%M') if f.last_seen else '' }}
+          {% if f.ado_bug_id %}<div>{% if item_link %}<a class="table-link" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener">Bug #{{ f.ado_bug_id }}</a>{% else %}Bug #{{ f.ado_bug_id }}{% endif %}</div>{% endif %}</td>
+      <td class="sc-act">
+        {% if f.status == 'open' %}
+        <details><summary>Suppress</summary><div>
+          <form method="post" action="/dashboard/security/{{ f.id }}/suppress">
+            <input type="text" name="reason" placeholder="reason (required)" required>
+            <input type="date" name="until" title="expires (optional)">
+            <button class="btn-save" type="submit">Suppress</button>
+            <button class="btn-ghost" type="submit" name="kind" value="false_positive">False positive</button>
+          </form></div></details>
+        {% if can_verify and f.verified is none %}<form method="post" action="/dashboard/security/{{ f.id }}/verify"><button class="btn-ghost" type="submit" title="Build a PoC in an isolated worktree">Verify</button></form>{% endif %}
+        {% if not f.ado_bug_id and can_file %}<form method="post" action="/dashboard/security/{{ f.id }}/file"><button class="btn-ghost" type="submit">File Bug</button></form>{% endif %}
+        {% else %}
+        <form method="post" action="/dashboard/security/{{ f.id }}/reopen"><button class="btn-ghost" type="submit">Reopen</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% elif not scans %}
+  <div class="sc-steps">
+    <b>No scans yet.</b> Three ways to get findings on this page:
+    <ol>
+      <li>Enter a repository path above and press <b>▶ Scan now</b> (builtin rules always work; install <code>semgrep</code>/<code>gitleaks</code> for more — see Readiness).</li>
+      <li>Add a <a class="table-link" href="/dashboard/loops">scan loop</a> from a preset (secrets daily · dependency CVEs daily · OWASP deep weekly).</li>
+      <li>From a terminal or CI: <code>ai-autopilot scan --repo &lt;path&gt; --format sarif --out scan.sarif</code>.</li>
+    </ol>
+  </div>
+  {% else %}
+  <div class="sc-empty">Nothing matches these filters.</div>
+  {% endif %}
+</div>
+
+{# ── Recent scans ── #}
+<div class="sc-card">
+  <div class="sc-hd"><h3>Recent scans</h3><span>{{ scans|length }} shown · click # for the run's own page</span></div>
+  {% if scans %}
+  <div style="overflow-x:auto">
+  <table class="sc-tbl sc-scans">
+    <thead><tr><th>#</th><th>When</th><th>Repo</th><th>Trigger</th><th>Scope · AI</th><th>Tools</th><th>Crit / High / Med / Low</th><th>New · Fixed · Supp</th><th>Gate</th><th>Report</th></tr></thead>
+    <tbody>
+    {% for s in scans %}
+    <tr>
+      <td><a class="table-link" href="/dashboard/security/scans/{{ s.id }}">{{ s.id }}</a></td>
+      <td>{{ s.started_at.strftime('%Y-%m-%d %H:%M') if s.started_at else '' }}{% if s.duration_seconds %} · {{ s.duration_seconds|round|int }}s{% endif %}</td>
+      <td title="{{ s.repo }}">{{ s.repo.rsplit('/', 1)[-1].rsplit('\\', 1)[-1] }}</td>
+      <td>{{ s.trigger }}{% if s.loop_name %} · {{ s.loop_name }}{% endif %}</td>
+      <td>{{ s.scope }} · {{ s.ai_mode }}</td>
+      <td title="{{ s.tools_json }}">{{ tool_summary(s.tools_json) }}</td>
+      <td>{{ s.critical_count }} / {{ s.high_count }} / {{ s.medium_count }} / {{ s.low_count }}</td>
+      <td>{{ s.new_count }} · {{ s.fixed_count }} · {{ s.suppressed_count }}</td>
+      <td>{% if s.status == 'running' %}<span class="sev info">running</span>{% elif s.error %}<span class="sev fail" title="{{ s.error }}">error</span>{% elif s.gate_passed %}<span class="sev pass">pass</span>{% else %}<span class="sev fail">fail</span>{% endif %}</td>
+      <td>{% if s.report_id %}<a class="table-link" href="/dashboard/reports/{{ s.report_id }}">report</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<div class="sc-empty">No scans recorded yet.</div>{% endif %}
+</div>
+
+<script>
+(function () {
+  var box = document.getElementById('sc-prog');
+  if (!box) { return; }
+  var repo = box.dataset.repo, text = document.getElementById('sc-prog-text');
+  var tick = function () {
+    fetch('/dashboard/security/progress?repo=' + encodeURIComponent(repo), { credentials: 'same-origin' })
+      .then(function (r) { return r.text(); })
+      .then(function (t) {
+        if (t === 'idle') { window.location.reload(); return; }
+        text.textContent = t; setTimeout(tick, 3000);
+      })
+      .catch(function () { setTimeout(tick, 6000); });
+  };
+  setTimeout(tick, 3000);
+})();
+</script>
+{% endblock %}

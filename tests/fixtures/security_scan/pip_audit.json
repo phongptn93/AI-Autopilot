@@ -1,0 +1,17 @@
+{
+  "dependencies": [
+    {"name": "fastapi", "version": "0.100.0", "vulns": []},
+    {
+      "name": "cryptography",
+      "version": "41.0.0",
+      "vulns": [
+        {
+          "id": "GHSA-jfhm-5ghh-2f97",
+          "fix_versions": ["41.0.6"],
+          "aliases": ["CVE-2023-49083"],
+          "description": "NULL-dereference when loading PKCS7 certificates"
+        }
+      ]
+    }
+  ]
+}

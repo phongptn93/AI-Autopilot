@@ -32,6 +32,8 @@ from ai_autopilot.data.entities import (
     QualityKind,
     SchedulerDecision,
     SdlcLoopState,
+    SecurityFinding,
+    SecurityScan,
     SpecDrift,
     SyncMarker,
     WorkItemState,
@@ -1960,3 +1962,263 @@ class FleetKnowledgeRepository:
             )
             await session.commit()
             return bool(result.rowcount)
+
+
+@dataclass
+class ScanUpsert:
+    """What one scan did to the findings table — the numbers the CLI prints."""
+
+    new: int = 0
+    persisting: int = 0
+    reopened: int = 0
+    fixed: int = 0
+    suppressed: int = 0
+
+
+class SecurityRepository:
+    """Findings with a lifecycle, and the scans that observed them.
+
+    ``upsert_scan`` is the only writer that matters: it reconciles what a scan reported
+    against what the table believes, so the page and the gate never disagree about
+    what is new. A ``full`` scan is authoritative for the whole repo (anything open
+    it did not report is fixed); a ``diff`` scan only knows about the files it looked
+    at and must not close findings elsewhere.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def open_fingerprints(self, repo: str, files: set[str] | None = None) -> set[str]:
+        """The baseline: every fingerprint currently open or suppressed on ``repo`` —
+        optionally only those in ``files`` (a diff scan's view of the world)."""
+        async with self._db.session() as session:
+            query = select(SecurityFinding.fingerprint).where(
+                SecurityFinding.repo == repo,
+                SecurityFinding.status.in_(("open", "suppressed", "false_positive")),
+            )
+            if files is not None:
+                query = query.where(SecurityFinding.file.in_(sorted(files)))
+            rows = await session.execute(query)
+            return {str(r) for (r,) in rows.all()}
+
+    async def has_history(self, repo: str) -> bool:
+        async with self._db.session() as session:
+            row = await session.execute(
+                select(func.count(SecurityScan.id)).where(SecurityScan.repo == repo)
+            )
+            return int(row.scalar() or 0) > 0
+
+    async def start_scan(self, **fields) -> int:
+        row = SecurityScan(started_at=datetime.now(UTC), status="running", **fields)
+        async with self._db.session() as session:
+            session.add(row)
+            await session.commit()
+            return int(row.id)
+
+    async def finish_scan(self, scan_id: int, **fields) -> None:
+        async with self._db.session() as session:
+            row = await session.get(SecurityScan, scan_id)
+            if row is None:
+                return
+            for key, value in fields.items():
+                setattr(row, key, value)
+            row.finished_at = datetime.now(UTC)
+            await session.commit()
+
+    async def upsert_scan(
+        self, repo: str, project: str, scan_id: int, findings: list, *,
+        scope: str = "full", suppressed: set[str] | None = None,
+        scanned_files: set[str] | None = None, now: datetime | None = None,
+    ) -> ScanUpsert:
+        """Reconcile ``findings`` (``reports.Finding`` with fingerprints) into the table."""
+        now = now or datetime.now(UTC)
+        suppressed = suppressed or set()
+        result = ScanUpsert()
+        reported = {f.fingerprint: f for f in findings if f.fingerprint}
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(SecurityFinding).where(SecurityFinding.repo == repo)
+            )
+            existing = {row.fingerprint: row for row in rows.scalars().all()}
+
+            for fp, f in reported.items():
+                row = existing.get(fp)
+                is_suppressed = fp in suppressed
+                if row is None:
+                    # ``status`` set here, not left to the column default: the default
+                    # only applies at INSERT, and the suppression branch below reads it.
+                    row = SecurityFinding(
+                        repo=repo, project=project, fingerprint=fp, status="open",
+                        first_seen=now, last_seen=now, times_seen=1,
+                    )
+                    session.add(row)
+                    existing[fp] = row
+                    result.new += 1
+                else:
+                    row.times_seen = (row.times_seen or 0) + 1
+                    row.last_seen = now
+                    if row.status == "fixed":
+                        row.status, row.fixed_at = "open", None
+                        result.reopened += 1
+                    else:
+                        result.persisting += 1
+                # Always refresh what the scanner says — the line moved, the title improved.
+                row.tool, row.rule_id = (f.tool or "")[:30], (f.rule_id or "")[:200]
+                row.severity = f.severity
+                row.cwe, row.owasp = (f.cwe or "")[:20], (f.owasp or "")[:20]
+                row.confidence = (f.confidence or "")[:10]
+                row.file, row.line = (f.file or "")[:1000], f.line
+                row.title, row.detail = (f.title or "")[:500], f.detail or ""
+                row.snippet, row.agent = (f.snippet or "")[:600], (f.agent or "")[:200]
+                row.project = project or row.project
+                row.last_scan_id = scan_id
+                if is_suppressed:
+                    if row.status == "open":
+                        row.status = "suppressed"
+                    result.suppressed += 1
+                elif row.status == "suppressed":
+                    # Suppression expired or was removed from the file: it is open again.
+                    row.status = "open"
+
+            if scope == "full" or scanned_files:
+                for fp, row in existing.items():
+                    if fp in reported or row.status == "fixed":
+                        continue
+                    if scope != "full" and scanned_files and row.file not in scanned_files:
+                        continue  # a diff scan cannot vouch for files it did not read
+                    row.status, row.fixed_at = "fixed", now
+                    result.fixed += 1
+            await session.commit()
+        return result
+
+    async def by_fingerprints(self, repo: str, fps: list[str]) -> list[SecurityFinding]:
+        """The rows for these fingerprints, worst first — a scan page's new/fixed lists."""
+        from ai_autopilot.reports import SEVERITIES
+
+        if not fps:
+            return []
+        async with self._db.session() as session:
+            rows = await session.execute(select(SecurityFinding).where(
+                SecurityFinding.repo == repo, SecurityFinding.fingerprint.in_(list(fps)[:500])))
+            out = list(rows.scalars().all())
+        out.sort(key=lambda r: (
+            SEVERITIES.index(r.severity) if r.severity in SEVERITIES else 9, r.file, r.line or 0,
+        ))
+        return out
+
+    async def list_findings(
+        self, *, repo: str = "", project: str = "", status: str = "open",
+        severity: str = "", tool: str = "", cwe: str = "", limit: int = 500,
+        new_since: datetime | None = None, q: str = "",
+    ) -> list[SecurityFinding]:
+        from ai_autopilot.reports import SEVERITIES
+
+        async with self._db.session() as session:
+            query = select(SecurityFinding)
+            if q.strip():
+                like = f"%{q.strip()}%"
+                query = query.where(or_(
+                    SecurityFinding.title.ilike(like), SecurityFinding.file.ilike(like),
+                    SecurityFinding.rule_id.ilike(like), SecurityFinding.cwe.ilike(like),
+                    SecurityFinding.fingerprint.ilike(like),
+                ))
+            if repo:
+                query = query.where(SecurityFinding.repo == repo)
+            if project:
+                query = query.where(SecurityFinding.project == project)
+            if status and status != "all":
+                query = query.where(SecurityFinding.status == status)
+            if severity:
+                query = query.where(SecurityFinding.severity == severity)
+            if tool:
+                query = query.where(SecurityFinding.tool == tool)
+            if cwe:
+                query = query.where(SecurityFinding.cwe == cwe)
+            if new_since is not None:
+                query = query.where(SecurityFinding.first_seen >= new_since)
+            rows = await session.execute(
+                query.order_by(SecurityFinding.last_seen.desc()).limit(limit)
+            )
+            out = list(rows.scalars().all())
+        out.sort(key=lambda r: (
+            SEVERITIES.index(r.severity) if r.severity in SEVERITIES else 9, r.file, r.line or 0,
+        ))
+        return out
+
+    async def get(self, finding_id: int) -> SecurityFinding | None:
+        async with self._db.session() as session:
+            return await session.get(SecurityFinding, finding_id)
+
+    async def by_fingerprint(self, repo: str, fp: str) -> SecurityFinding | None:
+        async with self._db.session() as session:
+            rows = await session.execute(select(SecurityFinding).where(
+                SecurityFinding.repo == repo, SecurityFinding.fingerprint == fp))
+            return rows.scalars().first()
+
+    async def set_status(
+        self, finding_id: int, status: str, *, reason: str = "", by: str = "",
+        until: datetime | None = None,
+    ) -> bool:
+        async with self._db.session() as session:
+            row = await session.get(SecurityFinding, finding_id)
+            if row is None:
+                return False
+            row.status = status
+            if status in ("suppressed", "false_positive"):
+                row.suppress_reason = (reason or "")[:1000]
+                row.suppressed_by, row.suppress_until = (by or "")[:200], until
+            elif status == "open":
+                row.suppress_reason, row.suppressed_by, row.suppress_until = "", "", None
+            await session.commit()
+            return True
+
+    async def set_bug(self, finding_id: int, bug_id: int) -> None:
+        async with self._db.session() as session:
+            row = await session.get(SecurityFinding, finding_id)
+            if row is not None:
+                row.ado_bug_id = bug_id
+                await session.commit()
+
+    async def set_verification(
+        self, finding_id: int, verified: bool | None, poc_md: str,
+    ) -> None:
+        async with self._db.session() as session:
+            row = await session.get(SecurityFinding, finding_id)
+            if row is not None:
+                row.verified, row.poc_md = verified, poc_md or ""
+                if verified:
+                    row.confidence = "high"
+                await session.commit()
+
+    async def recent_scans(self, limit: int = 30, repo: str = "") -> list[SecurityScan]:
+        async with self._db.session() as session:
+            query = select(SecurityScan).order_by(SecurityScan.started_at.desc()).limit(limit)
+            if repo:
+                query = query.where(SecurityScan.repo == repo)
+            rows = await session.execute(query)
+            return list(rows.scalars().all())
+
+    async def get_scan(self, scan_id: int) -> SecurityScan | None:
+        async with self._db.session() as session:
+            return await session.get(SecurityScan, scan_id)
+
+    async def repos(self) -> list[str]:
+        async with self._db.session() as session:
+            rows = await session.execute(select(SecurityFinding.repo).distinct())
+            return sorted({str(r) for (r,) in rows.all() if r})
+
+    async def counts(self, repo: str = "", project: str = "") -> dict[str, dict[str, int]]:
+        """``{status: {severity: n}}`` — the page's header chips in one query."""
+        async with self._db.session() as session:
+            query = select(
+                SecurityFinding.status, SecurityFinding.severity, func.count(SecurityFinding.id)
+            ).group_by(SecurityFinding.status, SecurityFinding.severity)
+            if repo:
+                query = query.where(SecurityFinding.repo == repo)
+            if project:
+                query = query.where(SecurityFinding.project == project)
+            rows = await session.execute(query)
+            out: dict[str, dict[str, int]] = {}
+            for status, severity, n in rows.all():
+                out.setdefault(str(status), {})[str(severity)] = int(n)
+            return out

@@ -1,0 +1,22 @@
+[
+  {
+    "Description": "Azure Storage Account Key",
+    "StartLine": 12,
+    "EndLine": 12,
+    "StartColumn": 5,
+    "EndColumn": 120,
+    "Match": "AccountKey=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789EXAMPLEKEYfixtur==",
+    "Secret": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789EXAMPLEKEYfixtur==",
+    "File": "Presentation/Nois.Api/appsettings.Production.json",
+    "Line": "    \"Storage\": \"DefaultEndpointsProtocol=https;AccountName=noisprod;AccountKey=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789EXAMPLEKEYfixtur==\"",
+    "Commit": "3fa9c1e2d4b5a6978",
+    "Entropy": 5.1,
+    "Author": "someone",
+    "Email": "someone@example.com",
+    "Date": "2026-09-01T10:00:00Z",
+    "Message": "add prod settings",
+    "Tags": [],
+    "RuleID": "azure-storage-account-key",
+    "Fingerprint": "3fa9c1e2d4b5a6978:Presentation/Nois.Api/appsettings.Production.json:azure-storage-account-key:12"
+  }
+]

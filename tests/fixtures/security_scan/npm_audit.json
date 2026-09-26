@@ -1,0 +1,37 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "lodash": {
+      "name": "lodash",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1096305,
+          "name": "lodash",
+          "dependency": "lodash",
+          "title": "Prototype Pollution in lodash",
+          "url": "https://github.com/advisories/GHSA-p6mc-m468-83gw",
+          "severity": "high",
+          "cwe": ["CWE-1321"],
+          "range": "<4.17.21"
+        }
+      ],
+      "effects": [],
+      "range": "<4.17.21",
+      "nodes": ["node_modules/lodash"],
+      "fixAvailable": {"name": "lodash", "version": "4.17.21", "isSemVerMajor": false}
+    },
+    "minimist": {
+      "name": "minimist",
+      "severity": "critical",
+      "isDirect": false,
+      "via": ["mkdirp"],
+      "effects": ["mkdirp"],
+      "range": "<0.2.4",
+      "nodes": ["node_modules/minimist"],
+      "fixAvailable": true
+    }
+  },
+  "metadata": {"vulnerabilities": {"info": 0, "low": 0, "moderate": 0, "high": 1, "critical": 1, "total": 2}}
+}

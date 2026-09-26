@@ -1546,6 +1546,68 @@ def check_scheduled_loops(config: Settings) -> list[Finding]:
     )]
 
 
+def check_security_scan(config: Settings) -> list[Finding]:
+    """The security scanner is configured to use tools that are not on this machine.
+
+    Not an error: every scanner is optional and the builtin rules always run. But a
+    team that turned ``semgrep`` on expects semgrep's findings, and a scan that quietly
+    skips it looks identical to one that ran it and found nothing — so say it here,
+    once, where it is read, rather than in a per-run status line nobody checks.
+    """
+    import shutil
+
+    sec = config.security_scan
+    if not sec.enabled:
+        return [Finding(OK, "Security scan: disabled")]
+    out: list[Finding] = []
+    wanted = [t for t in sec.tools if t not in ("builtin", "ai")]
+    binaries = {"semgrep": ["semgrep"], "gitleaks": ["gitleaks"],
+                "sca": ["trivy", "dotnet", "npm", "pip-audit"]}
+    for tool in wanted:
+        names = binaries.get(tool)
+        if names is None:
+            out.append(Finding(
+                WARN, f"Security scan lists an unknown tool '{tool}'",
+                "It is ignored. Known: builtin, gitleaks, semgrep, sca.",
+                "Fix security_scan.tools in config.yaml.",
+            ))
+        elif not any(shutil.which(b) for b in names):
+            out.append(Finding(
+                WARN, f"Security scan tool '{tool}' is not installed",
+                f"None of {', '.join(names)} is on PATH, so `ai-autopilot scan` and scan "
+                "loops skip it (the run still says so per tool). The builtin rule set "
+                "and the AI pass still run.",
+                f"Install it, or remove '{tool}' from security_scan.tools.",
+            ))
+    import os
+
+    if sec.ai_enabled and not os.getenv("ANTHROPIC_API_KEY", "").strip():
+        out.append(Finding(
+            WARN, "Security scan AI pass has no API key",
+            f"ai_mode is '{sec.ai_mode}' but no ANTHROPIC_API_KEY is set; the model "
+            "pass is skipped with an error status on every run.",
+            "Set the key, or security_scan.ai_mode: off.",
+        ))
+    if (sec.fail_on or "").lower() not in ("critical", "high", "medium", "low", "info"):
+        out.append(Finding(
+            ERROR, f"Security scan fail_on '{sec.fail_on}' is not a severity",
+            "The gate falls back to 'high'.",
+            "Use one of critical, high, medium, low, info.",
+        ))
+    for target in sec.dast_targets:
+        if target.enabled and not target.owner_confirmed:
+            out.append(Finding(
+                WARN, f"DAST target '{target.name}' is not owner-confirmed",
+                "It is refused at run time until owner_confirmed: true — the config "
+                "must state, in writing, that this host is yours to test.",
+                "Set owner_confirmed: true on the target, or disable it.",
+            ))
+    if out:
+        return out
+    return [Finding(OK, f"Security scan: {', '.join(sec.tools)} · AI {sec.ai_mode} · "
+                        f"fail on {sec.fail_on}")]
+
+
 CHECKS = (
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
@@ -1559,7 +1621,7 @@ CHECKS = (
     check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
     check_board_processes,
-    check_assignee_scoping, check_scheduled_loops,
+    check_assignee_scoping, check_scheduled_loops, check_security_scan,
 )
 
 

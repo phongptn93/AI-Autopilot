@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  /* ── One finding (scoped) ── everything needed to decide, on one screen. */
+  .main { max-width:none; }
+  .sf-top { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; margin-bottom:8px; }
+  .sf-top h2 { font-size:19px; font-weight:750; letter-spacing:-.02em; line-height:1.3; }
+  .sf-crumb { font-size:12px; color:var(--text-dim); margin-bottom:6px; }
+  .sf-crumb a { color:var(--accent-hover); text-decoration:none; }
+  .sf-flash { padding:11px 16px; margin-bottom:14px; border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-card); font-size:12.5px; }
+  .sf-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); } .sf-flash.warn { border-color:rgba(245,166,35,.45); color:var(--amber); } .sf-flash.bad { border-color:rgba(240,82,106,.45); color:var(--red); }
+  .sf-grid { display:grid; grid-template-columns: 1.4fr 1fr; gap:16px; }
+  @media (max-width: 1100px) { .sf-grid { grid-template-columns: 1fr; } }
+  .sf-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:16px; }
+  .sf-hd { display:flex; gap:10px; align-items:baseline; padding:12px 18px; border-bottom:1px solid var(--border-soft); }
+  .sf-hd h3 { font-size:13.5px; font-weight:650; } .sf-hd span { color:var(--text-dim); font-size:12px; margin-left:auto; }
+  .sf-body { padding:14px 18px; font-size:13px; line-height:1.65; }
+  .sf-kv { display:grid; grid-template-columns: 130px 1fr; gap:6px 14px; font-size:12.5px; }
+  .sf-kv dt { color:var(--text-dim); font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; padding-top:3px; }
+  .sf-kv dd { margin:0; word-break:break-word; }
+  .sf-kv code, .sf-body code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input); padding:1px 6px; border-radius:5px; }
+  pre.sf-snip { margin:0; padding:11px 13px; border-radius:8px; background:rgba(127,127,127,.12); border:1px solid var(--border); font-family:var(--mono); font-size:12px; overflow-x:auto; white-space:pre-wrap; word-break:break-all; }
+  .sev { display:inline-block; font-size:10.5px; font-family:var(--mono); font-weight:700; padding:2px 8px; border-radius:5px; white-space:nowrap; }
+  .sev.critical { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+  .sev.high { background:rgba(245,166,35,.14); color:var(--amber); border:1px solid rgba(245,166,35,.45); }
+  .sev.medium { background:rgba(245,166,35,.08); color:var(--amber); border:1px solid rgba(245,166,35,.3); }
+  .sev.low { background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.35); }
+  .sev.info { background:var(--bg-input); color:var(--text-dim); border:1px solid var(--border); }
+  .sev.pass { background:var(--green-bg); color:var(--green); border:1px solid rgba(46,204,113,.45); }
+  .sev.fail { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
+  .sf-tag { display:inline-block; font-size:10.5px; font-family:var(--mono); padding:1px 7px; border-radius:5px; border:1px solid var(--border); color:var(--text-dim); margin-right:4px; text-decoration:none; }
+  .sf-tag[href]:hover { color:var(--accent-hover); border-color:var(--accent); }
+  .sf-actions { display:flex; flex-direction:column; gap:10px; }
+  .sf-actions form { display:flex; flex-direction:column; gap:6px; padding:10px; border:1px solid var(--border); border-radius:9px; background:var(--bg-input); }
+  .sf-actions form b { font-size:12px; }
+  .sf-actions form small { color:var(--text-dim); font-size:11px; line-height:1.4; }
+  .sf-actions input[type=text], .sf-actions input[type=date] { font-size:12px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg-card); color:var(--text); }
+  .sf-actions .row { display:flex; gap:6px; flex-wrap:wrap; }
+  .sf-hist { width:100%; border-collapse:collapse; font-size:12px; }
+  .sf-hist td { padding:6px 0; border-bottom:1px solid var(--border-soft); font-family:var(--mono); }
+  .sf-hist tr:last-child td { border-bottom:0; }
+  .md > :first-child { margin-top:0; } .md > :last-child { margin-bottom:0; }
+  .md pre { margin:8px 0; padding:10px 12px; border-radius:8px; background:rgba(127,127,127,.12); border:1px solid var(--border); overflow-x:auto; font-family:var(--mono); font-size:12px; }
+  .md p { margin:6px 0; } .md blockquote { margin:8px 0; padding:2px 12px; border-left:3px solid var(--text-dim); color:var(--text-dim); }
+</style>
+
+<div class="sf-crumb"><a href="/dashboard/security?repo={{ f.repo|urlencode }}">🔐 Security</a> › {{ repo_name }} › finding #{{ f.id }}</div>
+<div class="sf-top">
+  <span class="sev {{ f.severity }}">{{ f.severity }}</span>
+  <h2>{{ f.title }}</h2>
+  {% if f.status != 'open' %}<span class="sev info">{{ f.status }}</span>{% endif %}
+  {% if f.verified %}<span class="sev pass" title="PoC verified">verified</span>{% elif f.verified is sameas false %}<span class="sev info">unconfirmed</span>{% endif %}
+  {% if verifying %}<span class="sev info">verifying…</span>{% endif %}
+</div>
+
+{% if flash %}<div class="sf-flash {{ 'ok' if flash[0] == 'green' else ('warn' if flash[0] == 'amber' else 'bad') }}">{{ flash[1]|safe }}</div>{% endif %}
+
+<div class="sf-grid">
+  <div>
+    <div class="sf-card">
+      <div class="sf-hd"><h3>Where &amp; what</h3><span>{{ f.tool or 'ai' }}{% if f.rule_id %} · {{ f.rule_id }}{% endif %}</span></div>
+      <div class="sf-body">
+        <dl class="sf-kv">
+          <dt>Location</dt><dd><code>{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}</code></dd>
+          <dt>Classification</dt><dd>
+            {% if f.cwe %}<a class="sf-tag" href="{{ cwe_link }}" target="_blank" rel="noopener" title="open CWE definition">{{ f.cwe }} ↗</a>{% endif %}
+            {% if f.owasp %}<a class="sf-tag" href="{{ owasp_link }}" target="_blank" rel="noopener">{{ f.owasp }} ↗</a>{% endif %}
+            {% if not f.cwe and not f.owasp %}<span class="sf-tag">unclassified</span>{% endif %}
+          </dd>
+          <dt>Confidence</dt><dd>{{ f.confidence or '—' }}{% if f.verified %} · <b>PoC verified</b>{% elif f.verified is sameas false %} · could not reproduce{% endif %}</dd>
+          <dt>Repository</dt><dd><code>{{ f.repo }}</code></dd>
+          <dt>Fingerprint</dt><dd><code>{{ f.fingerprint }}</code> <small style="color:var(--text-dim)">— stable across runs; use in <code>.autopilot/security-suppressions.yaml</code></small></dd>
+          {% if f.agent %}<dt>Found by</dt><dd>{{ f.agent }}</dd>{% endif %}
+        </dl>
+        {% if f.detail %}<p style="margin:12px 0 8px">{{ f.detail }}</p>{% endif %}
+        {% if f.snippet %}<pre class="sf-snip">{{ f.snippet }}</pre>{% endif %}
+      </div>
+    </div>
+
+    {% if poc_html %}
+    <div class="sf-card">
+      <div class="sf-hd"><h3>🧪 Proof of concept</h3><span>{{ 'reproduced' if f.verified else 'not reproduced' }}</span></div>
+      <div class="sf-body md">{{ poc_html|safe }}</div>
+    </div>
+    {% endif %}
+
+    <div class="sf-card">
+      <div class="sf-hd"><h3>History</h3><span>seen {{ f.times_seen }}×</span></div>
+      <div class="sf-body">
+        <table class="sf-hist">
+          <tr><td>first seen</td><td>{{ f.first_seen.strftime('%Y-%m-%d %H:%M') if f.first_seen else '' }}</td></tr>
+          <tr><td>last seen</td><td>{{ f.last_seen.strftime('%Y-%m-%d %H:%M') if f.last_seen else '' }}</td></tr>
+          {% if f.fixed_at %}<tr><td>fixed</td><td>{{ f.fixed_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>{% endif %}
+          {% if f.suppress_reason %}<tr><td>{{ f.status }}</td><td>{{ f.suppress_reason }}{% if f.suppressed_by %} — {{ f.suppressed_by }}{% endif %}{% if f.suppress_until %} · until {{ f.suppress_until.strftime('%Y-%m-%d') }}{% endif %}</td></tr>{% endif %}
+          {% if f.ado_bug_id %}<tr><td>ADO</td><td>{% if item_link %}<a class="table-link" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener">Bug #{{ f.ado_bug_id }}</a>{% else %}Bug #{{ f.ado_bug_id }}{% endif %}</td></tr>{% endif %}
+          {% for s in seen_in %}
+          <tr><td><a class="table-link" href="/dashboard/security/scans/{{ s.id }}">scan #{{ s.id }}</a></td><td>{{ s.started_at.strftime('%Y-%m-%d %H:%M') if s.started_at else '' }} · {{ s.trigger }} · {{ s.scope }} · AI {{ s.ai_mode }}{% if s.report_id %} · <a class="table-link" href="/dashboard/reports/{{ s.report_id }}">report</a>{% endif %}</td></tr>
+          {% endfor %}
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="sf-card">
+      <div class="sf-hd"><h3>Decide</h3></div>
+      <div class="sf-body sf-actions">
+        {% if f.status == 'open' %}
+        {% if can_verify and not verifying %}
+        <form method="post" action="/dashboard/security/{{ f.id }}/verify">
+          <b>🧪 Verify with a PoC</b>
+          <small>The model builds and runs the smallest proof in a throwaway git worktree — nothing is committed. Confirmed → confidence <b>high</b>; not reproduced → badged <i>unconfirmed</i> with the reason.</small>
+          <div class="row"><button class="btn-save" type="submit">{{ 'Re-verify' if f.verified is not none else 'Verify' }}</button></div>
+        </form>
+        {% endif %}
+        {% if can_file and not f.ado_bug_id %}
+        <form method="post" action="/dashboard/security/{{ f.id }}/file">
+          <b>🐞 File a Bug on ADO</b>
+          <small>Title <code>[Security][{{ f.severity }}]{{ ('[' ~ f.cwe ~ ']') if f.cwe else '' }} …</code>, tags <code>security, autopilot-security</code>. One Bug per fingerprint; a later scan that stops seeing it comments on the Bug.</small>
+          <div class="row"><button class="btn-save" type="submit">File Bug</button></div>
+        </form>
+        {% endif %}
+        <form method="post" action="/dashboard/security/{{ f.id }}/suppress">
+          <b>🔕 Suppress / accept risk</b>
+          <small>Requires a reason. Written to <code>.autopilot/security-suppressions.yaml</code> in the workspace so the CLI in CI honours it. An expiry brings it back — and the run says so.</small>
+          <input type="text" name="reason" placeholder="reason (required) — e.g. test fixture, tracked in #1234" required>
+          <input type="date" name="until" title="expires (optional)">
+          <div class="row"><button class="btn-save" type="submit">Suppress</button><button class="btn-ghost" type="submit" name="kind" value="false_positive">Mark false positive</button></div>
+        </form>
+        {% else %}
+        <form method="post" action="/dashboard/security/{{ f.id }}/reopen">
+          <b>↩ Reopen</b>
+          <small>Removes the suppression from the workspace file too.</small>
+          <div class="row"><button class="btn-save" type="submit">Reopen</button></div>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    <div class="sf-card">
+      <div class="sf-hd"><h3>Fix it</h3></div>
+      <div class="sf-body" style="font-size:12.5px">
+        Open a terminal in the repo and ask the agent with the finding attached:
+        <pre class="sf-snip">claude "Fix the {{ f.severity }} security finding {{ f.cwe or f.rule_id }} at {{ f.file }}{% if f.line %}:{{ f.line }}{% endif %} — {{ f.title }}. Keep the change minimal and add a regression test."</pre>
+        <small style="color:var(--text-dim)">Or create a Bug above and let the autopilot pick it up with its normal tag — the pre-PR gate re-scans the diff, so the fix is verified on the way in.</small>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

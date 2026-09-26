@@ -59,7 +59,13 @@ def normalise_severity(value: object) -> str:
 
 @dataclass
 class Finding:
-    """One thing the audit found."""
+    """One thing the audit found.
+
+    The security fields (``rule_id`` … ``snippet``) default to empty so a finding from a
+    plain report loop is unchanged. A security scan fills them: they are what turns a
+    line of prose into something that can be deduplicated across runs (``fingerprint``),
+    classified (``cwe``/``owasp``), and traced to the tool that raised it (``tool``).
+    """
 
     severity: str = "info"
     title: str = ""
@@ -67,12 +73,56 @@ class Finding:
     line: int | None = None
     detail: str = ""
     agent: str = ""          # which sub-agent reported it, when the agent says
+    # ── security-scan fields ──
+    tool: str = ""           # ai | builtin | semgrep | gitleaks | sca | dast | poc
+    rule_id: str = ""        # scanner rule / CVE id / AI category
+    cwe: str = ""            # "CWE-89"
+    owasp: str = ""          # "API3:2023" / "A03:2021"
+    confidence: str = ""     # high | medium | low
+    fingerprint: str = ""    # stable id across runs — see security_scan.fingerprint
+    snippet: str = ""        # the offending line(s), bounded
 
     def as_dict(self) -> dict:
-        return {
+        data = {
             "severity": self.severity, "title": self.title, "file": self.file,
             "line": self.line, "detail": self.detail, "agent": self.agent,
         }
+        # Only emit the security keys when set — a plain report's JSON stays as it was.
+        for key in ("tool", "rule_id", "cwe", "owasp", "confidence", "fingerprint", "snippet"):
+            value = getattr(self, key)
+            if value:
+                data[key] = value
+        return data
+
+    @classmethod
+    def from_dict(cls, row: dict) -> Finding:
+        """The inverse of :meth:`as_dict`; tolerant of missing/extra keys."""
+        return cls(
+            severity=normalise_severity(row.get("severity")),
+            title=str(row.get("title") or "").strip(),
+            file=str(row.get("file") or "").strip().replace("\\", "/"),
+            line=_coerce_line(row.get("line")),
+            detail=str(row.get("detail") or "").strip(),
+            agent=str(row.get("agent") or "").strip(),
+            tool=str(row.get("tool") or "").strip().lower(),
+            rule_id=str(row.get("rule_id") or row.get("rule") or "").strip(),
+            cwe=_norm_cwe(row.get("cwe")),
+            owasp=str(row.get("owasp") or "").strip(),
+            confidence=str(row.get("confidence") or "").strip().lower(),
+            fingerprint=str(row.get("fingerprint") or "").strip(),
+            snippet=str(row.get("snippet") or "").strip()[:500],
+        )
+
+
+def _norm_cwe(value: object) -> str:
+    """``89`` / ``cwe-89`` / ``CWE-089`` → ``CWE-89``; lists keep the first; else ""."""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    text = str(value or "").strip().upper()
+    m = re.search(r"(\d+)", text)
+    if not m:
+        return ""
+    return f"CWE-{int(m.group(1))}"
 
 
 @dataclass
@@ -142,17 +192,7 @@ def parse_findings(text: str) -> tuple[str, list[Finding]]:
         rows = data.get("findings")
         if not isinstance(rows, list):
             continue
-        findings = [
-            Finding(
-                severity=normalise_severity(row.get("severity")),
-                title=str(row.get("title") or "").strip(),
-                file=str(row.get("file") or "").strip(),
-                line=_coerce_line(row.get("line")),
-                detail=str(row.get("detail") or "").strip(),
-                agent=str(row.get("agent") or "").strip(),
-            )
-            for row in rows if isinstance(row, dict)
-        ]
+        findings = [Finding.from_dict(row) for row in rows if isinstance(row, dict)]
         findings.sort(key=lambda f: SEVERITIES.index(f.severity))
         return str(data.get("summary") or "").strip(), findings
     return "", []
@@ -182,12 +222,16 @@ Finish your answer with a single fenced ```json block, and nothing after it:
                "title": "short, specific",
                "file": "repo/relative/path.ext", "line": 42,
                "detail": "what is wrong and what it causes",
-               "agent": "which sub-agent found it"}]}
+               "agent": "which sub-agent found it",
+               "cwe": "CWE-89", "owasp": "API3:2023 or A03:2021",
+               "rule_id": "short category slug, e.g. sqli, bola, hardcoded-secret",
+               "confidence": "high|medium|low"}]}
 ```
 
 Report only what you can point at in the code — file and line. An empty `findings` list
 is a real answer and a good one; do not pad it. Everything above the block is written
-for a person and will be shown as the body of the report.
+for a person and will be shown as the body of the report. The `cwe`/`owasp`/`rule_id`/
+`confidence` keys are for security findings — leave them out for anything else.
 """.strip()
 
 

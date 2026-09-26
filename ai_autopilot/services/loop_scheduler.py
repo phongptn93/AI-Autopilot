@@ -131,6 +131,9 @@ class LoopScheduler:
             self._log.warning("scheduled loop has no repo configured", name=loop.name)
             return
 
+        if loop.is_scan:
+            await self._run_scan(loop, repo, base)
+            return
         if loop.is_report:
             await self._run_report(loop, repo, base)
             return
@@ -239,6 +242,73 @@ class LoopScheduler:
             report_id=report_id or None, html=html_path or None,
             findings=len(findings), worst=report.worst,
             **{k: v for k, v in counts.items() if v},
+        )
+        await self._notify(item, result)
+
+    async def _run_scan(self, loop: ScheduledLoop, repo: str, base: str) -> None:
+        """Run a SCAN loop: the security scanner, stored with a lifecycle, then the same
+        report row / HTML / notification a report loop produces — so the Reports page,
+        the Security page and the notifier all see one run, not three."""
+        from ai_autopilot.security_scan import ado_sync
+        from ai_autopilot.security_scan.runner import ScanRequest, run_scan
+
+        c, cfg = self._c, self._config
+        sec = cfg.security_scan
+        scoped = cfg.scoped_for_project(loop.project)
+        ai_mode = (loop.scan_ai_mode or sec.ai_mode or "off").lower()
+        self._log.info("running scan loop", name=loop.name, repo=repo, ai=ai_mode)
+        item = WorkItemInfo(id=0, title=f"[scan] {loop.name}")
+        record_id = await c.execution_repo.start_execution(
+            item, f"scan:{loop.name}", profile=loop.name
+        )
+        req = ScanRequest(
+            repo=repo, project=loop.project, workspace=scoped.workspace_directory,
+            tools=list(loop.scan_tools or sec.tools), ai_mode=ai_mode,
+            ai_agents=list(loop.agents or sec.ai_agents), scope=loop.scan_scope or "full",
+            base_branch=base, fail_on=sec.fail_on, trigger="loop", loop_name=loop.name,
+            write_html=loop.report_html, max_findings_per_tool=sec.max_findings_per_tool,
+            semgrep_config=list(sec.semgrep_config),
+            disabled_rules=list(sec.disabled_rules), ignore_paths=list(sec.ignore_paths),
+        )
+        scan = await run_scan(
+            req, executor=c.executor, security_repo=c.security_repo,
+            loop_report_repo=c.loop_report_repo, config=sec,
+        )
+        from ai_autopilot.models import ExecutionResult
+
+        summary = scan.ai_summary or (
+            f"{len(scan.findings)} finding(s), {len(scan.diff.new)} new, "
+            f"gate {'passed' if scan.passed else 'FAILED'}"
+        )
+        result = (ExecutionResult.ok if scan.passed else ExecutionResult.fail)(
+            0, f"scan:{loop.name}", summary
+        )
+        result.cost_tokens = scan.cost_tokens
+        result.duration_seconds = scan.duration_seconds
+        await c.execution_repo.complete_execution(record_id, result)
+        if scan.cost_tokens:
+            await c.cost_tracker.track(record_id, scan.cost_tokens)
+
+        # Bugs for the new ones, a note on the fixed ones — both best-effort.
+        with contextlib.suppress(Exception):
+            repo_abs = str(Path(repo).resolve())  # noqa: ASYNC240 — local path math
+            outcome = await ado_sync.file_new_findings(
+                ado=c.ado_for(loop.project), security_repo=c.security_repo, config=cfg,
+                repo=repo_abs, project=loop.project, scan_id=scan.scan_id,
+                fingerprints=[f.fingerprint for f in scan.diff.new],
+                repo_name=Path(repo).name,
+            )
+            fixed = await ado_sync.comment_fixed(
+                ado=c.ado_for(loop.project), security_repo=c.security_repo,
+                repo=repo_abs, fingerprints=list(scan.diff.fixed),
+            )
+            if outcome.filed or fixed:
+                self._log.info("scan loop synced to ADO", name=loop.name,
+                               filed=len(outcome.filed), fixed_commented=fixed)
+        self._log.info(
+            "scan loop finished", name=loop.name, passed=scan.passed,
+            findings=len(scan.findings), new=len(scan.diff.new), fixed=len(scan.diff.fixed),
+            report_id=scan.report_id or None, html=scan.html_path or None,
         )
         await self._notify(item, result)
 

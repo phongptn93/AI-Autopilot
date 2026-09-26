@@ -1968,7 +1968,7 @@ class ClaudeExecutor:
                 push_args.append("--force")
             await self._git(push_args, work_dir)
 
-            review = await self._reviewer.review(work_dir)
+            review = await self._reviewer.review(work_dir, base_branch)
             if self._config.learning_loop_enabled and (review.critical_issues or review.warnings):
                 # Remember what got flagged so the next run on this repo is warned.
                 ws = self._config.workspace_directory

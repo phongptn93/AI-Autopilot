@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,11 @@ from ai_autopilot.logging_config import get_logger
 # Lightweight additive migrations (no Alembic): columns added to existing tables
 # after they were first created. ``create_all`` only creates missing TABLES, not
 # missing COLUMNS, so each is applied via ``ALTER TABLE ... ADD COLUMN`` if absent.
+# What a migration entry may contain — see ``_apply_column_migrations``.
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
+_DDL = re.compile(r"(?:INTEGER|TEXT|FLOAT|REAL|BOOLEAN|DATETIME|VARCHAR\(\d{1,4}\))"
+                  r"(?: NOT NULL)?(?: DEFAULT (?:\d+|'[A-Za-z0-9_ ]*'))?")
+
 _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("executions", "trigger_tag", "VARCHAR(100)"),
     ("executions", "pr_urls", "TEXT"),
@@ -30,6 +36,9 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("executions", "tests_total", "INTEGER"),
     ("executions", "tests_failed", "INTEGER"),
     ("executions", "tests_blocked", "INTEGER"),
+    ("security_scans", "new_json", "TEXT"),
+    ("security_scans", "fixed_json", "TEXT"),
+    ("security_scans", "filtered_count", "INTEGER"),
 )
 
 
@@ -47,11 +56,22 @@ class Database:
         self._log.info("database ready")
 
     async def _apply_column_migrations(self, conn) -> None:
-        """Add columns introduced after a table's initial creation (SQLite)."""
+        """Add columns introduced after a table's initial creation (SQLite).
+
+        Identifiers cannot be bound parameters in PRAGMA / ALTER TABLE, so the statement
+        is formatted — which is safe only while every piece is a plain identifier or a
+        known column type. That is checked here rather than trusted to the constant: a
+        later edit that builds a migration from anything dynamic fails loudly instead of
+        becoming an injection.
+        """
         for table, column, ddl in _COLUMN_MIGRATIONS:
+            if not (_IDENT.fullmatch(table) and _IDENT.fullmatch(column) and _DDL.fullmatch(ddl)):
+                raise ValueError(f"unsafe column migration: {table}.{column} {ddl!r}")
+            # autopilot:ignore[py-sql-format] identifiers validated just above
             rows = (await conn.execute(text(f"PRAGMA table_info({table})"))).all()
             existing = {r[1] for r in rows}  # PRAGMA column name is index 1
             if column not in existing:
+                # autopilot:ignore[py-sql-format] identifiers validated just above
                 await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
                 self._log.info("db migration: added column", table=table, column=column)
 

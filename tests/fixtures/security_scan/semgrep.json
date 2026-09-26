@@ -1,0 +1,39 @@
+{
+  "version": "1.99.0",
+  "errors": [],
+  "results": [
+    {
+      "check_id": "csharp.lang.security.sqli.entity-framework-fromsqlraw.entity-framework-fromsqlraw",
+      "path": "Plugins/Nois.Plugin.Order/Services/OrderService.cs",
+      "start": {"line": 88, "col": 20},
+      "end": {"line": 88, "col": 70},
+      "extra": {
+        "message": "Detected string concatenation with a non-literal variable in a raw SQL query. This could lead to SQL injection.",
+        "severity": "ERROR",
+        "lines": "var rows = _db.Orders.FromSqlRaw(\"SELECT * FROM Orders WHERE Code = '\" + code + \"'\");",
+        "metadata": {
+          "cwe": ["CWE-89: Improper Neutralization of Special Elements used in an SQL Command"],
+          "owasp": ["A03:2021 - Injection"],
+          "confidence": "HIGH",
+          "severity": "HIGH"
+        }
+      }
+    },
+    {
+      "check_id": "typescript.angular.security.audit.angular-bypasssecuritytrust.angular-bypasssecuritytrust",
+      "path": "projects/dxfac/src/app/preview.component.ts",
+      "start": {"line": 41, "col": 5},
+      "end": {"line": 41, "col": 60},
+      "extra": {
+        "message": "The application uses bypassSecurityTrustHtml which disables Angular's sanitizer.",
+        "severity": "WARNING",
+        "lines": "this.safe = this.sanitizer.bypassSecurityTrustHtml(input);",
+        "metadata": {
+          "cwe": "CWE-79",
+          "owasp": "A03:2021 - Injection",
+          "confidence": "MEDIUM"
+        }
+      }
+    }
+  ]
+}

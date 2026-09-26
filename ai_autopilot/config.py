@@ -833,10 +833,93 @@ class ScheduledLoop(BaseModel):
     # default because a report that exists only in a database cannot be forwarded.
     report_html: bool = True
 
+    # mode == "scan" only: which scanners and how deep. Empty → the global
+    # ``security_scan`` block decides.
+    scan_tools: list[str] = []
+    scan_ai_mode: str = ""      # "" (inherit) | off | fast | deep
+    scan_scope: str = "full"    # full | diff (diff = files changed since base branch)
+
     @property
     def is_report(self) -> bool:
         """True when this loop reports rather than builds."""
-        return (self.mode or "pr").strip().lower() == "report"
+        return (self.mode or "pr").strip().lower() in ("report", "scan")
+
+    @property
+    def is_scan(self) -> bool:
+        """True when this loop is a security scan (report-shaped, scanner-driven)."""
+        return (self.mode or "pr").strip().lower() == "scan"
+
+
+class DastTarget(BaseModel):
+    """A running application the DAST pass is ALLOWED to probe.
+
+    Every field that gates the run is explicit on purpose: a dynamic test sends real
+    requests, and the only acceptable failure mode for a misconfiguration is "refused to
+    run", never "probed the wrong host". ``owner_confirmed`` is the operator saying, in
+    the config that is reviewed and versioned, that this target is theirs to test.
+    """
+
+    name: str
+    base_url: str
+    allowed_hosts: list[str] = []          # exact hostnames; base_url's host must be listed
+    owner_confirmed: bool = False          # must be true or the target is refused
+    require_private: bool = True           # refuse public IPs unless explicitly allowed
+    allow_mutations: bool = False          # only GET/HEAD/OPTIONS unless true
+    rate_limit_rps: float = 5.0
+    max_requests: int = 300
+    # Two identities so BOLA/IDOR can be tested properly: A reads B's resource.
+    auth_env_var: str = ""                 # env var holding a bearer token for user A
+    auth_b_env_var: str = ""               # … and for user B (optional)
+    auth_header: str = "Authorization"
+    auth_scheme: str = "Bearer"
+    # Paths (prefixes) the probe may touch; empty = anything under base_url.
+    allowed_paths: list[str] = []
+    # OpenAPI/Swagger document URL to enumerate endpoints from (optional).
+    openapi_url: str = ""
+    enabled: bool = True
+
+
+class SecurityScanSettings(BaseModel):
+    """The ``security_scan:`` block — what ``ai-autopilot scan`` and scan loops do.
+
+    Scanners are optional binaries; a listed one that is not installed is skipped and
+    said so, both in the scan output and by ``ai-autopilot doctor``. ``builtin`` is the
+    pure-Python rule set and is always available.
+    """
+
+    enabled: bool = True
+    tools: list[str] = ["builtin", "gitleaks", "semgrep", "sca"]
+    ai_mode: str = "fast"                  # off | fast | deep
+    ai_agents: list[str] = ["agent-security-reviewer"]
+    semgrep_config: list[str] = ["p/owasp-top-ten", "p/secrets", "p/csharp", "p/typescript"]
+    # New, unsuppressed findings at or above this severity fail the scan (exit 1).
+    fail_on: str = "high"
+    # Which deterministic scanners the pre-PR review gate runs on the branch diff.
+    pr_gate_tools: list[str] = ["builtin", "gitleaks"]
+    # Cap per tool so a pathological repo cannot flood the report.
+    max_findings_per_tool: int = 500
+    # Noise control at the RULE and PATH level — the two knobs that make a scanner
+    # liveable. A rule that is wrong for this codebase (``ts-target-blank`` on an
+    # internal admin UI) is switched off once, not suppressed ten times; generated or
+    # vendored trees are never read. Globs match the repo-relative posix path.
+    disabled_rules: list[str] = []
+    ignore_paths: list[str] = ["**/Migrations/**", "**/*.Designer.cs", "**/wwwroot/lib/**",
+                               "**/*.min.js", "**/dist/**", "**/node_modules/**"]
+    # Findings at/above this severity are filed on ADO when autonomy allows.
+    file_bugs_from: str = "high"
+    file_bugs: bool = False
+    # ── Phase 3: PoC verification (isolated worktree; never merged) ──
+    verify_enabled: bool = False
+    verify_from: str = "high"
+    verify_max_per_scan: int = 5
+    verify_timeout_minutes: int = 10
+    # ── Phase 4: DAST ──
+    dast_enabled: bool = False
+    dast_targets: list[DastTarget] = []
+
+    @property
+    def ai_enabled(self) -> bool:
+        return (self.ai_mode or "off").strip().lower() in ("fast", "deep")
 
 
 def _yaml_path() -> Path:
@@ -1594,6 +1677,10 @@ class Settings(BaseSettings):
     # ── Auto-review ──
     auto_review_enabled: bool = True
     block_on_severity: str = "Critical,High"
+
+    # ── Security scanning (SAST + SCA + secrets; `ai-autopilot scan`, scan loops,
+    #    the pre-PR gate and the Security page) ──
+    security_scan: SecurityScanSettings = Field(default_factory=SecurityScanSettings)
 
     # ── Policy engine (hard guardrails on what a run may change) ──
     # Enforced deterministically BEFORE a PR opens (like the review/test gates) —

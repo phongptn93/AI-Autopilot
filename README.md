@@ -26,6 +26,7 @@ Polls your ADO board, understands each tagged work item, and drives **Claude Cod
 | 🔀 **Dependency‑aware scheduling** | Orders work by the ADO link graph (0 tokens) and avoids running conflicting items concurrently — with an AI conflict feed‑back loop. |
 | 🔁 **Closed‑loop SDLC (v2)** | Optional multi‑stage engine (analyze → design → implement → test → review → PR) with per‑stage gating and multi‑machine handoff. |
 | 🛡️ **Safe by design** | Isolated git worktrees, auto security review, objective run scoring, and a single tag/state policy table. |
+| 🔐 **Security scanner** | `ai-autopilot scan` — SAST + SCA + secrets (builtin rules, gitleaks, semgrep, trivy/npm/dotnet/pip‑audit) plus an OWASP‑driven AI pass that triages them. Fingerprinted findings with a baseline, suppressions with reason + expiry, SARIF export, an exit code CI can gate on, and a deterministic secret check on every PR. |
 | 📊 **Live dashboard** | Overview · Board · Planning · Reviews · Queue · Analytics · Learning · Audit · History · Settings · Config — full‑width, filterable, drag‑and‑drop, password‑lockable. |
 | 🧠 **Retrospective learning** | What auto‑review flags is remembered **per repo** and injected into the next brief, so the agent stops re‑earning the same findings. The **Learning** page shows every lesson, which ones feed the next run, and lets you prune a wrong one — History badges each run it warned (`🧠 N`). |
 | 🩺 **`ai-autopilot doctor`** | Audits whether the configuration is *coherent* — the gap `/health` cannot see. Every check came from a failure diagnosed by hand: a Teams bot switched on with no app id (silently absent, not broken), a messaging endpoint on loopback, concurrency without worktrees, a setting whose companion switch is off. Config‑only: no network, no writes, safe in CI. |
@@ -276,6 +277,31 @@ unresolved review comments and feed them back to Claude to revise (bounded by
 
 ---
 
+## 🔐 Security scanning
+
+The same engine behind the pre‑PR review gate is a standalone security tool for the
+repositories the autopilot works on — see [`docs/security-scan.md`](docs/security-scan.md).
+
+```bash
+ai-autopilot scan --repo ../Backend                       # builtin rules + gitleaks + semgrep + SCA + AI (fast)
+ai-autopilot scan --scope diff --base development         # only what this branch changed
+ai-autopilot scan --no-ai --tools builtin,gitleaks --fail-on critical    # CI: no API key needed
+ai-autopilot scan --format sarif --out scan.sarif         # ADO Advanced Security / GitHub code scanning
+```
+
+| | |
+|---|---|
+| **Scanners** | `builtin` (pure‑Python rules: secrets, C#/.NET, Angular/TS, Python, SQL/config — always on) · `gitleaks` · `semgrep` · `sca` (trivy / `dotnet list --vulnerable` / `npm audit` / `pip-audit`). Missing binaries are skipped **and said so**. |
+| **AI pass** | `agent-security-reviewer` + the `security-review` skill, read‑only. Handed the scanners' findings first: triages them (confirmed / false positive, with a reason) and then hunts what regexes cannot see — BOLA/IDOR, missing role checks, mass assignment. |
+| **Identity** | Every finding gets a fingerprint (tool + rule + file + normalised snippet, *not* the line number), so the second scan reports **new / known / fixed** and the gate only trips on new. |
+| **Suppressions** | `<workspace>/.autopilot/security-suppressions.yaml` — fingerprint + reason + optional expiry; expired ones come back and the run says so. |
+| **Outputs** | table · JSON · SARIF 2.1.0 · HTML · Markdown. Exit `0` pass · `1` gate failed · `2` usage · `3` could not run. |
+| **Everywhere else** | Scan loops (`mode: scan`), the pre‑PR gate (`security_scan.pr_gate_tools` on the diff), and `/dashboard/security` (lifecycle, suppress, trend). `ai-autopilot doctor` reports tools that are configured but not installed. |
+| **PoC verification** (`--verify`) | Each new high+ finding gets a proof‑of‑concept built and run in a **throwaway git worktree** (`security-verify-poc` skill): confirmed → `confidence: high` + PoC stored; not reproducible → badged *unconfirmed* with the reason. Nothing is ever committed or pushed. |
+| **DAST** (`--dast <target>`) | Probes a **running**, `owner_confirmed` app for OWASP API Top 10 (BOLA/IDOR with two identities, missing auth, function‑level authz, headers, verbose errors) via the `security-dast` skill. Gates fail closed: host allowlist, private‑address check, request cap, rate limit, mutations off by default. |
+
+---
+
 ## 👀 PR reviewer tracking
 
 Enable `pr_reviewer_tracking_enabled` to watch the reviewer list of **every active PR**
@@ -493,6 +519,7 @@ conflicts with the new one). Fix, in order:
 |-----|----------|
 | [`docs/ai-autopilot-user-guide.html`](docs/ai-autopilot-user-guide.html) | Full usage & configuration guide (every setting explained). |
 | [`docs/planning-sdlc-v2-full-guide.html`](docs/planning-sdlc-v2-full-guide.html) | Technical deep‑dive on Planning + SDLC v2. |
+| [`docs/security-scan.md`](docs/security-scan.md) | Security scanning: scanners, AI triage, fingerprints/baseline, suppressions, CLI & CI usage. |
 | [`config.example.yaml`](config.example.yaml) | Annotated example configuration. |
 
 ---

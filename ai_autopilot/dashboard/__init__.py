@@ -3943,6 +3943,37 @@ def create_dashboard_router() -> APIRouter:
 
     # ── Flow editor: per-work-item-type state transitions ────────────────────
 
+    # Roll-up ranks a child by how far through the workflow its state sits, and the
+    # editor's row order is what the engine reads back as that ranking. Sorting the rows
+    # alphabetically therefore made the ALPHABET the workflow: on a real board "Deferred"
+    # came last and so counted as the most advanced state a child could reach, and
+    # "Awaiting Clarification" outranked "Approved". Nobody decided that; `sorted()` did.
+    _CAT_ORDER = {"proposed": 0, "inprogress": 1, "resolved": 2, "completed": 3,
+                  "removed": 4}
+
+    def _by_workflow(states: set[str], categories: dict[str, str],
+                     states_by_type: dict[str, list[str]]) -> list[str]:
+        """Child states in workflow order: state category first, then the board order the
+        process template itself defines, and only then the name.
+
+        Falls back to alphabetical when ADO cannot be reached — same as before, but now
+        that is the degraded path rather than the design.
+        """
+        # Board position of each state, from the first type that defines it.
+        board: dict[str, int] = {}
+        for names in states_by_type.values():
+            for index, name in enumerate(names):
+                board.setdefault(name, index)
+
+        def key(state: str) -> tuple[int, int, str]:
+            cat = (categories.get(state, "") or "").strip().lower()
+            # Unknown category sorts with Proposed rather than last: a state we cannot
+            # classify is more likely early work than finished work, and guessing
+            # "finished" is the guess that lets a parent close too soon.
+            return (_CAT_ORDER.get(cat, 0), board.get(state, 9_999), state)
+
+        return sorted(states, key=key)
+
     async def _flow_context(request: Request, flows: list | None = None) -> dict:
         """Everything flow.html renders, built from the project's REAL types + states.
 
@@ -3955,6 +3986,12 @@ def create_dashboard_router() -> APIRouter:
             states_by_type = await c.ado.get_states_by_type()
         except Exception:  # noqa: BLE001 — the page must render with ADO down
             states_by_type = {}
+        # Roll-up rows are ordered by these, not alphabetically. Reading the rows IS
+        # reading the progression, so a table sorted by first letter taught the wrong
+        # order to whoever was editing it — and the engine read the same order back.
+        state_categories: dict[str, str] = {}
+        with contextlib.suppress(Exception):
+            state_categories = await c.ado.get_state_categories()
         current = flows if flows is not None else list(cfg.work_item_flows or [])
         groups = [f for f in current if isinstance(f, dict)]
         # Which flow (if any) already claims each type, so a chip can say who holds it
@@ -3991,12 +4028,12 @@ def create_dashboard_router() -> APIRouter:
             # editor leads with are the states of types the autopilot actually manages (the
             # ones in some other flow group); the rest stay reachable behind a toggle.
             others = {t for f in groups for t in (f.get("types") or [])} - set(resolved)
-            likely = sorted({
+            likely = _by_workflow({
                 s for t, st in states_by_type.items() if t in others for s in st
-            })
-            everything = sorted({
+            }, state_categories, states_by_type)
+            everything = _by_workflow({
                 s for t, st in states_by_type.items() if t not in resolved for s in st
-            })
+            }, state_categories, states_by_type)
             if not likely:      # only one group configured — nothing to narrow to yet
                 likely, everything = everything, []
             child_states.append(likely)

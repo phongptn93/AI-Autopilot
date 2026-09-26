@@ -100,43 +100,110 @@ def parse_rollup_map(entries: list[str]) -> list[tuple[str, str]]:
     return pairs
 
 
+# How far through a workflow each ADO state category sits. This is the progression the
+# roll-up ranks children by, and it comes from the PROCESS TEMPLATE rather than from us:
+# every template assigns each of its states to one of these, which is exactly the
+# "how far along is this" question a roll-up asks.
+#
+# It replaces ranking by the order the lines happened to be written in. That order came
+# from the editor, and the editor sorted the child states ALPHABETICALLY — so the
+# alphabet was the workflow. On a real board that made "Deferred" (last letter-wise) the
+# most advanced state a child could be in, so a child parked there never held its parent
+# back, and "Awaiting Clarification" outranked "Approved". Nobody wrote that rule; it
+# fell out of `sorted()`.
+_CATEGORY_RANK = {
+    "proposed": 0,
+    "inprogress": 1,
+    "resolved": 2,
+    "completed": 3,
+}
+# Not a rank at all. A cancelled or deferred child is not slow work, it is work that is
+# no longer in the flow, and ranking it either way is wrong: rank it low and one
+# abandoned child pins the parent open forever; rank it high and it silently counts as
+# finished.
+_CATEGORY_OUT_OF_FLOW = "removed"
+
+
+def _out_of_flow(state: str, categories: dict[str, str] | None) -> bool:
+    """Is this child state one the process template puts OUTSIDE the workflow?"""
+    if not categories:
+        return False
+    return (categories.get(state.strip(), "") or "").strip().lower() == _CATEGORY_OUT_OF_FLOW
+
+
+def _in_flow_children(
+    children: list[WorkItemInfo], categories: dict[str, str] | None
+) -> list[WorkItemInfo]:
+    return [c for c in children if not _out_of_flow(c.state or "", categories)]
+
+
 def unmapped_child_states(
-    children: list[WorkItemInfo], pairs: list[tuple[str, str]]
+    children: list[WorkItemInfo], pairs: list[tuple[str, str]],
+    categories: dict[str, str] | None = None,
 ) -> list[str]:
     """Child states the roll-up map doesn't cover — the reason a roll-up does nothing.
 
     A single missing line silently disables roll-up for the whole parent (see
     ``parent_rollup_target``), and until this was surfaced there was no way to tell an
     incomplete map from a parent that was simply up to date.
+
+    Out-of-flow states are not reported: the roll-up skips those children, so naming
+    them here would send somebody off to map a state that is deliberately ignored.
     """
     known = {child.strip().lower() for child, _ in pairs}
     return sorted({
-        (c.state or "").strip() for c in children
+        (c.state or "").strip() for c in _in_flow_children(children, categories)
         if (c.state or "").strip() and (c.state or "").strip().lower() not in known
     })
 
 
 def parent_rollup_target(
-    children: list[WorkItemInfo], pairs: list[tuple[str, str]]
+    children: list[WorkItemInfo], pairs: list[tuple[str, str]],
+    categories: dict[str, str] | None = None,
 ) -> str | None:
     """Parent's target state = the parent-state mapped from the LEAST-advanced child.
 
-    ``pairs`` is the ordered child→parent progression (e.g. Active→Active,
-    Ready to Testing→Implement Done). Returns None if there are no children/pairs, or
-    any child is in a child-state outside the map (then we don't touch the parent) —
-    a child whose stage is unknown could be the slowest, so advancing the parent past
-    it would be a guess. ``unmapped_child_states`` reports which state was missing.
+    "One child is still Active, so the parent is still Active; every child is Closed, so
+    the parent is Closed" — the rule reads off the slowest child, not off a state every
+    child happens to share.
+
+    ``pairs`` is the child→parent map. ``categories`` maps a state name to its ADO state
+    category and is what ORDERS the children; pass it whenever it can be read. Without
+    it this falls back to the order the lines are written in, which is what shipped
+    before and is only right by accident — see ``_CATEGORY_RANK``.
+
+    Returns None — leave the parent alone — when:
+      * there are no children, or no map;
+      * a child sits in a state the map does not cover, because a child whose stage is
+        unknown could be the slowest one and advancing past it would be a guess
+        (``unmapped_child_states`` names it);
+      * every child is out of flow, because then there is nothing to roll up. That is
+        NOT the same as "all done", and reporting the parent finished because its only
+        children were cancelled is how a parent closes with its work still undone.
     """
     if not children or not pairs:
         return None
+    in_flow = _in_flow_children(children, categories)
+    if not in_flow:
+        return None
     order = {child.strip().lower(): (i, parent) for i, (child, parent) in enumerate(pairs)}
-    best: tuple[int, str] | None = None  # (stage index, parent state) of the slowest child
-    for child in children:
-        entry = order.get((child.state or "").strip().lower())
+    best: tuple[tuple[int, int], str] | None = None   # (rank, parent state) of the slowest
+    for child in in_flow:
+        state = (child.state or "").strip()
+        entry = order.get(state.lower())
         if entry is None:
             return None  # a child outside the map → leave the parent alone
-        if best is None or entry[0] < best[0]:
-            best = entry
+        row_index, parent_state = entry
+        if categories:
+            # Category first, the author's own line order only as a tie-break WITHIN a
+            # category — two InProgress states still need an order, and the person who
+            # wrote the map is the one who knows it.
+            cat = (categories.get(state, "") or "").strip().lower()
+            rank = (_CATEGORY_RANK.get(cat, 0), row_index)
+        else:
+            rank = (row_index, 0)
+        if best is None or rank < best[0]:
+            best = (rank, parent_state)
     return best[1] if best else None
 
 
@@ -636,13 +703,20 @@ class StateSyncService:
         pairs = parse_rollup_map(resolve_rollup(self._cfg_for(parent), parent.work_item_type))
         if not pairs:
             return
-        # Parent = the parent-state mapped from its least-advanced child.
-        target = parent_rollup_target(children, pairs)
+        # The state categories order the children. Best-effort and memoised by the client
+        # — without them the ranking falls back to the order the map was written in,
+        # which is worse but is what this did before, so an unreachable ADO degrades
+        # rather than changes the answer.
+        categories: dict[str, str] = {}
+        with contextlib.suppress(Exception):
+            categories = await self._ado(project).get_state_categories()
+        # Parent = the parent-state mapped from its least-advanced child still in flow.
+        target = parent_rollup_target(children, pairs, categories)
         if target is None:
             # An unmapped child state stops the roll-up. Name it: an incomplete map was
             # indistinguishable from "parent already up to date", which is how a map with
             # one wrong line stayed broken indefinitely.
-            missing = unmapped_child_states(children, pairs)
+            missing = unmapped_child_states(children, pairs, categories)
             if missing:
                 self._log.info(
                     "parent roll-up held — child states not in the map", id=parent_id,

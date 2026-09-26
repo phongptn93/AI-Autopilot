@@ -96,6 +96,10 @@
   details.fl-more > summary .hint{font-weight:400;color:var(--text-dim);font-size:11.5px}
   .fl-more-body{padding:0 18px 16px}
 
+  .fl-ru-lede { font-size:12px; color:var(--text-muted); line-height:1.6; margin:0 0 12px;
+    padding:9px 11px; border-left:3px solid var(--border); background:var(--bg-input);
+    border-radius:0 6px 6px 0; }
+  .fl-ru-lede b { color:var(--text); }
   /* Parent roll-up: one row per child state, so an incomplete map is visible and an
      invalid parent state is unpickable. This was a free-text textarea — the only control
      on a page whose whole point is "you cannot configure what ADO would reject". */
@@ -278,15 +282,28 @@
     </details>
 
     <details class="fl-more" {% if g.rollup %}open{% endif %}>
-      <summary>Parent roll-up
+      <summary>Parent roll-up · cha theo con chậm nhất
         <span class="hint">{{ (g.rollup|length ~ ' rule' ~ ('' if g.rollup|length == 1 else 's')) if g.rollup else 'off' }}</span>
       </summary>
       <div class="fl-more-body">
         {% set rows = rollup_rows[i] %}
         {% if rows %}
         <input type="hidden" name="flow{{ i }}_rollup_count" value="{{ rows|length }}">
+        {# The old heading read "When every child is at…", which describes a rule this
+           has never implemented. The parent follows its SLOWEST child: one child still
+           Active keeps the parent Active, and the parent only reaches the last state
+           when every child has. Saying "every child" made people map one state, see
+           nothing happen, and conclude the feature was broken. #}
+        <p class="fl-ru-lede">Cha đi theo <b>đứa con kém tiến triển nhất</b>. Một con còn ở
+          <i>Active</i> thì cha ở trạng thái mà <i>Active</i> trỏ tới; cha chỉ tới trạng
+          thái cuối khi mọi con đã tới đó. Hàng xếp theo thứ tự quy trình của process
+          template, không theo bảng chữ cái — thứ tự này chính là thang tiến triển.
+          <br>Con ở trạng thái thuộc nhóm <i>Removed</i> (huỷ / hoãn) bị <b>bỏ khỏi phép
+          tính</b>; nếu MỌI con đều như vậy thì cha không bị đụng tới — đó không phải
+          "xong hết". Còn một trạng thái chưa map thì roll-up dừng toàn bộ, vì con ở
+          trạng thái lạ có thể chính là con chậm nhất.</p>
         <div class="fl-ru-head">
-          <span>When every child is at…</span><span></span><span>…move the parent to</span>
+          <span>Con đang ở…</span><span></span><span>…thì cha chuyển sang</span>
         </div>
         {# Leading rows: states of the types the autopilot manages — the plausible children.
            `loop.index0` must index the WHOLE row list, since the parser walks 0..count-1,

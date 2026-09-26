@@ -1222,13 +1222,22 @@ def test_saving_absorbs_the_single_url_into_the_list(tmp_path, monkeypatch):
 def test_every_form_control_gets_the_dashboard_styling(tmp_path, monkeypatch):
     """The inputs I added first were outside `.form-input`, the only place the styling was
     scoped, so they rendered as native white boxes on a dark page. The rules are now at
-    element level in base.html — assert they are there rather than per-page copies."""
+    element level in base.html — assert they are there rather than per-page copies.
+
+    This checks the rule is ELEMENT-level and actually served. It deliberately no longer
+    pins the selector's exact text: it used to assert the literal
+    `input[type=text], input[type=password]`, which made the allowlist itself the thing
+    under test — so replacing that allowlist (it silently missed every <input> with no
+    type attribute) failed here for the wrong reason. What the selector must MATCH is
+    tested properly in tests/test_dashboard_controls.py."""
     monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
     settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
     with TestClient(create_app(settings)) as client:
         page = client.get("/dashboard/settings").text
-    # Element-level selector, not `.form-input input[...]`.
-    assert "input[type=text], input[type=password]" in page
+    # Element-level, not scoped under `.form-input`: the rule names bare elements and
+    # sets the shared background.
+    assert "select, textarea {" in page
+    assert "background: var(--bg-input)" in page
     assert "input:focus, select:focus, textarea:focus" in page
     # The compact-checkbox utility replaced the repeated inline sizing.
     assert 'class="chk"' in page

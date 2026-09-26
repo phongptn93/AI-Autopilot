@@ -167,8 +167,19 @@
            ring ended up shipping. Styling the elements themselves means a new input is
            correct by default and there is one place to change it. `.form-input` below keeps
            only what is about LAYOUT, not looks. */
-        input[type=text], input[type=password], input[type=number], input[type=date],
-        input[type=search], input[type=email], select, textarea {
+        /* Listed by what is NOT a text-entry control, never by what is. The previous
+           form was an allowlist of types — input[type=text], [type=password], … — which
+           misses two things silently: an <input> with NO type attribute at all (valid
+           HTML, defaults to text, but `input[type=text]` does not match it), and any
+           type nobody thought to add. Both then fell through to the browser default,
+           which on this dark dashboard is a pale box sitting next to a correctly dark
+           one. That is exactly how the Planning filter shipped with its Assignee field
+           a different colour from the State and Type dropdowns beside it, and how
+           thirteen fields on Workspaces plus the schedule datetime picker did too. An
+           exclusion list cannot fail that way: a control is styled unless it is named
+           here as something else. */
+        input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=file]):not([type=range]):not([type=color]):not([type=image]),
+        select, textarea {
             background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
             border-radius: var(--radius-sm); padding: 9px 12px; font-size: 13.5px;
             font-family: inherit; transition: border-color .12s, box-shadow .12s; }
@@ -184,8 +195,9 @@
         .chk-sm { width: 14px; height: 14px; }
         .chk-red { accent-color: var(--red); }
 
-        .form-input input[type=text], .form-input input[type=password],
-        .form-input input[type=number], .form-input select, .form-input textarea {
+        /* Same exclusion rule as the look above, for the same reason. */
+        .form-input input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=file]):not([type=range]):not([type=color]):not([type=image]),
+        .form-input select, .form-input textarea {
             width: 100%; max-width: 480px; }
         .form-input input[type=checkbox] { width: 18px; height: 18px; margin-top: 8px; }
         .form-help { color: var(--text-dim); font-size: 12px; margin-top: 6px; line-height: 1.5; }

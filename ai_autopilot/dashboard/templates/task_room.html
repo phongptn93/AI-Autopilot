@@ -42,7 +42,7 @@
 <div class="tr-head">
   <div>
     <div class="tr-title">
-      {% if item_url %}<a href="{{ item_url }}" target="_blank">#{{ room.work_item_id }}</a>
+      {% if item_url %}<a href="{{ item_url }}" target="_blank" rel="noopener">#{{ room.work_item_id }}</a>
       {% else %}#{{ room.work_item_id }}{% endif %}
       — {{ item.title if item else 'không đọc được' }}
     </div>
@@ -104,7 +104,7 @@
             <span class="pill {{ 'pill-ok' if run.status.value == 'success' else 'pill-warn' }}">{{ run.status.value }}</span>
             {{ run.skill_used }} · <span class="tr-when">{{ run.started_at.strftime('%d/%m %H:%M') }}</span>
             {% if run.branch_name %} · <code>{{ run.branch_name }}</code>{% endif %}
-            {% if run.pr_url %} · <a href="{{ run.pr_url }}" target="_blank">PR</a>{% endif %}
+            {% if run.pr_url %} · <a href="{{ run.pr_url }}" target="_blank" rel="noopener">PR</a>{% endif %}
             {% if run.error %}<div class="tr-when">{{ run.error }}</div>{% endif %}
           </li>
         {% endfor %}
@@ -173,7 +173,7 @@
     <div class="tr-card">
       <div class="tr-head" style="margin:0">
         <div>
-          <b><a href="{{ pr.url }}" target="_blank">{{ pr.repo }} !{{ pr.pr_id }}</a></b>
+          <b><a href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.repo }} !{{ pr.pr_id }}</a></b>
           {% if pr.title %} — {{ pr.title }}{% endif %}
           <div class="tr-meta">
             {% if pr.status %}<span class="pill pill-dim">{{ pr.status }}</span>{% endif %}

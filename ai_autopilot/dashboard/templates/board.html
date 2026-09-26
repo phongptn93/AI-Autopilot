@@ -245,6 +245,7 @@
       busy = true;
       try {
         const r = await fetch(partialUrl, { headers: { 'X-Requested-With': 'fetch' } });
+        // autopilot:ignore[ts-innerhtml-dynamic] same-origin partial, rendered by Jinja with autoescape
         if (r.ok) { mount.innerHTML = await r.text(); stamp.textContent = 'updated just now'; }
       } catch (e) { /* keep last view */ }
       finally { busy = false; }

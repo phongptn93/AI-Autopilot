@@ -114,6 +114,9 @@ class TestGate:
 
         self._log.info("running test gate", dir=work_dir, repo=repo, cmd=cmd, timeout=timeout)
         try:
+            # A shell on purpose: the command is the operator's `test_command` from config
+            # (or a fixed detected one) — never read from the branch the agent wrote.
+            # autopilot:ignore[py-shell-true] operator-configured test command
             proc = await asyncio.create_subprocess_shell(
                 cmd,
                 cwd=work_dir,

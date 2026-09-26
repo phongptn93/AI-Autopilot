@@ -47,7 +47,7 @@
       <div>
         <div class="s-title">
           {% if work_item_url %}
-            <a href="{{ work_item_url(group.work_item_id) }}" target="_blank">#{{ group.work_item_id }}</a>
+            <a href="{{ work_item_url(group.work_item_id) }}" target="_blank" rel="noopener">#{{ group.work_item_id }}</a>
           {% else %}#{{ group.work_item_id }}{% endif %}
           — {{ group.title or '(không có tiêu đề)' }}
           <a href="/dashboard/task/{{ group.work_item_id }}?tab=drift" class="pill pill-warn"
@@ -56,7 +56,7 @@
         <div class="s-meta">
           <span class="pill pill-warn">{{ group.rows | length }} điểm</span>
           {% if group.project %} · {{ group.project }}{% endif %}
-          {% if group.pr_url %} · <a href="{{ group.pr_url }}" target="_blank">PR</a>{% endif %}
+          {% if group.pr_url %} · <a href="{{ group.pr_url }}" target="_blank" rel="noopener">PR</a>{% endif %}
           · báo lúc {{ group.created_at.strftime('%d/%m %H:%M') }}
         </div>
       </div>

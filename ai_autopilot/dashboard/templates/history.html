@@ -87,7 +87,7 @@
                     <td class="mono">{{ e.skill_used or '—' }}</td>
                     <td><span class="badge {{ status_class(e.status.value) }}"><span class="badge-dot"></span>{{ e.status.value }}</span></td>
                     <td class="mono">{{ e.branch_name or '—' }}</td>
-                    <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank" class="table-link">View PR</a>{% else %}<span style="color:var(--text-dim)">—</span>{% endif %}</td>
+                    <td>{% if e.pr_url %}<a href="{{ e.pr_url }}" target="_blank" rel="noopener" class="table-link">View PR</a>{% else %}<span style="color:var(--text-dim)">—</span>{% endif %}</td>
                     <td class="mono">{{ mmss(e.duration_seconds) }}</td>
                     <td style="text-align:center">{{ e.retry_count }}</td>
                     {% set live = (e.skill_used or '').startswith('interactive') %}

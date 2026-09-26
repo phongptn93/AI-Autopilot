@@ -166,6 +166,9 @@ def _yaml_load(text: str) -> Any:
 
 
 async def _shell_ok(command: str, cwd: str) -> tuple[bool, str]:
+    # A shell on purpose: an eval check is a command line the suite author wrote in the
+    # eval YAML (pipes, `&&`), never text from a model or a work item.
+    # autopilot:ignore[py-shell-true] author-written eval check, not untrusted input
     proc = await asyncio.create_subprocess_shell(
         command, cwd=cwd or None,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,

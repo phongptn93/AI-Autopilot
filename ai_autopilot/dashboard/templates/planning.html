@@ -99,7 +99,7 @@
             <td><input class="cell-chk wbchk" type="checkbox" name="ids" value="{{ it.id }}" onclick="_sel()" {% if it.id in selected %}checked{% endif %}></td>
             <td>
               <span class="id-col">#{{ it.id }}</span>&nbsp;
-              {% if ado_item_base %}<a class="rowlink" href="{{ ado_item_base }}/{{ it.id }}" target="_blank">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %}
+              {% if ado_item_base %}<a class="rowlink" href="{{ ado_item_base }}/{{ it.id }}" target="_blank" rel="noopener">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %}
             </td>
             <td class="muted">{{ it.assigned_to or '—' }}</td>
             <td><span class="chip">{{ it.work_item_type }}</span></td>
@@ -219,6 +219,7 @@
       setInterval(function(){
         fetch('/dashboard/planning/live-partial', {headers:{'X-Requested-With':'fetch'}})
           .then(function(r){ return r.text(); })
+          // autopilot:ignore[ts-innerhtml-dynamic] same-origin partial, rendered by Jinja with autoescape
           .then(function(html){ var w=document.getElementById('live-wrap'); if(w) w.innerHTML=html; })
           .catch(function(){});
       }, every*1000);

@@ -1,0 +1,329 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1587 1123" width="1587" height="1123"
+     font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+  <title>AI-Autopilot — Sơ đồ tổ chức agent</title>
+  <desc>Cấu trúc 16 subagent của AI-Autopilot: tầng điều phối fleet, dây chuyền SDLC 8 chặng,
+        agent xuyên suốt spec-updater, và nhóm agent trực sự cố. A3 ngang, in đen trắng vẫn đọc được.</desc>
+
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#000"/>
+    </marker>
+    <marker id="ar-open" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    </marker>
+    <style>
+      .t    { font-size:31px; font-weight:700; letter-spacing:-.4px }
+      .sub  { font-size:13.5px; fill:#333 }
+      .band { font-size:11px; font-weight:700; letter-spacing:2.2px; fill:#000 }
+      .stg  { font-size:11px; font-weight:700; letter-spacing:1.4px; fill:#fff }
+      .nm   { font-size:14.5px; font-weight:700 }
+      .rl   { font-size:10.5px; fill:#333 }
+      .sk   { font-size:10px; fill:#000; font-family:"DejaVu Sans Mono",Consolas,monospace }
+      .cap  { font-size:10px; fill:#555 }
+      .num  { font-size:10px; font-weight:700; fill:#fff }
+      .box  { fill:#fff; stroke:#000; stroke-width:1.5 }
+      .boxg { fill:#ededed; stroke:#000; stroke-width:1.5 }
+      .hdr  { fill:#000 }
+      .wire { stroke:#000; stroke-width:1.6; fill:none }
+      .soft { stroke:#555; stroke-width:1.2; fill:none; stroke-dasharray:5 4 }
+    </style>
+  </defs>
+
+  <rect width="1587" height="1123" fill="#fff"/>
+
+  <!-- ─── Header ─────────────────────────────────────────────────────────── -->
+  <text class="t" x="48" y="62">AI-AUTOPILOT · SƠ ĐỒ TỔ CHỨC AGENT</text>
+  <text class="sub" x="48" y="87">16 subagent · 55 skill · 21 rule · 4 loop chạy theo lịch.</text>
+  <text class="sub" x="48" y="106">Mỗi agent là một VAI TRÒ; skill là QUY TRÌNH nó đọc khi được gọi. Agent thiếu artifact của chặng trước thì tự chạy chặng đó, không chỉ nhắc người.</text>
+  <line x1="48" y1="120" x2="1539" y2="120" stroke="#000" stroke-width="2.5"/>
+
+  <!-- ─── Band 1 · Fleet ─────────────────────────────────────────────────── -->
+  <text class="band" x="48" y="149">TẦNG ĐIỀU PHỐI — MÁY NÀO CHẠY VIỆC GÌ</text>
+
+  <rect class="box" x="48" y="160" width="300" height="78"/>
+  <rect class="hdr" x="48" y="160" width="300" height="20"/>
+  <text class="stg" x="58" y="174">CENTRAL</text>
+  <text class="nm"  x="58" y="200">poller · scheduler · fleet config</text>
+  <text class="rl"  x="58" y="217">Nhặt work item theo trigger tag / trigger state,</text>
+  <text class="rl"  x="58" y="230">phát cấu hình xuống worker mỗi nhịp heartbeat.</text>
+
+  <path class="wire" d="M348,199 L410,199" marker-end="url(#ar)"/>
+
+  <rect class="box" x="420" y="160" width="232" height="78"/>
+  <text class="nm" x="430" y="184">worker · máy A</text>
+  <text class="rl" x="430" y="203">Chạy agent trong workspace</text>
+  <text class="rl" x="430" y="217">riêng. Trigger tag là của</text>
+  <text class="rl" x="430" y="231">chính nó.</text>
+
+  <rect class="box" x="668" y="160" width="232" height="78"/>
+  <text class="nm" x="678" y="184">worker · máy B</text>
+  <text class="rl" x="678" y="203">Trigger states + run-now tag</text>
+  <text class="rl" x="678" y="217">do CENTRAL phục vụ — worker</text>
+  <text class="rl" x="678" y="231">không tự ghi đè được.</text>
+
+  <rect class="box" x="916" y="160" width="232" height="78"/>
+  <text class="nm" x="926" y="184">worker · máy C</text>
+  <text class="rl" x="926" y="203">Rời mạng quá ngưỡng thì</text>
+  <text class="rl" x="926" y="217">central đánh dấu offline,</text>
+  <text class="rl" x="926" y="231">không giao thêm việc.</text>
+
+  <rect class="boxg" x="1164" y="160" width="375" height="78"/>
+  <text class="nm" x="1174" y="184">Máy đứng một mình (standalone)</text>
+  <text class="rl" x="1174" y="203">Không có fleet: một máy vừa điều phối vừa chạy.</text>
+  <text class="rl" x="1174" y="217">Sở hữu TOÀN BỘ cấu hình của chính nó — đây là</text>
+  <text class="rl" x="1174" y="231">hình thái mặc định khi cài mới.</text>
+
+  <!-- ─── Band 2 · SDLC pipeline ─────────────────────────────────────────── -->
+  <text class="band" x="48" y="283">DÂY CHUYỀN SDLC — THỨ TỰ CÁC CHẶNG PHỤ THUỘC NHAU</text>
+
+  <!-- stage 1 -->
+  <rect class="hdr" x="48" y="296" width="162" height="24"/>
+  <circle cx="63" cy="308" r="8" fill="#fff"/><text class="num" x="63" y="312" text-anchor="middle" fill="#000">1</text>
+  <text class="stg" x="78" y="312">PHÂN TÍCH</text>
+  <rect class="box" x="48" y="320" width="162" height="150"/>
+  <text class="nm" x="58" y="342">requirement-</text>
+  <text class="nm" x="58" y="358">analyst</text>
+  <text class="rl" x="58" y="378">BA động: đầu vào thô</text>
+  <text class="rl" x="58" y="391">→ user story + AC.</text>
+  <text class="rl" x="58" y="404">Req có rồi → tách task.</text>
+  <text class="cap" x="58" y="428">SKILL</text>
+  <text class="sk" x="58" y="443">analyze-requirement</text>
+  <text class="sk" x="58" y="457">azure-devops-task-gen</text>
+
+  <path class="wire" d="M210,395 L232,395" marker-end="url(#ar)"/>
+
+  <!-- stage 2 -->
+  <rect class="hdr" x="236" y="296" width="162" height="24"/>
+  <circle cx="251" cy="308" r="8" fill="#fff"/><text class="num" x="251" y="312" text-anchor="middle" fill="#000">2</text>
+  <text class="stg" x="266" y="312">THIẾT KẾ</text>
+  <rect class="box" x="236" y="320" width="162" height="150"/>
+  <text class="nm" x="246" y="342">api-designer</text>
+  <text class="rl" x="246" y="364">Chốt contract TRƯỚC</text>
+  <text class="rl" x="246" y="377">khi code: endpoint, DTO,</text>
+  <text class="rl" x="246" y="390">validation, lỗi trả về.</text>
+  <text class="rl" x="246" y="403">Ghi ra file để BE/FE</text>
+  <text class="rl" x="246" y="416">không tự đoán nhau.</text>
+  <text class="cap" x="246" y="437">SKILL</text>
+  <text class="sk" x="246" y="452">api-design</text>
+
+  <path class="wire" d="M398,395 L420,395" marker-end="url(#ar)"/>
+
+  <!-- stage 3 -->
+  <rect class="hdr" x="424" y="296" width="162" height="24"/>
+  <circle cx="439" cy="308" r="8" fill="#fff"/><text class="num" x="439" y="312" text-anchor="middle" fill="#000">3</text>
+  <text class="stg" x="454" y="312">HIỆN THỰC</text>
+  <rect class="box" x="424" y="320" width="162" height="150"/>
+  <text class="nm" x="434" y="342">backend-</text>
+  <text class="nm" x="434" y="358">implementer</text>
+  <text class="rl" x="434" y="378">Controller, entity,</text>
+  <text class="rl" x="434" y="391">service, DTO, migration.</text>
+  <text class="cap" x="434" y="414">SKILL</text>
+  <text class="sk" x="434" y="429">api-controller</text>
+  <text class="sk" x="434" y="443">crud-full-stack</text>
+  <text class="sk" x="434" y="457">sql-migration</text>
+
+  <rect class="box" x="424" y="480" width="162" height="150"/>
+  <text class="nm" x="434" y="502">frontend-</text>
+  <text class="nm" x="434" y="518">implementer</text>
+  <text class="rl" x="434" y="538">Angular module ăn API:</text>
+  <text class="rl" x="434" y="551">service, list, detail,</text>
+  <text class="rl" x="434" y="564">form. Chưa có contract</text>
+  <text class="rl" x="434" y="577">thì tự chạy chặng 2.</text>
+  <text class="cap" x="434" y="600">SKILL</text>
+  <text class="sk" x="434" y="615">fe-module</text>
+
+  <path class="wire" d="M586,395 L608,395" marker-end="url(#ar)"/>
+
+  <!-- stage 4 -->
+  <rect class="hdr" x="612" y="296" width="162" height="24"/>
+  <circle cx="627" cy="308" r="8" fill="#fff"/><text class="num" x="627" y="312" text-anchor="middle" fill="#000">4</text>
+  <text class="stg" x="642" y="312">KIỂM THỬ</text>
+  <rect class="box" x="612" y="320" width="162" height="150"/>
+  <text class="nm" x="622" y="342">test-writer</text>
+  <text class="rl" x="622" y="364">Unit + integration.</text>
+  <text class="rl" x="622" y="377">Tự dò mục tiêu từ</text>
+  <text class="rl" x="622" y="390">git diff.</text>
+  <text class="rl" x="622" y="403">Chỉ chạy khi được yêu</text>
+  <text class="rl" x="622" y="416">cầu — không tự kích.</text>
+  <text class="cap" x="622" y="437">SKILL</text>
+  <text class="sk" x="622" y="452">write-tests</text>
+  <text class="sk" x="622" y="466">write-fe-tests</text>
+
+  <path class="wire" d="M774,395 L796,395" marker-end="url(#ar)"/>
+
+  <!-- stage 5 -->
+  <rect class="hdr" x="800" y="296" width="162" height="24"/>
+  <circle cx="815" cy="308" r="8" fill="#fff"/><text class="num" x="815" y="312" text-anchor="middle" fill="#000">5</text>
+  <text class="stg" x="830" y="312">QC</text>
+  <rect class="box" x="800" y="320" width="162" height="150"/>
+  <text class="nm" x="810" y="342">qc-manual</text>
+  <text class="rl" x="810" y="364">Tạo QC task, viết và</text>
+  <text class="rl" x="810" y="377">import test case lên ADO,</text>
+  <text class="rl" x="810" y="390">chuẩn bị test data,</text>
+  <text class="rl" x="810" y="403">thực thi và báo bug.</text>
+  <text class="cap" x="810" y="426">SKILL</text>
+  <text class="sk" x="810" y="441">qc-test-management</text>
+
+  <rect class="box" x="800" y="480" width="162" height="150"/>
+  <text class="nm" x="810" y="502">qc-automation</text>
+  <text class="rl" x="810" y="524">E2E bằng MCP browser.</text>
+  <text class="rl" x="810" y="537">Req chưa có test case</text>
+  <text class="rl" x="810" y="550">thì gọi qc-manual trước</text>
+  <text class="rl" x="810" y="563">rồi mới chạy E2E.</text>
+  <text class="rl" x="810" y="576">KHÔNG viết script.</text>
+  <text class="cap" x="810" y="598">SKILL</text>
+  <text class="sk" x="810" y="613">qc-automation</text>
+
+  <path class="wire" d="M962,395 L984,395" marker-end="url(#ar)"/>
+
+  <!-- stage 6 -->
+  <rect class="hdr" x="988" y="296" width="162" height="24"/>
+  <circle cx="1003" cy="308" r="8" fill="#fff"/><text class="num" x="1003" y="312" text-anchor="middle" fill="#000">6</text>
+  <text class="stg" x="1018" y="312">MỞ PR</text>
+  <rect class="box" x="988" y="320" width="162" height="150"/>
+  <text class="nm" x="998" y="342">pr-author</text>
+  <text class="rl" x="998" y="364">Soạn mô tả, tạo PR trên</text>
+  <text class="rl" x="998" y="377">Azure DevOps, link work</text>
+  <text class="rl" x="998" y="390">item.</text>
+  <text class="rl" x="998" y="408">Cổng chặn: code lệch</text>
+  <text class="rl" x="998" y="421">spec mà chưa comment</text>
+  <text class="rl" x="998" y="434">lên work item → dừng.</text>
+  <text class="cap" x="998" y="450">SKILL</text>
+  <text class="sk" x="998" y="464">pr-create</text>
+
+  <path class="wire" d="M1150,395 L1172,395" marker-end="url(#ar)"/>
+
+  <!-- stage 7 -->
+  <rect class="hdr" x="1176" y="296" width="162" height="24"/>
+  <circle cx="1191" cy="308" r="8" fill="#fff"/><text class="num" x="1191" y="312" text-anchor="middle" fill="#000">7</text>
+  <text class="stg" x="1206" y="312">RÀ SOÁT</text>
+  <rect class="box" x="1176" y="320" width="162" height="150"/>
+  <text class="nm" x="1186" y="342">pr-reviewer</text>
+  <text class="rl" x="1186" y="364">Đọc diff: đúng/sai,</text>
+  <text class="rl" x="1186" y="377">bảo mật, chất lượng.</text>
+  <text class="rl" x="1186" y="390">Tự chọn mức security</text>
+  <text class="rl" x="1186" y="403">review theo phạm vi.</text>
+  <text class="cap" x="1186" y="426">SKILL</text>
+  <text class="sk" x="1186" y="441">pr-create (checklist)</text>
+  <text class="sk" x="1186" y="455">security-review</text>
+
+  <path class="wire" d="M1338,395 L1360,395" marker-end="url(#ar)"/>
+
+  <!-- stage 8 -->
+  <rect class="hdr" x="1364" y="296" width="175" height="24"/>
+  <circle cx="1379" cy="308" r="8" fill="#fff"/><text class="num" x="1379" y="312" text-anchor="middle" fill="#000">8</text>
+  <text class="stg" x="1394" y="312">TRIỂN KHAI</text>
+  <rect class="box" x="1364" y="320" width="175" height="150"/>
+  <text class="nm" x="1374" y="342">deploy-runner</text>
+  <text class="rl" x="1374" y="364">Build ảnh, đẩy registry,</text>
+  <text class="rl" x="1374" y="377">restart deployment,</text>
+  <text class="rl" x="1374" y="390">verify — hỏng thì</text>
+  <text class="rl" x="1374" y="403">rollback ngay.</text>
+  <text class="cap" x="1374" y="422">SKILL</text>
+  <text class="sk" x="1374" y="437">docker-build · k8s-deploy</text>
+  <text class="sk" x="1374" y="451">post-deploy-verify</text>
+  <text class="sk" x="1374" y="465">rollback-deploy</text>
+
+  <!-- ─── Band 3 · cross-cutting spec-updater ────────────────────────────── -->
+  <path class="soft" d="M505,630 L505,660"/>
+  <path class="soft" d="M881,630 L881,660"/>
+  <path class="soft" d="M1069,470 L1069,660"/>
+
+  <rect x="48" y="660" width="1491" height="74" fill="#fff" stroke="#000" stroke-width="2" stroke-dasharray="9 5"/>
+  <text class="nm" x="64" y="686">spec-updater  <tspan class="sk">· update-spec</tspan></text>
+  <text class="rl" x="64" y="706">XUYÊN SUỐT — chạy LẶP LẠI đúng 3 điểm: sau implement (3), sau QC (5), sau khi mở PR (6) — lượt cuối rơi vào TRƯỚC rà soát và triển khai. Không phải một chặng.</text>
+  <text class="rl" x="64" y="723">Lý do nó tồn tại: BA sửa Description, QC viết test theo AC trong đó, khách nghiệm thu theo tài liệu đã ký. Báo trong chat là không đủ — chat trôi, work item thì không.</text>
+  <text class="cap" x="1360" y="686" text-anchor="end">gắn vào 3 điểm ↑</text>
+
+  <!-- ─── Band 4 · scheduled loops ───────────────────────────────────────── -->
+  <text class="band" x="48" y="757">CHẠY THEO LỊCH — KHÔNG AI GỌI, KHÔNG CÓ WORK ITEM. CRON LÀ THỨ KÍCH HOẠT.</text>
+  <text class="cap" x="1539" y="757" text-anchor="end">4 loop mẫu, dựng sẵn — không cái nào tự bật cho tới khi có người thêm vào.</text>
+
+  <rect class="box" x="48" y="767" width="353" height="96"/>
+  <text class="nm" x="58" y="789">code-review-daily</text>
+  <text class="sk" x="58" y="807">cron 7 18 * * 1-5   ·   18:07 T2–T6</text>
+  <text class="rl" x="58" y="826">Quét commit 24h qua, chấm đúng phần đã đổi.</text>
+  <text class="cap" x="58" y="845">GỌI LẠI AGENT</text>
+  <text class="sk" x="150" y="845">pr-reviewer · security-reviewer</text>
+  <text class="sk" x="58" y="858">mode: report</text>
+
+  <rect class="box" x="427" y="767" width="353" height="96"/>
+  <text class="nm" x="437" y="789">security-audit-weekly</text>
+  <text class="sk" x="437" y="807">cron 23 2 * * 6   ·   02:23 thứ Bảy</text>
+  <text class="rl" x="437" y="826">Rà toàn repo theo OWASP — sâu hơn bản ngày.</text>
+  <text class="cap" x="437" y="845">GỌI LẠI AGENT</text>
+  <text class="sk" x="529" y="845">security-reviewer</text>
+  <text class="sk" x="437" y="858">mode: report</text>
+
+  <rect class="box" x="806" y="767" width="353" height="96"/>
+  <text class="nm" x="816" y="789">performance-sweep-weekly</text>
+  <text class="sk" x="816" y="807">cron 41 3 * * 6   ·   03:41 thứ Bảy</text>
+  <text class="rl" x="816" y="826">Đo hiệu năng định kỳ, không đợi ai kêu chậm.</text>
+  <text class="cap" x="816" y="845">GỌI LẠI AGENT</text>
+  <text class="sk" x="908" y="845">performance-investigator</text>
+  <text class="sk" x="816" y="858">mode: report</text>
+
+  <rect class="box" x="1185" y="767" width="354" height="96"/>
+  <text class="nm" x="1195" y="789">spec-drift-weekly</text>
+  <text class="sk" x="1195" y="807">cron 13 7 * * 1   ·   07:13 thứ Hai</text>
+  <text class="rl" x="1195" y="826">Tìm chỗ code đã lệch khỏi spec, trước khi QC đọc.</text>
+  <text class="cap" x="1195" y="845">GỌI LẠI AGENT</text>
+  <text class="sk" x="1287" y="845">spec-updater · ci-triage</text>
+  <text class="sk" x="1195" y="858">mode: report</text>
+
+  <!-- ─── Band 5 · on-call ───────────────────────────────────────────────── -->
+  <text class="band" x="48" y="892">NGƯỜI GỌI TRỰC TIẾP — CÙNG NHÓM AGENT TRÊN, KHÁC CA TRỰC</text>
+
+  <rect class="boxg" x="48" y="902" width="282" height="96"/>
+  <text class="nm" x="58" y="924">bugfix-handler</text>
+  <text class="rl" x="58" y="943">Tái hiện → căn nguyên → sửa → verify</text>
+  <text class="rl" x="58" y="957">→ cập nhật Bug trên ADO. Tách nhánh</text>
+  <text class="rl" x="58" y="971">hotfix và fix thường.</text>
+  <text class="sk" x="58" y="990">bugfix-workflow</text>
+
+  <rect class="boxg" x="350" y="902" width="282" height="96"/>
+  <text class="nm" x="360" y="924">ci-triage</text>
+  <text class="rl" x="360" y="943">Pipeline đỏ: phân biệt flake / code /</text>
+  <text class="rl" x="360" y="957">hạ tầng / secret. KHÔNG sửa logic trừ</text>
+  <text class="rl" x="360" y="971">khi log chỉ đích danh compile hay test.</text>
+  <text class="sk" x="360" y="990">ci-pipeline-triage</text>
+
+  <rect class="boxg" x="652" y="902" width="282" height="96"/>
+  <text class="nm" x="662" y="924">performance-investigator</text>
+  <text class="rl" x="662" y="943">Chậm, không phải sai. Đo trước rồi mới</text>
+  <text class="rl" x="662" y="957">kết luận: .NET, SQL, Angular. Checklist</text>
+  <text class="rl" x="662" y="971">EF/SQL, bundle, change detection.</text>
+  <text class="sk" x="662" y="990">performance-investigation</text>
+
+  <rect class="boxg" x="954" y="902" width="282" height="96"/>
+  <text class="nm" x="964" y="924">security-reviewer</text>
+  <text class="rl" x="964" y="943">OWASP API Top 10 (BE) và Web Top 10</text>
+  <text class="rl" x="964" y="957">(FE). STRIDE, hai mức Fast / Deep.</text>
+  <text class="rl" x="964" y="971">Chạy trước merge hoặc trước deploy.</text>
+  <text class="sk" x="964" y="990">security-review</text>
+
+  <rect class="boxg" x="1256" y="902" width="283" height="96"/>
+  <text class="nm" x="1266" y="924">k8s-cluster-ops</text>
+  <text class="rl" x="1266" y="943">Vận hành cụm AKS: node pool, pod bị</text>
+  <text class="rl" x="1266" y="957">trục xuất, chi phí, observability.</text>
+  <text class="rl" x="1266" y="971">Agent duy nhất chạm tới hạ tầng.</text>
+  <text class="sk" x="1266" y="990">kubectl / az trực tiếp</text>
+
+  <!-- ─── Footer ─────────────────────────────────────────────────────────── -->
+  <line x1="48" y1="1016" x2="1539" y2="1016" stroke="#000" stroke-width="2.5"/>
+
+  <text class="band" x="48" y="1038">CÁCH ĐỌC</text>
+  <rect class="box" x="48" y="1048" width="24" height="13"/>
+  <text class="rl" x="80" y="1059">Trong dây chuyền, hoặc chạy theo lịch — có ràng buộc thứ tự / thời điểm.</text>
+  <rect class="boxg" x="48" y="1068" width="24" height="13"/>
+  <text class="rl" x="80" y="1079">Do người gọi — không theo thứ tự nào.</text>
+  <rect x="48" y="1088" width="24" height="13" fill="#fff" stroke="#000" stroke-width="2" stroke-dasharray="5 3"/>
+  <text class="rl" x="80" y="1099">Xuyên suốt — chạy lại nhiều điểm trong cùng một luồng.</text>
+
+  <text class="band" x="620" y="1038">BỐN RÀNG BUỘC ĐỊNH HÌNH SƠ ĐỒ NÀY</text>
+  <text class="rl" x="620" y="1059">1 · Thiếu artifact thì TỰ CHẠY chặng trước, không chỉ nhắc người — nên mũi tên là quan hệ phụ thuộc, không phải lịch trình.</text>
+  <text class="rl" x="620" y="1079">2 · spec-updater không đứng cuối. Đứng cuối nghĩa là spec chỉ đúng một lần, rồi lệch dần đúng lúc QC bắt đầu đọc nó.</text>
+  <text class="rl" x="620" y="1099">3 · test-writer không tự kích hoạt — test agent tự sinh để tự chấm mình là test luôn xanh.   4 · Loop dùng cron lệch :00 và :30, vì đó là lúc mọi scheduler khác cùng nổ.</text>
+
+  <text class="cap" x="48" y="1117">Nguồn: Industrial Team — New Ocean IS   ·   A3 ngang (420×297mm), in đen trắng vẫn đọc được.</text>
+</svg>

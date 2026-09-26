@@ -770,6 +770,73 @@ class AdoClient:
             return 0
         return int(resp.json().get("id", 0))
 
+    async def create_bug(
+        self, title: str, description: str, parent_id: int,
+        repro_steps: str = "", tag: str = "", project: str = "",
+    ) -> tuple[int, str]:
+        """File one Bug against the item whose QC found it. ``(id, link)``; ``(0, "")`` on
+        failure.
+
+        The link is attempted as a CHILD first and falls back to ``Related``. Which of
+        the two a project accepts is decided by its process template, not by us —
+        ``create_test_case`` already ships that lesson ("most process templates refuse
+        the hierarchy link between those two types outright"), and Bug-under-Task is
+        refused about as widely. Both relations travel in the create patch, so a refused
+        link does not cost a failed field, it costs the whole work item: retrying
+        unlinked-then-Related is the difference between a Bug nobody can trace and no
+        Bug at all.
+
+        ``link`` says which one landed, because "the Bug exists but is only Related" is
+        something the person reading the run needs told rather than left to discover.
+        """
+        if not title.strip():
+            return (0, "")
+        if not project.strip():
+            project = await self._project_for(parent_id)
+        base: list[dict[str, Any]] = [
+            {"op": "add", "path": "/fields/System.Title", "value": title[:255]},
+        ]
+        if description.strip():
+            base.append({
+                "op": "add", "path": "/fields/System.Description", "value": description,
+            })
+        if repro_steps.strip():
+            # The field the Bug form actually renders as "Repro Steps"; written to
+            # Description alone it lands in a box QC does not read first.
+            base.append({
+                "op": "add", "path": "/fields/Microsoft.VSTS.TCM.ReproSteps",
+                "value": repro_steps,
+            })
+        if tag.strip():
+            base.append({"op": "add", "path": "/fields/System.Tags", "value": tag})
+
+        url = self._url(f"wit/workitems/$Bug?{_API}", project)
+        for rel, kind in (
+            ("System.LinkTypes.Hierarchy-Reverse", "child"),
+            ("System.LinkTypes.Related", "related"),
+        ):
+            patch = [*base, {
+                "op": "add", "path": "/relations/-",
+                "value": {
+                    "rel": rel,
+                    # Org-level: ADO resolves the parent by id, so this cannot name the
+                    # wrong project for a cross-project parent.
+                    "url": f"{self._base}/_apis/wit/workitems/{parent_id}",
+                },
+            }]
+            resp = await self._http.post(
+                url, content=_json(patch),
+                headers=await self._headers("application/json-patch+json"),
+            )
+            if resp.status_code < 400:
+                return (int(resp.json().get("id", 0)), kind)
+            self._log.info(
+                "bug link refused — trying the next link type", link=kind,
+                parent=parent_id, status=resp.status_code, detail=_terse(resp.text),
+            )
+        self._log.warning("create_bug failed", parent=parent_id, title=title[:80])
+        return (0, "")
+
     async def create_test_case(
         self, title: str, steps: list[str], expected: str, tests_item_id: int,
         preconditions: str = "", tag: str = "", project: str = "",

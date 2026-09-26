@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
+from html import escape as html_escape
 
 from ai_autopilot import metrics, test_report
 from ai_autopilot.board import handoff_states
@@ -1603,6 +1604,15 @@ class AdoPollerService:
             # _handle_agent_result, before this runs; an unwired install has none and
             # keeps the old whole-item assumption.
             expected_pr=role_opens_pr(result.profile, cfg) if result.profile else True,
+            # The QC verdict. Until this was passed, a run that executed cases and found
+            # failures reached exactly the same gate as one that found none — so the item
+            # was tagged handled and the only trace of the defect was a comment.
+            tests_failed=sum(
+                1 for r in (result.test_results or []) if getattr(r, "outcome", "") == "fail"
+            ),
+            tests_blocked=sum(
+                1 for r in (result.test_results or []) if getattr(r, "outcome", "") == "blocked"
+            ),
         )
         return score_run(
             inp, auto_min=cfg.pr_score_auto_min, review_min=cfg.pr_score_review_min
@@ -1702,6 +1712,94 @@ class AdoPollerService:
         self._log.info("test cases filed", id=item.id, filed=filed, offered=len(cases))
         return filed
 
+    @staticmethod
+    def _bug_title(case) -> str:
+        """The Bug's title, and therefore its identity for the duplicate check.
+
+        Prefixed so a human scanning the board can see at a glance which Bugs the
+        autopilot filed, and so the duplicate check cannot collide with a Bug somebody
+        wrote by hand that happens to share a case name.
+        """
+        return f"[QC] {(getattr(case, 'title', '') or '').strip()}"[:255]
+
+    async def _bugs_already_filed(self, item: WorkItemInfo) -> set[str]:
+        """Titles of Bugs already linked to this item, lowercased.
+
+        Read off the ITEM rather than kept in our own ledger, on purpose. A ledger says
+        "we filed it" and keeps saying so after somebody deletes the Bug, which is the
+        one case where refiling is the correct answer. Reading the links asks the
+        question that actually matters — is there a Bug on this item for this case —
+        and answers it the same way the person looking at the board would.
+
+        Both link directions are read: the child link is the one we prefer, but where a
+        process template refuses it the Bug lands as Related and would otherwise be
+        invisible here, so a re-run would file a second one.
+        """
+        ado = self._provider(item.project)
+        linked: list = []
+        with contextlib.suppress(Exception):
+            linked = list(await ado.get_children(item.id))
+        with contextlib.suppress(Exception):
+            _preds, related = await ado.get_work_item_links([item.id])
+            ids = sorted(related.get(item.id, set()))
+            if ids:
+                linked += list(await ado.get_work_items_by_ids(ids))
+        return {
+            (w.title or "").strip().lower() for w in linked
+            if str(getattr(w, "work_item_type", "")).strip().lower() == "bug"
+        }
+
+    async def _file_bugs(self, item: WorkItemInfo, result: ExecutionResult) -> int:
+        """File one Bug per FAILED case; returns how many were created.
+
+        One per case rather than one listing them all, for the reason the audit-filing
+        screen already gives: they are fixed by different people at different times, and
+        a single Bug holding nine defects is closed when the easiest one is done.
+
+        Only failures. A blocked case means QC could not reach a verdict — filing a Bug
+        for it would assert a defect nobody has established.
+
+        Best-effort per Bug, like ``_file_test_cases``: the run's work is done either
+        way, and a template that refuses the type must not turn a good QC run into a
+        failed one.
+        """
+        cfg = self._config
+        failures = [
+            r for r in (result.test_results or [])
+            if getattr(r, "outcome", "") == "fail" and (getattr(r, "title", "") or "").strip()
+        ]
+        if not failures or not cfg.qc_create_bug_items or cfg.dry_run:
+            return 0
+        existing = await self._bugs_already_filed(item)
+        filed = 0
+        for case in failures:
+            title = self._bug_title(case)
+            if title.strip().lower() in existing:
+                continue                      # already on the board — re-run, same case
+            note = (getattr(case, "note", "") or "").strip()
+            try:
+                bug_id, link = await self._provider(item.project).create_bug(
+                    title=title,
+                    description=(
+                        f"<div>Tìm thấy khi chạy QC trên "
+                        f"<b>#{item.id}</b> — {html_escape(item.title or '')}.</div>"
+                        + (f"<div>{html_escape(note)}</div>" if note else "")
+                    ),
+                    repro_steps=html_escape(note) if note else "",
+                    parent_id=item.id,
+                    tag=cfg.processed_tag or "",
+                    project=item.project or "",
+                )
+            except Exception as exc:  # noqa: BLE001 — bookkeeping must not sink the run
+                self._log.warning("bug not filed", id=item.id, error=describe_exc(exc))
+                continue
+            if bug_id:
+                filed += 1
+                existing.add(title.strip().lower())   # guard within this run too
+                self._log.info("bug filed", id=item.id, bug=bug_id, link=link)
+        self._log.info("bugs filed", id=item.id, filed=filed, failures=len(failures))
+        return filed
+
     async def _report_test_results(self, item: WorkItemInfo, result: ExecutionResult) -> int:
         """Comment the outcomes of the cases this run executed; returns how many.
 
@@ -1775,17 +1873,34 @@ class AdoPollerService:
             if score and score.gate == "escalate" and cfg.autonomy_level != "report":
                 # Terminal too — same reasoning as the needs_human exit above.
                 await self._file_test_cases(item, result)
+                # Here rather than beside the verdict comment: this is the exit a failing
+                # case now takes (see pr_scorer), it is terminal, and filing on a
+                # retryable path would put the same Bug on the board once per attempt.
+                bugs = await self._file_bugs(item, result)
                 await c.state_repo.set(
-                    item.id, PipelineState.NEEDS_HUMAN, detail=f"run score {score.score}/100"
+                    item.id, PipelineState.NEEDS_HUMAN,
+                    detail="; ".join(score.reasons)[:400] or f"run score {score.score}/100",
                 )
                 await self._apply_outcome(item, "needs_human")
+                # Say WHICH reason held it. This was hardcoded to "điểm dưới ngưỡng
+                # review", which is now sometimes untrue: a QC run that finds a defect is
+                # held on its VERDICT while scoring perfectly well, and telling that
+                # reader to go look at a score sends them to the wrong number.
                 await self._provider(item.project).add_comment(
                     item.id,
                     score_badge_html(score)
-                    + "<div><b>🙋 Held for human</b> — điểm dưới ngưỡng review.</div>",
+                    + (f"<div><b>🐞 {bugs} Bug</b> đã được tạo và gắn vào work item này."
+                       "</div>" if bugs else "")
+                    + "<div><b>🙋 Held for human</b> — "
+                    + (html_escape("; ".join(score.reasons)) if score.reasons
+                       else "điểm dưới ngưỡng review")
+                    + ".</div>",
                 )
                 await c.notifier.notify_completed(item, result)
-                self._log.info("run below review threshold — escalated", id=item.id, score=score.score)
+                self._log.info(
+                    "run held for a human", id=item.id, score=score.score,
+                    why="; ".join(score.reasons) or "below review threshold",
+                )
                 return
             badge = score_badge_html(score) if score else ""
             if result.pr_url or result.pr_urls:

@@ -46,6 +46,13 @@ class ScoreInput:
     review_warnings: int = 0
     ci_passed: bool | None = None
     unresolved_threads: int = 0
+    # Cases this run EXECUTED and their verdict — the QC half, which the rubric could
+    # not see at all. `ci_passed` is a different signal: that is the repository's own
+    # test suite run as a gate, not the test cases a QC role executed against the item.
+    # Without these a QC run that found a real defect scored — and gated — identically
+    # to one that found nothing, so the verdict had no authority over the pipeline.
+    tests_failed: int = 0
+    tests_blocked: int = 0
 
 
 @dataclass
@@ -125,6 +132,23 @@ def score_run(inp: ScoreInput, *, auto_min: int = 85, review_min: int = 60) -> R
 
     total = max(0, min(100, sum(comp.values())))
     gate = "auto" if total >= auto_min else "review" if total >= review_min else "escalate"
+
+    # A failed or blocked case forces the gate REGARDLESS of the score, and the score is
+    # deliberately left alone. The two measure different things and conflating them was
+    # the mistake: the score asks "how well did this run go", the gate asks "must a human
+    # look before this moves". A QC run that finds a real defect went WELL — marking it
+    # down would penalise the agent for doing its job — and it is precisely the run
+    # nobody may let through unread.
+    #
+    # Blocked counts too. A case that could not be run is not a case that passed, which
+    # is already how the comment renderer reads it (TestReport.is_clean).
+    if inp.tests_failed or inp.tests_blocked:
+        gate = "escalate"
+        if inp.tests_failed:
+            why.append(f"{inp.tests_failed} test case KHÔNG ĐẠT — người phải quyết định")
+        if inp.tests_blocked:
+            why.append(f"{inp.tests_blocked} test case chưa chạy được — chưa có kết luận")
+
     return RunScore(score=total, grade=_grade(total), gate=gate, components=comp, reasons=why)
 
 

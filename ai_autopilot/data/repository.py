@@ -119,6 +119,10 @@ class ExecutionRepository:
             )
             record.error = (result.error or "")[:2000] or None
             record.output = (result.output or "")[:5000]
+            outcomes = [getattr(r, "outcome", "") for r in (result.test_results or [])]
+            record.tests_total = len(outcomes)
+            record.tests_failed = sum(1 for o in outcomes if o == "fail")
+            record.tests_blocked = sum(1 for o in outcomes if o == "blocked")
             now = datetime.now(UTC)
             record.completed_at = now
             record.duration_seconds = result.duration_seconds

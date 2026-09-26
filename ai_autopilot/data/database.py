@@ -27,6 +27,9 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("executions", "cache_read_tokens", "INTEGER"),
     ("executions", "cache_creation_tokens", "INTEGER"),
     ("executions", "profile", "VARCHAR(100)"),
+    ("executions", "tests_total", "INTEGER"),
+    ("executions", "tests_failed", "INTEGER"),
+    ("executions", "tests_blocked", "INTEGER"),
 )
 
 

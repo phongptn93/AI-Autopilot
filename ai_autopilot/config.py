@@ -1559,6 +1559,15 @@ class Settings(BaseSettings):
     # cases on the work item" is the complaint that says a file alone is not enough —
     # doubly so now the file lives at the workspace root, on one machine, uncommitted.
     qc_create_test_case_items: bool = True
+    # File a Bug for each case the run reported as FAILED. Off by default, and that is
+    # a judgement rather than caution: a failing case is not always a product defect —
+    # it is just as often a wrong test, stale data, or a broken environment — so filing
+    # one automatically writes to a shared board that somebody then has to clean. On, it
+    # is the right answer for a team whose process requires Requirement → TC + Bug
+    # traceability, where a defect that exists only in a comment counts as not found.
+    # The failing run is held for a human either way (see pr_scorer): this decides
+    # whether the Bug is waiting for them when they arrive.
+    qc_create_bug_items: bool = False
     # DEPRECATED — superseded by sdlc_roles.stages.
     # Extra / overriding profiles merged over the built-ins (name → ordered stage names).
     sdlc_profiles: dict[str, list[str]] = Field(default_factory=dict)

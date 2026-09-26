@@ -568,6 +568,13 @@ class ExecutionRecord(Base):
     error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     output: Mapped[str | None] = mapped_column(String(5000), nullable=True)
     duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    # The QC verdict, as numbers. It existed only inside a rendered ADO comment, so
+    # "which items have a failing test case right now" was a question nothing could
+    # answer — not the dashboard, not a report, not an alert. A finding you cannot
+    # query is a finding nobody acts on.
+    tests_total: Mapped[int] = mapped_column(Integer, default=0)
+    tests_failed: Mapped[int] = mapped_column(Integer, default=0)
+    tests_blocked: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime] = mapped_column(DateTime)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)

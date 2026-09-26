@@ -499,6 +499,14 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "This is what QC actually works from — and with the path above pointing outside "
           "every repo, it is the ONLY copy that leaves this machine. Off = the workspace "
           "file alone."),
+    Field("qc_create_bug_items", "File a Bug for each FAILED case", "bool",
+          "🧪 QC test cases",
+          "One ADO Bug per failing case, linked to the item QC was running against "
+          "(child link, falling back to Related where the process template refuses it). "
+          "Re-running does not duplicate: a case whose Bug is already linked is skipped. "
+          "Off by default — a failing case is not always a product defect, it is often a "
+          "wrong test or a broken environment, and those Bugs land on a shared board. "
+          "Turn it on where the process requires Requirement → TC + Bug traceability."),
     # ── Planning workbench ──
     Field("planning_ai_analysis", "AI conflict analysis", "bool", "Planning workbench",
           "The Analyze action runs bounded Claude judges over keyword-overlapping pairs "

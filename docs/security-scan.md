@@ -13,7 +13,7 @@ The same engine runs from four places and cannot disagree with itself:
 ## What runs
 
 ```
-scanners (parallel) ──► model pass (optional) ──► merge ──► fingerprint ──► suppress ──► baseline diff ──► store ──► render
+scanners (parallel) ──► threat intel ──► model pass (optional) ──► merge ──► fingerprint ──► suppress ──► baseline diff ──► store ──► render
    builtin   pure-Python rules: secrets (PEM, AWS, Azure, ADO PAT, JWT, conn strings…),
              C#/.NET (raw SQL concat, BinaryFormatter, JWT validation off, CORS *, TLS off…),
              TS/Angular (bypassSecurityTrust, innerHTML, eval, token in localStorage…),
@@ -21,10 +21,15 @@ scanners (parallel) ──► model pass (optional) ──► merge ──► fi
    gitleaks  secrets in tree or in a commit range
    semgrep   rule-based SAST with dataflow (OWASP packs + language packs)
    sca       vulnerable dependencies: trivy fs, dotnet list --vulnerable, npm audit, pip-audit
+   intel     CISA KEV + FIRST EPSS on the SCA findings (see Phase 5 below)
    ai        `agent-security-reviewer` + the `security-review` skill, READ-ONLY (file tools denied
              at the tool surface). It is handed the scanners' findings first: it triages them
              (CONFIRMED / FALSE POSITIVE with a reason) and then looks for what regexes cannot
              see — BOLA/IDOR, missing role checks, mass assignment.
+             `ai_mode: deep` runs THREE focused passes instead of one sweep — access
+             control & auth, injection & config, business logic (workflow order,
+             double-submit, rate limits, client-supplied math, races: CWE-840/841/799/
+             770/602/362). ~3x tokens; meant for nightly/audit loops, not the PR gate.
 ```
 
 Every scanner except `builtin` is optional. A missing binary is **skipped and said so** —
@@ -228,3 +233,30 @@ ai-autopilot scan --dast staging
 ```
 
 `ai-autopilot doctor` warns about a target that is enabled but not owner-confirmed.
+
+## Phase 5 — Threat intel: CISA KEV + EPSS (`intel_enabled`, default on)
+
+A dependency CVE is three separate facts: the flaw exists (the scanner's job), someone is
+**exploiting it in the wild** (CISA's [KEV catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+— a record of events), and how likely exploitation is soon ([EPSS](https://www.first.org/epss/)
+— a prediction). After the SCA scanners run, each finding's id is resolved to a CVE
+(GHSA/PYSEC ids go through [OSV](https://osv.dev)'s alias data — `rule_id` itself never
+changes, fingerprints depend on it) and joined against both feeds:
+
+| Signal | Effect |
+|---|---|
+| **In KEV** | severity → `critical`, and the finding **fails the gate even when it is old news to the baseline**. Every summary then says `KEV escalation (not caused by new code)` so a nightly red reads as CISA news, not a CI flake. The AI pass sees the escalation in its seed; its triage cannot demote a KEV finding. |
+| **EPSS score** | display and ordering only (highest first within a severity) — never a severity change. |
+
+An explicit suppression still wins — it is a human decision with a reason and an expiry —
+but the report warns: *N suppressed finding(s) are in CISA KEV*.
+
+**Offline is fine.** Feeds are fetched with a 24h on-disk cache
+(`<workspace>/.autopilot/intel/`, written only by stored scans); on a network failure a
+stale cache is used and labelled, and with no cache at all the step is skipped and the
+tool status says `offline` — enrichment never sinks a scan. Air-gapped runners point
+`intel_kev_url` / `intel_epss_url` / `intel_osv_url` at an internal mirror.
+
+Two boundaries to know: the **pre-PR gate does not run intel** (it is diff-scoped and
+store-less; KEV escalations belong to the nightly/full scan), and intel is
+**config.yaml-only** — there is deliberately no dashboard form field for it.

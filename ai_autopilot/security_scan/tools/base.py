@@ -54,8 +54,9 @@ class ToolStatus:
         # What was deliberately left out is part of the answer: "0 findings" and
         # "0 findings, 4 excused inline" are different statements about a codebase.
         excused = ", ".join(
-            f"{self.extra[k]} {k.replace('_', ' ')}"
-            for k in ("inline_ignored", "allowlisted") if self.extra.get(k)
+            f"{self.extra[k]} {k.replace('_', ' ')}" if k != "cache" else str(self.extra[k])
+            for k in ("inline_ignored", "allowlisted", "epss_scored", "passes", "cache")
+            if self.extra.get(k)
         )
         base = f"{self.findings} finding(s) in {self.duration_seconds:.1f}s"
         return f"{base} ({excused})" if excused else base

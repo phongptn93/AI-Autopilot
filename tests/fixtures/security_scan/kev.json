@@ -1,0 +1,44 @@
+{
+  "title": "CISA Catalog of Known Exploited Vulnerabilities",
+  "catalogVersion": "2026.09.26",
+  "dateReleased": "2026-09-26T12:00:00.000Z",
+  "count": 3,
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-2023-49083",
+      "vendorProject": "pyca",
+      "product": "cryptography",
+      "vulnerabilityName": "cryptography NULL-dereference in PKCS7",
+      "dateAdded": "2026-09-20",
+      "shortDescription": "NULL-dereference when loading PKCS7 certificates.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2026-10-11",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": "",
+      "cwes": ["CWE-476"]
+    },
+    {
+      "cveID": "CVE-2021-44228",
+      "vendorProject": "Apache",
+      "product": "Log4j2",
+      "vulnerabilityName": "Log4Shell",
+      "dateAdded": "2021-12-10",
+      "shortDescription": "JNDI features do not protect against attacker controlled endpoints.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2021-12-24",
+      "knownRansomwareCampaignUse": "Known",
+      "notes": "",
+      "cwes": ["CWE-917", "CWE-20"]
+    },
+    {
+      "cveID": "CVE-2020-7598",
+      "vendorProject": "substack",
+      "product": "minimist",
+      "vulnerabilityName": "minimist prototype pollution",
+      "dateAdded": "2026-09-25",
+      "shortDescription": "Prototype pollution via constructor payloads.",
+      "requiredAction": "Apply updates per vendor instructions.",
+      "dueDate": "2026-10-16"
+    }
+  ]
+}

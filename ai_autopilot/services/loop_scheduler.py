@@ -276,9 +276,14 @@ class LoopScheduler:
         )
         from ai_autopilot.models import ExecutionResult
 
+        gate_word = "passed" if scan.passed else "FAILED"
+        if scan.kev_only_failure:
+            # A nightly red with "0 new" reads like a flake — name the real cause:
+            # CISA added an existing finding's CVE to the KEV catalog.
+            gate_word = "FAILED (KEV escalation, not new code)"
         summary = scan.ai_summary or (
             f"{len(scan.findings)} finding(s), {len(scan.diff.new)} new, "
-            f"gate {'passed' if scan.passed else 'FAILED'}"
+            f"gate {gate_word}"
         )
         result = (ExecutionResult.ok if scan.passed else ExecutionResult.fail)(
             0, f"scan:{loop.name}", summary

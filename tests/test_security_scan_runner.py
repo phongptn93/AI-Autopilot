@@ -183,6 +183,52 @@ async def test_ai_pass_merges_and_triages(repo):
     assert result.ai_summary == "one BOLA"
 
 
+async def test_deep_mode_runs_three_focused_passes(repo):
+    ai_text = (
+        "Reviewed.\n```json\n" + json.dumps({
+            "summary": "one BOLA",
+            "findings": [
+                {"severity": "high", "title": "BOLA: order id not checked",
+                 "file": "src/orders.py", "line": 9, "cwe": "CWE-639",
+                 "rule_id": "bola", "confidence": "high"},
+            ],
+        }) + "\n```"
+    )
+    ex = _FakeExecutor(ai_text)
+    result = await run_scan(_req(repo, store=False, ai_mode="deep"), executor=ex)
+
+    assert len(ex.calls) == 3
+    assert "ACCESS CONTROL" in ex.calls[0]
+    assert "INJECTION AND CONFIGURATION" in ex.calls[1]
+    assert "BUSINESS LOGIC" in ex.calls[2] and "CWE-840" in ex.calls[2]
+    # Exactly one pass owns triage of the scanner seed; the others only get the list.
+    assert "Triage them instead" in ex.calls[0]
+    assert all("Triage them instead" not in c for c in ex.calls[1:])
+    assert all("ALREADY FOUND" in c for c in ex.calls)
+
+    st = result.tools["ai"]
+    assert st.ran and st.extra["passes"] == "3/3" and "passes" in st.label
+    assert result.cost_tokens == 3 * 123
+    # The same finding from three passes dedupes to one row.
+    assert sum(1 for f in result.findings if f.rule_id == "bola") == 1
+    assert "#### AI pass — business-logic" in result.ai_body
+
+
+async def test_deep_mode_survives_a_failed_pass(repo):
+    class _Flaky(_FakeExecutor):
+        async def run_audit(self, name, prompt, repo_, base, project=""):
+            if len(self.calls) == 1:   # second pass dies
+                self.calls.append(prompt)
+                return ExecutionResult.fail(0, prompt, "model crashed")
+            return await super().run_audit(name, prompt, repo_, base, project)
+
+    ai_text = "Fine.\n```json\n" + json.dumps({"summary": "clean", "findings": []}) + "\n```"
+    result = await run_scan(_req(repo, store=False, ai_mode="deep"), executor=_Flaky(ai_text))
+    st = result.tools["ai"]
+    assert st.ran and not st.error            # partial success is success, visibly partial
+    assert st.extra["passes"] == "2/3" and "model crashed" in st.extra["failed"]
+
+
 async def test_ai_failure_is_recorded_not_raised(repo):
     result = await run_scan(
         _req(repo, store=False, ai_mode="deep"), executor=_FakeExecutor("boom", success=False),

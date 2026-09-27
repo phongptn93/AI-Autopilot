@@ -2230,6 +2230,9 @@ def create_dashboard_router() -> APIRouter:
             agent=r.agent or "", tool=r.tool or "", rule_id=r.rule_id or "", cwe=r.cwe or "",
             owasp=r.owasp or "", confidence=r.confidence or "", fingerprint=r.fingerprint,
             snippet=r.snippet or "",
+            cve=r.cve or "", kev=bool(r.kev), kev_due=r.kev_due or "",
+            kev_ransomware=bool(r.kev_ransomware), epss=r.epss,
+            epss_percentile=r.epss_percentile,
         ) for r in rows]
         name = (Path(repo).name if repo else "all") + f"-{status}"
         if fmt == "json":

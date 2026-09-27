@@ -258,8 +258,11 @@ def _table(result: ScanResult, include_suppressed: bool) -> str:
     new_fps = {f.fingerprint for f in result.diff.new}
     lines = []
     verdict = "PASS ✅" if result.passed else "FAIL ❌"
+    if result.kev_only_failure:
+        verdict += "  — KEV escalation, not new code"
+    gate = f"new ≥ {result.fail_on}, or KEV" if result.kev_findings else f"new ≥ {result.fail_on}"
     lines.append(
-        f"Security scan — {verdict}  (gate: new ≥ {result.fail_on}; scope: {result.scope})"
+        f"Security scan — {verdict}  (gate: {gate}; scope: {result.scope})"
     )
     lines.append("  " + "  ".join(f"{s}: {c[s]}" for s in SEVERITIES))
     d = result.diff.counts
@@ -278,15 +281,18 @@ def _table(result: ScanResult, include_suppressed: bool) -> str:
         lines.append("\n  No findings.")
         return "\n".join(lines)
     lines.append("")
-    lines.append(f"  {'SEV':<9}{'NEW':<5}{'TOOL':<9}{'CWE':<9}{'WHERE':<52}TITLE")
+    lines.append(f"  {'SEV':<9}{'NEW':<5}{'KEV':<5}{'EPSS':<6}{'TOOL':<9}{'CWE':<9}"
+                 f"{'WHERE':<52}TITLE")
     for f in rows:
         where = f"{f.file}:{f.line}" if f.line else f.file
         if len(where) > 50:
             where = "…" + where[-49:]
         flag = "new" if f.fingerprint in new_fps else ("sup" if f in result.suppressed else "")
+        kev = "KEV" if f.kev else ""
+        epss = f"{f.epss:.2f}" if f.epss is not None else ""
         lines.append(
-            f"  {f.severity:<9}{flag:<5}{(f.tool or 'ai'):<9}{(f.cwe or ''):<9}"
-            f"{where:<52}{f.title[:70]}"
+            f"  {f.severity:<9}{flag:<5}{kev:<5}{epss:<6}{(f.tool or 'ai'):<9}"
+            f"{(f.cwe or ''):<9}{where:<52}{f.title[:70]}"
         )
     lines.append("")
     lines.append("  fingerprints: run with --format json for the ids to put in "
@@ -309,11 +315,14 @@ def _markdown(result: ScanResult, include_suppressed: bool) -> str:
     rows = list(result.findings) + (list(result.suppressed) if include_suppressed else [])
     if rows:
         new_fps = {f.fingerprint for f in result.diff.new}
-        out += ["", "| Sev | New | Tool | CWE | Where | Finding | Fingerprint |",
-                "|---|---|---|---|---|---|---|"]
+        out += ["", "| Sev | New | CVE | KEV | EPSS | Tool | CWE | Where | Finding "
+                "| Fingerprint |", "|---|---|---|---|---|---|---|---|---|---|"]
         for f in rows:
             where = f"{f.file}:{f.line}" if f.line else f.file
             new = "✦" if f.fingerprint in new_fps else ""
-            out.append(f"| {f.severity} | {new} | {f.tool or 'ai'} | {f.cwe} | `{where}` | "
+            kev = "⚠" if f.kev else ""
+            epss = f"{f.epss:.2f}" if f.epss is not None else ""
+            out.append(f"| {f.severity} | {new} | {f.cve} | {kev} | {epss} "
+                       f"| {f.tool or 'ai'} | {f.cwe} | `{where}` | "
                        f"{f.title.replace('|', '/')} | `{f.fingerprint}` |")
     return "\n".join(out)

@@ -88,10 +88,32 @@ class ScanResult:
         return reports.severity_counts(self.findings)
 
     @property
-    def gate_findings(self) -> list[Finding]:
-        """New, unsuppressed findings at/above ``fail_on`` — what fails the gate."""
+    def kev_findings(self) -> list[Finding]:
+        """Unsuppressed findings in CISA's KEV catalog — exploited in the wild."""
+        return [f for f in self.findings if f.kev]
+
+    @property
+    def _new_gate_findings(self) -> list[Finding]:
         floor = _sev_index(self.fail_on)
         return [f for f in self.diff.new if SEVERITIES.index(f.severity) <= floor]
+
+    @property
+    def gate_findings(self) -> list[Finding]:
+        """What fails the gate: new, unsuppressed findings at/above ``fail_on`` — plus
+        anything in KEV, however long it has been in the baseline. "We already knew" is
+        exactly the state a KEV listing escalates out of. (An explicit suppression with
+        its reason and expiry still wins: ``findings`` excludes suppressed rows.)"""
+        out = list(self._new_gate_findings)
+        seen = {f.fingerprint for f in out}
+        out += [f for f in self.kev_findings if f.fingerprint not in seen]
+        return out
+
+    @property
+    def kev_only_failure(self) -> bool:
+        """The gate failed purely because of KEV — nothing new crossed ``fail_on``.
+        Callers word their summaries with this so a nightly red is read as a CISA
+        escalation, not a CI flake."""
+        return bool(self.kev_findings) and not self._new_gate_findings and not self.error
 
     @property
     def passed(self) -> bool:
@@ -259,7 +281,25 @@ async def run_scan(
         say(f"  ignored {result.filtered} by disabled_rules / ignore_paths")
     scanner_findings = fp_mod.dedupe(scanner_findings)
 
+    # ── threat intel (KEV + EPSS) on the SCA findings ─────────────────────────
+    # Before the model pass on purpose: the AI review is seeded with the scanner
+    # findings, and "critical, in KEV" is context it should triage with. Fail-soft:
+    # offline just means "not enriched", and the status says so.
+    if getattr(config, "intel_enabled", False):
+        from ai_autopilot.security_scan import intel
+
+        st = await intel.run_intel(
+            scanner_findings, workspace=workspace, cfg=config, store=req.store,
+        )
+        result.tools["intel"] = st
+        prog.tools["intel"] = st.label
+        say(f"  intel: {st.label}")
+
     # ── the model ─────────────────────────────────────────────────────────────
+    # Fast is one sweep. Deep is one focused pass per category (ai_sast.DEEP_PASSES):
+    # a reviewer told to hunt exactly one class of flaw finds what a do-everything
+    # prompt skims past. Sequential on purpose — every run_audit fetches
+    # origin/<base>, and concurrent fetches fight over the repo's lock.
     ai_findings: list[Finding] = []
     ai_mode = (req.ai_mode or "off").lower()
     if ai_mode in ("fast", "deep"):
@@ -268,41 +308,65 @@ async def run_scan(
             st.skipped_reason = "no executor"
         else:
             t0 = time.monotonic()
-            ai_feed = activity.loop_key(req.loop_name or f"security-scan-{ai_mode}")
-            say(f"🤖 AI review ({ai_mode}) — live: /dashboard/activity/{ai_feed}", "ai")
+            base_name = req.loop_name or f"security-scan-{ai_mode}"
             scope_note = ""
             if files is not None:
                 shown = files[:80]
                 scope_note = ("Scope: ONLY these changed files (already computed):\n"
                               + "\n".join(f"- {f}" for f in shown)
                               + (f"\n… and {len(files) - 80} more." if len(files) > 80 else ""))
-            prompt = ai_sast.build_prompt(
-                repo=repo, mode=ai_mode, agents=req.ai_agents, seeded=scanner_findings,
-                scope_note=scope_note,
-            )
-            try:
-                exec_result = await executor.run_audit(
-                    req.loop_name or f"security-scan-{ai_mode}", prompt, repo,
-                    req.base_branch, req.project,
+            passes = ai_sast.DEEP_PASSES if ai_mode == "deep" else (("", ""),)
+            summaries: list[str] = []
+            bodies: list[str] = []
+            errors: list[str] = []
+            for idx, (suffix, focus) in enumerate(passes):
+                name = f"{base_name}-{suffix}" if suffix else base_name
+                ai_feed = activity.loop_key(name)
+                label = f"{ai_mode}: {suffix}" if suffix else ai_mode
+                say(f"🤖 AI review ({label}) — live: /dashboard/activity/{ai_feed}", "ai")
+                prompt = ai_sast.build_prompt(
+                    repo=repo, mode=ai_mode, agents=req.ai_agents, seeded=scanner_findings,
+                    scope_note=scope_note, focus=focus, triage=(idx == 0),
                 )
-                st.duration_seconds = time.monotonic() - t0
-                result.cost_tokens = int(getattr(exec_result, "cost_tokens", 0) or 0)
+                try:
+                    exec_result = await executor.run_audit(
+                        name, prompt, repo, req.base_branch, req.project,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(describe_exc(exc)[:200])
+                    continue
+                result.cost_tokens += int(getattr(exec_result, "cost_tokens", 0) or 0)
                 text = getattr(exec_result, "output", "") or ""
-                if getattr(exec_result, "success", False):
-                    summary, parsed = reports.parse_findings(text)
-                    own, verdicts = ai_sast.split_triage(parsed)
-                    for f in own:
-                        f.tool = "ai"
-                        f.agent = f.agent or (req.ai_agents[0] if req.ai_agents else "")
-                    result.ai_demoted = ai_sast.apply_triage(scanner_findings, verdicts)
-                    ai_findings = own
-                    result.ai_summary, result.ai_body = summary, text
-                    st.ran, st.findings = True, len(own)
-                    st.extra["triaged"] = len(verdicts)
+                if not getattr(exec_result, "success", False):
+                    errors.append((getattr(exec_result, "error", "") or "model run failed")[:200])
+                    continue
+                summary, parsed = reports.parse_findings(text)
+                own, verdicts = ai_sast.split_triage(parsed)
+                for f in own:
+                    f.tool = "ai"
+                    f.agent = f.agent or (req.ai_agents[0] if req.ai_agents else "")
+                result.ai_demoted += ai_sast.apply_triage(scanner_findings, verdicts)
+                ai_findings += own
+                if verdicts:
+                    st.extra["triaged"] = st.extra.get("triaged", 0) + len(verdicts)
+                if summary:
+                    summaries.append(summary)
+                if len(passes) > 1:
+                    bodies.append(f"#### AI pass — {suffix}\n\n"
+                                  + reports.strip_findings_block(text))
                 else:
-                    st.error = (getattr(exec_result, "error", "") or "model run failed")[:200]
-            except Exception as exc:  # noqa: BLE001
-                st.error = describe_exc(exc)[:200]
+                    bodies.append(text)
+            st.duration_seconds = time.monotonic() - t0
+            if errors and not bodies:
+                st.error = errors[0]
+            else:
+                st.ran, st.findings = True, len(ai_findings)
+                if len(passes) > 1:
+                    st.extra["passes"] = f"{len(bodies)}/{len(passes)}"
+                if errors:  # partial success: visible in "passes", detail here
+                    st.extra["failed"] = "; ".join(errors)[:200]
+            result.ai_summary = " · ".join(summaries)[:500]
+            result.ai_body = "\n\n".join(bodies)
             ai_findings, _ = (apply_ignores(ai_findings, req.disabled_rules, req.ignore_paths)
                               if ai_findings else (ai_findings, 0))
         result.tools["ai"] = st
@@ -319,6 +383,9 @@ async def run_scan(
         prefix = (f.detail + " ") if f.detail else ""
         f.detail = prefix + f"Suppressed: {sup.reason_for(f.fingerprint)}"
     reported = [f for f in merged if f.fingerprint not in active]
+    # Within a severity, the most likely to be exploited first (EPSS is display order,
+    # never a severity change). Python's sort is stable, so unscored rows keep place.
+    reported.sort(key=lambda f: (SEVERITIES.index(f.severity), -(f.epss or 0.0)))
     result.findings = reported
     if baseline is not None:
         # A finding that is still detected but suppressed is neither new nor fixed: it
@@ -395,7 +462,10 @@ async def run_scan(
             )
         except Exception as exc:  # noqa: BLE001
             _log.warning("security scan: could not record finish", error=describe_exc(exc))
-    gate = "✅ gate passed" if result.passed else "❌ gate FAILED"
+    if result.kev_only_failure:
+        gate = "❌ gate FAILED — KEV escalation (not caused by new code)"
+    else:
+        gate = "✅ gate passed" if result.passed else "❌ gate FAILED"
     say(f"{gate} · {result.duration_seconds:.0f}s"
         + (f" · report /dashboard/reports/{result.report_id}" if result.report_id else ""), "done")
     progress.finish(repo)
@@ -428,6 +498,10 @@ def _as_report(req: ScanRequest, result: ScanResult, started_at: datetime) -> re
     if result.suppressed:
         lines.append(f"- {len(result.suppressed)} suppressed "
                      f"(see `.autopilot/{sup_mod.FILE_NAME}`)")
+    kev_suppressed = [f for f in result.suppressed if f.kev]
+    if kev_suppressed:
+        lines.append(f"- ⚠ {len(kev_suppressed)} suppressed finding(s) are in CISA KEV "
+                     "— actively exploited; revisit those suppressions")
     if result.expired_suppressions:
         lines.append(f"- ⚠ {len(result.expired_suppressions)} suppression(s) EXPIRED "
                      "and are reported again")
@@ -440,7 +514,14 @@ def _as_report(req: ScanRequest, result: ScanResult, started_at: datetime) -> re
                      f"reproduced, of {v.attempted} attempted")
     if result.gate_findings:
         lines += ["", "## Gate", ""]
+        if result.kev_only_failure:
+            lines.append("Failed by a **KEV escalation** — no new finding crossed "
+                         f"`{result.fail_on}`; CISA listed the ones below as actively "
+                         "exploited.")
+            lines.append("")
         lines += [f"- [{f.severity}] {f.file}:{f.line or ''} — {f.title}"
+                  + (f" — in CISA KEV (due {f.kev_due})" if f.kev and f.kev_due
+                     else " — in CISA KEV" if f.kev else "")
                   for f in result.gate_findings[:30]]
     if result.ai_body:
         lines += ["", "## AI review", "", reports.strip_findings_block(result.ai_body)]
@@ -461,7 +542,11 @@ def _summary_line(result: ScanResult) -> str:
     c = result.counts
     parts = [f"{c[s]} {s}" for s in SEVERITIES if c[s]]
     head = ", ".join(parts) or "no findings"
+    if result.kev_findings:
+        head += f"; {len(result.kev_findings)} in CISA KEV"
     gate = "passed" if result.passed else "FAILED"
+    if result.kev_only_failure:
+        gate = "FAILED (KEV escalation, not new code)"
     return f"{head}; {len(result.diff.new)} new since baseline; gate {gate}."
 
 

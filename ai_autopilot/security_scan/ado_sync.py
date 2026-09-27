@@ -39,7 +39,8 @@ def _floor(name: str) -> int:
 
 def bug_title(row) -> str:
     cwe = f"[{row.cwe}]" if row.cwe else ""
-    return f"[Security][{row.severity}]{cwe} {row.title}"[:250]
+    kev = "[KEV]" if getattr(row, "kev", None) else ""
+    return f"{kev}[Security][{row.severity}]{cwe} {row.title}"[:250]
 
 
 def bug_body(row, repo_name: str, scan_id: int = 0) -> str:
@@ -51,6 +52,12 @@ def bug_body(row, repo_name: str, scan_id: int = 0) -> str:
     ]
     if row.cwe or row.owasp:
         parts.append(f"<b>Classification:</b> {escape(row.cwe)} {escape(row.owasp)}")
+    # KEV context (dates, ransomware) already reads out in ``detail`` below and in the
+    # [KEV] title — this line only adds the structured ids/score.
+    if getattr(row, "cve", None):
+        epss = getattr(row, "epss", None)
+        parts.append(f"<b>CVE:</b> {escape(row.cve)}"
+                     + (f" &nbsp; <b>EPSS:</b> {epss:.2f}" if epss is not None else ""))
     if row.detail:
         parts.append(escape(row.detail))
     if row.snippet:

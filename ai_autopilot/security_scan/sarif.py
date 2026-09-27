@@ -39,6 +39,8 @@ def to_sarif(findings: list[Finding], *, repo: str = "", version: str = "") -> d
         })
         if f.cwe and f"external/cwe/{f.cwe.lower()}" not in rule["properties"]["tags"]:
             rule["properties"]["tags"].append(f"external/cwe/{f.cwe.lower()}")
+        if f.kev and "kev" not in rule["properties"]["tags"]:
+            rule["properties"]["tags"].append("kev")
         result: dict = {
             "ruleId": rule_id,
             "level": _LEVEL.get(f.severity, "note"),
@@ -50,6 +52,12 @@ def to_sarif(findings: list[Finding], *, repo: str = "", version: str = "") -> d
                 "cwe": f.cwe, "owasp": f.owasp, "tool": tool,
             },
         }
+        if f.cve:
+            result["properties"]["cve"] = f.cve
+        if f.kev:
+            result["properties"]["kev"] = True
+        if f.epss is not None:
+            result["properties"]["epss"] = f.epss
         if f.file:
             loc: dict = {"artifactLocation": {
                 "uri": f.file.replace("\\", "/"), "uriBaseId": "%SRCROOT%",

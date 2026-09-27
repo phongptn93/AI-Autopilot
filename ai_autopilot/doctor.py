@@ -1602,10 +1602,19 @@ def check_security_scan(config: Settings) -> list[Finding]:
                 "must state, in writing, that this host is yours to test.",
                 "Set owner_confirmed: true on the target, or disable it.",
             ))
+    if not sec.intel_enabled:
+        out.append(Finding(
+            WARN, "Threat intel (KEV/EPSS) is disabled",
+            "SCA findings are not checked against CISA's Known Exploited "
+            "Vulnerabilities catalog, so an actively exploited dependency "
+            "cannot escalate or fail the gate.",
+            "Set security_scan.intel_enabled: true (needs outbound HTTPS "
+            "or an internal mirror via intel_kev_url).",
+        ))
     if out:
         return out
     return [Finding(OK, f"Security scan: {', '.join(sec.tools)} · AI {sec.ai_mode} · "
-                        f"fail on {sec.fail_on}")]
+                        f"fail on {sec.fail_on} · KEV+EPSS on")]
 
 
 CHECKS = (

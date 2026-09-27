@@ -273,6 +273,7 @@
     {% for f in rows %}
     <tr>
       <td><span class="sev {{ f.severity }}">{{ f.severity }}</span>
+          {% if f.kev %}<br><span class="sev critical" title="in CISA Known Exploited Vulnerabilities{% if f.kev_due %} — remediation due {{ f.kev_due }}{% endif %}{% if f.kev_ransomware %} · known ransomware use{% endif %}">KEV</span>{% endif %}
           {% if f.first_seen and f.first_seen >= new_since %}<br><span class="sev new" title="first seen in the last 7 days">new</span>{% endif %}
           {% if f.verified %}<br><span class="sev pass" title="PoC verified">verified</span>{% elif f.verified is sameas false %}<br><span class="sev info" title="PoC could not reproduce">unconfirmed</span>{% endif %}</td>
       <td><a class="t" href="/dashboard/security/f/{{ f.id }}">{{ f.title }}</a>
@@ -280,7 +281,7 @@
           {% if f.snippet %}<div class="sc-snip" title="{{ f.snippet }}">{{ f.snippet }}</div>{% endif %}
           {% if f.status != 'open' %}<div class="sc-det"><b>{{ f.status }}</b>{% if f.suppress_reason %} — {{ f.suppress_reason }}{% endif %}{% if f.suppressed_by %} ({{ f.suppressed_by }}){% endif %}{% if f.suppress_until %} until {{ f.suppress_until.strftime('%Y-%m-%d') }}{% endif %}</div>{% endif %}</td>
       <td class="sc-where">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}
-          <div><span class="sc-tag">{{ f.tool or 'ai' }}</span>{% if f.rule_id %}<span class="sc-tag">{{ f.rule_id }}</span>{% endif %}{% if f.confidence %}<span class="sc-tag" title="confidence">{{ f.confidence }}</span>{% endif %}</div></td>
+          <div><span class="sc-tag">{{ f.tool or 'ai' }}</span>{% if f.rule_id %}<span class="sc-tag">{{ f.rule_id }}</span>{% endif %}{% if f.confidence %}<span class="sc-tag" title="confidence">{{ f.confidence }}</span>{% endif %}{% if f.epss is not none %}<span class="sc-tag" title="EPSS — probability of exploitation within 30 days">EPSS {{ '%.2f'|format(f.epss) }}</span>{% endif %}</div></td>
       <td>{% if f.cwe %}<a class="sc-tag" href="https://cwe.mitre.org/data/definitions/{{ f.cwe[4:] }}.html" target="_blank" rel="noopener">{{ f.cwe }}</a>{% endif %}{% if f.owasp %}<span class="sc-tag">{{ f.owasp }}</span>{% endif %}</td>
       <td class="sc-where">{{ f.times_seen }}× · {{ f.last_seen.strftime('%m-%d %H:%M') if f.last_seen else '' }}
           {% if f.ado_bug_id %}<div>{% if item_link %}<a class="table-link" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener">Bug #{{ f.ado_bug_id }}</a>{% else %}Bug #{{ f.ado_bug_id }}{% endif %}</div>{% endif %}</td>

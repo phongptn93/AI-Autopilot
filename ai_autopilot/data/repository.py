@@ -2236,6 +2236,12 @@ class SecurityRepository:
                 row.file, row.line = (f.file or "")[:1000], f.line
                 row.title, row.detail = (f.title or "")[:500], f.detail or ""
                 row.snippet, row.agent = (f.snippet or "")[:600], (f.agent or "")[:200]
+                # Threat intel refreshes with the scan too: a scan run with intel off
+                # (or offline) clears a stale KEV flag rather than letting it linger.
+                row.cve = (f.cve or "")[:20] or None
+                row.kev, row.kev_due = f.kev or None, (f.kev_due or "")[:10] or None
+                row.kev_ransomware = f.kev_ransomware or None
+                row.epss, row.epss_percentile = f.epss, f.epss_percentile
                 row.project = project or row.project
                 row.last_scan_id = scan_id
                 if is_suppressed:

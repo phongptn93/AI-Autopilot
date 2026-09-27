@@ -81,6 +81,13 @@ class Finding:
     confidence: str = ""     # high | medium | low
     fingerprint: str = ""    # stable id across runs — see security_scan.fingerprint
     snippet: str = ""        # the offending line(s), bounded
+    # ── threat intel (security_scan.intel fills these; never model output) ──
+    cve: str = ""            # resolved "CVE-2023-49083" — rule_id stays GHSA/PYSEC
+    kev: bool = False        # in the CISA Known Exploited Vulnerabilities catalog
+    kev_due: str = ""        # CISA remediation due date, "YYYY-MM-DD"
+    kev_ransomware: bool = False
+    epss: float | None = None            # P(exploited within 30 days), 0.0–1.0
+    epss_percentile: float | None = None
 
     def as_dict(self) -> dict:
         data = {
@@ -88,9 +95,15 @@ class Finding:
             "line": self.line, "detail": self.detail, "agent": self.agent,
         }
         # Only emit the security keys when set — a plain report's JSON stays as it was.
-        for key in ("tool", "rule_id", "cwe", "owasp", "confidence", "fingerprint", "snippet"):
+        for key in ("tool", "rule_id", "cwe", "owasp", "confidence", "fingerprint",
+                    "snippet", "cve", "kev", "kev_due", "kev_ransomware"):
             value = getattr(self, key)
             if value:
+                data[key] = value
+        # Floats compare against None, not truthiness — an EPSS of 0.0 is still a score.
+        for key in ("epss", "epss_percentile"):
+            value = getattr(self, key)
+            if value is not None:
                 data[key] = value
         return data
 
@@ -111,7 +124,21 @@ class Finding:
             confidence=str(row.get("confidence") or "").strip().lower(),
             fingerprint=str(row.get("fingerprint") or "").strip(),
             snippet=str(row.get("snippet") or "").strip()[:500],
+            # ``cve`` round-trips (the SCA parsers build findings through here). The
+            # OTHER intel fields deliberately do not: model output also arrives via
+            # from_dict, and a hallucinated ``kev: true`` must not be able to fail the
+            # gate — only security_scan.intel.enrich sets kev/epss.
+            cve=_norm_cve(row.get("cve")),
         )
+
+
+_CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$")
+
+
+def _norm_cve(value: object) -> str:
+    """A well-formed ``CVE-YYYY-NNNN…`` uppercased, else "" — never free text."""
+    text = str(value or "").strip().upper()
+    return text if _CVE_RE.match(text) else ""
 
 
 def _norm_cwe(value: object) -> str:

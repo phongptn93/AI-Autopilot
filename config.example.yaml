@@ -198,6 +198,19 @@ security_scan:
   #     auth_b_env_var: DAST_TOKEN_B   # user B — lets the probe test IDOR (A reads B's data)
   #     allow_mutations: false         # GET/HEAD/OPTIONS only unless true
   #     rate_limit_rps: 5
+  # Phase 5 — threat intel on SCA findings (config.yaml-only; no dashboard form).
+  # A dependency CVE in CISA's KEV catalog (= exploited in the wild) is escalated to
+  # critical and FAILS the gate even when the finding is old news to the baseline —
+  # the run says "KEV escalation (not caused by new code)" so it reads as CISA news,
+  # not a CI flake. EPSS only orders and annotates findings. Offline is fine: the
+  # enrichment is skipped and the tool status says why. Feeds are cached 24h under
+  # <workspace>/.autopilot/intel/ (stored scans only).
+  intel_enabled: true
+  intel_cache_hours: 24
+  # Air-gapped runners: point these at an internal mirror.
+  # intel_kev_url: https://mirror.internal/kev.json
+  # intel_epss_url: https://api.first.org/data/v1/epss
+  # intel_osv_url: https://api.osv.dev/v1/vulns
 # Suppressions (accepted/deferred findings, with reason + expiry) live in the WORKSPACE:
 #   <workspace>/.autopilot/security-suppressions.yaml
 # Reviewers on the PRs the autopilot opens. The assignee of the work item is the

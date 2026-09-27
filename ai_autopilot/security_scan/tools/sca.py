@@ -148,18 +148,21 @@ class ScaScanner:
 # ── parsers (pure, fixture-tested) ──────────────────────────────────────────
 
 def _vuln(title: str, pkg: str, version: str, severity: str, ident: str, manifest: str,
-          fix: str = "", detail: str = "") -> Finding:
+          fix: str = "", detail: str = "", cve: str = "") -> Finding:
     return Finding.from_dict({
         "severity": normalise_severity(severity),
         "title": f"{pkg}@{version}: {title}" if title else f"{pkg}@{version} is vulnerable",
         "file": manifest,
         "detail": (detail + " " if detail else "") + (f"Fixed in {fix}." if fix else ""),
         "tool": "sca",
+        # rule_id is fingerprint material — it keeps whatever id the backend gave
+        # (GHSA/PYSEC/CVE); a resolved CVE travels on the separate ``cve`` field.
         "rule_id": ident or f"{pkg}@{version}",
         "cwe": "",
         "owasp": "A06:2021",
         "confidence": "high",
         "snippet": f"{pkg} {version}",
+        "cve": cve,
     })
 
 
@@ -169,10 +172,12 @@ def parse_trivy(data: object) -> list[Finding]:
     for res in results or []:
         target = str(res.get("Target") or "")
         for v in res.get("Vulnerabilities") or []:
+            ident = str(v.get("VulnerabilityID") or "")
             out.append(_vuln(
                 clip(str(v.get("Title") or ""), 120), str(v.get("PkgName") or "?"),
                 str(v.get("InstalledVersion") or "?"), str(v.get("Severity") or "medium"),
-                str(v.get("VulnerabilityID") or ""), target, str(v.get("FixedVersion") or ""),
+                ident, target, str(v.get("FixedVersion") or ""),
+                cve=ident if ident.upper().startswith("CVE-") else "",
             ))
     return out
 
@@ -234,12 +239,19 @@ def parse_pip_audit(data: object, manifest: str) -> list[Finding]:
                 clip(str(v.get("description") or ""), 120), str(dep.get("name") or "?"),
                 str(dep.get("version") or "?"), _pip_severity(v), str(v.get("id") or ""),
                 manifest, ", ".join(map(str, fixes)),
+                cve=_pip_cve(v),
             ))
     return out
+
+
+def _pip_cve(v: dict) -> str:
+    """The CVE hiding in pip-audit's aliases (its ids are PYSEC/GHSA), or ""."""
+    m = re.search(r"CVE-\d{4}-\d{4,}",
+                  " ".join(map(str, v.get("aliases") or [])) + " " + str(v.get("id") or ""))
+    return m.group(0) if m else ""
 
 
 def _pip_severity(v: dict) -> str:
     """pip-audit carries no severity; infer from aliases (GHSA critical marker absent) →
     high for anything with a CVE, medium otherwise. Conservative on purpose."""
-    aliases = " ".join(map(str, v.get("aliases") or []))
-    return "high" if re.search(r"CVE-\d{4}-\d+", aliases + str(v.get("id") or "")) else "medium"
+    return "high" if _pip_cve(v) else "medium"

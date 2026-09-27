@@ -37,9 +37,42 @@ _DEEP = (
     "touched."
 )
 
+# Deep mode runs one focused pass per category instead of one prompt asking for
+# everything — a reviewer told to hunt exactly one class of flaw finds instances a
+# do-everything sweep skims past. Three passes ≈ 3x tokens, which is why only deep
+# (the nightly/audit mode) pays it; fast stays a single pass.
+DEEP_PASSES: tuple[tuple[str, str], ...] = (
+    ("access-control",
+     "THIS PASS HUNTS ACCESS CONTROL AND AUTHENTICATION ONLY — ignore other categories. "
+     "BOLA/IDOR (CWE-639: an id from the request reaching a query without an ownership "
+     "check), missing or wrong authorisation (CWE-285/862/863), function-level authz "
+     "(admin actions reachable by ordinary roles), privilege management (CWE-269), "
+     "authentication and session flaws (CWE-287, session fixation CWE-384, sessions "
+     "that never expire CWE-613, weak password recovery CWE-640, missing brute-force "
+     "protection CWE-307)."),
+    ("injection-config",
+     "THIS PASS HUNTS INJECTION AND CONFIGURATION ONLY — ignore other categories. "
+     "SQL/command/template injection, SSRF (API7), unsafe deserialisation, secrets in "
+     "config or code, security headers, CORS, mass assignment and excessive data "
+     "exposure (API3), unsafe consumption of third-party APIs (API10)."),
+    ("business-logic",
+     "THIS PASS HUNTS BUSINESS LOGIC FLAWS ONLY — ignore other categories. These live "
+     "in the gap between intended and actual behaviour, where pattern scanners see "
+     "nothing: workflow steps that can be skipped or reordered (CWE-840/841 — can step "
+     "N be reached without step N-1? can an approval status be set directly through an "
+     "update endpoint or mass assignment?), actions that must be idempotent or limited "
+     "but are repeatable (double-submit → double spend or duplicate approval, CWE-799), "
+     "missing rate limits or resource caps on expensive or sensitive flows (CWE-770, "
+     "API4/API6), client-supplied price/quantity/total arithmetic (negative amounts, "
+     "totals computed on the client), and race conditions on balances, stock or "
+     "counters (CWE-362)."),
+)
 
-def seeded_block(findings: list[Finding]) -> str:
-    """The scanner findings, formatted for the model to triage."""
+
+def seeded_block(findings: list[Finding], *, triage: bool = True) -> str:
+    """The scanner findings, formatted for the model. ``triage=False`` lists them only
+    as already-found (a multi-pass deep scan asks ONE pass to triage — three passes all
+    triaging the same seed would stack three verdict notes on every finding)."""
     if not findings:
         return ""
     rows = []
@@ -50,31 +83,39 @@ def seeded_block(findings: list[Finding]) -> str:
             + (f" — `{f.snippet[:120]}`" if f.snippet else "")
         )
     more = len(findings) - _MAX_SEEDED
-    return (
+    head = (
         "External scanner findings — ALREADY FOUND, do not report these again. "
         "Triage them instead: for each one you inspect, add a finding with `rule_id` "
         "\"triage\", the same `file` and `line`, `severity` \"info\", and a `title` "
         "starting with either \"CONFIRMED:\" or \"FALSE POSITIVE:\" followed by one "
         "sentence of reason. Then look for what they cannot see.\n"
-        + "\n".join(rows)
-        + (f"\n… and {more} more not shown." if more > 0 else "")
+    ) if triage else (
+        "External scanner findings — ALREADY FOUND, do not report or triage these; "
+        "another pass owns them. Look for what they cannot see.\n"
     )
+    return head + "\n".join(rows) + (f"\n… and {more} more not shown." if more > 0 else "")
 
 
 def build_prompt(
     *, repo: str, mode: str, agents: list[str], seeded: list[Finding],
-    digest: str = "", scope_note: str = "",
+    digest: str = "", scope_note: str = "", focus: str = "", triage: bool = True,
 ) -> str:
-    """The full prompt: operator's ask, mode, scanner seed, the report contract."""
+    """The full prompt: operator's ask, mode, scanner seed, the report contract.
+
+    ``focus`` narrows a deep pass to one category (see :data:`DEEP_PASSES`); ``triage``
+    hands the scanner-seed verdict work to exactly one pass of a multi-pass run.
+    """
     ask = _DEEP if (mode or "fast").lower() == "deep" else _FAST
     parts = [
         "Security review of this repository. Report only what you can point at — "
         "file and line — and say what an attacker gets.",
         ask,
     ]
+    if focus:
+        parts.append(focus)
     if scope_note:
         parts.append(scope_note)
-    seed = seeded_block(seeded)
+    seed = seeded_block(seeded, triage=triage)
     if seed:
         parts.append(seed)
     parts.append(
@@ -127,6 +168,12 @@ def apply_triage(scanner_findings: list[Finding], verdicts: dict) -> int:
         kind, _, reason = verdict.partition(":")
         prefix = (f.detail + " ") if f.detail else ""
         if kind == "false_positive":
+            if f.kev:
+                # CISA says this is being exploited in the wild; the model's opinion is
+                # recorded but does not lower severity — the gate keys on ``kev``, and a
+                # demoted-yet-failing finding would read as a contradiction.
+                f.detail = prefix + f"AI triage disagreed ({reason}) — kept: in CISA KEV."
+                continue
             if SEVERITIES.index(f.severity) < SEVERITIES.index("low"):
                 f.severity = "low"
             f.confidence = "low"

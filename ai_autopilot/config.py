@@ -916,6 +916,18 @@ class SecurityScanSettings(BaseModel):
     # ── Phase 4: DAST ──
     dast_enabled: bool = False
     dast_targets: list[DastTarget] = []
+    # ── Phase 5: threat intel (CISA KEV + FIRST EPSS) on SCA findings ──
+    # A dependency CVE listed in CISA's Known Exploited Vulnerabilities catalog is
+    # escalated to critical and FAILS the gate even when it is old news to the baseline
+    # — "actively exploited" outranks "we already knew". EPSS only orders and annotates,
+    # it never changes a severity. Offline is fine: enrichment is skipped and says so.
+    intel_enabled: bool = True
+    intel_cache_hours: int = 24
+    # Overridable for an internal mirror (air-gapped runners).
+    intel_kev_url: str = ("https://www.cisa.gov/sites/default/files/feeds/"
+                          "known_exploited_vulnerabilities.json")
+    intel_epss_url: str = "https://api.first.org/data/v1/epss"
+    intel_osv_url: str = "https://api.osv.dev/v1/vulns"
 
     @property
     def ai_enabled(self) -> bool:

@@ -823,6 +823,14 @@ class SecurityFinding(Base):
     # Phase 3: PoC verification outcome. None = not attempted.
     verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     poc_md: Mapped[str] = mapped_column(Text, default="")
+    # Phase 5: threat intel (SCA only). All nullable — migrated rows hold NULL, and
+    # None must mean the same thing ("not enriched") on fresh and migrated databases.
+    cve: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    kev: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    kev_due: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    kev_ransomware: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    epss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    epss_percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
     first_seen: Mapped[datetime] = mapped_column(DateTime)
     last_seen: Mapped[datetime] = mapped_column(DateTime)
     fixed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

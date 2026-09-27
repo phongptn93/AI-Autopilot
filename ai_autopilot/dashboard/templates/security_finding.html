@@ -68,6 +68,12 @@
             {% if not f.cwe and not f.owasp %}<span class="sf-tag">unclassified</span>{% endif %}
           </dd>
           <dt>Confidence</dt><dd>{{ f.confidence or '—' }}{% if f.verified %} · <b>PoC verified</b>{% elif f.verified is sameas false %} · could not reproduce{% endif %}</dd>
+          {% if f.cve %}<dt>Threat intel</dt><dd>
+            <a class="sf-tag" href="https://nvd.nist.gov/vuln/detail/{{ f.cve }}" target="_blank" rel="noopener">{{ f.cve }} ↗</a>
+            {% if f.kev %}<span class="sf-tag" style="background:var(--red,#c0392b);color:#fff" title="CISA Known Exploited Vulnerabilities">KEV{% if f.kev_due %} · due {{ f.kev_due }}{% endif %}</span>{% endif %}
+            {% if f.kev_ransomware %}<span class="sf-tag">ransomware use</span>{% endif %}
+            {% if f.epss is not none %}<span class="sf-tag" title="EPSS — probability of exploitation within 30 days">EPSS {{ '%.2f'|format(f.epss) }}{% if f.epss_percentile is not none %} · top {{ '%.0f'|format((1 - f.epss_percentile) * 100) }}%{% endif %}</span>{% endif %}
+          </dd>{% endif %}
           <dt>Repository</dt><dd><code>{{ f.repo }}</code></dd>
           <dt>Fingerprint</dt><dd><code>{{ f.fingerprint }}</code> <small style="color:var(--text-dim)">— stable across runs; use in <code>.autopilot/security-suppressions.yaml</code></small></dd>
           {% if f.agent %}<dt>Found by</dt><dd>{{ f.agent }}</dd>{% endif %}

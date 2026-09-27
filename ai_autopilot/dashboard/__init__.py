@@ -231,6 +231,8 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                                           "tương ứng và trong comment trên PR."),
     "conflict_scan_started": ("green", "🔄 Đang quét PR — làm mới trang sau ít giây."),
     "conflict_not_resolvable": ("amber", "⏳ PR này đang được giải, hoặc đã hết conflict."),
+    "conflict_session_closed": ("green", "✕ Đã đóng phiên interactive — branch không bị thay đổi."),
+    "conflict_not_in_session": ("amber", "PR này không có phiên interactive nào đang mở."),
     "err_conflict_missing": ("red", "⛔ Không tìm thấy conflict."),
     "err_conflict_service": ("red", "⛔ Dịch vụ theo dõi conflict không chạy trong tiến trình "
                                     "này — bật <code>pr_conflict_tracking_enabled</code> rồi "
@@ -2780,6 +2782,8 @@ def create_dashboard_router() -> APIRouter:
             _ctx(request, "conflicts", items=view, status=status, counts=counts, flash=flash,
                  tracking=cfg.pr_conflict_tracking_enabled, service_live=svc is not None,
                  autoresolve=cfg.pr_conflict_autoresolve,
+                 interactive=(cfg.execution_mode or "").lower() == "interactive",
+                 session_hours=cfg.pr_session_hours,
                  command=cfg.pr_conflict_command, max_files=cfg.pr_conflict_max_files,
                  item_link=work_item_link_base(cfg),
                  active_statuses=pr_conflicts_mod.ACTIVE_STATUSES),
@@ -2798,7 +2802,8 @@ def create_dashboard_router() -> APIRouter:
             return _flash("/dashboard/conflicts", "err_conflict_missing")
         if svc is None:
             return _flash("/dashboard/conflicts", "err_conflict_service")
-        if row.status not in pr_conflicts_mod.ACTIVE_STATUSES or row.status == "resolving":
+        if (row.status not in pr_conflicts_mod.ACTIVE_STATUSES
+                or row.status in pr_conflicts_mod.BUSY_STATUSES):
             return _flash("/dashboard/conflicts", "conflict_not_resolvable")
         task = asyncio.create_task(svc.resolve(conflict_id, requested_by="dashboard"))
         _BACKGROUND_RUNS.add(task)
@@ -2808,6 +2813,21 @@ def create_dashboard_router() -> APIRouter:
             target=f"PR !{row.pr_id}",
         )
         return _flash("/dashboard/conflicts", "conflict_resolve_started")
+
+    @router.post("/conflicts/{conflict_id}/cancel")
+    async def conflicts_cancel(request: Request, conflict_id: int):
+        """✕ Close session — the branch is left exactly as it was."""
+        c: Container = request.app.state.container
+        svc = getattr(request.app.state, "pr_conflicts", None)
+        if svc is None:
+            return _flash("/dashboard/conflicts", "err_conflict_service")
+        if not await svc.cancel(conflict_id):
+            return _flash("/dashboard/conflicts", "conflict_not_in_session")
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="pr.conflict_session_closed",
+            target=f"conflict {conflict_id}",
+        )
+        return _flash("/dashboard/conflicts", "conflict_session_closed")
 
     @router.post("/conflicts/scan")
     async def conflicts_scan(request: Request):

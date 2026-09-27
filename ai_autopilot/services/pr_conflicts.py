@@ -36,14 +36,16 @@ from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import WorkItemInfo
 from ai_autopilot.notifications.base import NotificationMessage, NotificationType
 from ai_autopilot.pr_conflicts import (
+    BUSY_STATUSES,
     BY_AGENT,
     BY_CLEAN_MERGE,
     BY_OTHER,
     CLOSED,
     ESCALATED,
+    IN_SESSION,
     OPEN,
     RESOLVED,
-    RESOLVING,
+    ConflictResolution,
     ResolveContext,
     files_html,
     is_conflicted,
@@ -115,7 +117,8 @@ class PrConflictService:
     async def scan(self) -> dict[str, int]:
         """One pass. Returns counts, for the log and for tests."""
         c, cfg = self._c, self._config
-        counts = {"prs": 0, "conflicted": 0, "new": 0, "cleared": 0, "closed": 0}
+        counts = {"prs": 0, "conflicted": 0, "new": 0, "cleared": 0, "closed": 0,
+                  "finalized": 0}
         if not (cfg.ado_pat or (cfg.oauth_app_id and cfg.oauth_app_secret)):
             # Not configured yet is a state, not an error: say so once, not every cycle.
             if not self._said_unconfigured:
@@ -123,6 +126,7 @@ class PrConflictService:
                 self._said_unconfigured = True
             return counts
         self._said_unconfigured = False
+        counts["finalized"] = await self._finalize_sessions()
         repos = await c.ado.get_repositories()
         conflicted: set[tuple[str, int]] = set()
         for repo in repos:
@@ -142,7 +146,7 @@ class PrConflictService:
         if repos:
             cleared, closed = await self._reconcile_gone(conflicted)
             counts["cleared"], counts["closed"] = cleared, closed
-        if counts["conflicted"] or counts["cleared"] or counts["closed"]:
+        if counts["conflicted"] or counts["cleared"] or counts["closed"] or counts["finalized"]:
             self._log.info("conflict scan", **counts)
         return counts
 
@@ -181,7 +185,7 @@ class PrConflictService:
         c = self._c
         cleared = closed = 0
         for row in await c.pr_conflict_repo.active():
-            if (row.repo_id, row.pr_id) in conflicted or row.status == RESOLVING:
+            if (row.repo_id, row.pr_id) in conflicted or row.status in BUSY_STATUSES:
                 continue
             pr = await c.ado.get_pull_request(row.repo_id, row.pr_id)
             if pr is None:
@@ -213,7 +217,7 @@ class PrConflictService:
         """
         c, cfg = self._c, self._config
         command = (cfg.pr_conflict_command or "").strip()
-        if not command or row.status == RESOLVING:
+        if not command or row.status in BUSY_STATUSES:
             return ""
         threads = await c.ado.get_pull_request_threads(row.repo_id, row.pr_id)
         for cmd in command_threads(threads, [command]):
@@ -242,9 +246,17 @@ class PrConflictService:
 
     # ── resolution ───────────────────────────────────────────────────────────
 
+    def _interactive(self) -> bool:
+        """Follow the machine's execution_mode, exactly as work items do."""
+        return (self._config.execution_mode or "").strip().lower() == "interactive"
+
     async def resolve(self, conflict_id: int, *, requested_by: str = "") -> str:
         """Run one resolution attempt. Returns a short outcome word (for the dashboard
-        and tests): ``resolved`` / ``escalated`` / ``skipped``."""
+        and tests): ``resolved`` / ``escalated`` / ``in_session`` / ``skipped``.
+
+        Interactive mode opens a session and returns ``in_session``; the outcome is
+        recorded later, when ``scan`` finds the session's result (``_finalize_sessions``).
+        """
         c, cfg = self._c, self._config
         row = await c.pr_conflict_repo.get(conflict_id)
         if row is None:
@@ -259,33 +271,74 @@ class PrConflictService:
         if problem:
             await self._finish_failed(row, problem, {}, 0)
             return "escalated"
-        pr = await c.ado.get_pull_request(row.repo_id, row.pr_id) or {}
-        item_title = ""
-        if row.work_item_id:
-            with contextlib.suppress(Exception):
-                item = await c.ado.get_work_item(row.work_item_id)
-                item_title = item.title if item else ""
-        ctx = ResolveContext(
-            pr_id=row.pr_id, title=row.title, description=str(pr.get("description") or ""),
-            work_item_id=row.work_item_id, work_item_title=item_title,
-            source_branch=row.source_branch, target_branch=row.target_branch,
-        )
-        if not requested_by:
+        ctx = await self._context(row)
+        interactive = self._interactive()
+        if not requested_by and not interactive:
             await c.ado.add_pull_request_comment(
                 row.repo_id, row.pr_id,
                 f"<div><b>🔧 Đang tự giải conflict</b> — merge <code>{row.target_branch}</code>"
                 f" vào <code>{row.source_branch}</code> (không rebase, không force-push).</div>",
             )
         self._log.info("resolving PR conflict", pr=row.pr_id, repo=row.repo_name,
-                       files=len(json.loads(row.files_json or "[]")), by=requested_by or "auto")
+                       files=len(json.loads(row.files_json or "[]")),
+                       by=requested_by or "auto", mode="interactive" if interactive else "headless")
         lock = c.executor.branch_lock(row.repo_id, row.source_branch)
+        if interactive:
+            # Only the staging (and a clean-merge push) runs under the branch lock; the
+            # session itself may last hours and must not block /ai on this branch.
+            async with lock, self._sem:
+                prepared = await self._resolver.prepare_session(
+                    repo_name=row.repo_name, branch=row.source_branch,
+                    target_branch=row.target_branch, ctx=ctx, key=f"conflict-{row.id}",
+                )
+            if isinstance(prepared, ConflictResolution):
+                return await self._record_outcome(row, prepared, requested_by)
+            await c.pr_conflict_repo.update(
+                row.id, status=IN_SESSION, session_dir=prepared.run_dir,
+                session_name=prepared.session, session_started=datetime.now(UTC),
+            )
+            await c.ado.add_pull_request_comment(
+                row.repo_id, row.pr_id,
+                f"<div><b>🧑‍💻 Đã mở phiên interactive</b> <code>{prepared.session}</code> để "
+                f"giải conflict — merge <code>{row.target_branch}</code> đã được đặt sẵn trên "
+                f"<code>{row.source_branch}</code>. Attach qua Remote Control (claude.ai) để "
+                "theo dõi hoặc chỉ cách giải các hunk. Khi phiên xong, AI Autopilot kiểm tra "
+                "(không còn marker, không đụng file khác, security gate, test) rồi mới push "
+                "— không rebase, không force-push.</div>",
+            )
+            await c.audit_repo.record(
+                actor=requested_by or "autopilot", source="pr-conflicts",
+                action="pr.conflict_session_opened", target=f"PR !{row.pr_id}",
+                detail=prepared.session,
+            )
+            return "in_session"
         async with lock, self._sem:
             result = await self._resolver.resolve(
                 repo_path=repo_path, branch=row.source_branch,
                 target_branch=row.target_branch, ctx=ctx,
             )
+        return await self._record_outcome(row, result, requested_by)
+
+    async def _context(self, row) -> ResolveContext:
+        c = self._c
+        pr = await c.ado.get_pull_request(row.repo_id, row.pr_id) or {}
+        item_title = ""
+        if row.work_item_id:
+            with contextlib.suppress(Exception):
+                item = await c.ado.get_work_item(row.work_item_id)
+                item_title = item.title if item else ""
+        return ResolveContext(
+            pr_id=row.pr_id, title=row.title, description=str(pr.get("description") or ""),
+            work_item_id=row.work_item_id, work_item_title=item_title,
+            source_branch=row.source_branch, target_branch=row.target_branch,
+        )
+
+    async def _record_outcome(self, row, result: ConflictResolution, actor: str) -> str:
+        """One place that turns a finished attempt — headless or interactive — into a
+        row update, an audit entry and a PR comment."""
+        c = self._c
         await c.audit_repo.record(
-            actor=requested_by or "autopilot", source="pr-conflicts",
+            actor=actor or "autopilot", source="pr-conflicts",
             action="pr.conflict_resolved" if result.success else "pr.conflict_escalated",
             target=f"PR !{row.pr_id}",
             detail=(result.how if result.success else result.error)[:300],
@@ -296,6 +349,7 @@ class PrConflictService:
                 resolved_by=result.how, merge_commit=result.merge_commit,
                 checks=result.checks, files=result.files or json.loads(row.files_json or "[]"),
                 last_error="", cost_tokens=(row.cost_tokens or 0) + result.tokens,
+                session_dir="", session_name="",
             )
             await c.ado.add_pull_request_comment(
                 row.repo_id, row.pr_id, self._success_html(row, result),
@@ -305,12 +359,56 @@ class PrConflictService:
                                   files=result.files)
         return "escalated"
 
+    async def _finalize_sessions(self) -> int:
+        """Record the outcome of every interactive session that has written its result;
+        close and escalate the ones that ran past ``pr_session_hours``."""
+        c, cfg = self._c, self._config
+        done = 0
+        limit = max(1, int(cfg.pr_session_hours or 8)) * 3600
+        now = datetime.now(UTC)
+        for row in await c.pr_conflict_repo.in_session():
+            key = f"conflict-{row.id}"
+            started = row.session_started
+            if started is not None and started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            if not row.session_dir:
+                await self._finish_failed(row, "phiên interactive không còn thư mục làm việc",
+                                          {}, 0)
+                done += 1
+                continue
+            if started is not None and (now - started).total_seconds() > limit:
+                await self._resolver.cancel_session(row.session_dir, key)
+                await self._finish_failed(
+                    row, f"phiên interactive quá {cfg.pr_session_hours} giờ không có "
+                         "kết quả — đã đóng phiên, branch không bị thay đổi", {}, 0)
+                done += 1
+                continue
+            lock = c.executor.branch_lock(row.repo_id, row.source_branch)
+            async with lock, self._sem:
+                result = await self._resolver.finalize_session(row.session_dir, key)
+            if result is None:
+                continue          # still working
+            await self._record_outcome(row, result, "")
+            done += 1
+        return done
+
+    async def cancel(self, conflict_id: int) -> bool:
+        """The dashboard's ✕ Close session: close it, leave the branch as it was."""
+        c = self._c
+        row = await c.pr_conflict_repo.get(conflict_id)
+        if row is None or row.status != IN_SESSION:
+            return False
+        await self._resolver.cancel_session(row.session_dir, f"conflict-{row.id}")
+        await self._finish_failed(row, "phiên interactive đã được đóng từ dashboard — "
+                                       "branch không bị thay đổi", {}, 0)
+        return True
+
     async def _finish_failed(self, row, error: str, checks: dict, tokens: int,
                              files: list[str] | None = None) -> None:
         c = self._c
         await c.pr_conflict_repo.update(
             row.id, status=ESCALATED, last_error=(error or "")[:2000], checks=checks,
-            cost_tokens=(row.cost_tokens or 0) + tokens,
+            cost_tokens=(row.cost_tokens or 0) + tokens, session_dir="", session_name="",
             **({"files": files} if files else {}),
         )
         await c.ado.add_pull_request_comment(

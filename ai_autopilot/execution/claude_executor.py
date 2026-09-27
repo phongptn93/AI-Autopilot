@@ -1074,6 +1074,29 @@ class ClaudeExecutor:
         # greedily swallows the prompt as one of its values. The interactive CLI
         # auto-discovers the workspace's .claude config from cwd, so MCP/skills load
         # without an explicit flag.
+        pid = self._launch_console(run_dir, session, prompt, resuming=resuming)
+        if pid is not None:
+            # Remember the console's pid so `close_interactive` can shut the whole
+            # tree down when the item finalises. Persisted (not just in memory) so an
+            # autopilot restart can still close a session it did not launch itself.
+            self._write_session_handle(run_dir, item.id, pid, session)
+            self._log.info(
+                "launched interactive session", id=item.id, session=session,
+                pid=pid, cwd=run_dir, isolated=bool(scratch), resumed=resuming,
+            )
+            return True, session, run_dir
+        await self.release_scratch(scratch)
+        return False, session, workspace
+
+    def _launch_console(
+        self, cwd: str, session: str, prompt: str, *, resuming: bool = False,
+    ) -> int | None:
+        """Open a Remote-Control Claude Code console in ``cwd``; its pid, or None.
+
+        The one place a visible session is started — a work item's run and a PR
+        conflict resolution both come through here, so they are attached to, steered
+        and closed the same way.
+        """
         # Remote-Control sessions run locally as a normal (non-root) user and are
         # meant to proceed UNATTENDED — the human *attaches* to steer when they want
         # to, they shouldn't have to answer a permission prompt for every Bash/MCP
@@ -1087,11 +1110,11 @@ class ClaudeExecutor:
         cli_args = [
             "--remote-control", session,
             "--permission-mode", interactive_perm,
-            # Boolean flag, so it can't swallow the positional prompt (see NOTE above).
+            # Boolean flag, so it can't swallow the positional prompt (see NOTE in
+            # dispatch_interactive).
             *(["--continue"] if resuming else []),
             prompt,
         ]
-
         try:
             if sys.platform == "win32":
                 # `cmd /c` lets cmd resolve claude.cmd via PATHEXT (passing the bare
@@ -1099,27 +1122,19 @@ class ClaudeExecutor:
                 # console close once the CLI exits. `|| pause` keeps the window up
                 # ONLY on a non-zero exit, so a startup error is still readable.
                 proc = subprocess.Popen(  # noqa: ASYNC220 — fire-and-forget launch
-                    ["cmd", "/c", "claude", *cli_args, "||", "pause"], cwd=run_dir,
+                    ["cmd", "/c", "claude", *cli_args, "||", "pause"], cwd=cwd,
                     creationflags=subprocess.CREATE_NEW_CONSOLE,
                 )
             else:
                 claude = shutil.which("claude") or "claude"
                 proc = subprocess.Popen(  # noqa: ASYNC220
-                    [claude, *cli_args], cwd=run_dir, start_new_session=True
+                    [claude, *cli_args], cwd=cwd, start_new_session=True
                 )
-            # Remember the console's pid so `close_interactive` can shut the whole
-            # tree down when the item finalises. Persisted (not just in memory) so an
-            # autopilot restart can still close a session it did not launch itself.
-            self._write_session_handle(run_dir, item.id, proc.pid, session)
-            self._log.info(
-                "launched interactive session", id=item.id, session=session,
-                pid=proc.pid, cwd=run_dir, isolated=bool(scratch), resumed=resuming,
-            )
-            return True, session, run_dir
+            return proc.pid
         except Exception as exc:  # noqa: BLE001
-            self._log.error("failed to launch interactive session", id=item.id, error=describe_exc(exc))
-            await self.release_scratch(scratch)
-            return False, session, workspace
+            self._log.error("failed to launch interactive session", session=session,
+                            error=describe_exc(exc))
+            return None
 
     @_scoped_sync
     def finalize_interactive(self, item: WorkItemInfo, run_dir: str) -> ExecutionResult | None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from html import escape as html_escape
 
 import httpx
 
@@ -23,7 +24,10 @@ from ai_autopilot.config import (
 from ai_autopilot.container import Container
 from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.feedback_handler import resolve_command
+from ai_autopilot.execution.revise_session import SKILL as SESSION_SKILL
+from ai_autopilot.execution.revise_session import ReviseSessions
 from ai_autopilot.logging_config import describe_exc, get_logger
+from ai_autopilot.models import ExecutionResult
 from ai_autopilot.outcomes import apply_outcome
 from ai_autopilot.services.pr_feedback import (
     FIX_OFFER as _FIX_OFFER,
@@ -53,6 +57,8 @@ class PrMonitorService:
         # Sessions whose cleanup failed, so the warning is written once rather than on
         # every scan. Cleared when a later sweep succeeds — the retry itself continues.
         self._close_failures: set[int] = set()
+        # `/ai` actions as interactive sessions (execution_mode interactive).
+        self._sessions = ReviseSessions(getattr(c, "executor", None), c.config)
         # Command handling runs as bounded background tasks so a slow revise never blocks the
         # scan loop (other PRs keep getting picked up). Same-repo revises are still serialised
         # by the executor's per-repo git lock.
@@ -249,6 +255,8 @@ class PrMonitorService:
 
     async def _scan(self) -> None:
         c = self._c
+        with contextlib.suppress(Exception):
+            await self._finalize_sessions()
         repos = await c.ado.get_repositories()
         active_pr_ids: set[int] = set()
         active_branches: set[tuple[str, str]] = set()
@@ -627,6 +635,149 @@ class PrMonitorService:
                 )
             )
 
+
+    async def _report_result(
+        self, repo_id: str, repo_name: str, pr_id: int, work_item_id: int, branch: str,
+        item: object, tid: int, instruction: str, result, *, advisory: bool,
+        before: set[int] | None = None,
+    ) -> None:
+        """Reply in the thread and move the board — the one ending shared by a headless
+        run and an interactive session."""
+        c = self._c
+        hint_html = self._config.comment_command_hint_html
+        hint = f"<br/>{hint_html}" if hint_html else ""
+        if result.success and advisory:
+            # Only claim there are notes above when this run actually left some.
+            posted = len(await self._bot_comment_ids(repo_id, pr_id) - (before or set()))
+            msg = (
+                f"<div><b>🔍 Đã review xong</b> — nhận xét chi tiết ở trên.<br/>"
+                f"{_FIX_OFFER}{hint}</div>"
+                if posted
+                else "<div><b>🔍 Đã review xong — không có nhận xét nào.</b> Tôi đọc "
+                     "thay đổi và không thấy vấn đề đáng nêu, nên không đăng nhận xét "
+                     f"nào ở trên.{hint}</div>"
+            )
+        elif result.success:
+            msg = f"<div><b>✅ Đã xử lý xong</b> — branch đã được cập nhật.{hint}</div>"
+        else:
+            verb = "review" if advisory else "xử lý"
+            # Escaped: the reason can be the agent's own words or git output.
+            reason = html_escape(result.error or "")
+            msg = f"<div><b>⚠️ Chưa {verb} được:</b> {reason}{hint}</div>"
+        await c.ado.reply_to_pull_request_thread(repo_id, pr_id, tid, msg)
+        await c.ado.add_comment(work_item_id, msg)   # also on the board's work item
+        # The reply invites a follow-up ("Reply /ai …") — keep the fast lane warm.
+        self._mark_hot(repo_id, repo_name, {
+            "pullRequestId": pr_id, "sourceRefName": f"refs/heads/{branch}",
+        })
+        if result.success:
+            # Resolve the thread (Fixed = durable "handled" mark). Only an ACTION
+            # changes code → then move the item to review + assess draft PRs.
+            await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "fixed")
+            if not advisory and item is not None:
+                await self._apply_outcome(item, "review")
+                await self._adjust_related_drafts(work_item_id, pr_id, instruction)
+        else:
+            # Back to Active so the PR still flags the thread as needing attention.
+            await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "active")
+
+    # ── interactive `/ai` sessions ──────────────────────────────────────────
+
+    def _interactive(self) -> bool:
+        return (self._config.execution_mode or "").strip().lower() == "interactive"
+
+    async def _start_session(
+        self, repo_id: str, repo_name: str, pr_id: int, work_item_id: int, branch: str,
+        item: object, cmd: dict, revision: int,
+    ) -> None:
+        """Open a session for an `/ai` action; its result is reported by the scan."""
+        c, cfg = self._c, self._config
+        tid = cmd["thread_id"]
+        repo = getattr(c, "pr_session_repo", None)
+        if repo is not None and await repo.open_for_pr(repo_id, pr_id):
+            # One session per PR: a second one would edit the same branch from a second
+            # worktree, and the later push would be refused anyway.
+            await c.ado.reply_to_pull_request_thread(
+                repo_id, pr_id, tid,
+                "<div><b>🕐 PR này đang có một phiên interactive mở.</b> Attach vào phiên đó "
+                "để gửi thêm chỉ dẫn, hoặc gửi lại lệnh này sau khi phiên xong.</div>",
+            )
+            await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "active")
+            return
+        record = await open_run(c, cfg, item, SESSION_SKILL)
+        prompt = c.feedback.build_prompt(item, branch, cmd["instruction"])
+        key = f"pr-{pr_id}"
+        async with self._branch_lock(repo_id, branch), self._sem:
+            prepared = await self._sessions.prepare(
+                item_id=work_item_id, repo_name=repo_name, branch=branch, prompt=prompt,
+                key=key,
+            )
+        if isinstance(prepared, str):
+            result = ExecutionResult.fail(work_item_id, SESSION_SKILL,
+                                          f"không mở được phiên interactive: {prepared}")
+            await close_run(c, record, result)
+            await self._report_result(repo_id, repo_name, pr_id, work_item_id, branch, item,
+                                      tid, cmd["instruction"], result, advisory=False)
+            return
+        if repo is not None:
+            await repo.create(
+                key=key, repo_id=repo_id, repo_name=repo_name, pr_id=pr_id, thread_id=tid,
+                work_item_id=work_item_id, branch=branch, instruction=cmd["instruction"],
+                revision=revision, actor=str(cmd.get("author_name") or ""),
+                run_dir=prepared.run_dir, session_name=prepared.session,
+                run_record_id=record,
+            )
+        await c.ado.reply_to_pull_request_thread(
+            repo_id, pr_id, tid,
+            f"<div><b>🧑‍💻 Phiên <code>{prepared.session}</code> đã mở</b> trên "
+            f"<code>{branch}</code>. Attach qua Remote Control (claude.ai → Claude Code) để "
+            "theo dõi hoặc chỉnh hướng. Khi phiên xong, tôi chạy test + auto-review rồi mới "
+            "push (không force-push), và báo kết quả tại đây.</div>",
+        )
+        self._log.info("PR command running as an interactive session", pr=pr_id,
+                       id=work_item_id, session=prepared.session)
+
+    async def _finalize_sessions(self) -> int:
+        """Finish every session that wrote its result; close the ones past the limit."""
+        from datetime import UTC, datetime
+
+        c, cfg = self._c, self._config
+        repo = getattr(c, "pr_session_repo", None)
+        if repo is None:
+            return 0
+        done = 0
+        limit = max(1, int(getattr(cfg, "pr_session_hours", 8) or 8)) * 3600
+        now = datetime.now(UTC)
+        for row in await repo.open_sessions():
+            started = row.started
+            if started is not None and started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            if started is not None and (now - started).total_seconds() > limit:
+                await self._sessions.cancel(row.run_dir, row.key)
+                result = ExecutionResult.fail(
+                    row.work_item_id, SESSION_SKILL,
+                    f"phiên interactive quá {cfg.pr_session_hours} giờ không có kết quả — đã "
+                    "đóng, branch không bị thay đổi")
+                status = "cancelled"
+            else:
+                async with self._branch_lock(row.repo_id, row.branch), self._sem:
+                    result = await self._sessions.finalize(row.run_dir, row.key)
+                if result is None:
+                    continue      # still working
+                status = "done" if result.success else "failed"
+            await repo.finish(row.id, status, result.error or result.output or "")
+            await close_run(c, row.run_record_id, result)
+            item = None
+            if row.work_item_id:
+                with contextlib.suppress(Exception):
+                    item = await c.ado.get_work_item(row.work_item_id)
+            await self._report_result(
+                row.repo_id, row.repo_name, row.pr_id, row.work_item_id, row.branch,
+                item, row.thread_id, row.instruction, result, advisory=False,
+            )
+            done += 1
+        return done
+
     async def _advisory_exhausted(self, pr_id: int, pr: dict) -> bool:
         """True when this PR already had its allowance of advisory reviews AT THIS COMMIT.
 
@@ -694,6 +845,9 @@ class PrMonitorService:
         c, cfg = self._c, self._config
         tid = cmd["thread_id"]
         advisory = match_command(cmd["instruction"], cfg.advisory_commands) is not None
+        # Actions follow execution_mode, like work items: interactive opens a session a
+        # person can attach to. Advisory commands only read and comment — kept as is.
+        interactive = not advisory and self._interactive()
         lock = self._branch_lock(repo_id, branch)
         try:
             self._log.info(
@@ -703,7 +857,13 @@ class PrMonitorService:
             # Ack BEFORE any lock/queue wait: when several /ai land at once (or one
             # arrives mid-run), the human must still see pickup within seconds —
             # a silent queue reads as "the bot missed my comment".
-            if advisory:
+            if interactive:
+                ack = (
+                    "<div><b>🧑‍💻 Đã nhận</b> — tôi mở một phiên Claude Code interactive trên "
+                    f"<code>{branch}</code>; bạn có thể attach qua Remote Control để theo dõi "
+                    "hoặc chỉ thêm. Tên phiên và kết quả sẽ báo ngay tại đây.</div>"
+                )
+            elif advisory:
                 ack = (
                     "<div><b>🔍 Đang review</b> — tôi phân tích thay đổi và sẽ đăng nhận "
                     "xét ngay tại đây. Không chỉnh code.</div>"
@@ -721,6 +881,11 @@ class PrMonitorService:
             await c.ado.reply_to_pull_request_thread(repo_id, pr_id, tid, ack)
             # Mark the thread Pending while we work, so the PR shows it's in progress.
             await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "pending")
+            if interactive:
+                await self._start_session(
+                    repo_id, repo_name, pr_id, work_item_id, branch, item, cmd, revision,
+                )
+                return
             # Advisory runs are read-only (no checkout) — they only need a concurrency
             # slot. Action commands serialise per branch so parallel /ai can't corrupt
             # one branch's run.
@@ -745,40 +910,10 @@ class PrMonitorService:
             # Generated from comment_command / comment_advisory_commands, so the hint can
             # never advertise a command this instance would ignore. Blank when the command
             # trigger is off — then offer nothing rather than a dangling label.
-            hint_html = self._config.comment_command_hint_html
-            hint = f"<br/>{hint_html}" if hint_html else ""
-            if result.success and advisory:
-                # Only claim there are notes above when this run actually left some.
-                posted = len(await self._bot_comment_ids(repo_id, pr_id) - before)
-                msg = (
-                    f"<div><b>🔍 Đã review xong</b> — nhận xét chi tiết ở trên.<br/>"
-                    f"{_FIX_OFFER}{hint}</div>"
-                    if posted
-                    else "<div><b>🔍 Đã review xong — không có nhận xét nào.</b> Tôi đọc "
-                         "thay đổi và không thấy vấn đề đáng nêu, nên không đăng nhận xét "
-                         f"nào ở trên.{hint}</div>"
-                )
-            elif result.success:
-                msg = f"<div><b>✅ Đã xử lý xong</b> — branch đã được cập nhật.{hint}</div>"
-            else:
-                verb = "review" if advisory else "xử lý"
-                msg = f"<div><b>⚠️ Chưa {verb} được:</b> {result.error}{hint}</div>"
-            await c.ado.reply_to_pull_request_thread(repo_id, pr_id, tid, msg)
-            await c.ado.add_comment(work_item_id, msg)   # also on the board's work item
-            # The reply invites a follow-up ("Reply /ai …") — keep the fast lane warm.
-            self._mark_hot(repo_id, repo_name, {
-                "pullRequestId": pr_id, "sourceRefName": f"refs/heads/{branch}",
-            })
-            if result.success:
-                # Resolve the thread (Fixed = durable "handled" mark). Only an ACTION
-                # changes code → then move the item to review + assess draft PRs.
-                await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "fixed")
-                if not advisory:
-                    await self._apply_outcome(item, "review")
-                    await self._adjust_related_drafts(work_item_id, pr_id, cmd["instruction"])
-            else:
-                # Back to Active so the PR still flags the thread as needing attention.
-                await c.ado.set_pull_request_thread_status(repo_id, pr_id, tid, "active")
+            await self._report_result(
+                repo_id, repo_name, pr_id, work_item_id, branch, item, tid,
+                cmd["instruction"], result, advisory=advisory, before=before,
+            )
         except Exception as exc:  # noqa: BLE001 — a background task must not die silently
             self._log.error(
                 "PR command handler failed", id=work_item_id, pr=pr_id, error=describe_exc(exc)

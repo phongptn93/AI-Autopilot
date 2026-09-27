@@ -91,6 +91,9 @@ class _FakeExecutions:
 
 
 def _service(ado, feedback, **overrides) -> PrMonitorService:
+    # These tests cover the HEADLESS command path (the SDK revise); an `/ai` under
+    # execution_mode interactive opens a session instead — see test_pr_revise_session.
+    overrides.setdefault("execution_mode", "headless")
     config = Settings(
         comment_command="/ai, /review", max_concurrent=4,
         pr_adjust_related_drafts=False, **overrides,

@@ -1378,6 +1378,11 @@ class Settings(BaseSettings):
     # More conflicted files than this is a structural collision, not a merge to settle
     # hunk by hunk — hand it to a person without spending a token.
     pr_conflict_max_files: int = 15
+    # Under execution_mode "interactive", a conflict resolution AND an `/ai` action on a
+    # PR open a Remote-Control session a person can attach to, exactly like a work item.
+    # A session with no result after this many hours is closed (the branch untouched)
+    # and a person is told — an abandoned console must not hold a worktree forever.
+    pr_session_hours: int = 8
 
     # ── Feedback loop / PR babysitter ──
     feedback_loop_enabled: bool = False

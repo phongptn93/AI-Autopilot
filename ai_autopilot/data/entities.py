@@ -695,6 +695,43 @@ class PrConflict(Base):
     # runs the same request twice.
     handled_command: Mapped[str] = mapped_column(String(60), default="")
     cost_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # Interactive resolution: the scratch the session runs in and its Remote-Control
+    # name — what a person needs to attach, and what finalise reads the result from.
+    session_dir: Mapped[str] = mapped_column(String(600), default="")
+    session_name: Mapped[str] = mapped_column(String(120), default="")
+    session_started: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PrSession(Base):
+    """An `/ai` action on a PR running as an interactive session (execution_mode
+    interactive). Persisted so the PR babysitter can finish it — test gate, review,
+    push, reply in the thread — even after a restart, and so one PR never has two."""
+
+    __tablename__ = "pr_sessions"
+    __table_args__ = (
+        Index("ix_pr_sessions_status", "status"),
+        Index("ix_pr_sessions_pr", "repo_id", "pr_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(80), default="")
+    repo_id: Mapped[str] = mapped_column(String(100), default="")
+    repo_name: Mapped[str] = mapped_column(String(200), default="")
+    pr_id: Mapped[int] = mapped_column(Integer, default=0)
+    thread_id: Mapped[int] = mapped_column(Integer, default=0)
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0)
+    branch: Mapped[str] = mapped_column(String(300), default="")
+    instruction: Mapped[str] = mapped_column(Text, default="")
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    actor: Mapped[str] = mapped_column(String(200), default="")
+    run_dir: Mapped[str] = mapped_column(String(600), default="")
+    session_name: Mapped[str] = mapped_column(String(120), default="")
+    run_record_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # open | done | failed | cancelled
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    started: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    outcome: Mapped[str] = mapped_column(Text, default="")
 
 
 class SecurityScan(Base):

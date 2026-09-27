@@ -29,6 +29,7 @@ from ai_autopilot.data.entities import (
     PrConflict,
     PrReviewBudget,
     PrReviewerState,
+    PrSession,
     QualityEvent,
     QualityKind,
     SchedulerDecision,
@@ -2055,7 +2056,7 @@ class PrConflictRepository:
         running, or these exact inputs (target commit) already used the allowance."""
         async with self._db.session() as session:
             row = await session.get(PrConflict, conflict_id)
-            if row is None or row.status in ("resolving", "resolved", "closed"):
+            if row is None or row.status in ("resolving", "in_session", "resolved", "closed"):
                 return False
             same = bool(target_commit) and row.attempt_target == target_commit
             if same and row.attempts >= max(1, max_attempts):
@@ -2070,14 +2071,22 @@ class PrConflictRepository:
     async def active(self) -> list[PrConflict]:
         async with self._db.session() as session:
             rows = await session.execute(select(PrConflict).where(
-                PrConflict.status.in_(("open", "resolving", "escalated"))))
+                PrConflict.status.in_(("open", "resolving", "in_session", "escalated"))))
+            return list(rows.scalars().all())
+
+    async def in_session(self) -> list[PrConflict]:
+        """Conflicts whose interactive session is open — polled for its result."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(PrConflict).where(PrConflict.status == "in_session"))
             return list(rows.scalars().all())
 
     async def recent(self, limit: int = 200, status: str = "") -> list[PrConflict]:
         async with self._db.session() as session:
             query = select(PrConflict)
             if status == "active":
-                query = query.where(PrConflict.status.in_(("open", "resolving", "escalated")))
+                query = query.where(PrConflict.status.in_(
+                    ("open", "resolving", "in_session", "escalated")))
             elif status:
                 query = query.where(PrConflict.status == status)
             rows = await session.execute(
@@ -2094,6 +2103,42 @@ class PrConflictRepository:
                 row.status = "open"
             await session.commit()
             return len(rows)
+
+
+class PrSessionRepository:
+    """Interactive `/ai` sessions on PRs (see ``PrSession``)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def create(self, **fields) -> PrSession:
+        async with self._db.session() as session:
+            row = PrSession(status="open", started=datetime.now(UTC), **fields)
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return row
+
+    async def open_for_pr(self, repo_id: str, pr_id: int) -> PrSession | None:
+        async with self._db.session() as session:
+            rows = await session.execute(select(PrSession).where(
+                PrSession.repo_id == repo_id, PrSession.pr_id == pr_id,
+                PrSession.status == "open"))
+            return rows.scalars().first()
+
+    async def open_sessions(self) -> list[PrSession]:
+        async with self._db.session() as session:
+            rows = await session.execute(select(PrSession).where(PrSession.status == "open"))
+            return list(rows.scalars().all())
+
+    async def finish(self, session_id: int, status: str, outcome: str = "") -> None:
+        async with self._db.session() as session:
+            row = await session.get(PrSession, session_id)
+            if row is None:
+                return
+            row.status, row.outcome = status, (outcome or "")[:4000]
+            row.finished = datetime.now(UTC)
+            await session.commit()
 
 
 class SecurityRepository:

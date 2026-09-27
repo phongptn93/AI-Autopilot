@@ -160,6 +160,11 @@ pr_conflict_autoresolve: false     # true = resolve automatically on the autopil
 pr_conflict_command: /resolve      # comment on ANY PR (allowlisted users) to ask for one
 pr_conflict_max_attempts: 1        # per target commit; a new target push allows another
 pr_conflict_max_files: 15          # more = structural collision → straight to a person
+# Conflict resolutions AND `/ai` actions on a PR follow execution_mode, like work items:
+# "interactive" opens a Remote-Control session you can attach to and steer — the session
+# never pushes; the checks (tests, auto-review, conflict gates) run in code first —
+# "headless" runs one unattended SDK pass. Advisory commands (/review ...) stay headless.
+pr_session_hours: 8       # interactive PR session with no result → closed, branch untouched
 auto_review_enabled: true
 block_on_severity: "Critical,High"
 

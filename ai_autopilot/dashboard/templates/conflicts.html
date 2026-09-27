@@ -35,6 +35,9 @@
   .st { display:inline-block; font-size:10px; font-family:var(--mono); font-weight:700; padding:1px 7px; border-radius:5px; white-space:nowrap; }
   .st.open { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
   .st.resolving { background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.4); }
+  .st.in_session { background:rgba(6,182,212,.12); color:#22d3ee; border:1px solid rgba(6,182,212,.45); }
+  .cf-sess { margin-top:5px; font-size:11.5px; color:var(--text-muted); }
+  .cf-sess code { font-family:var(--mono); }
   .st.escalated { background:rgba(245,166,35,.14); color:var(--amber); border:1px solid rgba(245,166,35,.45); }
   .st.resolved { background:var(--green-bg); color:var(--green); border:1px solid rgba(46,204,113,.45); }
   .st.closed { background:var(--bg-input); color:var(--text-dim); border:1px solid var(--border); }
@@ -64,14 +67,15 @@
 
 <div class="cf-card">
   <div class="cf-mode">
+    <span><b>Mode</b>: {% if interactive %}🧑‍💻 interactive — opens a Remote-Control session you can attach to{% else %}🤖 headless — one unattended run{% endif %} <span style="color:var(--text-dim)">(execution_mode)</span></span>
     <span><b>Auto-resolve</b> on autopilot PRs: {{ '✅ on' if autoresolve else '⏸ off' }}</span>
     <span><b>On request</b> (any PR): {% if command %}comment <code>{{ command }}</code> or press Resolve{% else %}Resolve button only{% endif %}</span>
     <span><b>Escalates when</b> &gt; {{ max_files }} files, lock/binary files, markers left, other files touched, tests or security gate fail</span>
     <span style="margin-left:auto"><a class="table-link" href="/dashboard/settings">Settings → 🔁 PR review &amp; feedback</a></span>
   </div>
   <div class="cf-filter">
-    <a href="/dashboard/conflicts?status=active" class="{{ 'on' if status == 'active' else '' }}">active<span class="n">{{ counts.open + counts.resolving + counts.escalated }}</span></a>
-    {% for s in ('open', 'resolving', 'escalated', 'resolved', 'closed') %}
+    <a href="/dashboard/conflicts?status=active" class="{{ 'on' if status == 'active' else '' }}">active<span class="n">{{ counts.open + counts.resolving + counts.in_session + counts.escalated }}</span></a>
+    {% for s in ('open', 'resolving', 'in_session', 'escalated', 'resolved', 'closed') %}
     <a href="/dashboard/conflicts?status={{ s }}" class="{{ 'on' if status == s else '' }}">{{ s }}<span class="n">{{ counts[s] }}</span></a>
     {% endfor %}
     <a href="/dashboard/conflicts?status=all" class="{{ 'on' if status == 'all' else '' }}">all</a>
@@ -92,15 +96,19 @@
           {% if r.work_item_id %}{% if item_link %}<a class="tag" href="{{ item_link }}/{{ r.work_item_id }}" target="_blank" rel="noopener">#{{ r.work_item_id }}</a>{% else %}<span class="tag">#{{ r.work_item_id }}</span>{% endif %}{% endif %}</div>
           {% if r.last_error and r.status == 'escalated' %}<div class="cf-err">🙋 {{ r.last_error }}</div>{% endif %}
           {% if it.checks %}<div class="cf-checks">{% for k, v in it.checks.items() %}{{ '✅' if v == 'ok' or v.startswith(('skipped', 'already')) else '❌' }} {{ k }}{% if v != 'ok' %}: {{ v }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
-          {% if r.merge_commit %}<div class="cf-checks">merge commit <code>{{ r.merge_commit[:10] }}</code></div>{% endif %}</td>
+          {% if r.merge_commit %}<div class="cf-checks">merge commit <code>{{ r.merge_commit[:10] }}</code></div>{% endif %}
+          {% if r.status == 'in_session' %}<div class="cf-sess">🧑‍💻 Phiên <code>{{ r.session_name }}</code> — attach qua Remote Control (claude.ai → Claude Code) để theo dõi hoặc chỉ cách giải.{% if r.session_started %} Mở lúc {{ r.session_started.strftime('%H:%M %d/%m') }}; tự đóng sau {{ session_hours }} giờ nếu chưa xong.{% endif %}</div>{% endif %}</td>
       <td class="cf-br">{{ r.source_branch }}<br>→ {{ r.target_branch }}</td>
       <td>{% if it.files %}<ul class="cf-files">{% for f in it.files[:6] %}<li>{{ f }}</li>{% endfor %}{% if it.files|length > 6 %}<li>… +{{ it.files|length - 6 }}</li>{% endif %}</ul>{% else %}<span class="cf-checks">not listed by ADO</span>{% endif %}</td>
       <td class="cf-br" title="first seen {{ r.first_seen.strftime('%Y-%m-%d %H:%M') if r.first_seen else '' }}">{% if it.age_hours >= 48 %}{{ (it.age_hours / 24)|round|int }}d{% elif it.age_hours >= 1 %}{{ it.age_hours|round|int }}h{% else %}{{ (it.age_hours * 60)|round|int }}m{% endif %}</td>
       <td class="cf-br">{{ r.attempts }}{% if r.cost_tokens %}<div class="cf-checks">{{ '{:,}'.format(r.cost_tokens) }} tok</div>{% endif %}</td>
       <td class="cf-act">
         {% if r.status in ('open', 'escalated') %}
-        <form method="post" action="/dashboard/conflicts/{{ r.id }}/resolve"><button class="btn-save" type="submit" {% if not service_live %}disabled{% endif %} title="Merge {{ r.target_branch }} into {{ r.source_branch }}, settle the hunks, verify, push">▶ Resolve</button></form>
-        {% elif r.status == 'resolving' %}<span class="st resolving">working…</span>{% endif %}
+        <form method="post" action="/dashboard/conflicts/{{ r.id }}/resolve"><button class="btn-save" type="submit" {% if not service_live %}disabled{% endif %} title="Merge {{ r.target_branch }} into {{ r.source_branch }}, settle the hunks, verify, push">{{ '🧑‍💻 Resolve' if interactive else '▶ Resolve' }}</button></form>
+        {% elif r.status == 'resolving' %}<span class="st resolving">working…</span>
+        {% elif r.status == 'in_session' %}
+        <form method="post" action="/dashboard/conflicts/{{ r.id }}/cancel" onsubmit="return confirm('Đóng phiên interactive? Merge sẽ bị huỷ, branch giữ nguyên.');"><button class="btn-ghost" type="submit" {% if not service_live %}disabled{% endif %}>✕ Close session</button></form>
+        {% endif %}
       </td>
     </tr>
     {% endfor %}

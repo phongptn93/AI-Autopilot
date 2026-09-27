@@ -252,15 +252,12 @@ class FeedbackHandler:
                 return cmd.lower()
         return ""
 
-    async def handle_feedback(
-        self, item: WorkItemInfo, branch_name: str, feedback: str, revision: int,
-        repo: str = "", review_only: bool = False, pr_id: int = 0,
-    ) -> ExecutionResult:
+    def build_prompt(
+        self, item: WorkItemInfo, branch_name: str, feedback: str, *, review_only: bool = False,
+    ) -> str:
+        """The instruction a PR command runs under — shared by the headless revise and
+        the interactive session, so steering a session starts from the same brief."""
         command = self._command_verb(feedback)
-        self._log.info(
-            "handling feedback", id=item.id, revision=revision, command=command or "(none)",
-            review_only=review_only, feedback=feedback[:200],
-        )
         body = _guidance(
             command, item, branch_name, feedback,
             base="review" if review_only else "action",
@@ -272,7 +269,18 @@ class FeedbackHandler:
                 "it is purpose-built for exactly this. If that subagent is unavailable, do "
                 "the task directly with the relevant skill."
             )
-        prompt = f"{body}\n\n{BOT_COMMENT_INSTRUCTION}\n\n{AGENT_CONDUCT_INSTRUCTION}"
+        return f"{body}\n\n{BOT_COMMENT_INSTRUCTION}\n\n{AGENT_CONDUCT_INSTRUCTION}"
+
+    async def handle_feedback(
+        self, item: WorkItemInfo, branch_name: str, feedback: str, revision: int,
+        repo: str = "", review_only: bool = False, pr_id: int = 0,
+    ) -> ExecutionResult:
+        command = self._command_verb(feedback)
+        self._log.info(
+            "handling feedback", id=item.id, revision=revision, command=command or "(none)",
+            review_only=review_only, feedback=feedback[:200],
+        )
+        prompt = self.build_prompt(item, branch_name, feedback, review_only=review_only)
         result = await self._executor.revise(
             item, branch_name, prompt, draft_pr=self._config.pr_is_draft,
             repo=repo, allow_no_changes=review_only, read_only=review_only,

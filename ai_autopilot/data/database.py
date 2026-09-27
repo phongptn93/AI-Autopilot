@@ -39,6 +39,9 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("security_scans", "new_json", "TEXT"),
     ("security_scans", "fixed_json", "TEXT"),
     ("security_scans", "filtered_count", "INTEGER"),
+    ("pr_conflicts", "session_dir", "VARCHAR(600)"),
+    ("pr_conflicts", "session_name", "VARCHAR(120)"),
+    ("pr_conflicts", "session_started", "DATETIME"),
 )
 
 

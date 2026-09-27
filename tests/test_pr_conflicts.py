@@ -313,5 +313,7 @@ def test_conflicts_page_lists_tracked_conflicts(tmp_path):
             files=["Plugins/A.cs"], owned=True))
         page = client.get("/dashboard/conflicts").text
         assert "!42" in page and "Add filter config" in page and "Plugins/A.cs" in page
-        assert "feature/x" in page and "development" in page and "▶ Resolve" in page
+        assert "feature/x" in page and "development" in page
+        # Default execution_mode is interactive: the button opens a session.
+        assert "🧑‍💻 Resolve" in page and "interactive — opens a Remote-Control session" in page
         assert 'href="/dashboard/conflicts"' in page             # nav link

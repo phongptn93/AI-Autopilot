@@ -402,6 +402,11 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "A new push to the target, or a person asking, allows another."),
     Field("pr_conflict_poll_minutes", "↳ Scan every (minutes)", "int", "🔁 PR review & feedback",
           "How often active PRs are checked for conflicts."),
+    Field("pr_session_hours", "Interactive PR session limit (hours)", "int",
+          "🔁 PR review & feedback",
+          "Under execution_mode interactive, a conflict resolution and an /ai action on a PR "
+          "open a Remote-Control session you can attach to. With no result after this long it "
+          "is closed (branch untouched) and a person is told."),
     Field("pr_advisory_max_per_commit", "↳ Max advisory reviews / commit", "int",
           "🔁 PR review & feedback",
           "How often /review (and other comment-only commands) may run against the SAME "

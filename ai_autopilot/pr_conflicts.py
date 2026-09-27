@@ -28,11 +28,13 @@ from pathlib import Path
 # Status tokens stored on a tracked conflict. Order is the lifecycle.
 OPEN = "open"            # ADO reports a conflict; nobody has resolved it yet
 RESOLVING = "resolving"  # a resolution run is in flight
+IN_SESSION = "in_session"  # an interactive session is open on it; a person may attach
 ESCALATED = "escalated"  # the resolver tried and handed it to a person
 RESOLVED = "resolved"    # the PR merges cleanly again
 CLOSED = "closed"        # the PR was completed or abandoned while in conflict
-STATUSES = (OPEN, RESOLVING, ESCALATED, RESOLVED, CLOSED)
-ACTIVE_STATUSES = (OPEN, RESOLVING, ESCALATED)
+STATUSES = (OPEN, RESOLVING, IN_SESSION, ESCALATED, RESOLVED, CLOSED)
+ACTIVE_STATUSES = (OPEN, RESOLVING, IN_SESSION, ESCALATED)
+BUSY_STATUSES = (RESOLVING, IN_SESSION)   # an attempt owns the PR right now
 
 # Who/what cleared it — shown on the dashboard, because "it went away" and "the bot
 # merged main into it" are different facts for a reviewer.

@@ -13,6 +13,7 @@ from ai_autopilot.config import Settings
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
 from ai_autopilot.notifications.base import (
+    EVENT_DIGEST,
     NotificationChannel,
     NotificationMessage,
     NotificationType,
@@ -243,7 +244,15 @@ class AdoNotifier:
                              f"event '{message.event}' is off in alert_events / "
                              "alert_min_severity")
             return
-        if await self._hold_if_quiet(message):
+        if self._config.notify_window_digest_only:
+            # The window governs digests only: one about an item goes out now, a
+            # digest outside the window is dropped (a stale snapshot is not news).
+            if message.event == EVENT_DIGEST and self._quiet.is_quiet():
+                await self._note(message, "suppressed",
+                                 "outside notify hours — digests are dropped, not held "
+                                 "(notify_window_applies_to: digest)")
+                return
+        elif await self._hold_if_quiet(message):
             await self._note(message, "held", "outside notify hours — sent in the next "
                                               "window's summary")
             return
@@ -355,7 +364,10 @@ class AdoNotifier:
         return await self._flush_held()
 
     async def _flush_held(self) -> int:
-        if self._hold_repo is None or not self._maybe_held or self._quiet.is_quiet():
+        # In digest-only mode nothing is held any more, so a backlog left from "all"
+        # mode goes out now rather than waiting for a window that no longer governs it.
+        quiet_blocks = self._quiet.is_quiet() and not self._config.notify_window_digest_only
+        if self._hold_repo is None or not self._maybe_held or quiet_blocks:
             return 0
         try:
             held = await self._hold_repo.drain()

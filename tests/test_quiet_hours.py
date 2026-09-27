@@ -297,3 +297,50 @@ def test_a_notice_without_a_work_item_is_named_not_numbered():
     m = NotificationMessage(work_item=WorkItemInfo(id=0, title="[audit] code-review-daily"),
                             type=NotificationType.COMPLETED)
     assert "#0" not in m.title and "code-review-daily" in m.title
+
+
+# ── notify_window_applies_to: digest — the window governs digests only ───────
+
+def _digest(title="📋 Sức khoẻ quy trình"):
+    return NotificationMessage(work_item=WorkItemInfo(id=0), type=NotificationType.INFO,
+                               heading=title, text="…")
+
+
+async def test_digest_only_window_sends_item_notices_at_night(monkeypatch):
+    hold, channel = _FakeHold(), _FakeChannel()
+    notifier = _notifier(hold, channel, notify_window_applies_to="digest")
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: True)
+    await notifier._broadcast(_msg())                        # a run finished, at 22:40
+    assert len(channel.sent) == 1 and hold.rows == []        # sent, not held
+
+
+async def test_digest_only_window_drops_a_digest_outside_hours(monkeypatch):
+    log = _FakeLog()
+    hold, channel = _FakeHold(), _FakeChannel()
+    cfg = Settings(**{**WORK, "notify_window_applies_to": "digest"})
+    notifier = AdoNotifier(None, cfg, [channel], hold, log_repo=log)
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: True)
+    await notifier._broadcast(_digest())
+    assert channel.sent == [] and hold.rows == []            # dropped, not held
+    assert log.rows[-1]["outcome"] == "suppressed"
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: False)
+    await notifier._broadcast(_digest())
+    assert len(channel.sent) == 1                            # in hours: delivered
+
+
+async def test_switching_to_digest_only_releases_the_backlog_now(monkeypatch):
+    """Notices held under "all" must not wait for a window that no longer governs them."""
+    hold, channel = _FakeHold(), _FakeChannel()
+    notifier = _notifier(hold, channel)                      # "all": held
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: True)
+    for i in range(3):
+        await notifier._broadcast(_msg(i))
+    assert channel.sent == [] and len(hold.rows) == 3
+    notifier._config.notify_window_applies_to = "digest"     # operator switches, live
+    assert await notifier.flush_quiet() == 3                 # still night — goes out anyway
+    assert len(channel.sent) == 1 and "3 thông báo" in channel.sent[0].title
+
+
+def test_an_unrecognised_scope_keeps_the_window_on_everything():
+    assert not Settings(notify_window_applies_to="digests").notify_window_digest_only
+    assert Settings(notify_window_applies_to=" Digest ").notify_window_digest_only

@@ -396,6 +396,10 @@ delivery_stale_days: 3          # in progress, state unchanged (edits do not cou
 notify_hours_start: ""          # e.g. "08:00"
 notify_hours_end: ""            # e.g. "18:00"
 notify_days: "Mon,Tue,Wed,Thu,Fri"
+# all    = the window above governs every notice (held outside it, one summary later)
+# digest = it governs periodic digests only (Delivery, process health, update status —
+#          dropped outside it); item notices (run done, PR conflict, error) go out at once
+notify_window_applies_to: all
 notify_quiet_max_held: 200
 
 # ── Notifications — the channels (credentials only) ──

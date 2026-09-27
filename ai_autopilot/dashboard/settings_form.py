@@ -702,6 +702,11 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "the work item, not an interruption."),
     Field("notify_days", "Khung giờ được phép báo — ngày", "text", '🔔 Cảnh báo',
           "e.g. Mon,Tue,Wed,Thu,Fri. Blank = every day."),
+    Field("notify_window_applies_to", "↳ Khung giờ áp dụng cho", "select", '🔔 Cảnh báo',
+          "all = mọi thông báo (ngoài giờ bị giữ, gửi gộp khi mở khung) · digest = CHỈ "
+          "digest định kỳ (Delivery, sức khoẻ quy trình, cập nhật) — ngoài giờ thì bỏ; mọi "
+          "thông báo về một việc (chạy xong, conflict, lỗi, nhắc) gửi NGAY mọi lúc.",
+          ("all", "digest")),
     Field("notify_quiet_max_held", "↳ Tối đa thông báo giữ lại ngoài giờ", "int", '🔔 Cảnh báo',
           "Ceiling on the held queue so a quiet weekend cannot grow it without bound. Oldest "
           "are dropped first and the summary says how many."),
@@ -1177,6 +1182,7 @@ MACHINE_LOCAL = frozenset({
     "teams_agent_digest_interval_hours", "teams_agent_digest_at",
     "digest_skip_when_empty", "digest_respect_quiet_hours",
     "notify_hours_start", "notify_hours_end", "notify_days", "notify_quiet_max_held",
+    "notify_window_applies_to",
 })
 
 # Where a team's notices go. These ARE credentials — a Teams Workflows URL is itself

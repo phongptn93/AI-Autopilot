@@ -1879,6 +1879,15 @@ class Settings(BaseSettings):
     notify_hours_start: str = ""
     notify_hours_end: str = ""
     notify_days: str = "Mon,Tue,Wed,Thu,Fri"
+    # WHICH notices the window above governs:
+    #   all    — every notice; outside the window they are held and summarised (default)
+    #   digest — only periodic digests (Delivery, process health, update status); they
+    #            are dropped outside the window like the bot digest — a snapshot is not
+    #            worth delivering late. Everything about one item (a run finished, a PR
+    #            conflict, an error, a reminder) goes out the moment it happens.
+    # Anything else reads as "all": the window is a protection, and an unrecognised
+    # value must not silently turn it off.
+    notify_window_applies_to: str = "all"
     # Ceiling on held notices, so a quiet weekend cannot grow the table without bound.
     # Oldest are dropped first and the summary says how many.
     notify_quiet_max_held: int = 200
@@ -2345,6 +2354,12 @@ class Settings(BaseSettings):
         from ai_autopilot.notifications.base import Severity
 
         return int(Severity.parse(self.alert_min_severity, Severity.INFO))
+
+    @property
+    def notify_window_digest_only(self) -> bool:
+        """True when the notify window governs only digests — see
+        ``notify_window_applies_to``. Anything but "digest" means all notices."""
+        return (self.notify_window_applies_to or "").strip().lower() == "digest"
 
     def wants_alert(self, event: str, severity: int) -> bool:
         """The global gate every notice passes before any channel sees it."""

@@ -737,6 +737,27 @@ class PrMonitorService:
         self._log.info("PR command running as an interactive session", pr=pr_id,
                        id=work_item_id, session=prepared.session)
 
+    async def cancel_session(self, session_id: int) -> bool:
+        """The dashboard's ✕ Close: close the console, keep the branch, tell the thread."""
+        c = self._c
+        repo = getattr(c, "pr_session_repo", None)
+        if repo is None:
+            return False
+        row = next((r for r in await repo.open_sessions() if r.id == session_id), None)
+        if row is None:
+            return False
+        await self._sessions.cancel(row.run_dir, row.key)
+        result = ExecutionResult.fail(
+            row.work_item_id, SESSION_SKILL,
+            "phiên interactive đã được đóng từ dashboard — branch không bị thay đổi")
+        await repo.finish(row.id, "cancelled", result.error)
+        await close_run(c, row.run_record_id, result)
+        await self._report_result(
+            row.repo_id, row.repo_name, row.pr_id, row.work_item_id, row.branch, None,
+            row.thread_id, row.instruction, result, advisory=False,
+        )
+        return True
+
     async def _finalize_sessions(self) -> int:
         """Finish every session that wrote its result; close the ones past the limit."""
         from datetime import UTC, datetime

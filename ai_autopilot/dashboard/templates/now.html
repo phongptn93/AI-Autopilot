@@ -1,139 +1,213 @@
 {% extends "base.html" %}
 {% block content %}
-
-<h1>⏱ Đang chạy</h1>
-<p class="lead">
-  Lượt chạy đang diễn ra ngay lúc này. <b>History</b> ghi việc đã xong, <b>Board</b> ghi
-  việc đang ở đâu — còn khoảng giữa “bắt đầu chạy” và “có kết quả” thì trước đây không
-  có chỗ nào nhìn.
-  Cột <b>Im lặng</b> mới là cột trả lời “có bị treo không”: lượt chạy còn sinh sự kiện là
-  đang làm việc, lượt chạy vài phút không sinh gì mới là cái đáng để mắt tới.
-</p>
-
-<div class="nw-spend">
-  {% if spend %}
-    <div class="nw-stat"><span>Đã chạy hôm nay</span><b>{{ spend.runs }}</b> lượt</div>
-    <div class="nw-stat">
-      <span>Chi phí</span>
-      {% if spend.cost_usd is not none %}
-        <b>{% if spend.unpriced %}≥{% endif %}${{ '%.2f'|format(spend.cost_usd) }}</b>
-        {% if spend.unpriced %}
-          <em title="CLI không báo giá cho {{ spend.unpriced }} lượt chạy, nên đây là mức sàn chứ không phải con số đủ">
-            ({{ spend.unpriced }} lượt chưa có giá)
-          </em>
-        {% endif %}
-      {% else %}
-        <b>—</b>
-        <em>{% if spend.runs %}CLI chưa báo giá lượt nào{% else %}chưa có lượt chạy{% endif %}</em>
-      {% endif %}
-    </div>
-    <div class="nw-stat"><span>Token</span><b>{{ '{:,}'.format(spend.tokens) }}</b></div>
-  {% endif %}
-</div>
-
-{% if runs %}
-<table class="nw-table">
-  <thead>
-    <tr>
-      <th>Việc</th>
-      <th>Chạy cái gì</th>
-      <th class="num">Đã chạy</th>
-      <th class="num">Im lặng</th>
-      <th>Việc cuối cùng nó làm</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for r in runs %}
-    {% set stuck = r.quiet is not none and r.quiet >= quiet_warn_seconds %}
-    <tr class="{{ 'nw-stuck' if stuck else '' }}">
-      <td>
-        {% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">#{{ r.id }}</a>
-        {% else %}#{{ r.id }}{% endif %}
-        <div class="nw-title">{{ r.title }}</div>
-        {% if r.project %}<div class="nw-proj">{{ r.project }}</div>{% endif %}
-      </td>
-      <td>
-        {% if r.role %}
-        <div class="nw-role"><b>{{ r.role }}</b>
-          {% if r.stages %}<span class="nw-steps">{{ r.stages | join(' → ') }}</span>
-          {% else %}<span class="nw-steps">không có bước nào được khai báo</span>{% endif %}
-        </div>
-        {% else %}
-        <div class="nw-role nw-norole" title="Không có vai trò nào khớp — lượt chạy nhận nguyên work item, không giới hạn theo bước">
-          <b>cả work item</b><span class="nw-steps">không gán vai trò</span>
-        </div>
-        {% endif %}
-        <code>{{ r.skill or '—' }}</code>
-      </td>
-      <td class="num">{% if r.elapsed is not none %}{{ r.elapsed // 60 }}m {{ r.elapsed % 60 }}s{% else %}—{% endif %}</td>
-      <td class="num">
-        {% if r.quiet is none %}
-          <span class="nw-nofeed" title="Không có feed hoạt động — chưa đặt workspace directory, hoặc lượt chạy này không ghi feed">không có feed</span>
-        {% else %}
-          <b>{{ r.quiet // 60 }}m {{ r.quiet % 60 }}s</b>
-        {% endif %}
-      </td>
-      <td class="nw-last">{{ r.last or '—' }}</td>
-      <td><a class="nw-watch" href="{{ r.feed_url }}">Xem trực tiếp →</a></td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-
-<p class="nw-note">
-  Dòng tô đỏ là lượt chạy đã hơn {{ quiet_warn_seconds // 60 }} phút không sinh sự kiện nào.
-  Chưa chắc đã hỏng — một bước build hay một lần gọi model dài đều im lặng hợp lệ — nhưng
-  đó là chỗ đáng nhìn trước tiên.
-</p>
-{% else %}
-<div class="nw-empty">
-  <b>Không có lượt chạy nào đang diễn ra.</b>
-  <p>
-    Khi autopilot nhận một work item hoặc một lệnh <code>/review</code> trên PR, nó sẽ
-    hiện ở đây kèm thời gian chạy và việc nó vừa làm.
-  </p>
-</div>
-{% endif %}
-
 <style>
-  .lead { color: var(--muted); max-width: 70ch; line-height: 1.6; margin-bottom: 18px; }
-  .nw-spend { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 20px; }
-  .nw-stat { display: flex; align-items: baseline; gap: 8px; }
-  .nw-stat span { color: var(--muted); font-size: 12px; text-transform: uppercase;
-                  letter-spacing: .04em; }
-  .nw-stat b { font-size: 20px; }
-  .nw-stat em { color: var(--muted); font-size: 12px; font-style: normal; }
-  .nw-table { width: 100%; border-collapse: collapse; }
-  .nw-table th { text-align: left; font-size: 12px; text-transform: uppercase;
-                 letter-spacing: .04em; color: var(--muted); padding: 8px 10px;
-                 border-bottom: 1px solid var(--border); }
-  .nw-table td { padding: 10px; border-bottom: 1px solid var(--border);
-                 vertical-align: top; }
-  .nw-table .num { text-align: right; white-space: nowrap; }
-  .nw-title { color: var(--muted); font-size: 13px; margin-top: 2px; max-width: 46ch; }
-  .nw-proj { color: var(--muted); font-size: 11px; margin-top: 2px; opacity: .75; }
-  .nw-last { color: var(--muted); font-size: 12px; max-width: 52ch;
-             overflow-wrap: anywhere; }
-  .nw-nofeed { color: var(--muted); font-size: 12px; font-style: italic; }
-  /* The role reads first and the session id second: "which role is this" is the
-     question, and "interactive:autopilot-9004" was the only thing answering it. */
-  .nw-role { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
-  .nw-role b { font-size: 13px; }
-  .nw-steps { color: var(--muted); font-size: 11.5px; }
-  .nw-norole b { color: var(--muted); font-weight: 600; }
-  .nw-stuck { background: rgba(220, 80, 80, .10); }
-  .nw-stuck .num b { color: #e06c6c; }
-  .nw-watch { white-space: nowrap; font-size: 13px; }
-  .nw-note, .nw-empty { color: var(--muted); font-size: 13px; line-height: 1.6;
-                        margin-top: 16px; max-width: 70ch; }
-  .nw-empty b { color: var(--fg); }
+  /* ── In flight (scoped) ──
+     The two questions: "what is it doing" and "is anything stuck". Running work is a
+     card each — role, how long vs how long it usually takes, and how long it has been
+     QUIET, coloured by threshold — because silence, not duration, is what "stuck"
+     looks like. Interactive PR sessions sit beside them; up-next and just-finished keep
+     the page useful when nothing is running. */
+  .main { max-width:none; }
+  .nw-top { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-bottom:4px; }
+  .nw-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+  .nw-live { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-dim); }
+  .nw-live .dot { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 0 0 rgba(46,204,113,.6);
+    animation:nw-pulse 2s infinite; }
+  .nw-live.paused .dot { background:var(--text-dim); animation:none; }
+  @keyframes nw-pulse { 0% { box-shadow:0 0 0 0 rgba(46,204,113,.55); } 70% { box-shadow:0 0 0 7px rgba(46,204,113,0); } 100% { box-shadow:0 0 0 0 rgba(46,204,113,0); } }
+  .nw-live button { font-size:11px; padding:3px 9px; }
+  .nw-lede { color:var(--text-muted); font-size:13px; margin:0 0 14px; max-width:110ch; }
+  .nw-flash { padding:11px 16px; margin-bottom:14px; border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-card); font-size:12.5px; }
+  .nw-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); } .nw-flash.warn { border-color:rgba(245,166,35,.45); color:var(--amber); }
+
+  .nw-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
+  .kpi { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:13px 15px; }
+  .kpi .v { font-size:24px; font-weight:750; letter-spacing:-.02em; font-variant-numeric:tabular-nums; line-height:1.1; }
+  .kpi .l { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); margin-top:6px; }
+  .kpi .h { font-size:11.5px; color:var(--text-muted); margin-top:3px; }
+  .kpi.live .v { color:var(--accent-hover); } .kpi.bad .v { color:var(--red); } .kpi.good .v { color:var(--green); }
+
+  .nw-sec { display:flex; align-items:baseline; gap:10px; margin:6px 0 10px; }
+  .nw-sec h3 { font-size:14px; font-weight:700; }
+  .nw-sec span { font-size:12px; color:var(--text-dim); }
+
+  .nw-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(380px,1fr)); gap:12px; margin-bottom:22px; }
+  .run { background:var(--bg-card); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:var(--radius);
+    padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+  .run.warn { border-left-color:var(--amber); } .run.stuck { border-left-color:var(--red); background:linear-gradient(90deg, rgba(240,82,106,.06), transparent 40%), var(--bg-card); }
+  .run-hd { display:flex; align-items:baseline; gap:8px; }
+  .run-hd a.id { font-family:var(--mono); font-weight:700; color:var(--accent-hover); text-decoration:none; }
+  .run-hd .proj { font-size:11px; color:var(--text-dim); margin-left:auto; }
+  .run-title { font-size:13px; line-height:1.45; color:var(--text); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .run-role { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px; }
+  .run-role b { font-family:var(--mono); font-size:11.5px; padding:1px 8px; border-radius:6px; background:var(--accent-bg); color:var(--accent-hover); border:1px solid rgba(99,102,241,.4); }
+  .run-role .steps { color:var(--text-dim); font-size:11.5px; }
+  .run-role .whole { color:var(--text-muted); }
+  .run-meters { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .meter .k { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); }
+  .meter .v { font-family:var(--mono); font-size:15px; font-weight:700; margin-top:2px; }
+  .meter .v small { font-size:11px; font-weight:500; color:var(--text-dim); }
+  .bar { height:5px; border-radius:3px; background:var(--bg-input); overflow:hidden; margin-top:5px; }
+  .bar span { display:block; height:100%; background:var(--accent); }
+  .bar.over span { background:var(--amber); }
+  .q-ok { color:var(--green); } .q-warn { color:var(--amber); } .q-stuck { color:var(--red); } .q-none { color:var(--text-dim); font-size:12px !important; font-weight:500 !important; }
+  .run-last { font-size:12px; color:var(--text-muted); background:var(--bg-input); border-radius:7px; padding:7px 9px; font-family:var(--mono);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .run-ft { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:12px; }
+  .run-ft code { font-family:var(--mono); font-size:11px; color:var(--text-dim); }
+  .run-ft .sp { margin-left:auto; }
+  .run-ft a { color:var(--accent-hover); text-decoration:none; }
+  .sess-tag { font-size:10.5px; font-family:var(--mono); padding:1px 7px; border-radius:5px; color:#22d3ee; border:1px solid rgba(6,182,212,.45); background:rgba(6,182,212,.08); }
+
+  .nw-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:1100px) { .nw-grid { grid-template-columns:1fr; } }
+  .panel { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:14px; }
+  .panel-hd { display:flex; align-items:baseline; gap:10px; padding:12px 16px; border-bottom:1px solid var(--border-soft); }
+  .panel-hd h3 { font-size:13.5px; font-weight:650; } .panel-hd span { font-size:12px; color:var(--text-dim); }
+  .panel-hd a { margin-left:auto; font-size:12px; color:var(--accent-hover); text-decoration:none; }
+  .rows { list-style:none; margin:0; padding:0; }
+  .rows li { display:flex; align-items:center; gap:10px; padding:9px 16px; border-bottom:1px solid var(--border-soft); font-size:12.5px; }
+  .rows li:last-child { border-bottom:0; }
+  .rows .id { font-family:var(--mono); font-weight:650; color:var(--accent-hover); text-decoration:none; min-width:56px; }
+  .rows .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); }
+  .rows .m { font-family:var(--mono); font-size:11px; color:var(--text-dim); white-space:nowrap; }
+  .rows form { margin:0; }
+  .rows button { font-size:11px; padding:3px 9px; }
+  .empty-row { padding:16px; color:var(--text-dim); font-size:12.5px; }
+  .idle { background:var(--bg-card); border:1px dashed var(--border); border-radius:var(--radius); padding:18px 20px; margin-bottom:22px;
+    display:flex; align-items:center; gap:14px; }
+  .idle .ic { font-size:26px; }
+  .idle b { display:block; font-size:14px; margin-bottom:3px; }
+  .idle span { color:var(--text-muted); font-size:12.5px; }
 </style>
 
-<script>
-  // The page answers "is it still going?", so it has to keep answering it. A reload
-  // beats a partial here: the rows are few and the numbers are all derived server-side.
-  setTimeout(function () { location.reload(); }, 15000);
-</script>
+<div class="nw-top">
+  <h2>⏱ Đang chạy</h2>
+  <div class="nw-live" id="nw-live"><span class="dot"></span><span id="nw-live-t">cập nhật {{ refreshed }} · tự làm mới 15s</span>
+    <button type="button" class="btn-ghost" id="nw-pause">Tạm dừng</button></div>
+</div>
+<p class="nw-lede">Việc autopilot đang làm ngay lúc này. Cột <b>im lặng</b> trả lời “có bị treo không”:
+  còn sinh sự kiện là đang làm việc; im lặng quá {{ quiet_warn_seconds // 60 }} phút là đáng xem, quá
+  {{ quiet_stuck_seconds // 60 }} phút là nên nhìn trước tiên.</p>
 
+{% if flash %}<div class="nw-flash {{ 'ok' if flash[0] == 'green' else 'warn' }}">{{ flash[1]|safe }}</div>{% endif %}
+
+<div class="nw-kpis">
+  <div class="kpi {{ 'live' if runs else '' }}"><div class="v">{{ runs|length }}</div><div class="l">Đang chạy</div>
+    <div class="h">{% set stuck_n = runs|selectattr('level', 'equalto', 'stuck')|list|length %}{% if stuck_n %}<span class="q-stuck">{{ stuck_n }} im lặng lâu</span>{% else %}không có lượt nào im lặng lâu{% endif %}</div></div>
+  <div class="kpi {{ 'live' if sessions else '' }}"><div class="v">{{ sessions|length }}</div><div class="l">Phiên PR interactive</div><div class="h">conflict · /ai</div></div>
+  <div class="kpi"><div class="v">{{ queued_total }}</div><div class="l">Sắp chạy</div><div class="h">đang chờ trong hàng đợi</div></div>
+  <div class="kpi"><div class="v">{{ today.total }}</div><div class="l">Lượt hôm nay</div>
+    <div class="h"><span class="q-ok">{{ today.Success }} xong</span>{% if today.Failed %} · <span class="q-stuck">{{ today.Failed }} lỗi</span>{% endif %}</div></div>
+  <div class="kpi"><div class="v">{% if spend and spend.cost_usd is not none %}{% if spend.unpriced %}≥{% endif %}${{ '%.2f'|format(spend.cost_usd) }}{% else %}—{% endif %}</div>
+    <div class="l">Chi phí hôm nay</div><div class="h">{% if spend and spend.unpriced %}{{ spend.unpriced }} lượt không đo được (interactive){% elif spend and spend.runs %}{{ '{:,}'.format(spend.tokens) }} token{% else %}chưa có lượt chạy{% endif %}</div></div>
+</div>
+
+<div class="nw-sec"><h3>Lượt chạy</h3><span>{{ runs|length }} đang diễn ra · im lặng lâu nhất trước</span></div>
+{% if runs %}
+<div class="nw-cards">
+  {% for r in runs %}
+  <div class="run {{ r.level }}">
+    <div class="run-hd">
+      {% if r.url %}<a class="id" href="{{ r.url }}" target="_blank" rel="noopener">#{{ r.id }}</a>{% else %}<a class="id" href="/dashboard/task/{{ r.id }}">#{{ r.id }}</a>{% endif %}
+      {% if r.session %}<span class="sess-tag" title="Phiên Remote-Control — attach qua claude.ai → Claude Code">🧑‍💻 {{ r.session }}</span>{% endif %}
+      {% if r.project %}<span class="proj">{{ r.project }}</span>{% endif %}
+    </div>
+    <div class="run-title" title="{{ r.title }}">{{ r.title }}</div>
+    <div class="run-role">
+      {% if r.role %}<b>{{ r.role }}</b>{% if r.stages %}<span class="steps">{{ r.stages | join(' → ') }}</span>{% else %}<span class="steps">không có bước nào được khai báo</span>{% endif %}
+      {% else %}<span class="whole" title="Không có vai trò nào khớp — lượt chạy nhận nguyên work item, không giới hạn theo bước">cả work item · không gán vai trò</span>{% endif %}
+    </div>
+    <div class="run-meters">
+      <div class="meter"><div class="k">Đã chạy</div>
+        <div class="v">{% if r.elapsed is not none %}{{ r.elapsed // 60 }}m {{ '%02d'|format(r.elapsed % 60) }}s{% else %}—{% endif %}
+          {% if r.typical %}<small> / thường {{ r.typical // 60 }}m</small>{% endif %}</div>
+        {% if r.progress is not none %}<div class="bar {{ 'over' if r.overdue }}" title="{{ 'gấp đôi thời gian thường gặp' if r.overdue else 'so với thời gian thường gặp của vai trò này' }}"><span style="width:{{ r.progress }}%"></span></div>{% endif %}
+      </div>
+      <div class="meter"><div class="k">Im lặng</div>
+        <div class="v {{ 'q-' ~ r.level }}">{% if r.quiet is none %}<span class="q-none" title="Không có feed hoạt động — chưa đặt workspace, hoặc lượt chạy này không ghi feed">không có feed</span>{% else %}{{ r.quiet // 60 }}m {{ '%02d'|format(r.quiet % 60) }}s{% endif %}</div>
+      </div>
+    </div>
+    {% if r.last %}<div class="run-last" title="{{ r.last }}">{{ r.last }}</div>{% endif %}
+    <div class="run-ft">
+      <code title="{{ r.skill }}">{{ r.skill or '—' }}</code>
+      <a class="sp" href="{{ r.feed_url }}">Xem trực tiếp →</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="idle"><span class="ic">😴</span><div><b>Không có lượt chạy nào đang diễn ra.</b>
+  <span>Khi autopilot nhận một work item hoặc một lệnh trên PR, nó hiện ở đây kèm thời gian chạy, độ im lặng và việc nó vừa làm.</span></div></div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel-hd"><h3>🧑‍💻 Phiên interactive trên PR</h3><span>giải conflict · lệnh /ai — attach qua Remote Control; tự đóng sau {{ session_limit // 3600 }} giờ</span>
+    <a href="/dashboard/conflicts">Conflicts →</a></div>
+  {% if sessions %}
+  <ul class="rows">
+    {% for s in sessions %}
+    <li>
+      <span class="sess-tag">{{ '⚔️ conflict' if s.kind == 'conflict' else '🔧 /ai' }}</span>
+      {% if s.url %}<a class="id" href="{{ s.url }}" target="_blank" rel="noopener">!{{ s.pr }}</a>{% else %}<span class="id">!{{ s.pr }}</span>{% endif %}
+      <span class="t" title="{{ s.title }}">{{ s.title }} <span class="m">· {{ s.repo }} · {{ s.branch }}</span></span>
+      <code class="m" title="Tên phiên để attach">{{ s.session }}</code>
+      <span class="m">{% if s.elapsed is not none %}{{ s.elapsed // 3600 }}h {{ '%02d'|format((s.elapsed % 3600) // 60) }}m{% endif %}</span>
+      <form method="post" action="{{ s.cancel }}" onsubmit="return confirm('Đóng phiên? Branch giữ nguyên, thay đổi trong phiên bị bỏ.');"><button class="btn-ghost" type="submit">✕ Đóng</button></form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<div class="empty-row">Không có phiên nào đang mở.</div>{% endif %}
+</div>
+
+<div class="nw-grid">
+  <div class="panel">
+    <div class="panel-hd"><h3>⏭ Sắp chạy</h3><span>{{ queued_total }} trong hàng đợi, cũ nhất trước</span><a href="/dashboard/board">Board →</a></div>
+    {% if queued %}
+    <ul class="rows">
+      {% for q in queued %}
+      <li><a class="id" href="/dashboard/task/{{ q.id }}">#{{ q.id }}</a><span class="t" title="{{ q.title }}">{{ q.title or '—' }}</span>
+        <span class="m">{{ q.since.strftime('%m-%d %H:%M') if q.since else '' }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<div class="empty-row">Hàng đợi trống.</div>{% endif %}
+  </div>
+  <div class="panel">
+    <div class="panel-hd"><h3>✅ Vừa xong</h3><span>6 lượt gần nhất</span><a href="/dashboard/history">History →</a></div>
+    {% if recent %}
+    <ul class="rows">
+      {% for e in recent %}
+      <li><span class="badge {{ status_class(e.status.value) }}" style="min-width:74px"><span class="badge-dot"></span>{{ e.status.value }}</span>
+        {% if e.work_item_id %}<a class="id" href="/dashboard/task/{{ e.work_item_id }}">#{{ e.work_item_id }}</a>{% else %}<span class="id">loop</span>{% endif %}
+        <span class="t" title="{{ e.error if e.error and e.status.value == 'Failed' else e.title }}">{{ e.title }}</span>
+        <span class="m">{{ mmss(e.duration_seconds) }} · {{ e.started_at.strftime('%H:%M') }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<div class="empty-row">Chưa có lượt nào xong.</div>{% endif %}
+  </div>
+</div>
+
+<script>
+(function () {
+  // Keeps answering "is it still going?" — but can be paused (reading a long card, or
+  // about to press ✕) without the page reloading under the cursor.
+  var KEY = 'nw-paused', paused = false;
+  try { paused = localStorage.getItem(KEY) === '1'; } catch (e) {}
+  var live = document.getElementById('nw-live'), btn = document.getElementById('nw-pause'),
+      label = document.getElementById('nw-live-t'), timer = null;
+  function arm() {
+    live.classList.toggle('paused', paused);
+    btn.textContent = paused ? 'Tiếp tục' : 'Tạm dừng';
+    if (paused) { label.textContent = 'đã tạm dừng tự làm mới'; if (timer) clearTimeout(timer); }
+    else { timer = setTimeout(function () { location.reload(); }, 15000); }
+  }
+  btn.addEventListener('click', function () {
+    paused = !paused;
+    try { localStorage.setItem(KEY, paused ? '1' : '0'); } catch (e) {}
+    if (!paused) { location.reload(); return; }
+    arm();
+  });
+  arm();
+})();
+</script>
 {% endblock %}

@@ -227,6 +227,9 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "err_sec_repo_required": ("red", "⛔ Nhập hoặc chọn đường dẫn repo cần quét."),
     "err_sec_repo_invalid": ("red", "⛔ Đường dẫn repo không tồn tại trên máy chạy autopilot — "
                                     "kiểm tra lại (đường dẫn tuyệt đối, trên chính máy này)."),
+    "session_closed": ("green", "✕ Đã đóng phiên — branch không bị thay đổi, thread trên PR đã "
+                                "được báo."),
+    "session_not_open": ("amber", "Phiên này không còn mở (có thể vừa xong)."),
     "conflict_resolve_started": ("green", "🔧 Đang giải conflict ở nền — kết quả hiện ở dòng "
                                           "tương ứng và trong comment trên PR."),
     "conflict_scan_started": ("green", "🔄 Đang quét PR — làm mới trang sau ít giây."),
@@ -963,6 +966,8 @@ def _pr_outcomes(c: Container) -> dict:
 # heartbeat in claude_client uses the same idea: a run producing events is working,
 # one that has produced none for minutes is the case worth a person's eye.
 _QUIET_WARN_SECONDS = 180
+# Quiet this long is not "a long build step" any more — it is where to look first.
+_QUIET_STUCK_SECONDS = 600
 
 def _live_session_activity(c, item_id: int) -> tuple[str, float | None]:
     """What an interactive session last did, and how long ago. ``("", None)`` if unknown.
@@ -3417,18 +3422,116 @@ def create_dashboard_router() -> APIRouter:
                 "url": f"{link_base}/{r.work_item_id}" if link_base else "",
             })
         runs.sort(key=lambda r: r["quiet"] if r["quiet"] is not None else -1, reverse=True)
-        # Spend since midnight, so the page answers "what is this costing today" without
-        # a second trip to Analytics.
-        spend = None
+        _, in_scope = scope_of(request, cfg)
+
+        # How long a run of this role USUALLY takes (median of recent successes), so
+        # "running 14 min" can be read as "about done" or "twice as long as usual".
+        typical: dict[str, int] = {}
         with contextlib.suppress(Exception):
-            _, in_scope = scope_of(request, cfg)
-            midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            recent_ok, _ = await c.execution_repo.search(
+                status="Success", projects=in_scope, limit=400,
+                dfrom=(now - timedelta(days=30)).date().isoformat(),
+            )
+            by_role: dict[str, list[float]] = {}
+            for r in recent_ok:
+                if r.duration_seconds:
+                    by_role.setdefault((r.profile or "").strip(), []).append(r.duration_seconds)
+            for role, xs in by_role.items():
+                xs.sort()
+                typical[role] = int(xs[len(xs) // 2])
+        for r in runs:
+            t = typical.get(r["role"]) or typical.get("")
+            r["typical"] = t
+            r["progress"] = (min(100, int(r["elapsed"] / t * 100))
+                             if t and r["elapsed"] is not None else None)
+            r["overdue"] = bool(t and r["elapsed"] is not None and r["elapsed"] > 2 * t)
+            q = r["quiet"]
+            r["level"] = ("none" if q is None else "stuck" if q >= _QUIET_STUCK_SECONDS
+                          else "warn" if q >= _QUIET_WARN_SECONDS else "ok")
+            r["session"] = (f"autopilot-{r['id']}"
+                            if (r["skill"] or "").startswith("interactive") else "")
+
+        # Today, in numbers — spend, and how the day's runs ended.
+        spend = None
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        with contextlib.suppress(Exception):
             spend = await c.execution_repo.spend_since(midnight, projects=in_scope)
-        return _TEMPLATES.TemplateResponse(
+        today = {"Success": 0, "Failed": 0, "total": 0}
+        with contextlib.suppress(Exception):
+            day_rows, _ = await c.execution_repo.search(
+                dfrom=midnight.date().isoformat(), projects=in_scope, limit=1000)
+            for r in day_rows:
+                today["total"] += 1
+                if r.status.value in today:
+                    today[r.status.value] += 1
+
+        # Interactive PR sessions (conflicts and `/ai`) — work in flight that has no
+        # execution row of its own, so without this they were invisible here.
+        sessions: list[dict] = []
+        with contextlib.suppress(Exception):
+            for row in await c.pr_conflict_repo.in_session():
+                st = row.session_started
+                if st is not None and st.tzinfo is None:
+                    st = st.replace(tzinfo=UTC)
+                sessions.append({
+                    "kind": "conflict", "pr": row.pr_id, "repo": row.repo_name,
+                    "branch": row.source_branch, "title": row.title,
+                    "session": row.session_name, "url": row.url,
+                    "elapsed": int((now - st).total_seconds()) if st else None,
+                    "cancel": f"/dashboard/conflicts/{row.id}/cancel",
+                })
+        with contextlib.suppress(Exception):
+            for row in await c.pr_session_repo.open_sessions():
+                st = row.started
+                if st is not None and st.tzinfo is None:
+                    st = st.replace(tzinfo=UTC)
+                sessions.append({
+                    "kind": "ai", "pr": row.pr_id, "repo": row.repo_name,
+                    "branch": row.branch, "title": row.instruction[:140],
+                    "session": row.session_name, "url": "",
+                    "elapsed": int((now - st).total_seconds()) if st else None,
+                    "cancel": f"/dashboard/sessions/{row.id}/cancel",
+                })
+        session_limit = int(getattr(cfg, "pr_session_hours", 8) or 8) * 3600
+
+        # Up next and just finished: the page is useful when nothing is running too.
+        queued: list[dict] = []
+        with contextlib.suppress(Exception):
+            for st in await c.state_repo.all():
+                if st.state == PipelineState.QUEUED:
+                    queued.append({"id": st.work_item_id, "title": st.title or "",
+                                   "since": st.updated_at})
+            queued.sort(key=lambda q: q["since"] or datetime.min)
+        recent: list = []
+        with contextlib.suppress(Exception):
+            rec, _ = await c.execution_repo.search(projects=in_scope, limit=12)
+            recent = [r for r in rec if r.status.value != "Running"][:6]
+
+        flash = _take_flash(request)
+        response = _TEMPLATES.TemplateResponse(
             request, "now.html",
-            _ctx(request, "now", runs=runs, spend=spend,
-                 quiet_warn_seconds=_QUIET_WARN_SECONDS),
+            _ctx(request, "now", runs=runs, spend=spend, today=today, flash=flash,
+                 sessions=sessions, session_limit=session_limit,
+                 queued=queued[:8], queued_total=len(queued), recent=recent,
+                 link_base=link_base, refreshed=datetime.now().strftime("%H:%M:%S"),
+                 quiet_warn_seconds=_QUIET_WARN_SECONDS,
+                 quiet_stuck_seconds=_QUIET_STUCK_SECONDS),
         )
+        if flash:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/sessions/{session_id}/cancel")
+    async def session_cancel(request: Request, session_id: int):
+        """✕ Close an `/ai` session — the branch is left exactly as it was."""
+        monitor = getattr(request.app.state, "pr_monitor", None)
+        if monitor is None or not await monitor.cancel_session(session_id):
+            return _flash("/dashboard/now", "session_not_open")
+        await request.app.state.container.audit_repo.record(
+            actor="dashboard", source="dashboard", action="pr.session_closed",
+            target=f"session {session_id}",
+        )
+        return _flash("/dashboard/now", "session_closed")
 
     @router.get("/queue", response_class=HTMLResponse)
     async def queue_page(request: Request, resumed: int = 0):

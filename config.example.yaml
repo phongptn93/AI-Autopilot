@@ -160,6 +160,11 @@ pr_conflict_autoresolve: false     # true = resolve automatically on the autopil
 pr_conflict_command: /resolve      # comment on ANY PR (allowlisted users) to ask for one
 pr_conflict_max_attempts: 1        # per target commit; a new target push allows another
 pr_conflict_max_files: 15          # more = structural collision → straight to a person
+# Red tests after a resolution → the target is tested alone and the failures compared.
+# A target that was ALREADY red is named as the cause. false = still escalate (default);
+# true = push, since a merge adding no failure of its own makes nothing worse.
+# Failures the resolution ADDS always block.
+pr_conflict_allow_preexisting_failures: false
 # Conflict resolutions AND `/ai` actions on a PR follow execution_mode, like work items:
 # "interactive" opens a Remote-Control session you can attach to and steer — the session
 # never pushes; the checks (tests, auto-review, conflict gates) run in code first —

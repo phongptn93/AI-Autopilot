@@ -127,6 +127,9 @@ class ConflictResolution:
     error: str = ""                    # why it failed, in words for the PR comment
     merge_commit: str = ""
     checks: dict[str, str] = field(default_factory=dict)  # check → "ok" / reason
+    # The failing tests / build errors behind a red test check, normalised — shown on
+    # the PR so a reader sees WHAT failed without re-running the suite.
+    test_failures: list[str] = field(default_factory=list)
     tokens: int = 0
     duration_seconds: float = 0.0
 

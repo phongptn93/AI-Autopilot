@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ai_autopilot.execution.result_contract import clear_result, find_result
+from ai_autopilot.execution.test_gate import TestResult
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.pr_conflicts import (
     BY_AGENT,
@@ -66,6 +67,9 @@ class ConflictResolver:
     def __init__(self, executor, config) -> None:
         self._ex = executor
         self._config = config
+        # Target test runs, by target commit: a red target fails EVERY PR merged into
+        # it, and re-testing the same commit for each of them costs minutes apiece.
+        self._baselines: dict[str, TestResult] = {}
 
     # ── headless ─────────────────────────────────────────────────────────────
 
@@ -329,14 +333,89 @@ class ConflictResolver:
             res.error = "bản giải conflict tạo ra lỗi bảo mật mới: " + "; ".join(new_issues[:3])
             return res
         tests = await ex._test_gate.run(wd)
-        if tests.ran:
-            res.checks["tests"] = "ok" if tests.passed else tests.summary
-            if not tests.passed:
-                res.error = "test fail sau khi giải conflict: " + tests.summary
-                return res
-        else:
+        if not tests.ran:
             res.checks["tests"] = f"skipped ({tests.summary})"
+        elif tests.passed:
+            res.checks["tests"] = "ok"
+        else:
+            blocked, note = await self._judge_test_failure(res, tests, wd, target, note)
+            if blocked:
+                return res
         return await self._commit_and_push(res, wd, branch, target, ctx, BY_AGENT, note=note)
+
+    async def _judge_test_failure(
+        self, res: ConflictResolution, tests: TestResult, wd: str, target: str, note: str,
+    ) -> tuple[bool, str]:
+        """Red after resolving: was it the resolution, or was the target red already?
+
+        Tests the target commit on its own (a clean worktree, cached by commit) and
+        compares normalised failure lists. Only failures the resolution ADDED are its
+        fault. Returns ``(blocked, note)``; fills ``res.checks["tests"]``, ``res.error``
+        and ``res.test_failures`` with what a reader needs to act.
+        """
+        base = await self._baseline(wd, target)
+        mine = tests.failures
+        known = set(base.failures) if (base.ran and not base.passed) else set()
+        added = [f for f in mine if f not in known]
+        target_red = base.ran and not base.passed
+
+        if target_red and mine and not added:
+            # Every failure is already on the target: the resolution made nothing worse.
+            res.test_failures = mine
+            res.checks["tests"] = (f"target {target} đỏ sẵn — {len(base.failures)} lỗi có sẵn, "
+                                   "resolution không thêm lỗi mới")
+            if self._config.pr_conflict_allow_preexisting_failures:
+                return False, (note + "\n\n" if note else "") + (
+                    f"Tests: target {target} is already red ({len(base.failures)} failure(s)); "
+                    "this merge adds none.")
+            res.error = (f"target `{target}` đang đỏ sẵn — không do bản giải conflict "
+                         f"({len(base.failures)} lỗi có sẵn trên target). Sửa target rồi "
+                         "/resolve lại.")
+            return True, note
+
+        # The resolution's own failures (or, when output could not be parsed, the run).
+        res.test_failures = added or mine
+        if added:
+            res.checks["tests"] = f"{len(added)} lỗi mới do resolution" + (
+                f" (+{len(mine) - len(added)} có sẵn trên target)" if len(mine) > len(added)
+                else "")
+        else:
+            res.checks["tests"] = tests.summary
+        if target_red and not mine:
+            # Both red but nothing parseable to compare — say so rather than guess.
+            res.error = (f"test fail sau khi giải conflict ({tests.summary}); target "
+                         f"`{target}` cũng đang fail — chưa đối chiếu được lỗi, cần người xem")
+        else:
+            res.error = "test fail sau khi giải conflict: " + res.checks["tests"]
+        return True, note
+
+    async def _baseline(self, wd: str, target: str) -> TestResult:
+        """The target commit's own test result, from a throwaway worktree beside ``wd``.
+
+        Sibling rather than under a temp dir: Windows' 260-character path limit fails a
+        checkout deep in a large repo, and ``wd``'s parent is known to be short enough.
+        Never raises — an unavailable baseline is "unknown", which never unblocks.
+        """
+        ex = self._ex
+        sha = (await ex._git(["rev-parse", f"origin/{target}"], wd, check=False)).strip()
+        if not sha:
+            return TestResult(ran=False, summary="target commit unknown")
+        if sha in self._baselines:
+            return self._baselines[sha]
+        base_dir = str(Path(wd).parent / f"{Path(wd).name}-base")
+        result = TestResult(ran=False, summary="baseline not run")
+        try:
+            await ex._git(["worktree", "add", "--detach", "--force", base_dir, sha], wd)
+            result = await ex._test_gate.run(base_dir)   # signatures: repo-relative
+            _log.info("target baseline tested", target=target, commit=sha[:10],
+                      passed=result.passed, failures=len(result.failures))
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("target baseline unavailable", target=target, error=describe_exc(exc))
+        finally:
+            await ex._git(["worktree", "remove", "--force", base_dir], wd, check=False)
+        if result.ran:
+            self._baselines[sha] = result
+        return result
 
     async def _commit_and_push(
         self, res: ConflictResolution, wd: str, branch: str, target: str,

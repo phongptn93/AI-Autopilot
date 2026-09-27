@@ -14,8 +14,9 @@ real red run (non-zero exit) blocks.
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ai_autopilot.config import Settings
@@ -25,6 +26,8 @@ from ai_autopilot.proc import spawn_kwargs, terminate_tree
 # Keep only the tail of the test output — enough to see the failing assertions in
 # a log / comment without carrying megabytes of passing noise.
 _OUTPUT_TAIL_CHARS = 4000
+# More distinct failures than this is a broken build, not a list anyone reads.
+_MAX_FAILURES = 50
 
 
 @dataclass
@@ -34,6 +37,59 @@ class TestResult:
     ran: bool = False          # False = gate disabled OR no runner detected (skip)
     summary: str = ""
     output_tail: str = ""
+    # What failed, one normalised line each (see :func:`failure_signatures`) — what a
+    # reader needs to act on, and what makes two runs comparable.
+    failures: list[str] = field(default_factory=list)
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# .NET build: "path/File.cs(378,54): error CS1503: message [path/Project.csproj]"
+_DOTNET_BUILD = re.compile(
+    r"^(?P<path>[^\s(][^(]*?)\(\d+,\d+\):\s*error\s+(?P<code>[A-Z]+\d+):\s*(?P<msg>.*?)"
+    r"(?:\s*\[[^\]]*\])?\s*$")
+# .NET test: "  Failed Namespace.Class.Method [7 ms]"
+_DOTNET_TEST = re.compile(r"^\s*Failed\s+(?P<name>[\w.`+<>,\[\]-]+?)(?:\s*\[[^\]]*\])?\s*$")
+# pytest: "FAILED tests/test_x.py::test_name - AssertionError…"
+_PYTEST = re.compile(r"^FAILED\s+(?P<name>\S+)")
+# jest / vitest: "FAIL src/app.spec.ts"  ·  "  ● Suite › test"
+_JEST_FILE = re.compile(r"^\s*FAIL\s+(?P<name>\S+)")
+_JEST_TEST = re.compile(r"^\s*●\s+(?P<name>.+?)\s*$")
+_TEST_PATTERNS = (_DOTNET_TEST, _PYTEST, _JEST_FILE, _JEST_TEST)
+
+
+def failure_signatures(output: str, root: str = "") -> list[str]:
+    """The distinct failures in a test run's output, normalised so two runs compare.
+
+    A build error keeps file, code and message but not line/column — a merge shifts
+    lines, and "the same error three lines lower" is still the same error. Paths are
+    made relative to ``root`` because the target baseline and the resolved branch run
+    in different worktrees. Order of first appearance, de-duplicated, capped.
+    """
+    roots = {r for r in (root, root.replace("\\", "/"), root.replace("/", "\\")) if r}
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(sig: str) -> None:
+        sig = sig.strip()
+        if sig and sig not in seen:
+            seen.add(sig)
+            out.append(sig)
+
+    for raw in (output or "").splitlines():
+        line = _ANSI.sub("", raw).rstrip()
+        for r in roots:
+            line = line.replace(r.rstrip("\\/") + "\\", "").replace(r.rstrip("\\/") + "/", "")
+        if m := _DOTNET_BUILD.match(line.strip()):
+            path = m["path"].strip().replace("\\", "/")
+            add(f"build {m['code']} {path}: {m['msg'].strip()}")
+        else:
+            for pattern in _TEST_PATTERNS:
+                if m := pattern.match(line):
+                    add(f"test {m['name']}")
+                    break
+        if len(out) >= _MAX_FAILURES:
+            break
+    return out
 
 
 def detect_test_command(work_dir: str) -> str | None:
@@ -170,10 +226,27 @@ class TestGate:
 
         text = (out or b"").decode("utf-8", "replace")
         passed = proc.returncode == 0
-        self._log.info("test gate done", dir=work_dir, passed=passed, code=proc.returncode)
+        failures = [] if passed else failure_signatures(text, work_dir)
+        self._log.info("test gate done", dir=work_dir, passed=passed, code=proc.returncode,
+                       failures=len(failures))
+        if passed:
+            summary = "tests passed"
+        elif failures:
+            # Say WHAT failed. "tests failed (exit 1)" sent a reader to re-run the whole
+            # suite by hand to learn what one line of output would have told them.
+            kinds = {"build": 0, "test": 0}
+            for f in failures:
+                kinds[f.split(" ", 1)[0]] = kinds.get(f.split(" ", 1)[0], 0) + 1
+            parts = [f"{kinds['build']} build error(s)"] if kinds["build"] else []
+            if kinds["test"]:
+                parts.append(f"{kinds['test']} failing test(s)")
+            summary = f"tests failed (exit {proc.returncode}): " + ", ".join(parts)
+        else:
+            summary = f"tests failed (exit {proc.returncode})"
         return TestResult(
             passed=passed,
             ran=True,
-            summary=("tests passed" if passed else f"tests failed (exit {proc.returncode})"),
+            summary=summary,
             output_tail=text[-_OUTPUT_TAIL_CHARS:],
+            failures=failures,
         )

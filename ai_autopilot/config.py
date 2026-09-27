@@ -1390,6 +1390,13 @@ class Settings(BaseSettings):
     # More conflicted files than this is a structural collision, not a merge to settle
     # hunk by hunk — hand it to a person without spending a token.
     pr_conflict_max_files: int = 15
+    # When the tests fail after a resolution, the TARGET branch is tested on its own and
+    # the two failure lists are compared, so "the resolution broke it" and "the target
+    # was already red" read differently. This decides what the second case does: false
+    # (default) escalates with the cause named; true pushes, because a merge that adds
+    # no failure of its own makes nothing worse — the PR was going to inherit the
+    # target's red either way. Failures the resolution ADDS always block.
+    pr_conflict_allow_preexisting_failures: bool = False
     # Under execution_mode "interactive", a conflict resolution AND an `/ai` action on a
     # PR open a Remote-Control session a person can attach to, exactly like a work item.
     # A session with no result after this many hours is closed (the branch untouched)

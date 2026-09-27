@@ -138,3 +138,49 @@ def test_a_plain_node_test_script_is_unchanged(tmp_path):
     (tmp_path / "package.json").write_text(
         json.dumps({"scripts": {"test": "jest"}}), encoding="utf-8")
     assert detect_test_command(str(tmp_path)) == "npm test --silent"
+
+
+# ── failure signatures: what failed, comparable across worktrees ─────────────
+from ai_autopilot.execution.test_gate import failure_signatures  # noqa: E402
+
+_ERR = (r"error CS1503: Argument 1: cannot convert from 'decimal?' to 'decimal' "
+        r"[C:\wt\conflict-1\Plugins\Fac\Fac.csproj]")
+_DOTNET = "\n".join([          # real `dotnet test` shape: same error on two lines
+    "  Restore complete (2.1s)",
+    r"C:\wt\conflict-1\Plugins\Fac\Report.cs(378,54): " + _ERR,
+    r"C:\wt\conflict-1\Plugins\Fac\Report.cs(381,53): " + _ERR,
+    "  Failed Nois.UnitTest.AiAgent.MetricDateTimezoneTests"
+    ".An_offset_does_not_move_the_day [7 ms]",
+    "Failed!  - Failed:     1, Passed:  1219, Skipped:     0, Total:  1220",
+])
+
+
+def test_dotnet_build_errors_ignore_line_numbers_and_worktree_path():
+    sigs = failure_signatures(_DOTNET, r"C:\wt\conflict-1")
+    assert sigs == [
+        "build CS1503 Plugins/Fac/Report.cs: Argument 1: cannot convert from 'decimal?' "
+        "to 'decimal'",
+        "test Nois.UnitTest.AiAgent.MetricDateTimezoneTests.An_offset_does_not_move_the_day",
+    ]
+    # The same failures from another worktree compare equal — the whole point.
+    other = _DOTNET.replace(r"C:\wt\conflict-1", r"C:\wt\conflict-1-base")
+    assert failure_signatures(other, r"C:\wt\conflict-1-base") == sigs
+
+
+def test_pytest_and_jest_failures_and_ansi_colour():
+    out = ("FAILED tests/test_x.py::test_total - AssertionError\n"
+           "\x1b[31m FAIL \x1b[0m src/app.spec.ts\n  ● Cart › keeps both discounts\n")
+    assert failure_signatures(out) == [
+        "test tests/test_x.py::test_total", "test src/app.spec.ts",
+        "test Cart › keeps both discounts"]
+
+
+async def test_a_red_run_says_what_failed(tmp_path):
+    script = tmp_path / "t.py"
+    script.write_text("print('  Failed App.Tests.It_breaks [1 ms]'); raise SystemExit(1)\n",
+                      encoding="utf-8")
+    gate = TestGate(Settings(test_gate_enabled=True,
+                             test_command=f'"{sys.executable}" "{script}"'))
+    r = await gate.run(str(tmp_path))
+    assert not r.passed and r.failures == ["test App.Tests.It_breaks"]
+    assert r.summary == "tests failed (exit 1): 1 failing test(s)"

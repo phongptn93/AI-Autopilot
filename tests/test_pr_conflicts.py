@@ -317,3 +317,97 @@ def test_conflicts_page_lists_tracked_conflicts(tmp_path):
         # Default execution_mode is interactive: the button opens a session.
         assert "🧑‍💻 Resolve" in page and "interactive — opens a Remote-Control session" in page
         assert 'href="/dashboard/conflicts"' in page             # nav link
+
+
+# ── test gate vs. a target that was already red ─────────────────────────────
+
+class _Gate:
+    """Plays the repo's tests: the baseline worktree (name ends in -base) and the
+    resolved branch answer separately, and every call is counted."""
+
+    def __init__(self, *, target: list[str], resolved: list[str]):
+        self.target, self.resolved, self.calls = target, resolved, []
+
+    async def run(self, work_dir):
+        from ai_autopilot.execution.test_gate import TestResult
+        is_base = str(work_dir).rstrip("\/").endswith("-base")
+        self.calls.append("base" if is_base else "resolved")
+        fails = self.target if is_base else self.resolved
+        return TestResult(passed=not fails, ran=True, failures=list(fails),
+                          summary="tests passed" if not fails else "tests failed (exit 1)")
+
+
+def _write_resolution(repo):
+    (repo / "app.py").write_text("x = 110\ny = 2\n", encoding="utf-8")
+
+
+RED = ["build CS1503 src/Report.cs: Argument 3: cannot convert from 'decimal?' to 'decimal'"]
+
+
+async def test_a_red_target_is_named_as_the_cause_not_the_resolution(tmp_path):
+    origin, ws = _setup(tmp_path)
+    before = _origin_head(origin, "feature")
+    ex = _executor(ws)
+    _fake_claude(ex, _write_resolution)
+    ex._test_gate = _Gate(target=RED, resolved=RED)
+    res = await ConflictResolver(ex, ex._config).resolve(
+        repo_path=str(ws / "app"), branch="feature", target_branch="main", ctx=_ctx())
+    assert not res.success
+    assert "đỏ sẵn" in res.error and "không do bản giải conflict" in res.error
+    assert res.checks["tests"].startswith("target main đỏ sẵn")
+    assert res.test_failures == RED
+    assert _origin_head(origin, "feature") == before          # default: still not pushed
+    assert not (ws / "app-base").exists()                     # baseline worktree removed
+
+
+async def test_opt_in_pushes_when_the_merge_adds_no_failure(tmp_path):
+    origin, ws = _setup(tmp_path)
+    before = _origin_head(origin, "feature")
+    ex = _executor(ws, pr_conflict_allow_preexisting_failures=True)
+    _fake_claude(ex, _write_resolution)
+    ex._test_gate = _Gate(target=RED, resolved=RED)
+    res = await ConflictResolver(ex, ex._config).resolve(
+        repo_path=str(ws / "app"), branch="feature", target_branch="main", ctx=_ctx())
+    assert res.success, res.error
+    assert _origin_head(origin, "feature") != before
+    body = _git(origin, "log", "-1", "--format=%B", "feature")
+    assert "already red" in body                              # the commit says so
+
+
+async def test_a_failure_the_resolution_adds_always_blocks(tmp_path):
+    origin, ws = _setup(tmp_path)
+    before = _origin_head(origin, "feature")
+    ex = _executor(ws, pr_conflict_allow_preexisting_failures=True)
+    _fake_claude(ex, _write_resolution)
+    mine = "test App.Tests.Pricing_keeps_both_discounts"
+    ex._test_gate = _Gate(target=RED, resolved=[*RED, mine])
+    res = await ConflictResolver(ex, ex._config).resolve(
+        repo_path=str(ws / "app"), branch="feature", target_branch="main", ctx=_ctx())
+    assert not res.success
+    assert res.test_failures == [mine]                        # only what IT broke
+    assert "1 lỗi mới do resolution" in res.checks["tests"]
+    assert _origin_head(origin, "feature") == before
+
+
+async def test_a_green_resolution_never_pays_for_a_baseline(tmp_path):
+    _, ws = _setup(tmp_path)
+    ex = _executor(ws)
+    _fake_claude(ex, _write_resolution)
+    ex._test_gate = gate = _Gate(target=RED, resolved=[])
+    res = await ConflictResolver(ex, ex._config).resolve(
+        repo_path=str(ws / "app"), branch="feature", target_branch="main", ctx=_ctx())
+    assert res.success, res.error
+    assert gate.calls == ["resolved"]
+
+
+async def test_the_target_baseline_is_tested_once_per_commit(tmp_path):
+    _, ws = _setup(tmp_path)
+    ex = _executor(ws)
+    gate = _Gate(target=RED, resolved=RED)
+    ex._test_gate = gate
+    resolver = ConflictResolver(ex, ex._config)
+    for _ in range(2):
+        _fake_claude(ex, _write_resolution)
+        await resolver.resolve(repo_path=str(ws / "app"), branch="feature",
+                               target_branch="main", ctx=_ctx())
+    assert gate.calls.count("base") == 1                      # cached by target commit

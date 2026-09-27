@@ -361,7 +361,7 @@ class PrConflictService:
         )
         if not result.success:
             await self._finish_failed(row, result.error, result.checks, result.tokens,
-                                      files=result.files)
+                                      files=result.files, failures=result.test_failures)
             return "escalated"
         await c.pr_conflict_repo.update(
             row.id, status=RESOLVED, resolved_at=datetime.now(UTC),
@@ -488,7 +488,8 @@ class PrConflictService:
         return True
 
     async def _finish_failed(self, row, error: str, checks: dict, tokens: int,
-                             files: list[str] | None = None) -> None:
+                             files: list[str] | None = None,
+                             failures: list[str] | None = None) -> None:
         c = self._c
         await self._close_execution(row, success=False, detail=error or "escalated",
                                     tokens=tokens)
@@ -501,7 +502,7 @@ class PrConflictService:
             row.repo_id, row.pr_id,
             "<div><b>🙋 Chưa tự giải được conflict — cần người xử lý.</b><br/>"
             f"Lý do: {_esc(error or 'không rõ')}<br/>"
-            f"{self._checks_html(checks)}"
+            f"{self._checks_html(checks)}{self._failures_html(failures)}"
             "Branch trên origin <b>không bị thay đổi</b> (merge đã được huỷ). Giải tay: "
             f"<code>git merge origin/{row.target_branch}</code> trên "
             f"<code>{row.source_branch}</code>. Comment <code>"
@@ -564,12 +565,26 @@ class PrConflictService:
             return ""
         label = {"markers": "Conflict marker", "scope": "Chỉ sửa file conflict",
                  "security": "Security gate", "tests": "Test", "merge": "Merge"}
+        def icon(v: str) -> str:
+            if v == "ok" or v.startswith(("skipped", "already")):
+                return "✅"
+            # Red, but not this change's doing: the target was red on its own.
+            return "⚠️" if v.startswith("target ") else "❌"
+
         rows = "".join(
-            f"<li>{'✅' if v == 'ok' or str(v).startswith(('skipped', 'already')) else '❌'} "
-            f"{label.get(k, k)}: {_esc(str(v))}</li>"
+            f"<li>{icon(str(v))} {label.get(k, k)}: {_esc(str(v))}</li>"
             for k, v in checks.items()
         )
         return f"Kiểm tra:<ul>{rows}</ul>"
+
+    @staticmethod
+    def _failures_html(failures: list[str] | None, limit: int = 12) -> str:
+        """What actually failed, so the reader does not re-run the suite to find out."""
+        if not failures:
+            return ""
+        shown = "\n".join(_esc(f) for f in failures[:limit])
+        more = f"\n… +{len(failures) - limit} nữa" if len(failures) > limit else ""
+        return f"Lỗi:<pre>{shown}{more}</pre>"
 
     # ── helpers ──────────────────────────────────────────────────────────────
 

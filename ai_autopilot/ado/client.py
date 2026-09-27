@@ -14,7 +14,7 @@ import re
 import time
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -960,6 +960,48 @@ class AdoClient:
             self._log.warning("get_pull_request failed", pr=pr_id, status=resp.status_code)
             return None
         return resp.json()
+
+    async def pull_request_changed_files(self, pr_url: str) -> list[str]:
+        """Paths a PR changes, read from its latest iteration — [] on any failure.
+
+        For runs whose diff the executor never saw: an interactive session commits and
+        pushes by itself, so its result carried no file list and the run score read
+        "no file changed" for a PR that fixed a build. Takes the PR's browser URL
+        (``…/{project}/_git/{repo}/pullrequest/{id}``), which is what a result holds.
+        """
+        m = re.search(r"/([^/]+)/_git/([^/]+)/pullrequest/(\d+)", pr_url or "", re.IGNORECASE)
+        if not m:
+            return []
+        project, repo, pr_id = unquote(m[1]), unquote(m[2]), int(m[3])
+        base = f"git/repositories/{quote(repo, safe='')}/pullRequests/{pr_id}/iterations"
+        # The URL already names the CODE project — _git_url would map it again.
+        root = f"{self._base}/{quote(project, safe='')}/_apis"
+        try:
+            headers = await self._auth.get_auth_header()
+            resp = await self._send("GET", f"{root}/{base}?{_API}", headers=headers)
+            iterations = resp.json().get("value") or [] if resp.status_code < 400 else []
+            if not iterations:
+                return []
+            last = max(int(it.get("id") or 0) for it in iterations)
+            resp = await self._send(
+                "GET", f"{root}/{base}/{last}/changes?$top=2000&{_API}",
+                headers=headers,
+            )
+            if resp.status_code >= 400:
+                return []
+            entries = resp.json().get("changeEntries") or []
+        except (httpx.HTTPError, ValueError) as exc:
+            self._log.info("PR changed files unavailable", pr=pr_id, error=describe_exc(exc))
+            return []
+        paths = []
+        for entry in entries:
+            item = entry.get("item") or {}
+            if item.get("isFolder"):
+                continue
+            path = str(item.get("path") or entry.get("originalPath") or "").lstrip("/")
+            if path:
+                paths.append(path)
+        return paths
 
     async def get_pull_request_work_items(
         self, repo_id: str, pr_id: int, project: str = ""

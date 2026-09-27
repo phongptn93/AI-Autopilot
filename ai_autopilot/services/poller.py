@@ -1415,6 +1415,24 @@ class AdoPollerService:
             stages=[st.name for st in stages] if stages else [],
         )
 
+    async def _fill_changed_files(self, result) -> None:
+        """Give an interactive result the file list its PR(s) actually changed.
+
+        A live session commits and pushes by itself, so the executor never sees the diff
+        and the result arrived with no files — which the run score read as "no file
+        changed" (scope 0/15) and, with the rest of its signals, held a PR that fixed a
+        build for a human. The PR is the record of what changed; ask it. Best-effort:
+        a failed lookup leaves the result as it was."""
+        if result.files_changed or not result.success:
+            return
+        urls = list(dict.fromkeys([*(result.pr_urls or []), result.pr_url or ""]))
+        files: list[str] = []
+        for url in (u for u in urls if u):
+            with contextlib.suppress(Exception):
+                files += await self._c.ado.pull_request_changed_files(url)
+        if files:
+            result.files_changed = list(dict.fromkeys(files))
+
     async def _finalize_live_sessions(self) -> None:
         """Finalise interactive sessions whose result.json has appeared."""
         c, cfg = self._c, self._config
@@ -1435,6 +1453,7 @@ class AdoPollerService:
                 await self._watch_live_session(item, run_dir, record_id)
                 continue
             self._quiet_warned.discard(item_id)
+            await self._fill_changed_files(result)
             await c.execution_repo.complete_execution(record_id, result)
             if result.cost_tokens:
                 await c.cost_tracker.track(record_id, result.cost_tokens)
@@ -1602,6 +1621,7 @@ class AdoPollerService:
             # for — its pull request missing from the merge rate and the cost per
             # shipped PR. The card's "Duration 00:00" was the visible corner of it:
             # with no row, nothing backfilled the time either.
+            await self._fill_changed_files(result)
             record_id = await c.execution_repo.start_execution(
                 item, "interactive:(recovered)", trigger_tag=self._matched_tag(item),
                 started_at=datetime.now(UTC) - timedelta(seconds=result.duration_seconds),

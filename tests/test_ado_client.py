@@ -321,3 +321,30 @@ async def test_a_project_the_pat_cannot_see_is_not_asked_every_poll():
     assert len(calls) == 1                     # asked once, then left alone
     assert warned == ["Khatoco"]               # warned once, naming the project
     assert await c.get_work_item_types("DxFactory") == ["Bug"]   # others unaffected
+
+
+async def test_pr_changed_files_come_from_its_latest_iteration():
+    seen: list[str] = []
+
+    def handler(request):
+        url = str(request.url)
+        seen.append(url)
+        if url.split("?")[0].endswith("/iterations"):
+            return httpx.Response(200, json={"value": [{"id": 1}, {"id": 3}, {"id": 2}]})
+        return httpx.Response(200, json={"changeEntries": [
+            {"item": {"path": "/Plugins/Fac/Report.cs"}},
+            {"item": {"path": "/Plugins/Fac", "isFolder": True}},
+        ]})
+
+    c = _http_client(handler, ado_project="Board", code_project="Board")
+
+    async def _auth_header():
+        return {}
+
+    c._auth = type("A", (), {"get_auth_header": staticmethod(_auth_header)})()
+    files = await c.pull_request_changed_files(
+        "https://dev.azure.com/org/DxFactory/_git/Backend-Fresh/pullrequest/4349")
+    assert files == ["Plugins/Fac/Report.cs"]                  # folders dropped, no "/"
+    assert "/DxFactory/_apis/" in seen[0]                       # the PR's own project
+    assert "/iterations/3/changes" in seen[1]                   # the LATEST iteration
+    assert await c.pull_request_changed_files("not a pr url") == []

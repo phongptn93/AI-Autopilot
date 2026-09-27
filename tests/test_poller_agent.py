@@ -2006,3 +2006,31 @@ async def test_a_still_running_orphan_is_left_completely_alone():
     assert c.executor.closed == [] and c.executor.released == []
     assert c.execution_repo.completed == []
     assert (7, c.config.live_tag) not in c.ado.removed  # still live, still tagged
+
+
+async def test_interactive_result_gets_its_prs_files_for_scoring():
+    """A live session pushes by itself, so its result had no files and the run score
+    read "no file changed" for a PR that fixed a build."""
+    from types import SimpleNamespace
+
+    from ai_autopilot.models import ExecutionResult
+    from ai_autopilot.services.poller import AdoPollerService
+
+    asked: list[str] = []
+
+    async def changed(url):
+        asked.append(url)
+        return ["Plugins/Fac/Report.cs"]
+
+    svc = SimpleNamespace(_c=SimpleNamespace(ado=SimpleNamespace(
+        pull_request_changed_files=changed)))
+    ok = ExecutionResult.ok(9498, "interactive:autopilot-9498", "")
+    ok.pr_url = "https://dev.azure.com/o/P/_git/R/pullrequest/4349"
+    ok.pr_urls = [ok.pr_url]
+    await AdoPollerService._fill_changed_files(svc, ok)
+    assert ok.files_changed == ["Plugins/Fac/Report.cs"] and asked == [ok.pr_url]
+
+    failed = ExecutionResult.fail(1, "x", "boom")
+    failed.pr_urls = [ok.pr_url]
+    await AdoPollerService._fill_changed_files(svc, failed)
+    assert failed.files_changed == [] and len(asked) == 1       # a failure is left alone

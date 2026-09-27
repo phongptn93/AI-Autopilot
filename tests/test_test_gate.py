@@ -184,3 +184,106 @@ async def test_a_red_run_says_what_failed(tmp_path):
     r = await gate.run(str(tmp_path))
     assert not r.passed and r.failures == ["test App.Tests.It_breaks"]
     assert r.summary == "tests failed (exit 1): 1 failing test(s)"
+
+
+# ── an environment that cannot run tests is a skip, never "tests failed" ─────
+from ai_autopilot.execution.test_gate import environment_failure  # noqa: E402
+
+
+def test_environment_failures_are_recognised():
+    assert "'ng' not found" in environment_failure(
+        "> ng test\n'ng' is not recognized as an internal or external command,\n")
+    assert "'jest' not found" in environment_failure("sh: 1: jest: not found\n")
+    assert "ChromeHeadless is not installed" in environment_failure(
+        "ERROR [launcher]: No binary for ChromeHeadless browser on your platform.")
+    assert environment_failure("  Failed App.Tests.It_breaks [1 ms]") == ""
+
+
+async def test_a_suite_that_cannot_start_is_skipped_not_failed(tmp_path):
+    script = tmp_path / "t.py"
+    script.write_text("print(\"'ng' is not recognized as an internal or external command,\")\n"
+                      "raise SystemExit(1)\n", encoding="utf-8")
+    gate = TestGate(Settings(test_gate_enabled=True,
+                             test_command=f'"{sys.executable}" "{script}"'))
+    r = await gate.run(str(tmp_path))
+    assert r.passed and not r.ran
+    assert r.summary.startswith("skipped — test environment not ready: 'ng' not found")
+
+
+def _node_repo(tmp_path, *, lock=True):
+    (tmp_path / "package.json").write_text('{"scripts": {"test": "ng test"}}',
+                                           encoding="utf-8")
+    if lock:
+        (tmp_path / "package-lock.json").write_text("{}", encoding="utf-8")
+    return tmp_path
+
+
+async def test_node_worktree_gets_its_dependencies_before_the_suite(tmp_path, monkeypatch):
+    repo = _node_repo(tmp_path)
+    ran: list[str] = []
+
+    async def shell(self, cmd, cwd, limit_s, env=None):
+        ran.append(cmd)
+        if cmd.startswith("npm ci"):
+            return 1, "npm error `npm ci` can only install packages when your package.json " \
+                      "and package-lock.json are in sync.\n"
+        if cmd.startswith("npm install"):
+            (repo / "node_modules").mkdir()
+            return 0, "added 1200 packages"
+        return 0, "TOTAL: 42 SUCCESS"
+
+    monkeypatch.setattr(TestGate, "_shell", shell)
+    monkeypatch.setattr("ai_autopilot.execution.test_gate.shutil.which", lambda _b: "npm")
+    r = await TestGate(Settings(test_gate_enabled=True)).run(str(repo))
+    assert r.ran and r.passed
+    assert [c.split()[0:2] for c in ran] == [["npm", "ci"], ["npm", "install"], ["npm", "test"]]
+
+
+async def test_dependencies_that_cannot_install_skip_with_the_reason(tmp_path, monkeypatch):
+    repo = _node_repo(tmp_path, lock=False)
+
+    async def shell(self, cmd, cwd, limit_s, env=None):
+        return 1, "npm error code E404\nnpm error 404 Not Found - GET https://registry/x\n"
+
+    monkeypatch.setattr(TestGate, "_shell", shell)
+    monkeypatch.setattr("ai_autopilot.execution.test_gate.shutil.which", lambda _b: "npm")
+    r = await TestGate(Settings(test_gate_enabled=True)).run(str(repo))
+    assert r.passed and not r.ran
+    assert "npm install` failed" in r.summary and "404 Not Found" in r.summary
+
+
+async def test_an_installed_worktree_is_not_reinstalled(tmp_path, monkeypatch):
+    repo = _node_repo(tmp_path)
+    (repo / "node_modules").mkdir()
+    ran: list[str] = []
+
+    async def shell(self, cmd, cwd, limit_s, env=None):
+        ran.append(cmd)
+        return 0, "ok"
+
+    monkeypatch.setattr(TestGate, "_shell", shell)
+    monkeypatch.setattr("ai_autopilot.execution.test_gate.shutil.which", lambda _b: "npm")
+    await TestGate(Settings(test_gate_enabled=True)).run(str(repo))
+    assert len(ran) == 1 and ran[0].startswith("npm test")
+
+
+def test_angular_cli_errors_are_signatures_comparable_across_worktrees():
+    out = ("An unhandled exception occurred: error TS500: Error: ENOENT: no such file or "
+           r"directory, lstat 'C:\wt\c-4\projects\dxwms\tsconfig.spec.json'")
+    base = out.replace(r"C:\wt\c-4", r"C:\wt\c-4-base")
+    sig = failure_signatures(out, r"C:\wt\c-4")
+    assert sig == ["build TS500: Error: ENOENT: no such file or directory, "
+                   "lstat 'projects/dxwms/tsconfig.spec.json'"]
+    assert failure_signatures(base, r"C:\wt\c-4-base") == sig
+
+
+def test_karma_gets_edge_when_chrome_is_missing(monkeypatch, tmp_path):
+    from ai_autopilot.execution import test_gate as tg
+    edge = tmp_path / "msedge.exe"
+    edge.write_text("", encoding="utf-8")
+    monkeypatch.delenv("CHROME_BIN", raising=False)
+    monkeypatch.setattr(tg, "_CHROME_PATHS", (str(tmp_path / "none.exe"),))
+    monkeypatch.setattr(tg, "_EDGE_PATHS", (str(edge),))
+    assert tg._browser_env()["CHROME_BIN"] == str(edge)
+    monkeypatch.setenv("CHROME_BIN", "C:/mine/chrome.exe")   # the operator's choice wins
+    assert tg._browser_env() is None

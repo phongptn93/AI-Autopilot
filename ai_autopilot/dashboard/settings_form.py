@@ -349,6 +349,12 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "(pytest / dotnet test / npm test); no runner found = skipped, never blocks."),
     Field("test_timeout_seconds", "↳ Test timeout (seconds)", "int", "🧪 Quality gates",
           "Kill the test run after this long and treat it as failed. Default 600."),
+    Field("test_install_dependencies", "↳ Install Node dependencies first", "bool",
+          "🧪 Quality gates",
+          "A fresh worktree has no node_modules, so a detected `npm test` cannot find `ng` "
+          "/ `jest`. On = `npm ci` (then `npm install` if the lock is out of sync) before the "
+          "suite, ~2 min on a large monorepo. Cannot install = skipped with the reason — "
+          "a machine that cannot run tests is never reported as failing tests."),
     Field("pr_scoring_enabled", "Score each run (0–100)", "bool", "🧪 Quality gates",
           "Grade each run from objective signals; below the review threshold → hold for human."),
     Field("pr_score_auto_min", "Score ≥ this → auto-resolve", "int", "🧪 Quality gates",

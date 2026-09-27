@@ -1791,6 +1791,12 @@ class Settings(BaseSettings):
     test_commands: list[str] = Field(default_factory=list)
     test_timeouts: list[str] = Field(default_factory=list)
     test_timeout_seconds: int = 600
+    # A fresh worktree of a Node repo has no node_modules, so the detected `npm test`
+    # cannot find its runner (`ng`, `jest`). True = run `npm ci` (falling back to
+    # `npm install` when the lock is out of sync) before the detected command, within
+    # the same timeout. When it cannot be installed the gate SKIPS with the reason —
+    # an environment that cannot run tests is never reported as failing tests.
+    test_install_dependencies: bool = True
 
     # ── PR scoring ("get a score": grade each run from objective signals) ──
     pr_scoring_enabled: bool = True

@@ -51,6 +51,27 @@ async def test_gate_skips_when_no_runner(tmp_path):
     assert res.passed is True and res.ran is False
 
 
+async def test_detected_runner_missing_from_path_is_a_skip_not_a_failure(tmp_path, monkeypatch):
+    # cmd.exe answers an unknown command with exit 1 — without this check a .NET repo
+    # on a machine whose PATH lacks dotnet reported "tests failed (exit 1)" and every
+    # conflict resolution was escalated although no test had run.
+    (tmp_path / "App.csproj").write_text("<Project/>", encoding="utf-8")
+    monkeypatch.setattr("ai_autopilot.execution.test_gate.shutil.which", lambda _b: None)
+    gate = TestGate(Settings(test_gate_enabled=True, test_command=""))
+    r = await gate.run(str(tmp_path))
+    assert r.passed and not r.ran
+    assert "'dotnet' not found on PATH" in r.summary
+
+
+async def test_configured_command_is_not_second_guessed(tmp_path, monkeypatch):
+    # An operator's command may start with a shell builtin `which` cannot see.
+    monkeypatch.setattr("ai_autopilot.execution.test_gate.shutil.which", lambda _b: None)
+    gate = TestGate(Settings(test_gate_enabled=True,
+                             test_command=f'"{sys.executable}" -c "import sys; sys.exit(0)"'))
+    r = await gate.run(str(tmp_path))
+    assert r.ran and r.passed
+
+
 async def test_gate_passes_on_zero_exit(tmp_path):
     res = await TestGate(
         Settings(test_gate_enabled=True, test_command="exit 0")

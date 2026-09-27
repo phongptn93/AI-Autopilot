@@ -14,6 +14,7 @@ real red run (non-zero exit) blocks.
 from __future__ import annotations
 
 import asyncio
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -106,11 +107,28 @@ class TestGate:
             return TestResult(passed=True, ran=False, summary="test gate disabled")
 
         repo = await repo_name_for(work_dir)
-        cmd = self._config.test_command_for(repo) or detect_test_command(work_dir)
+        configured = self._config.test_command_for(repo)
+        cmd = configured or detect_test_command(work_dir)
         timeout = self._config.test_timeout_for(repo)
         if not cmd:
             self._log.info("test gate: no runner detected — skipping", dir=work_dir, repo=repo)
             return TestResult(passed=True, ran=False, summary="no test runner detected")
+        # A DETECTED runner whose binary is not on PATH must not reach the shell: cmd.exe
+        # answers "'dotnet' is not recognized" with exit code 1, which read as "tests
+        # failed" and escalated every conflict resolution on a .NET repo although no test
+        # ever ran. Checked only for detected commands — an operator's own command may
+        # start with a shell builtin (`cd x && …`) that `which` cannot see.
+        if not configured:
+            runner = cmd.split()[0]
+            if not shutil.which(runner):
+                self._log.warning("test gate: runner not on PATH — skipping", dir=work_dir,
+                                  repo=repo, runner=runner,
+                                  hint="add it to PATH, or set test_commands for this repo")
+                return TestResult(
+                    passed=True, ran=False,
+                    summary=f"test runner '{runner}' not found on PATH "
+                            f"(add it to PATH or set test_commands for {repo or 'this repo'})",
+                )
 
         self._log.info("running test gate", dir=work_dir, repo=repo, cmd=cmd, timeout=timeout)
         try:

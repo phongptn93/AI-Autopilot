@@ -150,10 +150,14 @@ def _column_for(
         return COL_READY_DEPLOY
     if state and state in handoff_states(getattr(cfg, "board_testing_state", None)):
         return COL_READY_TESTING
-    # The autopilot's own persisted pipeline state wins next.
+    tags = {t.lower() for t in item.tags}
+    # The autopilot's own persisted pipeline state wins next — except a "Needs human"
+    # whose hold tag a person has removed: the tag is what they changed, so the card
+    # must follow it now rather than on the next poll cycle.
+    if persisted == "Needs human" and cfg.escalation_tag.lower() not in tags:
+        persisted = None
     if persisted in COLUMNS:
         return persisted
-    tags = {t.lower() for t in item.tags}
     # ADO tags are the cross-restart source of truth, checked first.
     if cfg.escalation_tag.lower() in tags:
         return "Needs human"

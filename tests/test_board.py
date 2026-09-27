@@ -81,8 +81,19 @@ def test_latest_records_keeps_newest_first():
 def test_persisted_state_takes_priority():
     items = [_item(1, ["autopilot", "autopilot-done"])]  # tag says Done
     recs = {1: _rec(1, ExecutionStatus.RUNNING)}
-    board = build_board(items, recs, CFG, states_by_id={1: "Needs human"})
-    assert board["Needs human"][0].id == 1  # persisted state wins over tag/record
+    board = build_board(items, recs, CFG, states_by_id={1: "In review"})
+    assert board["In review"][0].id == 1  # persisted state wins over tag/record
+
+
+def test_needs_human_without_the_hold_tag_is_not_trusted():
+    # The hold was released in ADO (tag removed) and the item marked done: the card
+    # follows the tag, not a stale persisted "Needs human" (the #9447 field bug).
+    items = [_item(1, ["autopilot", "autopilot-done"])]
+    board = build_board(items, {}, CFG, states_by_id={1: "Needs human"})
+    assert board["Done"][0].id == 1 and not board["Needs human"]
+    held = [_item(2, ["autopilot", "autopilot-hold"])]
+    board = build_board(held, {}, CFG, states_by_id={2: "Needs human"})
+    assert board["Needs human"][0].id == 2
 
 
 def test_unknown_persisted_state_falls_back_to_derived():

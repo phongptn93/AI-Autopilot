@@ -329,6 +329,10 @@ class AdoPollerService:
                 if wi.id not in self._processed and not c.retry_policy.is_exhausted(wi.id):
                     asyncio.create_task(self._process(wi))
 
+        # A hold a person released on the board (the hold tag removed in ADO) must
+        # release here too — otherwise the item sits in "Needs human" forever.
+        await self._reconcile_released_holds()
+
         # Reopen items a human dragged back to a trigger state (clears skip tags),
         # so the pending query below picks them up again this cycle.
         await self._reconcile_reopened()
@@ -691,6 +695,53 @@ class AdoPollerService:
                 "autopilot tags and will reprocess.</div>",
             )
             self._log.info("reopened item", id=item.id, state=item.state, cleared=held)
+
+    def forget(self, item_id: int) -> None:
+        """Drop what this process remembers about an item — the per-cycle dedup and the
+        retry budget — so a person's "run it again" is not silently ignored by either."""
+        self._processed.pop(item_id, None)
+        self._c.retry_policy.record_success(item_id)
+
+    async def _reconcile_released_holds(self) -> None:
+        """Items held as "Needs human" whose hold tag a person removed in ADO.
+
+        The hold lives in two places — the tag on the item and the pipeline state here —
+        and only the tag is visible to people, so only the tag gets removed. The state
+        then kept the item in the Needs-human column, the queue page and every digest
+        indefinitely. The tag is the source of truth; the state follows it:
+
+        - done tag, or a done / resolved state → Done
+        - review tag → In review
+        - otherwise → Queued, with fresh retries (removing the hold means "carry on")
+        """
+        c, cfg = self._c, self._config
+        hold = (cfg.escalation_tag or "").lower()
+        if not hold:
+            return
+        held = [s for s in await c.state_repo.all() if s.state == PipelineState.NEEDS_HUMAN]
+        if not held:
+            return
+        try:
+            items = await c.ado.get_work_items_by_ids([s.work_item_id for s in held])
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("released-hold reconcile: fetch failed", error=describe_exc(exc))
+            return
+        done_states = {x.strip().lower() for x in [*cfg.done_states, cfg.resolved_state] if x}
+        for item in items:
+            tags = {t.lower() for t in item.tags}
+            if hold in tags:
+                continue
+            state_now = (item.state or "").strip().lower()
+            if (cfg.processed_tag or "").lower() in tags or state_now in done_states:
+                new_state = PipelineState.DONE
+            elif (cfg.review_tag or "").lower() in tags:
+                new_state = PipelineState.IN_REVIEW
+            else:
+                new_state = PipelineState.QUEUED
+                self.forget(item.id)
+            await c.state_repo.set(item.id, new_state, title=item.title)
+            self._log.info("hold released in ADO — state follows", id=item.id,
+                           state=new_state.value)
 
     async def _reconcile_restart_requests(self) -> None:
         """Force a CLEAN re-run for items a human tagged with ``restart_tag``.

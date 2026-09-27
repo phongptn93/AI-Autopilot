@@ -3454,11 +3454,22 @@ def create_dashboard_router() -> APIRouter:
         ids = [int(x) for x in form.getlist("ids") if str(x).strip().isdigit()]
         if not ids:
             return RedirectResponse("/dashboard/queue", status_code=303)
-        hold = c.config.escalation_tag
+        # EVERY outcome tag, not just the hold: the poller skips an item carrying any of
+        # them, so an item held while it also wore "autopilot-done" was set to Queued
+        # here and then never picked up — it sat in Queued for good.
+        from ai_autopilot.outcomes import all_outcome_tags
+
+        skip_tags = {t.lower() for t in all_outcome_tags(c.config)}
+        poller = getattr(request.app.state, "poller", None)
         for iid in ids:
-            if hold:
-                with contextlib.suppress(Exception):  # best-effort — tag may be absent
-                    await c.ado.remove_tag(iid, hold)
+            with contextlib.suppress(Exception):
+                item = await c.ado.get_work_item(iid)
+                for tag in (item.tags if item else []):
+                    if tag.lower() in skip_tags:
+                        await c.ado.remove_tag(iid, tag)
+            if poller is not None:
+                with contextlib.suppress(Exception):
+                    poller.forget(iid)       # dedup + retry budget: a fresh run
         started = await planning_analyzer.start_items(c, ids)
         for iid in ids:  # leave the queue immediately; the poller will re-own the state
             await c.state_repo.set(iid, PipelineState.QUEUED)

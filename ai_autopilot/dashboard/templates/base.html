@@ -39,7 +39,11 @@
         .layout { display: flex; min-height: 100vh; }
         .sidebar { width: 248px; background: var(--bg-sidebar); border-right: 1px solid var(--border-soft);
             padding: 20px 14px; position: fixed; inset: 0 auto 0 0; display: flex; flex-direction: column;
-            overflow: hidden; }
+            overflow: hidden;
+            /* Above everything in the page. Without it, any positioned element later in
+               the DOM (the board's columns) painted OVER the fixed sidebar whenever the
+               page scrolled sideways. 50 clears the page's highest layer (sticky bars, 20). */
+            z-index: 50; }
         /* Brand and footer stay put; only the link list scrolls. min-height:0 is what
            lets a flex child shrink below its content and actually scroll. */
         .nav-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
@@ -74,7 +78,11 @@
             box-shadow: 0 0 0 0 rgba(46,204,113,.5); animation: pulse 2.4s infinite; }
         @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(46,204,113,.5)} 70%{box-shadow:0 0 0 6px rgba(46,204,113,0)} 100%{box-shadow:0 0 0 0 rgba(46,204,113,0)} }
 
-        .main { margin-left: 248px; flex: 1; padding: 30px 38px 60px; max-width: 1500px; }
+        /* min-width:0 — a flex item never shrinks below its content by default, so one
+           wide child (the board's column strip, a wide table) stretched the whole page
+           past the window and the PAGE scrolled sideways under the sidebar. With it, wide
+           content scrolls inside its own overflow container, as each one is built to. */
+        .main { margin-left: 248px; flex: 1; min-width: 0; padding: 30px 38px 60px; max-width: 1500px; }
         .page-header { margin-bottom: 24px; }
         .page-header h2 { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
         .page-header p { color: var(--text-muted); font-size: 13.5px; margin-top: 3px; }

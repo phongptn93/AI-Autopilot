@@ -31,6 +31,7 @@ from ai_autopilot import updates
 from ai_autopilot.container import Container
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.proc import spawn_kwargs, terminate_tree
+from ai_autopilot.update_handoff import pin_config_path
 
 # pip over the network on a slow link, plus wheel install. Generous: the cost of it
 # being too short is a half-applied update.
@@ -75,6 +76,7 @@ class UpdaterService:
 
     def start(self) -> None:
         # Sync, like every other service here: app.py calls start() and awaits stop().
+        self._report_handoff()
         if self._task is None and self._config.update_check_enabled:
             self._task = asyncio.create_task(self._run(), name="update-check")
 
@@ -162,6 +164,12 @@ class UpdaterService:
                 f"{self._config.update_drain_timeout_minutes} phút — huỷ cập nhật "
                 "(không cắt ngang run đang chạy)"
             )
+
+        if self._restart_mode() == "spawn":
+            # Windows: never pip over the running process (its .exe is locked and a
+            # half-done install leaves this process serving from a gutted package).
+            # Hand off to a helper that installs once we are gone, then exit.
+            return await self._handoff(release)
 
         self.job.state = "installing"
         self.job.detail = "pip install"
@@ -257,15 +265,62 @@ class UpdaterService:
             return ""
         return (out or b"").decode("utf-8", "replace").strip()
 
-    def _restart(self) -> None:
-        """Bring the process back on the new code. Does not return on success."""
+    def _restart_mode(self) -> str:
         mode = (self._config.update_restart_mode or "auto").strip().lower()
         if mode == "auto":
             # Windows has no real exec: the CRT emulates it with CreateProcess + exit,
             # so the pid changes and whatever launched us (run.bat, a console) sees the
             # command finish. A detached respawn is the honest version of that.
             mode = "spawn" if sys.platform == "win32" else "exec"
+        return mode
+
+    async def _handoff(self, release) -> None:
+        """Start the out-of-process installer and exit (see ai_autopilot.update_handoff)."""
+        from ai_autopilot import update_handoff
+
+        self.job.state = "restarting"
+        self.job.detail = (f"giao cho trình cài đặt riêng — autopilot tắt, cài v{release.version}, "
+                           "rồi tự khởi động lại")
+        try:
+            pid = update_handoff.launch(update_handoff.plan(release.version, release.wheel_url))
+        except Exception as exc:  # noqa: BLE001
+            return self._fail(f"không khởi động được trình cài đặt: {describe_exc(exc)}")
+        await self._audit("update.handoff", f"{release.version} via helper pid {pid}")
+        self._log.info("update handed off — exiting so the installer can run",
+                       version=release.version, helper=pid)
+        # Give the redirect a moment to reach the browser before the process goes.
+        await asyncio.sleep(1.0)
+        os._exit(0)
+
+    def _report_handoff(self) -> None:
+        """Surface the outcome of the last handoff: a failed install must be SEEN."""
+        from ai_autopilot import __version__, update_handoff
+
+        with contextlib.suppress(Exception):
+            outcome = update_handoff.read_outcome()
+            if not outcome:
+                return
+            target = str(outcome.get("target") or "")
+            if outcome.get("ok") and __version__ == target:
+                self.job = UpdateJob(state="done", target=target,
+                                     detail=f"đã cập nhật lên v{target}")
+                self._log.info("update applied by the installer", version=target)
+            else:
+                error = str(outcome.get("error") or "không rõ")
+                self.job = UpdateJob(
+                    state="failed", target=target,
+                    detail=f"cập nhật lên v{target} thất bại — vẫn chạy v{__version__}: "
+                           f"{error[-300:]}")
+                self._log.warning("update by the installer failed", target=target,
+                                  running=__version__, error=error[-300:])
+
+    def _restart(self) -> None:
+        """Bring the process back on the new code. Does not return on success."""
+        mode = self._restart_mode()
         argv = [sys.executable, "-m", "ai_autopilot"]
+        # The restarted process must read the SAME config: the path is relative to the
+        # working directory unless pinned, so pin it absolutely before handing over.
+        pin_config_path()
         try:
             if mode == "exec":
                 os.execv(sys.executable, argv)        # noqa: S606 — our own interpreter
@@ -273,7 +328,8 @@ class UpdaterService:
                 flags = 0
                 if sys.platform == "win32":
                     flags = subprocess.CREATE_NEW_CONSOLE
-                subprocess.Popen(argv, close_fds=True, creationflags=flags)  # noqa: S603
+                subprocess.Popen(argv, close_fds=True, creationflags=flags,  # noqa: S603
+                                 cwd=os.getcwd())
                 os._exit(0)
             else:                                     # "exit" — a supervisor restarts us
                 os._exit(0)

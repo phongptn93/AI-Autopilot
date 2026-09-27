@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -37,7 +38,18 @@ def _ensure_dashboard_password() -> None:
         )
         return
 
-    print("No dashboard password is set yet. Set one now to protect the settings UI.")
+    cfg_path = config_file_path().resolve()
+    if not cfg_path.exists():
+        # The config path is RELATIVE (config.yaml in the working directory) unless
+        # AUTOPILOT_CONFIG_FILE says otherwise. Started from another folder, the process
+        # finds no config at all and would create a fresh one here — which looks exactly
+        # like "my config was wiped". Say where it looked before asking anything.
+        print(f"WARNING: no config file at {cfg_path}")
+        print(f"         (working directory: {Path.cwd()}).")
+        print("         If you already configured AI Autopilot, you are probably starting it")
+        print("         from a different folder. Stop (Ctrl+C) and start it from the folder")
+        print("         that holds your config.yaml, or set AUTOPILOT_CONFIG_FILE to its path.")
+    print(f"No dashboard password is set in {cfg_path}. Set one now to protect the settings UI.")
     for _ in range(3):
         first = getpass.getpass("New dashboard password: ")
         if not first.strip():

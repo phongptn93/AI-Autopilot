@@ -133,6 +133,11 @@ class _Poller:
 
 
 def _svc(**over):
+    # These tests cover the IN-PROCESS install (pip, verify, restart). On Windows the
+    # default mode now hands off to an out-of-process installer and exits — which, left
+    # to "auto" here, would really launch it and os._exit() the test run. Pin the mode
+    # they are about; the handoff has its own tests (test_update_handoff).
+    over.setdefault("update_restart_mode", "exec")
     cfg = Settings(update_check_enabled=True, update_drain_timeout_minutes=1, **over)
     c = SimpleNamespace(
         config=cfg, http=None, notifier=None,

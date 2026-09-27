@@ -30,7 +30,7 @@ def _mmss(seconds: float) -> str:
 class AdoNotifier:
     def __init__(
         self, ado: AdoClient, config: Settings, channels: list[NotificationChannel],
-        hold_repo: object | None = None,
+        hold_repo: object | None = None, *, log_repo: object | None = None,
     ) -> None:
         self._ado = ado
         self._config = config
@@ -38,6 +38,7 @@ class AdoNotifier:
         self._log = get_logger("ado.notifier")
         self._quiet = QuietHours(config)
         self._hold_repo = hold_repo
+        self._log_repo = log_repo
         # Set at startup so the FIRST in-hours broadcast checks the queue: a restart
         # loses the in-memory flag, and notices held before it must still get out.
         self._maybe_held = True
@@ -238,11 +239,30 @@ class AdoNotifier:
                 # a notify path, which meant the whole work item failed to process.
                 alert_event=message.event, severity=message.severity.name,
             )
+            await self._note(message, "suppressed",
+                             f"event '{message.event}' is off in alert_events / "
+                             "alert_min_severity")
             return
         if await self._hold_if_quiet(message):
+            await self._note(message, "held", "outside notify hours — sent in the next "
+                                              "window's summary")
             return
         await self._flush_held()
-        await self._send_now(message)
+        outcome, detail = await self._send_now(message)
+        await self._note(message, outcome, detail)
+
+    async def _note(self, message: NotificationMessage, outcome: str, detail: str) -> None:
+        """One row in the delivery log. Never raises — the log describes delivery, it
+        must never be the reason a notice (or the run that raised it) failed."""
+        if self._log_repo is None:
+            return
+        try:
+            await self._log_repo.record(
+                event=message.event, severity=message.severity.name, title=message.title,
+                outcome=outcome, detail=detail,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log.debug("notification log write failed", error=describe_exc(exc))
 
     def _attach_work_item_link(self, message: NotificationMessage) -> None:
         """Give the notice the item's browser URL + an "Open work item" button.
@@ -267,14 +287,43 @@ class AdoNotifier:
         message.work_item_url = f"{base}/_workitems/edit/{item.id}"
         message.actions = [*message.actions, ("🔗 Mở work item", message.work_item_url)]
 
-    async def _send_now(self, message: NotificationMessage) -> None:
+    async def _send_now(self, message: NotificationMessage) -> tuple[str, str]:
+        """Send to every enabled channel. Returns ``(outcome, detail)`` for the delivery
+        log: ``sent`` / ``partial`` / ``failed`` / ``no_channel``.
+
+        A channel that fans out (Teams, several webhooks) reports what it did as
+        ``(delivered, targeted, failed labels)``; any other channel counts as delivered
+        when ``send`` returns without raising.
+        """
+        ok: list[str] = []
+        bad: list[str] = []
         for channel in self._channels:
             if not channel.is_enabled:
                 continue
             try:
-                await channel.send(message)
+                report = await channel.send(message)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("notification failed", channel=channel.name, error=describe_exc(exc))
+                self._log.warning("notification failed", channel=channel.name,
+                                  error=describe_exc(exc))
+                bad.append(f"{channel.name}: {describe_exc(exc)[:80]}")
+                continue
+            if isinstance(report, tuple) and len(report) == 3:
+                delivered, targeted, failed = report
+                if targeted == 0:
+                    continue       # routing: no channel of this kind wanted the notice
+                if delivered:
+                    ok.append(f"{channel.name} {delivered}/{targeted}")
+                if failed:
+                    bad.append(f"{channel.name}: " + ", ".join(failed))
+            else:
+                ok.append(channel.name)
+        if not ok and not bad:
+            return "no_channel", "no enabled channel wanted this notice"
+        if bad and not ok:
+            return "failed", "; ".join(bad)
+        if bad:
+            return "partial", "sent: " + ", ".join(ok) + " · failed: " + "; ".join(bad)
+        return "sent", ", ".join(ok)
 
     async def _hold_if_quiet(self, message: NotificationMessage) -> bool:
         """Queue the notice if it is outside hours. Returns True when it was held."""
@@ -318,8 +367,10 @@ class AdoNotifier:
             return 0
         heading, body = render_held_summary(held)
         self._log.info("delivering held notifications", count=len(held))
-        await self._send_now(NotificationMessage(
+        summary = NotificationMessage(
             work_item=WorkItemInfo(id=0), type=NotificationType.INFO,
             heading=heading, text=body,
-        ))
+        )
+        outcome, detail = await self._send_now(summary)
+        await self._note(summary, outcome, detail)
         return len(held)

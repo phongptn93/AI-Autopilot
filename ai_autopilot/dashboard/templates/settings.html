@@ -627,6 +627,29 @@
       </div>
       {% endif %}
 
+      {# What happened to recent notices — sent / held / dropped / refused. Every one of
+         those used to be a log line on the sending machine and nothing here. #}
+      {% if notify_held %}
+      <div class="wh-probe-note" style="margin-top:10px">
+        ⏸ <b>{{ notify_held }} thông báo đang bị giữ</b> ngoài giờ làm việc
+        (notify_hours / notify_days) — sẽ gửi gộp thành một bản tóm tắt khi mở khung giờ.
+      </div>
+      {% endif %}
+      {% if notify_log %}
+      <details class="wh-probe" style="margin-top:10px" {% if notify_log[0].outcome in ('failed', 'partial') %}open{% endif %}>
+        <summary style="cursor:pointer"><b>📜 Nhật ký gửi gần đây</b>
+          <span class="form-help" style="margin:0">{{ notify_log|length }} thông báo mới nhất · 🟢 đã gửi · ⏸ giữ ngoài giờ · 🔇 bị tắt · 🔴 lỗi kênh</span></summary>
+        {% for n in notify_log %}
+        <div class="wh-probe-row">
+          <span class="wh-probe-ico">{{ {'sent': '🟢', 'partial': '🟠', 'failed': '🔴', 'held': '⏸', 'suppressed': '🔇'}.get(n.outcome, '—') }}</span>
+          <span class="mono" style="font-size:11px;color:var(--text-dim)">{{ n.at.strftime('%d/%m %H:%M') if n.at else '' }}</span>
+          <b>{{ n.title }}</b>
+          <span class="form-help" style="margin:0">{{ n.event }} · {{ n.outcome }}{% if n.detail %} — {{ n.detail }}{% endif %}</span>
+        </div>
+        {% endfor %}
+      </details>
+      {% endif %}
+
       <div class="form-help" style="margin-top:10px">
         Teams Workflows → <i>"Post to a channel when a webhook request is received"</i>.
         Unticking <b>Active</b> mutes a channel but keeps its URL — a Workflows URL cannot be

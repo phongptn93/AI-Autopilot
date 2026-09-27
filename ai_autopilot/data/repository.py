@@ -23,6 +23,7 @@ from ai_autopilot.data.entities import (
     HeldNotification,
     LoopReport,
     MergedPr,
+    NotificationLog,
     PipelineState,
     PlannedRun,
     PrCommandState,
@@ -1001,6 +1002,40 @@ class AiConflictRepository:
                 edges.setdefault(row.a_id, set()).add(row.b_id)
                 edges.setdefault(row.b_id, set()).add(row.a_id)
         return edges
+
+
+class NotificationLogRepository:
+    """What happened to each notice — see :class:`NotificationLog`. Bounded: the log
+    answers "did it go out lately", it is not an archive."""
+
+    KEEP = 500
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def record(self, *, event: str, severity: str, title: str, outcome: str,
+                     detail: str = "") -> None:
+        async with self._db.session() as session:
+            session.add(NotificationLog(
+                at=datetime.now(UTC), event=(event or "")[:20], severity=(severity or "")[:10],
+                title=(title or "")[:300], outcome=(outcome or "")[:12],
+                detail=(detail or "")[:500],
+            ))
+            await session.commit()
+            newest = (await session.execute(
+                select(NotificationLog.id).order_by(NotificationLog.id.desc())
+                .offset(self.KEEP).limit(1)
+            )).scalar()
+            if newest is not None:
+                await session.execute(delete(NotificationLog).where(NotificationLog.id <= newest))
+                await session.commit()
+
+    async def recent(self, limit: int = 30) -> list[NotificationLog]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(NotificationLog).order_by(NotificationLog.id.desc()).limit(limit)
+            )
+            return list(rows.scalars().all())
 
 
 class NotificationHoldRepository:

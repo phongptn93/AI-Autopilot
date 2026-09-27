@@ -496,6 +496,8 @@ async def _digest_loop(
             # and the next scheduled one is never far away.
             if config.digest_respect_quiet_hours and quiet.is_quiet():
                 _log.info("Teams digest skipped — outside notify hours")
+                await _note_digest(container, "suppressed",
+                                   "outside notify hours — digests are dropped, not held")
                 continue
             await _send_digest(
                 container, app, adapter, storage, message_factory, window_hours=window,
@@ -903,6 +905,7 @@ async def _send_digest(
 
     if not cfg.wants_alert(EVENT_DIGEST, int(Severity.INFO)):
         _log.info("Teams digest skipped — 'digest' is not an enabled alert event")
+        await _note_digest(container, "suppressed", "event 'digest' is off in alert_events")
         return
     now = datetime.now(UTC)
     report, error = None, None
@@ -940,6 +943,8 @@ async def _send_digest(
                 "Teams digest skipped — nothing new",
                 open_actions=len(report.actions), suppressed=suppressed,
             )
+            await _note_digest(container, "suppressed",
+                               "nothing new since the last digest (digest_skip_when_empty)")
             return
         text = build_digest(
             report, cfg, delivered_recent=delivered_recent,
@@ -972,6 +977,28 @@ async def _send_digest(
                 "digest send failed for one conversation", key=key, error=_fmt_exc(exc)
             )
     _log.info("Teams digest sent", sent=sent, failed=failed, total=len(keys))
+    if not sent and not failed:
+        outcome, detail = "no_channel", "the bot is in no conversation yet — add it to a chat"
+    elif failed and not sent:
+        outcome, detail = "failed", f"bot · 0/{sent + failed} conversations"
+    elif failed:
+        outcome, detail = "partial", f"bot · {sent}/{sent + failed} conversations"
+    else:
+        outcome, detail = "sent", f"bot · {sent} conversation(s)"
+    await _note_digest(container, outcome, detail)
+
+
+async def _note_digest(container: Container, outcome: str, detail: str) -> None:
+    """The bot digest in the notifier's delivery log. It reaches Teams through the bot,
+    not through AdoNotifier, so without this it was the one notice the Settings log
+    could not account for. Never raises."""
+    repo = getattr(container, "notification_log_repo", None)
+    if repo is None:
+        return
+    with contextlib.suppress(Exception):
+        await repo.record(event="digest", severity="INFO",
+                          title="🚚 Nhịp giao hàng (Teams bot digest)",
+                          outcome=outcome, detail=detail)
 
 
 async def _handle_turn(

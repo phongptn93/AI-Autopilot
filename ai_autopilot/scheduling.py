@@ -209,12 +209,20 @@ def render_held_summary(held: list, dropped: int = 0) -> tuple[str, str]:
         by_kind[row.kind or "khác"] = by_kind.get(row.kind or "khác", 0) + 1
     lines.append(" · ".join(f"{k}: {n}" for k, n in sorted(by_kind.items())))
     lines.append("")
-    for row in held[:20]:
-        when = row.at.strftime("%d/%m %H:%M") if row.at else ""
-        title = (row.title or "").strip()
-        lines.append(f"• {when} {title}")
-    if len(held) > 20:
-        lines.append(f"… và {len(held) - 20} thông báo nữa")
+    # The same notice raised several times overnight (an escalation retried against a
+    # new target commit) is one line with a count — repeating it is the noise the quiet
+    # window exists to prevent. First-raised order, latest time shown.
+    grouped: dict[str, list] = {}
+    for row in held:
+        grouped.setdefault((row.title or "").strip(), []).append(row)
+    entries = list(grouped.items())
+    for title, rows in entries[:20]:
+        last = max((r.at for r in rows if r.at), default=None)
+        when = last.strftime("%d/%m %H:%M") if last else ""
+        times = f" ×{len(rows)}" if len(rows) > 1 else ""
+        lines.append(f"• {when} {title}{times}")
+    if len(entries) > 20:
+        lines.append(f"… và {len(entries) - 20} thông báo nữa")
     if dropped:
         lines.append(
             f"\n⚠️ {dropped} thông báo cũ hơn đã bị bỏ do vượt hạn mức lưu giữ."

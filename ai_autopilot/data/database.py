@@ -42,6 +42,7 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("pr_conflicts", "session_dir", "VARCHAR(600)"),
     ("pr_conflicts", "session_name", "VARCHAR(120)"),
     ("pr_conflicts", "session_started", "DATETIME"),
+    ("pr_conflicts", "execution_id", "INTEGER"),
     ("security_findings", "cve", "VARCHAR(20)"),
     ("security_findings", "kev", "BOOLEAN"),
     ("security_findings", "kev_due", "VARCHAR(10)"),

@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -266,6 +266,10 @@ class PrConflictService:
         allowance = (row.attempts + 1) if requested_by else cfg.pr_conflict_max_attempts
         if not await c.pr_conflict_repo.claim_attempt(row.id, row.target_commit, allowance):
             return "skipped"
+        # The attempt is a run from this moment: open its History row now, so it shows
+        # as running while it works and every path that ends it — resolved, escalated,
+        # timed out, cancelled — closes the SAME row.
+        row.execution_id = await self._open_execution(row, requested_by)
 
         repo_path, problem = self._repo_path(row.repo_name)
         if problem:
@@ -311,6 +315,16 @@ class PrConflictService:
                 action="pr.conflict_session_opened", target=f"PR !{row.pr_id}",
                 detail=prepared.session,
             )
+            # A session waiting for someone to attach is exactly the notice a person
+            # needs: it closes itself after pr_session_hours with the branch untouched.
+            await self._notify(
+                row, NotificationType.REMINDER,
+                heading=f"🧑‍💻 PR !{row.pr_id} — phiên giải conflict đang chờ",
+                text=(f"{row.repo_name}: {row.target_branch} → {row.source_branch}. Attach "
+                      f"phiên {prepared.session} qua Remote Control để theo dõi hoặc chỉ "
+                      f"cách giải; tự đóng sau {self._config.pr_session_hours or 8}h nếu "
+                      "không có kết quả."),
+            )
             return "in_session"
         async with lock, self._sem:
             result = await self._resolver.resolve(
@@ -335,12 +349,9 @@ class PrConflictService:
 
     async def _record_outcome(self, row, result: ConflictResolution, actor: str) -> str:
         """One place that turns a finished attempt — headless or interactive — into a
-        row update, an audit entry, a PR comment — and an execution record, so the
-        History page shows conflict resolutions next to every other run (they spend
-        tokens and minutes like any run; invisible history reads as "never happened").
-        Attempts that never ran anything (missing repo path, expired session) go
-        through ``_finish_failed`` directly and stay off the execution history —
-        the Conflicts page keeps their trail."""
+        row update, an audit entry, a PR comment, the History row and a notification.
+        Failures go on to ``_finish_failed``, which every other way an attempt can end
+        (timed-out or cancelled session, missing repo) also goes through."""
         c = self._c
         await c.audit_repo.record(
             actor=actor or "autopilot", source="pr-conflicts",
@@ -348,44 +359,89 @@ class PrConflictService:
             target=f"PR !{row.pr_id}",
             detail=(result.how if result.success else result.error)[:300],
         )
-        with contextlib.suppress(Exception):  # history is a mirror, never a gate
-            item = WorkItemInfo(
-                id=row.work_item_id or 0,
-                title=f"[conflict] PR !{row.pr_id} — {row.title}"[:400],
+        if not result.success:
+            await self._finish_failed(row, result.error, result.checks, result.tokens,
+                                      files=result.files)
+            return "escalated"
+        await c.pr_conflict_repo.update(
+            row.id, status=RESOLVED, resolved_at=datetime.now(UTC),
+            resolved_by=result.how, merge_commit=result.merge_commit,
+            checks=result.checks, files=result.files or json.loads(row.files_json or "[]"),
+            last_error="", cost_tokens=(row.cost_tokens or 0) + result.tokens,
+            session_dir="", session_name="", execution_id=None,
+        )
+        await c.ado.add_pull_request_comment(
+            row.repo_id, row.pr_id, self._success_html(row, result),
+        )
+        await self._close_execution(
+            row, success=True, tokens=result.tokens,
+            detail=f"{result.how}: merged {row.target_branch} into {row.source_branch}",
+        )
+        how = ("merge sạch (ADO chưa kịp tính lại)" if result.how == BY_CLEAN_MERGE
+               else "agent đã giải các hunk")
+        await self._notify(
+            row, NotificationType.COMPLETED,
+            heading=f"✅ PR !{row.pr_id} — đã giải conflict",
+            text=(f"{row.repo_name}: {row.target_branch} → {row.source_branch} · {how} · "
+                  f"{len(result.files)} file. Review lại commit merge trước khi approve."),
+            result=ExecutionResult.ok(row.work_item_id or 0, "resolve-conflict", how),
+        )
+        return "resolved"
+
+    # ── history + notifications (shared by every way an attempt ends) ────────
+
+    def _item(self, row, title: str = "") -> WorkItemInfo:
+        """The work item a notice or History row is about — the PR's linked item, or
+        none. Never the PR id: that is not a work item id, and passing it made the
+        notifier link "Mở work item" to an unrelated item with the same number."""
+        return WorkItemInfo(id=row.work_item_id or 0,
+                            title=(title or f"[conflict] PR !{row.pr_id} — {row.title}")[:400])
+
+    async def _open_execution(self, row, requested_by: str) -> int | None:
+        """Open the History row of an attempt. None when the write fails — history is
+        a mirror of the attempt, never a condition for making it."""
+        try:
+            record_id = await self._c.execution_repo.start_execution(
+                self._item(row), "resolve-conflict", profile="conflict",
             )
-            started = datetime.now(UTC) - timedelta(seconds=result.duration_seconds or 0)
-            record_id = await c.execution_repo.start_execution(
-                item, "resolve-conflict", profile="conflict", started_at=started,
-            )
-            make = ExecutionResult.ok if result.success else ExecutionResult.fail
-            exec_result = make(
-                item.id, "resolve-conflict",
-                (f"{result.how}: merged {row.target_branch} into {row.source_branch}"
-                 if result.success else (result.error or "escalated")),
-            )
-            exec_result.branch_name = row.source_branch
+            await self._c.pr_conflict_repo.update(row.id, execution_id=record_id)
+            return record_id
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("conflict attempt not recorded in history",
+                              pr=row.pr_id, error=describe_exc(exc))
+            return None
+
+    async def _close_execution(self, row, *, success: bool, detail: str, tokens: int) -> None:
+        """Close the attempt's History row. Duration is left to wall-clock (open →
+        close), which for an interactive attempt is the whole session — the number a
+        reader wants — rather than just the checks at the end."""
+        record_id = getattr(row, "execution_id", None)
+        if not record_id:
+            return
+        with contextlib.suppress(Exception):
+            make = ExecutionResult.ok if success else ExecutionResult.fail
+            res = make(row.work_item_id or 0, "resolve-conflict", detail or "escalated")
+            res.branch_name = row.source_branch
             if row.url:
-                exec_result.pr_urls = [row.url]
-            exec_result.cost_tokens = result.tokens
-            exec_result.duration_seconds = result.duration_seconds
-            await c.execution_repo.complete_execution(record_id, exec_result)
-            if result.tokens:
-                await c.cost_tracker.track(record_id, result.tokens)
-        if result.success:
-            await c.pr_conflict_repo.update(
-                row.id, status=RESOLVED, resolved_at=datetime.now(UTC),
-                resolved_by=result.how, merge_commit=result.merge_commit,
-                checks=result.checks, files=result.files or json.loads(row.files_json or "[]"),
-                last_error="", cost_tokens=(row.cost_tokens or 0) + result.tokens,
-                session_dir="", session_name="",
-            )
-            await c.ado.add_pull_request_comment(
-                row.repo_id, row.pr_id, self._success_html(row, result),
-            )
-            return "resolved"
-        await self._finish_failed(row, result.error, result.checks, result.tokens,
-                                  files=result.files)
-        return "escalated"
+                res.pr_url, res.pr_urls = row.url, [row.url]
+            res.cost_tokens = tokens
+            await self._c.execution_repo.complete_execution(record_id, res)
+            if tokens:
+                await self._c.cost_tracker.track(record_id, tokens)
+        with contextlib.suppress(Exception):
+            await self._c.pr_conflict_repo.update(row.id, execution_id=None)
+
+    async def _notify(self, row, kind: NotificationType, *, heading: str, text: str,
+                      result: ExecutionResult | None = None) -> None:
+        """One notice about this PR, through the notifier's alert policy and quiet
+        window. The PR is the button; the linked work item (if any) is added by the
+        notifier itself."""
+        with contextlib.suppress(Exception):
+            await self._c.notifier.notify(NotificationMessage(
+                work_item=self._item(row, row.title), type=kind,
+                heading=heading, text=text, result=result,
+                actions=[("🔗 Mở PR", row.url)] if row.url else [],
+            ))
 
     async def _finalize_sessions(self) -> int:
         """Record the outcome of every interactive session that has written its result;
@@ -434,6 +490,8 @@ class PrConflictService:
     async def _finish_failed(self, row, error: str, checks: dict, tokens: int,
                              files: list[str] | None = None) -> None:
         c = self._c
+        await self._close_execution(row, success=False, detail=error or "escalated",
+                                    tokens=tokens)
         await c.pr_conflict_repo.update(
             row.id, status=ESCALATED, last_error=(error or "")[:2000], checks=checks,
             cost_tokens=(row.cost_tokens or 0) + tokens, session_dir="", session_name="",
@@ -451,15 +509,12 @@ class PrConflictService:
             "có thêm thông tin.</div>",
             active=True,
         )
-        with contextlib.suppress(Exception):
-            await c.notifier.notify(NotificationMessage(
-                work_item=WorkItemInfo(id=row.work_item_id or row.pr_id, title=row.title),
-                type=NotificationType.REMINDER,
-                heading=f"🙋 PR !{row.pr_id} — conflict cần người giải",
-                text=f"{row.repo_name}: {row.source_branch} → {row.target_branch}. "
-                     f"{(error or '')[:300]}",
-                actions=[("🔗 Mở PR", row.url)] if row.url else [],
-            ))
+        await self._notify(
+            row, NotificationType.REMINDER,
+            heading=f"🙋 PR !{row.pr_id} — conflict cần người giải",
+            text=f"{row.repo_name}: {row.source_branch} → {row.target_branch}. "
+                 f"{(error or '')[:300]}",
+        )
 
     # ── announcements ────────────────────────────────────────────────────────
 
@@ -484,15 +539,12 @@ class PrConflictService:
                 f" — không merge được cho tới khi giải xong.<br/>File xung đột:"
                 f"{files_html(files)}{how}</div>",
             )
-        with contextlib.suppress(Exception):
-            await c.notifier.notify(NotificationMessage(
-                work_item=WorkItemInfo(id=row.work_item_id or row.pr_id, title=row.title),
-                type=NotificationType.REMINDER,
-                heading=f"⚠️ PR !{row.pr_id} bị merge conflict",
-                text=(f"{row.repo_name}: {row.source_branch} → {row.target_branch} · "
-                      f"{len(files)} file · tác giả {row.author or '?'}"),
-                actions=[("🔗 Mở PR", row.url)] if row.url else [],
-            ))
+        await self._notify(
+            row, NotificationType.REMINDER,
+            heading=f"⚠️ PR !{row.pr_id} bị merge conflict",
+            text=(f"{row.repo_name}: {row.source_branch} → {row.target_branch} · "
+                  f"{len(files)} file · tác giả {row.author or '?'}"),
+        )
 
     def _success_html(self, row, result) -> str:
         how = ("git merge sạch (ADO chưa kịp tính lại)" if result.how == BY_CLEAN_MERGE

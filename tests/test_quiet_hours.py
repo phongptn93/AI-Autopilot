@@ -215,3 +215,85 @@ def test_summary_reports_what_had_to_be_dropped():
     assert "và 5 thông báo nữa" in body      # only the first 20 are listed
     assert "7 thông báo cũ hơn đã bị bỏ" in body
     assert render_held_summary([]) == ("", "")
+
+
+# ── delivery log: every notice leaves a trace of what happened to it ────────
+
+class _FakeLog:
+    def __init__(self):
+        self.rows: list[dict] = []
+
+    async def record(self, **kw):
+        self.rows.append(kw)
+
+
+class _FanOut(_FakeChannel):
+    """A channel that reports per-webhook results, the way Teams does."""
+
+    name = "teams"
+
+    def __init__(self, report):
+        super().__init__()
+        self._report = report
+
+    async def send(self, message):
+        self.sent.append(message)
+        return self._report
+
+
+def _logged(channel, **overrides):
+    log = _FakeLog()
+    cfg = Settings(**{**WORK, **overrides})
+    notifier = AdoNotifier(None, cfg, [channel], _FakeHold(), log_repo=log)
+    return notifier, log
+
+
+async def test_delivery_log_records_sent_held_and_suppressed(monkeypatch):
+    notifier, log = _logged(_FakeChannel(), alert_events="completed,failed")
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: False)
+    await notifier._broadcast(_msg())                                    # completed → sent
+    await notifier._broadcast(NotificationMessage(                       # reminder → off
+        work_item=WorkItemInfo(id=7, title="t"), type=NotificationType.REMINDER))
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: True)
+    await notifier._broadcast(_msg())                                    # after hours → held
+    assert [r["outcome"] for r in log.rows] == ["sent", "suppressed", "held"]
+    assert "alert_events" in log.rows[1]["detail"]
+
+
+async def test_delivery_log_names_the_webhook_that_refused(monkeypatch):
+    notifier, log = _logged(_FanOut((1, 2, ["dev-channel"])))
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: False)
+    await notifier._broadcast(_msg())
+    assert log.rows[-1]["outcome"] == "partial"
+    assert "dev-channel" in log.rows[-1]["detail"]
+
+    notifier, log = _logged(_FanOut((0, 1, ["pm-channel"])))
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: False)
+    await notifier._broadcast(_msg())
+    assert log.rows[-1]["outcome"] == "failed"
+
+
+async def test_the_morning_summary_is_logged_too(monkeypatch):
+    notifier, log = _logged(_FakeChannel())
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: True)
+    await notifier._broadcast(_msg())
+    monkeypatch.setattr(notifier._quiet, "is_quiet", lambda now=None: False)
+    await notifier.flush_quiet()
+    assert [r["outcome"] for r in log.rows] == ["held", "sent"]
+    assert "ngoài giờ" in log.rows[-1]["title"]
+
+
+def test_summary_collapses_a_notice_raised_repeatedly():
+    rows = [SimpleNamespace(kind="Reminder", title="🙋 PR !4318 — conflict cần người giải",
+                            at=_at(2026, 9, 27, h)) for h in (9, 11, 14)]
+    rows.append(SimpleNamespace(kind="Reminder", title="⚠️ PR !2748 bị merge conflict",
+                                at=_at(2026, 9, 27, 10)))
+    _, body = render_held_summary(rows)
+    assert body.count("PR !4318") == 1 and "×3" in body
+    assert "27/09 14:00" in body                       # the latest occurrence is shown
+
+
+def test_a_notice_without_a_work_item_is_named_not_numbered():
+    m = NotificationMessage(work_item=WorkItemInfo(id=0, title="[audit] code-review-daily"),
+                            type=NotificationType.COMPLETED)
+    assert "#0" not in m.title and "code-review-daily" in m.title

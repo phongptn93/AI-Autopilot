@@ -32,28 +32,33 @@ class TeamsNotifier(NotificationChannel):
     def is_enabled(self) -> bool:
         return bool(self._config.teams_webhooks)
 
-    async def send(self, message: NotificationMessage) -> None:
+    async def send(self, message: NotificationMessage) -> tuple[int, int, list[str]]:
         """Post the card to EVERY configured webhook, concurrently.
 
         One channel failing (revoked Workflows URL, a channel that was deleted) must not stop
         the others — otherwise adding a second channel would make notifications less reliable
         than having one. So each post is awaited independently and failures are logged per
-        URL, never raised."""
+        URL, never raised.
+
+        Returns ``(delivered, targeted, failed channel labels)`` so the notifier's delivery
+        log can say which channel refused the card — before, that answer lived only in
+        the log of the machine that sent it."""
         targets = self._interested(message)
         if not targets:
-            return
+            return 0, 0, []
         results = await self._deliver(targets, message)
         sent = sum(1 for _label, ok in results if ok)
-        if sent != len(targets):
+        failed = [label for label, ok in results if not ok]
+        if failed:
             # Name the channels that failed. "2 of 3 delivered" left you to guess which,
             # and every Workflows URL shares the same host, so the host was no help.
-            failed = [label for label, ok in results if not ok]
             self._log.warning(
                 "teams notification partially delivered",
                 sent=sent, total=len(targets), failed=failed, title=message.title,
             )
         else:
             self._log.debug("teams notification sent", title=message.title, channels=sent)
+        return sent, len(targets), failed
 
     async def _deliver(
         self, targets: list[WebhookTarget], message: NotificationMessage

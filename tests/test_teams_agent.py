@@ -738,9 +738,15 @@ async def test_digest_sends_to_every_stored_conversation():
 
     # A real Container always carries `.config` — the digest reads it to build the ADO
     # links, so the fake has to as well rather than the code guarding with getattr.
+    logged: list[dict] = []
+
+    async def _record(**kw):
+        logged.append(kw)
+
     container = SimpleNamespace(config=Settings(
         ado_organization="https://dev.azure.com/org", ado_project="Proj",
-    ))
+        digest_skip_when_empty=False,
+    ), notification_log_repo=SimpleNamespace(record=_record))
 
     await teams_agent._send_digest(
         container=container, app=_App(), adapter=None,
@@ -749,6 +755,24 @@ async def test_digest_sends_to_every_stored_conversation():
         window_hours=24,
     )
     assert sorted(delivered) == ["19:channel-a", "19:channel-b"]
+    # The bot digest reaches Teams outside AdoNotifier — it must still be in the log.
+    assert logged and logged[-1]["outcome"] == "sent" and "2 conversation" in logged[-1]["detail"]
+
+
+async def test_a_switched_off_digest_is_logged_as_suppressed():
+    logged: list[dict] = []
+
+    async def _record(**kw):
+        logged.append(kw)
+
+    container = SimpleNamespace(config=Settings(alert_events="completed,failed"),
+                                notification_log_repo=SimpleNamespace(record=_record))
+    await teams_agent._send_digest(container=container, app=None, adapter=None,
+                                   storage=None, message_factory=None)
+    assert logged == [{"event": "digest", "severity": "INFO",
+                       "title": "🚚 Nhịp giao hàng (Teams bot digest)",
+                       "outcome": "suppressed",
+                       "detail": "event 'digest' is off in alert_events"}]
 
 
 # ── Mutation pre-filter: word boundaries, and questions are not instructions ──

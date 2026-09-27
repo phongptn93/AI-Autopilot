@@ -4749,6 +4749,14 @@ def create_dashboard_router() -> APIRouter:
         # result cannot be mistaken for the state of the channels right now.
         probe = getattr(request.app.state, "notify_probe", None)
         request.app.state.notify_probe = None
+        # Delivery log + what quiet hours is holding: "did the card go out?" answered on
+        # the page, not in the log of the machine that sent it.
+        notify_log, notify_held = [], None
+        c_ = request.app.state.container
+        with contextlib.suppress(Exception):
+            notify_log = await c_.notification_log_repo.recent(30)
+        with contextlib.suppress(Exception):
+            notify_held = await c_.notification_hold_repo.count()
         response = _TEMPLATES.TemplateResponse(
             request,
             "settings.html",
@@ -4802,6 +4810,7 @@ def create_dashboard_router() -> APIRouter:
                 flash=flash,
                 webhook_channels=channels,
                 notify_probe=probe,
+                notify_log=notify_log, notify_held=notify_held,
                 # Named on the ADO section so "where do I put Jira?" is answered on the
                 # page people look at first, not only on the one that owns the setting.
                 jira_workspaces=[

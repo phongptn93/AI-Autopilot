@@ -211,6 +211,28 @@ class HeldNotification(Base):
     at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class NotificationLog(Base):
+    """What happened to each notice that reached the notifier — sent, held, dropped.
+
+    Every way a notice can fail to arrive was silent by design (a switched-off event,
+    quiet hours, a revoked webhook are each one log line on a machine the reader may
+    not reach), so "did the Teams card go out?" had no answer on the dashboard. One
+    row per notice, trimmed to the most recent few hundred.
+    """
+
+    __tablename__ = "notification_log"
+    __table_args__ = (Index("ix_notification_log_at", "at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime)
+    event: Mapped[str] = mapped_column(String(20), default="")      # alert_events vocabulary
+    severity: Mapped[str] = mapped_column(String(10), default="")
+    title: Mapped[str] = mapped_column(String(300), default="")
+    # sent | partial | failed | held | suppressed | no_channel
+    outcome: Mapped[str] = mapped_column(String(12), default="")
+    detail: Mapped[str] = mapped_column(String(500), default="")
+
+
 class AlertState(Base):
     """What has already been said about one problem, so it is not said again daily.
 
@@ -700,6 +722,10 @@ class PrConflict(Base):
     session_dir: Mapped[str] = mapped_column(String(600), default="")
     session_name: Mapped[str] = mapped_column(String(120), default="")
     session_started: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # The ExecutionRecord of the attempt in progress — opened when an attempt is
+    # claimed, closed by whichever path ends it. Persisted because an interactive
+    # attempt can outlive the process that started it.
+    execution_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class PrSession(Base):

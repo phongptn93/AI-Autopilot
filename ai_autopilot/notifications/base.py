@@ -83,7 +83,9 @@ EVENT_LABELS: dict[str, str] = {
     EVENT_COMPLETED: "Chạy xong (thành công)",
     EVENT_FAILED: "Chạy xong (thất bại)",
     EVENT_ERROR: "Lỗi hệ thống",
-    EVENT_REMINDER: "Nhắc reviewer",
+    # Anything that waits on a PERSON: reviewer nudges, a PR conflict that needs
+    # resolving, an interactive session waiting to be attached.
+    EVENT_REMINDER: "Cần người xử lý (review, conflict)",
     EVENT_DIGEST: "Digest / tổng hợp",
 }
 
@@ -139,19 +141,22 @@ class NotificationMessage:
         if self.heading:
             return self.heading
         wid = self.work_item.id
+        # A notice with no work item (a scheduled loop, an audit) is named by what it
+        # is — "✅ Completed #0" named a number that does not exist.
+        what = f"#{wid}" if wid else ((self.work_item.title or "").strip()[:80] or "run")
         if self.type is NotificationType.STARTED:
-            return f"🤖 Processing #{wid}"
+            return f"🤖 Processing {what}"
         if self.type is NotificationType.COMPLETED:
             return (
-                f"✅ Completed #{wid}"
+                f"✅ Completed {what}"
                 if self.result and self.result.success
-                else f"❌ Failed #{wid}"
+                else f"❌ Failed {what}"
             )
         if self.type is NotificationType.ERROR:
-            return f"⚠️ Error #{wid}"
+            return f"⚠️ Error {what}"
         if self.type is NotificationType.REMINDER:
             return f"👋 Review reminder — PR !{wid}"
-        return f"📋 #{wid}"
+        return f"📋 {what}"
 
     @property
     def assignee(self) -> str:

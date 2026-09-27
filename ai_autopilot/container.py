@@ -24,6 +24,7 @@ from ai_autopilot.data import (
     FleetWorkerRepository,
     LoopReportRepository,
     NotificationHoldRepository,
+    NotificationLogRepository,
     PlannedRunRepository,
     PrCommandRepository,
     PrConflictRepository,
@@ -129,9 +130,11 @@ class Container:
             EmailNotifier(config),
         ]
         self.notification_hold_repo = NotificationHoldRepository(self.database)
+        self.notification_log_repo = NotificationLogRepository(self.database)
         self.alert_state_repo = AlertStateRepository(self.database)
         self.notifier = AdoNotifier(
-            self.ado, config, self.channels, self.notification_hold_repo
+            self.ado, config, self.channels, self.notification_hold_repo,
+            log_repo=self.notification_log_repo,
         )
 
         # Execution.

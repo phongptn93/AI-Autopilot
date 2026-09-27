@@ -276,3 +276,56 @@ async def test_service_uses_headless_when_execution_mode_is_headless(tmp_path):
         assert launched == []                                  # no console in headless mode
     finally:
         await db.dispose()
+
+
+async def test_every_attempt_lands_in_history_even_a_timed_out_session(tmp_path):
+    """The attempt opens its History row when it starts — so it shows while it runs —
+    and the path that ends it closes that SAME row, here the 8-hour timeout."""
+    _, ws = _setup(tmp_path)
+    ex = _interactive_executor(ws)
+    _session(ex)
+    svc, c, db = await _service(tmp_path, ex)
+    try:
+        row = await _observe(c, 12)
+        assert await svc.resolve(row.id, requested_by="dashboard") == "in_session"
+        running = await c.execution_repo.get_recent(5)
+        assert running and running[0].completed_at is None          # visible while open
+        await c.pr_conflict_repo.update(
+            row.id, session_started=datetime.now(UTC) - timedelta(hours=9))
+        assert await svc._finalize_sessions() == 1
+        recent = await c.execution_repo.get_recent(5)
+        assert len(recent) == 1                                     # closed, not duplicated
+        assert recent[0].status.value.lower() == "failed"
+        assert recent[0].title.startswith("[conflict] PR !12")
+        assert (await c.pr_conflict_repo.get(row.id)).execution_id is None
+    finally:
+        await db.dispose()
+
+
+async def test_resolution_is_announced_and_never_links_the_pr_id_as_a_work_item(tmp_path):
+    _, ws = _setup(tmp_path)
+    ex = _executor(ws, execution_mode="headless")
+    _session(ex)
+
+    async def run(prompt, cwd, repo=None, **kw):
+        (Path(repo) / "app.py").write_text("x = 110\ny = 2\n", encoding="utf-8")
+        return SimpleNamespace(text="RESOLUTION: done — kept both", input_tokens=1,
+                               output_tokens=1)
+
+    ex._run_claude = run                   # type: ignore[method-assign]
+    svc, c, db = await _service(tmp_path, ex)
+    sent = []
+
+    async def capture(message):
+        sent.append(message)
+
+    c.notifier = SimpleNamespace(notify=capture)
+    try:
+        row = await _observe(c, 13)        # no work item linked to this PR
+        assert await svc.resolve(row.id, requested_by="dashboard") == "resolved"
+        done = [m for m in sent if "đã giải conflict" in m.title]
+        assert done, [m.title for m in sent]
+        assert done[0].event == "completed"
+        assert done[0].work_item.id == 0   # not 13 — that is the PR, not a work item
+    finally:
+        await db.dispose()

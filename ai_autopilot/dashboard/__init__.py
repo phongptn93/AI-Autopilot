@@ -3286,6 +3286,8 @@ def create_dashboard_router() -> APIRouter:
             _feed_for(c, item_id) or "(no activity yet — waiting for the agent…)"
         )
 
+    _HISTORY_STATUSES = ("Success", "Failed", "Running", "Retrying", "Pending")
+
     @router.get("/history", response_class=HTMLResponse)
     async def history(request: Request):
         c: Container = request.app.state.container
@@ -3295,7 +3297,11 @@ def create_dashboard_router() -> APIRouter:
         q = (qp.get("q") or "").strip()
         dfrom = (qp.get("from") or "").strip()
         dto = (qp.get("to") or "").strip()
-        page_size = 25
+        try:
+            per = int(qp.get("per") or 25)
+        except ValueError:
+            per = 25
+        per = per if per in _QUALITY_PER else 25
         try:
             page = max(1, int(qp.get("page") or 1))
         except ValueError:
@@ -3303,34 +3309,42 @@ def create_dashboard_router() -> APIRouter:
 
         _, in_scope = scope_of(request, c.config)
 
-        async def _run(pg: int):
+        async def _run(pg: int, st: str | None = None, limit: int | None = None):
             return await c.execution_repo.search(
-                status=status or None, category=cat or None, q=q or None,
-                dfrom=dfrom or None, dto=dto or None, projects=in_scope,
-                offset=(pg - 1) * page_size, limit=page_size,
+                status=(status if st is None else st) or None, category=cat or None,
+                q=q or None, dfrom=dfrom or None, dto=dto or None, projects=in_scope,
+                offset=(pg - 1) * per, limit=limit or per,
             )
 
         rows, total = await _run(page)
-        pages = max(1, -(-total // page_size))          # ceil
-        if page > pages:                                # out-of-range → clamp + re-query
-            page = pages
+        pager = _pager(total, page, per)
+        if pager["page"] != page:                       # out of range → clamp + re-query
+            page = pager["page"]
             rows, total = await _run(page)
+        # Counts per status under the OTHER filters, for the chips — "Failed 3" says
+        # where to look before anyone opens the list.
+        status_counts = {}
+        for st in _HISTORY_STATUSES:
+            _, n = await _run(1, st=st, limit=1)
+            status_counts[st] = n
+        all_count = sum(status_counts.values())
 
-        base = {k: v for k, v in {
-            "status": status, "cat": cat, "q": q, "from": dfrom, "to": dto,
-        }.items() if v}
+        params = {"status": status, "cat": cat, "q": q, "from": dfrom, "to": dto,
+                  "per": per, "page": page}
 
-        def purl(pg: int) -> str:
-            return "/dashboard/history?" + urlencode({**base, "page": pg})
+        def url(**over) -> str:
+            merged = {**params, **over}
+            keep = {k: v for k, v in merged.items()
+                    if v not in ("", None, 0) and not (k == "page" and v == 1)
+                    and not (k == "per" and v == 25)}
+            return "/dashboard/history" + (("?" + urlencode(keep)) if keep else "")
 
         ctx = _ctx(
             request, "history",
-            records=rows, total=total, page=page, pages=pages, page_size=page_size,
-            status=status, cat=cat, q=q, date_from=dfrom, date_to=dto,
-            start_idx=((page - 1) * page_size + 1) if total else 0,
-            end_idx=min(page * page_size, total),
-            prev_url=purl(page - 1) if page > 1 else "",
-            next_url=purl(page + 1) if page < pages else "",
+            records=rows, total=total, pager=pager, per=per, per_options=_QUALITY_PER,
+            status=status, cat=cat, q=q, date_from=dfrom, date_to=dto, url=url,
+            status_counts=status_counts, all_count=all_count,
+            filtered=bool(q or status or cat or dfrom or dto),
         )
         return _TEMPLATES.TemplateResponse(request, "history.html", ctx)
 

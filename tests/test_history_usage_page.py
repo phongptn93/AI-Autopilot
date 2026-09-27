@@ -41,7 +41,7 @@ def test_history_shows_the_model_and_the_token_breakdown(client: TestClient):
     client.portal.call(_seed, client.app, True)
     html = client.get("/dashboard/history").text
 
-    assert "<th>Model</th>" in html
+    assert "Model · usage" in html          # model + tokens share one column
     assert "opus-5" in html                 # trimmed label in the cell
     assert "claude-opus-5" in html          # full id in the tooltip
     assert "90,040" in html                 # total tokens
@@ -55,7 +55,7 @@ def test_a_run_with_no_usage_renders_dashes_not_zeroes(client: TestClient):
     client.portal.call(_seed, client.app, False)
     html = client.get("/dashboard/history").text
 
-    assert "<th>Model</th>" in html
+    assert "Model · usage" in html          # model + tokens share one column
     assert "$0.0000" not in html
     assert "0 out" not in html
 
@@ -77,7 +77,8 @@ def test_interactive_runs_say_why_they_have_no_usage(client: TestClient):
     client.portal.call(_seed_interactive, client.app)
     html = client.get("/dashboard/history").text
 
-    assert "interactive:autopilot-8953" in html
-    assert "does not meter" in html                  # the tooltip explains the blank
+    assert "interactive:autopilot-8953" in html      # the full skill, in the tooltip
+    assert "không đo" in html                        # marked, and the tooltip says why
     assert "headless" in html                        # ...and what to change for numbers
-    assert html.count("no-usage") >= 3               # model, tokens and cost, all marked
+    # Marked ONCE per row. Three identical glyphs (model, tokens, cost) read as a bug.
+    assert html.count('class="no-meter"') == 1

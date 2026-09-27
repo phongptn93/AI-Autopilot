@@ -287,3 +287,20 @@ def test_karma_gets_edge_when_chrome_is_missing(monkeypatch, tmp_path):
     assert tg._browser_env()["CHROME_BIN"] == str(edge)
     monkeypatch.setenv("CHROME_BIN", "C:/mine/chrome.exe")   # the operator's choice wins
     assert tg._browser_env() is None
+
+
+def test_xunit_theory_cases_are_each_their_own_failure():
+    """A [Theory] puts its arguments in the name; they were not matched, so 4 of the
+    10 failures on a real run went unseen — and a baseline comparison that cannot see
+    a failure on the target will blame it on the resolution."""
+    out = "\n".join([
+        "  Failed Nois.DxFac.BomTests.Calc(rawQty: 3.073, unit: 168000) [2 ms]",
+        "  Failed Nois.DxFac.BomTests.Calc(rawQty: 4.1, unit: 168000) [1 ms]",
+        "  Failed Nois.DxFac.ExportTests.ExportAsync_KhongBiCatCotCuoi [5 ms]",
+        "Failed!  - Failed:     3, Passed:    97, Skipped:     0, Total:   100",
+    ])
+    assert failure_signatures(out) == [
+        "test Nois.DxFac.BomTests.Calc(rawQty: 3.073, unit: 168000)",
+        "test Nois.DxFac.BomTests.Calc(rawQty: 4.1, unit: 168000)",
+        "test Nois.DxFac.ExportTests.ExportAsync_KhongBiCatCotCuoi",
+    ]

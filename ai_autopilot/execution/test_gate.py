@@ -49,7 +49,9 @@ _DOTNET_BUILD = re.compile(
     r"^(?P<path>[^\s(][^(]*?)\(\d+,\d+\):\s*error\s+(?P<code>[A-Z]+\d+):\s*(?P<msg>.*?)"
     r"(?:\s*\[[^\]]*\])?\s*$")
 # .NET test: "  Failed Namespace.Class.Method [7 ms]"
-_DOTNET_TEST = re.compile(r"^\s*Failed\s+(?P<name>[\w.`+<>,\[\]-]+?)(?:\s*\[[^\]]*\])?\s*$")
+# The name runs up to the trailing "[7 ms]"; an xUnit [Theory] carries its arguments in
+# it — "Method(qty: 3.073, unit: 168000)" — and each case is its own failure.
+_DOTNET_TEST = re.compile(r"^\s*Failed\s+(?P<name>[\w.`+<>]\S*(?:\(.*\))?)(?:\s+\[[^\]]*\])?\s*$")
 # pytest: "FAILED tests/test_x.py::test_name - AssertionError…"
 _PYTEST = re.compile(r"^FAILED\s+(?P<name>\S+)")
 # jest / vitest: "FAIL src/app.spec.ts"  ·  "  ● Suite › test"

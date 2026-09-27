@@ -406,6 +406,17 @@ class ExecutionRepository:
             )
             return {int(r[0]) for r in rows if r[0] is not None}
 
+    async def count_running(self, projects: list[str] | None = None) -> int:
+        """Executions currently RUNNING — the Overview's "is it doing something now"."""
+        conds = [ExecutionRecord.status == ExecutionStatus.RUNNING]
+        project_cond = _project_cond(projects)
+        if project_cond is not None:
+            conds.append(project_cond)
+        async with self._db.session() as session:
+            return int((await session.execute(
+                select(func.count()).select_from(ExecutionRecord).where(*conds)
+            )).scalar_one())
+
     async def get_efficiency(
         self, trigger_tag: str | None = None, projects: list[str] | None = None
     ) -> EfficiencyStats:
@@ -2378,6 +2389,15 @@ class SecurityRepository:
         async with self._db.session() as session:
             rows = await session.execute(select(SecurityFinding.repo).distinct())
             return sorted({str(r) for (r,) in rows.all() if r})
+
+    async def open_kev_count(self, project: str = "") -> int:
+        """Open findings in CISA's KEV catalog — exploited in the wild, unresolved here."""
+        async with self._db.session() as session:
+            query = select(func.count(SecurityFinding.id)).where(
+                SecurityFinding.status == "open", SecurityFinding.kev.is_(True))
+            if project:
+                query = query.where(SecurityFinding.project == project)
+            return int((await session.execute(query)).scalar_one())
 
     async def counts(self, repo: str = "", project: str = "") -> dict[str, dict[str, int]]:
         """``{status: {severity: n}}`` — the page's header chips in one query."""

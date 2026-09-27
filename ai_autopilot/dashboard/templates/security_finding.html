@@ -51,6 +51,8 @@
   {% if f.status != 'open' %}<span class="sev info">{{ f.status }}</span>{% endif %}
   {% if f.verified %}<span class="sev pass" title="PoC verified">verified</span>{% elif f.verified is sameas false %}<span class="sev info">unconfirmed</span>{% endif %}
   {% if verifying %}<span class="sev info">verifying…</span>{% endif %}
+  {% if f.kev %}<span class="sev critical" title="CISA Known Exploited Vulnerabilities">KEV</span>{% endif %}
+  {% if f.ado_bug_id %}{% if item_link %}<a class="sf-tag" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener" title="the ADO work item tracking this finding">🐞 Bug #{{ f.ado_bug_id }} ↗</a>{% else %}<span class="sf-tag">🐞 Bug #{{ f.ado_bug_id }}</span>{% endif %}{% endif %}
 </div>
 
 {% if flash %}<div class="sf-flash {{ 'ok' if flash[0] == 'green' else ('warn' if flash[0] == 'amber' else 'bad') }}">{{ flash[1]|safe }}</div>{% endif %}
@@ -119,7 +121,14 @@
           <div class="row"><button class="btn-save" type="submit">{{ 'Re-verify' if f.verified is not none else 'Verify' }}</button></div>
         </form>
         {% endif %}
-        {% if can_file and not f.ado_bug_id %}
+        {% if f.ado_bug_id %}
+        {# Already tracked: say so where the decision is made — the File Bug form hides
+           itself once a Bug exists, and an empty spot read as "no Bug was filed". #}
+        <div>
+          <b>🐞 Tracked on ADO</b>
+          <small>This finding is Bug {% if item_link %}<a class="table-link" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener">#{{ f.ado_bug_id }} ↗</a>{% else %}#{{ f.ado_bug_id }}{% endif %}. One Bug per fingerprint — a later full scan that stops seeing it comments "no longer detected" there; closing it stays a person's call.</small>
+        </div>
+        {% elif can_file %}
         <form method="post" action="/dashboard/security/{{ f.id }}/file">
           <b>🐞 File a Bug on ADO</b>
           <small>Title <code>[Security][{{ f.severity }}]{{ ('[' ~ f.cwe ~ ']') if f.cwe else '' }} …</code>, tags <code>security, autopilot-security</code>. One Bug per fingerprint; a later scan that stops seeing it comments on the Bug.</small>
@@ -147,7 +156,11 @@
       <div class="sf-body" style="font-size:12.5px">
         Open a terminal in the repo and ask the agent with the finding attached:
         <pre class="sf-snip">claude "Fix the {{ f.severity }} security finding {{ f.cwe or f.rule_id }} at {{ f.file }}{% if f.line %}:{{ f.line }}{% endif %} — {{ f.title }}. Keep the change minimal and add a regression test."</pre>
+        {% if f.ado_bug_id %}
+        <small style="color:var(--text-dim)">Or add the autopilot's normal tag to Bug #{{ f.ado_bug_id }} and let it pick the fix up — the pre-PR gate re-scans the diff, so the fix is verified on the way in.</small>
+        {% else %}
         <small style="color:var(--text-dim)">Or create a Bug above and let the autopilot pick it up with its normal tag — the pre-PR gate re-scans the diff, so the fix is verified on the way in.</small>
+        {% endif %}
       </div>
     </div>
   </div>

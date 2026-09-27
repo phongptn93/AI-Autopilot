@@ -243,6 +243,25 @@
 {# ── Findings ── #}
 <div class="sc-card">
   <div class="sc-hd"><h3>Findings</h3><span>{{ rows|length }} shown · worst first · click a title for the full record</span></div>
+  {# The list is the CURRENT state — one row per fingerprint, re-seen rows count up
+     (the "N×" in Seen), never duplicated. What it lacked was "as of which scan":
+     say it here instead of 60 rows further down in Recent scans. #}
+  {% if scans %}{% set last = scans[0] %}
+  <div class="sc-hd" style="border-bottom:1px solid var(--border-soft);font-size:12.5px">
+    <span>
+      As of <a class="table-link" href="/dashboard/security/scans/{{ last.id }}">scan #{{ last.id }}</a>
+      · {{ last.started_at.strftime('%Y-%m-%d %H:%M') if last.started_at else '?' }}
+      · {{ last.scope }} · AI {{ last.ai_mode }} · {{ last.trigger }}{% if last.loop_name %} · {{ last.loop_name }}{% endif %}
+      · <b>+{{ last.new_count or 0 }}</b> new · <b>−{{ last.fixed_count or 0 }}</b> fixed
+      · gate {% if last.status == 'running' %}<span class="sev info">running</span>{% elif last.error %}<span class="sev fail">error</span>{% elif last.gate_passed %}<span class="sev pass">pass</span>{% else %}<span class="sev fail">fail</span>{% endif %}
+    </span>
+    <span class="r"><a class="table-link" href="#recent-scans">all {{ scans|length }} scans ↓</a></span>
+  </div>
+  <div style="padding:6px 18px 0;font-size:11.5px;color:var(--text-dim)">
+    One row per finding across all scans — a re-scan updates it (Seen <code>N×</code>), it never adds a copy.
+    <span class="sev new" style="font-size:10px">new</span> = first seen in the last 7 days. What each scan found or fixed: open that scan.
+  </div>
+  {% endif %}
   <div class="sc-filter">
     <span class="lbl">repo</span>
     <a href="/dashboard/security?status={{ status }}" class="{{ '' if repo else 'on' }}">all</a>
@@ -320,7 +339,7 @@
 </div>
 
 {# ── Recent scans ── #}
-<div class="sc-card">
+<div class="sc-card" id="recent-scans">
   <div class="sc-hd"><h3>Recent scans</h3><span>{{ scans|length }} shown · click # for the run's own page</span></div>
   {% if scans %}
   <div style="overflow-x:auto">

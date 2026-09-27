@@ -1184,6 +1184,24 @@ def create_dashboard_router() -> APIRouter:
         tokens_per_merged = (
             efficiency.total_tokens // prs["merged"] if prs["merged"] else None
         )
+        # "Needs attention now" — all local DB reads (this page never waits on ADO).
+        # Each figure degrades to None alone: one broken source must not blank the rest.
+        running = sec_open = sec_kev = conflicts_active = conflicts_escalated = None
+        spend_today = None
+        with contextlib.suppress(Exception):
+            running = await c.execution_repo.count_running(projects=in_scope)
+        with contextlib.suppress(Exception):
+            sc = await c.security_repo.counts()
+            open_by_sev = sc.get("open", {})
+            sec_open = open_by_sev.get("critical", 0) + open_by_sev.get("high", 0)
+            sec_kev = await c.security_repo.open_kev_count()
+        with contextlib.suppress(Exception):
+            active_rows = await c.pr_conflict_repo.active()
+            conflicts_active = len(active_rows)
+            conflicts_escalated = sum(1 for r in active_rows if r.status == "escalated")
+        with contextlib.suppress(Exception):
+            midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            spend_today = await c.execution_repo.spend_since(midnight, projects=in_scope)
         return _TEMPLATES.TemplateResponse(
             request,
             "overview.html",
@@ -1200,6 +1218,10 @@ def create_dashboard_router() -> APIRouter:
                 # Outstanding spec drift belongs on the landing page: it is work owed to
                 # a HUMAN, so it has to be visible without navigating to find it.
                 spec_drift_open=await c.spec_drift_repo.open_count(),
+                running=running,
+                sec_open=sec_open, sec_kev=sec_kev,
+                conflicts_active=conflicts_active, conflicts_escalated=conflicts_escalated,
+                spend_today=spend_today,
             ),
         )
 

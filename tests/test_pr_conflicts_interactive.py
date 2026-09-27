@@ -158,6 +158,7 @@ class _AdoStub:
 
 
 async def _service(tmp_path, ex):
+    from ai_autopilot.data import ExecutionRepository
     from ai_autopilot.services.pr_conflicts import PrConflictService
 
     db = Database(f"sqlite+aiosqlite:///{tmp_path / 'svc.sqlite'}")
@@ -170,6 +171,8 @@ async def _service(tmp_path, ex):
         config=ex._config, executor=ex, pr_conflict_repo=PrConflictRepository(db),
         ado=_AdoStub(), audit_repo=SimpleNamespace(record=_noop),
         notifier=SimpleNamespace(notify=_noop),
+        execution_repo=ExecutionRepository(db),
+        cost_tracker=SimpleNamespace(track=_noop),
     )
     return PrConflictService(c), c, db
 
@@ -224,6 +227,33 @@ async def test_service_closes_a_session_that_ran_too_long(tmp_path):
         assert row.status == "escalated" and "quá" in row.last_error
         assert _origin_head(origin, "feature") == before
         assert not session_dir.exists()
+    finally:
+        await db.dispose()
+
+
+async def test_resolution_lands_in_execution_history(tmp_path):
+    """A resolve attempt is a run: it must show on the History page like any other.
+    Success and escalation both leave a record; the tokens roll into the totals."""
+    _, ws = _setup(tmp_path)
+    ex = _executor(ws, execution_mode="headless")
+    _session(ex)
+
+    async def run(prompt, cwd, repo=None, **kw):
+        (Path(repo) / "app.py").write_text("x = 110\ny = 2\n", encoding="utf-8")
+        return SimpleNamespace(text="RESOLUTION: done — kept both", input_tokens=7,
+                               output_tokens=5)
+
+    ex._run_claude = run                   # type: ignore[method-assign]
+    svc, c, db = await _service(tmp_path, ex)
+    try:
+        row = await _observe(c, 11)
+        assert await svc.resolve(row.id, requested_by="dashboard") == "resolved"
+        recent = await c.execution_repo.get_recent(5)
+        assert recent, "resolution left no execution record"
+        rec = recent[0]
+        assert rec.title.startswith("[conflict] PR !11")
+        assert rec.status.value.lower() == "success"
+        assert rec.completed_at is not None
     finally:
         await db.dispose()
 

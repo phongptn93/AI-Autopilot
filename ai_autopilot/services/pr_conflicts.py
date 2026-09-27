@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -33,7 +33,7 @@ from ai_autopilot.config import matches_any_user
 from ai_autopilot.container import Container
 from ai_autopilot.execution.conflict_resolver import ConflictResolver
 from ai_autopilot.logging_config import describe_exc, get_logger
-from ai_autopilot.models import WorkItemInfo
+from ai_autopilot.models import ExecutionResult, WorkItemInfo
 from ai_autopilot.notifications.base import NotificationMessage, NotificationType
 from ai_autopilot.pr_conflicts import (
     BUSY_STATUSES,
@@ -335,7 +335,12 @@ class PrConflictService:
 
     async def _record_outcome(self, row, result: ConflictResolution, actor: str) -> str:
         """One place that turns a finished attempt — headless or interactive — into a
-        row update, an audit entry and a PR comment."""
+        row update, an audit entry, a PR comment — and an execution record, so the
+        History page shows conflict resolutions next to every other run (they spend
+        tokens and minutes like any run; invisible history reads as "never happened").
+        Attempts that never ran anything (missing repo path, expired session) go
+        through ``_finish_failed`` directly and stay off the execution history —
+        the Conflicts page keeps their trail."""
         c = self._c
         await c.audit_repo.record(
             actor=actor or "autopilot", source="pr-conflicts",
@@ -343,6 +348,29 @@ class PrConflictService:
             target=f"PR !{row.pr_id}",
             detail=(result.how if result.success else result.error)[:300],
         )
+        with contextlib.suppress(Exception):  # history is a mirror, never a gate
+            item = WorkItemInfo(
+                id=row.work_item_id or 0,
+                title=f"[conflict] PR !{row.pr_id} — {row.title}"[:400],
+            )
+            started = datetime.now(UTC) - timedelta(seconds=result.duration_seconds or 0)
+            record_id = await c.execution_repo.start_execution(
+                item, "resolve-conflict", profile="conflict", started_at=started,
+            )
+            make = ExecutionResult.ok if result.success else ExecutionResult.fail
+            exec_result = make(
+                item.id, "resolve-conflict",
+                (f"{result.how}: merged {row.target_branch} into {row.source_branch}"
+                 if result.success else (result.error or "escalated")),
+            )
+            exec_result.branch_name = row.source_branch
+            if row.url:
+                exec_result.pr_urls = [row.url]
+            exec_result.cost_tokens = result.tokens
+            exec_result.duration_seconds = result.duration_seconds
+            await c.execution_repo.complete_execution(record_id, exec_result)
+            if result.tokens:
+                await c.cost_tracker.track(record_id, result.tokens)
         if result.success:
             await c.pr_conflict_repo.update(
                 row.id, status=RESOLVED, resolved_at=datetime.now(UTC),

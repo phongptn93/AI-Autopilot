@@ -118,6 +118,8 @@ def test_security_page_has_readiness_scan_form_and_links(tmp_path):
         page = client.get(f"/dashboard/security?repo={repo}").text
         assert "/dashboard/security/f/" in page
         assert f"/dashboard/security/scans/{scan_id}" in page
+        assert "As of <a" in page and f"scan #{scan_id}" in page    # list says which scan
+        assert "it never adds a copy" in page and 'id="recent-scans"' in page
         assert "⬇ SARIF" in page
         # Search narrows.
         assert "SQL concat" in client.get(f"/dashboard/security?repo={repo}&q=OrderService").text
@@ -141,6 +143,23 @@ def test_finding_page_shows_everything_and_scan_page_lists_new(tmp_path):
         assert "New in this scan" in scan and "SQL concat in OrderService" in scan
         assert "semgrep" in scan and "skipped (not installed)" in scan
         assert "gate failed" in scan
+
+
+def test_finding_page_surfaces_its_filed_bug(tmp_path):
+    # Once a Bug exists the File Bug form hides itself; the page must say where the
+    # finding is tracked instead of leaving that spot empty (read as "never filed").
+    repo = tmp_path / "ws" / "app"
+    repo.mkdir(parents=True)
+    with _client(tmp_path, workspace_directory=str(repo.parent)) as client:
+        f, _ = _seed(client, repo)
+        c = client.app.state.container
+        row = client.portal.call(c.security_repo.by_fingerprint, str(repo), f.fingerprint)
+        client.portal.call(c.security_repo.set_bug, row.id, 9494)
+        page = client.get(f"/dashboard/security/f/{row.id}").text
+        assert "Tracked on ADO" in page and "#9494" in page
+        assert "🐞 Bug #9494" in page                     # header badge
+        assert "Or create a Bug above" not in page          # Fix it no longer says "create"
+        assert 'action="/dashboard/security/' + str(row.id) + '/file"' not in page
 
 
 def test_export_sarif_and_json(tmp_path):

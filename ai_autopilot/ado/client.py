@@ -31,6 +31,8 @@ _MAX_IDS_PER_BATCH = 200
 # template) and only changes when someone edits the process, so a short cache turns
 # every reader of it into a free lookup.
 _TYPE_STATE_TTL_SECONDS = 300.0
+# How long a project whose type listing failed is left alone before trying again.
+_TYPE_DENIED_RETRY_SECONDS = 600.0
 
 
 def _terse(body: str, limit: int = 300) -> str:
@@ -108,12 +110,20 @@ class AdoClient:
         # project → (fetched_at, type names). Separate from _type_states on purpose:
         # see get_work_item_types.
         self._wi_types: dict[str, tuple[float, list[str]]] = {}
+        # project → when its type listing last FAILED. A project the PAT cannot see (or
+        # one that was renamed) answers 404 on every poll; without this it was asked
+        # again every ~20s and logged a warning each time, burying everything else.
+        self._types_denied: dict[str, float] = {}
+        self._types_warned: set[str] = set()
+        self._unreadable_logged: set[int] = set()
 
     def refresh(self) -> None:
         """Re-read the organization URL after a live config change."""
         self._base = self._config.ado_organization.rstrip("/")
         self._type_states = {}  # a different org/project has different types
         self._wi_types = {}
+        self._types_denied = {}   # a config change may be the fix — ask again
+        self._types_warned = set()
         self._item_projects = {}
         self._pr_items = {}
 
@@ -542,8 +552,12 @@ class AdoClient:
         self._remember_projects(found)
         missing = sorted(set(ids) - {item.id for item in found})
         if missing:
-            self._log.info(
-                "work items skipped — not readable", ids=missing,
+            # Once per id: a deleted item stays deleted, and the same line every poll
+            # (~20s) drowned the log in a fact that had already been said.
+            fresh = [i for i in missing if i not in self._unreadable_logged]
+            self._unreadable_logged.update(fresh)
+            (self._log.info if fresh else self._log.debug)(
+                "work items skipped — not readable", ids=fresh or missing,
                 hint="deleted, or the PAT cannot see them",
             )
         return found
@@ -1325,6 +1339,8 @@ class AdoClient:
         cached = self._wi_types.get(project.lower())
         if cached is not None and time.monotonic() - cached[0] < _TYPE_STATE_TTL_SECONDS:
             return list(cached[1])
+        if self._types_recently_denied(project):
+            return []
         try:
             resp = await self._send(
                 "GET",
@@ -1335,9 +1351,9 @@ class AdoClient:
             self._log.warning("work-item type request error", error=describe_exc(exc))
             return []
         if resp.status_code >= 400:
-            self._log.warning("list work-item types failed", status=resp.status_code,
-                              project=project, detail=_terse(resp.text))
+            self._types_denied_now(project, resp)
             return []
+        self._types_denied.pop(project.lower(), None)
         names = [
             t["name"]
             for t in (resp.json().get("value") or [])
@@ -1345,6 +1361,29 @@ class AdoClient:
         ]
         self._wi_types[project.lower()] = (time.monotonic(), names)
         return list(names)
+
+    def _types_recently_denied(self, project: str) -> bool:
+        at = self._types_denied.get(project.lower())
+        return at is not None and time.monotonic() - at < _TYPE_DENIED_RETRY_SECONDS
+
+    def _types_denied_now(self, project: str, resp) -> None:
+        """Remember a failed type listing, and say so ONCE per project with the fix —
+        a 404 here means the PAT cannot see the project (no access, renamed, deleted),
+        which no amount of re-asking changes."""
+        key = project.lower()
+        self._types_denied[key] = time.monotonic()
+        if key in self._types_warned:
+            self._log.debug("list work-item types still failing", project=project,
+                            status=resp.status_code)
+            return
+        self._types_warned.add(key)
+        self._log.warning(
+            "list work-item types failed", project=project, status=resp.status_code,
+            detail=_terse(resp.text),
+            hint=("the PAT cannot see this project (no access, renamed or deleted) — "
+                  "grant access or remove it from the workspace; retried every "
+                  f"{int(_TYPE_DENIED_RETRY_SECONDS // 60)} min, warned once"),
+        )
 
     async def _type_state_map(self, project: str = "") -> dict[str, list[dict]]:
         """``{work-item type: [raw state dicts]}`` for one project, briefly cached.
@@ -1364,6 +1403,8 @@ class AdoClient:
         cached = self._type_states.get(project.lower())
         if cached is not None and time.monotonic() - cached[0] < _TYPE_STATE_TTL_SECONDS:
             return cached[1]
+        if self._types_recently_denied(project):
+            return {}
         out: dict[str, list[dict]] = {}
         try:
             resp = await self._http.get(
@@ -1371,9 +1412,9 @@ class AdoClient:
                 headers=await self._auth.get_auth_header(),
             )
             if resp.status_code >= 400:
-                self._log.warning("list work-item types failed", status=resp.status_code,
-                                  detail=_terse(resp.text))
+                self._types_denied_now(project, resp)
                 return {}
+            self._types_denied.pop(project.lower(), None)
             types = [
                 t["name"]
                 for t in (resp.json().get("value") or [])

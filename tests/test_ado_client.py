@@ -290,3 +290,34 @@ async def test_a_read_that_never_comes_back_still_raises():
     client = _http_client(handler)
     with pytest.raises(httpx.TransportError):
         await client._send("GET", "https://dev.azure.com/o/_apis/wit/x", retries=1)
+
+
+async def test_a_project_the_pat_cannot_see_is_not_asked_every_poll():
+    """Khatoco answered 404 on every ~20s poll and logged a warning each time. A failed
+    type listing is remembered (retried after a while) and warned about ONCE."""
+    calls: list[str] = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        if "Khatoco" in str(request.url):
+            return httpx.Response(404, json={"message": "VS800075: project does not exist"})
+        return httpx.Response(200, json={"value": [{"name": "Bug"}]})
+
+    c = _http_client(handler, ado_project="DxFactory")
+
+    async def _auth_header():
+        return {}
+
+    c._auth = type("A", (), {"get_auth_header": staticmethod(_auth_header)})()
+    warned: list[str] = []
+    c._log = type("L", (), {
+        "warning": staticmethod(lambda msg, **kw: warned.append(kw.get("project", ""))),
+        "debug": staticmethod(lambda *a, **kw: None),
+        "info": staticmethod(lambda *a, **kw: None),
+    })()
+    for _ in range(3):
+        assert await c.get_work_item_types("Khatoco") == []
+        assert await c._type_state_map("Khatoco") == {}
+    assert len(calls) == 1                     # asked once, then left alone
+    assert warned == ["Khatoco"]               # warned once, naming the project
+    assert await c.get_work_item_types("DxFactory") == ["Bug"]   # others unaffected

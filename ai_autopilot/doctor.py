@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -1617,7 +1618,39 @@ def check_security_scan(config: Settings) -> list[Finding]:
                         f"fail on {sec.fail_on} · KEV+EPSS on")]
 
 
+def check_claude_cli(config: Settings) -> list[Finding]:
+    """Which `claude` the Agent SDK will run — the one thing every SDK run needs.
+
+    Reads the filesystem only (no process is started, per diagnose()'s contract). On
+    Windows an npm install leaves just a `claude.CMD` shim, which the SDK refuses to
+    execute: every review, audit and headless run then fails with "Refusing to execute
+    batch script" — a machine-wide outage worth naming before the first run hits it."""
+    from ai_autopilot.execution import claude_client
+
+    claude_client.configure_cli(config.claude_cli_path)
+    chosen = claude_client.cli_path_for_sdk()
+    on_path = shutil.which("claude") or ""
+    if chosen:
+        return [Finding(OK, f"Claude CLI for the SDK: {chosen}")]
+    if on_path.lower().endswith((".cmd", ".bat")):
+        return [Finding(
+            ERROR, "Claude CLI is only a batch shim — the Agent SDK refuses to run it",
+            f"{on_path} (npm install). Every SDK run fails with "
+            "\"Refusing to execute batch script\".",
+            "Install Claude Code natively (irm https://claude.ai/install.ps1 | iex), or set "
+            "claude_cli_path to a claude.exe.",
+        )]
+    if not on_path:
+        return [Finding(
+            WARN, "No `claude` executable found",
+            "The Agent SDK will look for one and fail if it cannot find it.",
+            "Install Claude Code, or set claude_cli_path.",
+        )]
+    return [Finding(OK, f"Claude CLI for the SDK: {on_path}")]
+
+
 CHECKS = (
+    check_claude_cli,
     check_ado, check_trigger, check_trigger_state_roles, check_relay_wiring, check_projects,
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
     check_relay_hands_over, check_default_profile_is_not_a_doorway,

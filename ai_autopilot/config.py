@@ -1192,6 +1192,11 @@ class Settings(BaseSettings):
     #                   enabled) the human can attach to / steer (default)
     execution_mode: str = "interactive"
     claude_model: str = ""  # empty → SDK default
+    # The native `claude` executable the Agent SDK runs. Blank = discover: PATH when it
+    # holds a real executable, else (Windows, where an npm install leaves only a
+    # `claude.CMD` shim the SDK refuses to run) ~/.local/bin/claude.exe or the newest
+    # one bundled with the Claude Code editor extension.
+    claude_cli_path: str = ""
     claude_max_turns: int = 0  # 0 → unbounded
     # Permission mode for autonomous runs. "acceptEdits" works when the process
     # runs as root (e.g. containers); "bypassPermissions" is fully autonomous but

@@ -46,6 +46,7 @@ from ai_autopilot.execution import (
     RetryPolicy,
     SdlcLoopEngine,
 )
+from ai_autopilot.execution import claude_client
 from ai_autopilot.execution.sdlc_plan import handoff_collisions
 from ai_autopilot.learning import QualityLog
 from ai_autopilot.logging_config import describe_exc, get_logger
@@ -139,6 +140,7 @@ class Container:
 
         # Execution.
         self.reviewer = AutoReviewer(config)
+        claude_client.configure_cli(config.claude_cli_path)
         self.executor = ClaudeExecutor(config, self.reviewer, self.claude_session_repo)
         self.feedback = FeedbackHandler(self.executor, config)
         self.retry_policy = RetryPolicy(config.max_retries, config.retry_backoff_seconds)

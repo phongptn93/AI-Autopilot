@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+import re
+import shutil
 import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 from claude_agent_sdk import (
@@ -28,6 +32,57 @@ from claude_agent_sdk import (
 
 from ai_autopilot import activity
 from ai_autopilot.logging_config import describe_exc, get_logger
+
+# ── which `claude` binary the SDK runs ────────────────────────────────────────
+# On Windows an npm install of Claude Code puts a batch shim (`claude.CMD`) on PATH,
+# and the SDK refuses batch scripts (cmd.exe cannot escape arguments safely), so every
+# SDK run — reviews, audits, headless agents — failed with "Refusing to execute batch
+# script". A native claude.exe is usually already on the machine: the official
+# installer's ~/.local/bin, or the one the Claude Code editor extension ships.
+_cli_override = ""
+
+
+def configure_cli(path: str) -> None:
+    """The operator's explicit ``claude_cli_path`` (blank = discover)."""
+    global _cli_override
+    _cli_override = (path or "").strip().strip('"')
+
+
+def _version_key(path: Path) -> tuple:
+    m = re.search(r"claude-code-(\d+(?:\.\d+)*)", str(path))
+    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
+
+
+def _native_candidates() -> list[Path]:
+    home = Path(os.environ.get("USERPROFILE") or Path.home())
+    found = [home / ".local" / "bin" / "claude.exe"]
+    for editor in (".vscode", ".vscode-insiders", ".cursor", ".windsurf"):
+        found += sorted(
+            (home / editor / "extensions").glob(
+                "anthropic.claude-code-*/resources/native-binary/claude.exe"),
+            key=_version_key, reverse=True,          # the newest extension first
+        )
+    return found
+
+
+def cli_path_for_sdk() -> str | None:
+    """The claude binary to hand the SDK, or None to let it search PATH itself.
+
+    None whenever PATH already resolves to a real executable. Re-checked on every
+    call rather than cached: an editor-extension update deletes the old version's
+    folder, and a remembered path would then fail every run until a restart."""
+    if _cli_override:
+        if Path(_cli_override).is_file():
+            return _cli_override
+        _log.warning("claude_cli_path does not exist — falling back to discovery",
+                     path=_cli_override)
+    if os.name != "nt":
+        return None
+    on_path = shutil.which("claude") or ""
+    if on_path and not on_path.lower().endswith((".cmd", ".bat")):
+        return None
+    native = next((p for p in _native_candidates() if p.is_file()), None)
+    return str(native) if native else None
 
 # How often a run in flight says it is alive. Long enough not to crowd a log that is
 # already busy, short enough that somebody waiting gets an answer.
@@ -342,6 +397,8 @@ async def run_claude(
         options = ClaudeAgentOptions(
             cwd=work_dir, permission_mode=permission_mode, stderr=_capture_stderr,
         )
+        if cli := cli_path_for_sdk():
+            options.cli_path = cli
         if allowed_tools is not None:
             # `[]` must mean "no tools" (e.g. pure-text classification callers) —
             # `if allowed_tools:` treated an empty list as falsy and silently left the

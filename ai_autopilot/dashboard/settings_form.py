@@ -406,6 +406,12 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "🔁 PR review & feedback",
           "Automatic attempts against the SAME target commit (same inputs → same conflict). "
           "A new push to the target, or a person asking, allows another."),
+    Field("pr_conflict_allow_preexisting_failures", "↳ Push when the target is already red",
+          "bool", "🔁 PR review & feedback",
+          "Red tests after a resolution → the target branch is tested alone and the failures "
+          "compared. On = push when the resolution adds NO failure of its own (the PR "
+          "inherits the target's red either way). Off = escalate, naming the target as the "
+          "cause. Failures the resolution ADDS always block."),
     Field("pr_conflict_poll_minutes", "↳ Scan every (minutes)", "int", "🔁 PR review & feedback",
           "How often active PRs are checked for conflicts."),
     Field("pr_session_hours", "Interactive PR session limit (hours)", "int",
@@ -877,6 +883,7 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     "pr_conflict_command": ("pr_conflict_tracking_enabled", ("1",)),
     "pr_conflict_max_files": ("pr_conflict_tracking_enabled", ("1",)),
     "pr_conflict_max_attempts": ("pr_conflict_tracking_enabled", ("1",)),
+    "pr_conflict_allow_preexisting_failures": ("pr_conflict_tracking_enabled", ("1",)),
     "pr_conflict_poll_minutes": ("pr_conflict_tracking_enabled", ("1",)),
     "max_comment_rounds": ("comment_reprocess_enabled", ("1",)),
     # 🚚 Delivery — the history switch is what starts the clock at all.

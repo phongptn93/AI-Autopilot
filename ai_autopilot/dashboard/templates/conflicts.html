@@ -70,7 +70,8 @@
     <span><b>Mode</b>: {% if interactive %}🧑‍💻 interactive — opens a Remote-Control session you can attach to{% else %}🤖 headless — one unattended run{% endif %} <span style="color:var(--text-dim)">(execution_mode)</span></span>
     <span><b>Auto-resolve</b> on autopilot PRs: {{ '✅ on' if autoresolve else '⏸ off' }}</span>
     <span><b>On request</b> (any PR): {% if command %}comment <code>{{ command }}</code> or press Resolve{% else %}Resolve button only{% endif %}</span>
-    <span><b>Escalates when</b> &gt; {{ max_files }} files, lock/binary files, markers left, other files touched, tests or security gate fail</span>
+    <span><b>Escalates when</b> &gt; {{ max_files }} files, lock/binary files, markers left, other files touched, the resolution adds a failing test, or the security gate fails</span>
+    <span title="pr_conflict_allow_preexisting_failures"><b>Target already red</b> (resolution adds nothing): {% if allow_red_target %}✅ push{% else %}⏸ escalate{% endif %}</span>
     <span style="margin-left:auto"><a class="table-link" href="/dashboard/settings">Settings → 🔁 PR review &amp; feedback</a></span>
   </div>
   <div class="cf-filter">

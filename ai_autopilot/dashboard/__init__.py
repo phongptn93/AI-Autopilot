@@ -2815,6 +2815,7 @@ def create_dashboard_router() -> APIRouter:
                  interactive=(cfg.execution_mode or "").lower() == "interactive",
                  session_hours=cfg.pr_session_hours,
                  command=cfg.pr_conflict_command, max_files=cfg.pr_conflict_max_files,
+                 allow_red_target=cfg.pr_conflict_allow_preexisting_failures,
                  item_link=work_item_link_base(cfg),
                  active_statuses=pr_conflicts_mod.ACTIVE_STATUSES),
         )

@@ -96,7 +96,13 @@ class TestCase:
         return not self.title.strip()
 
 
-TEST_OUTCOMES = ("pass", "fail", "blocked")
+# `blocked` = the case was attempted and could not reach a verdict (environment broke,
+# runner missing) — an incident, and it holds the item. `pending_deploy` = the case
+# needs an environment that runs THIS build (a tenant DB, a browser on the real app),
+# which cannot exist before the change is deployed. That is the normal order of the
+# pipeline, not an incident: the case waits, and is handed to QC once the item is
+# deployed (services.deferred_verification).
+TEST_OUTCOMES = ("pass", "fail", "blocked", "pending_deploy")
 # An outcome nobody can read is NOT a pass. Reading it as one would hide exactly the
 # case a reader is looking for, and the cost of the other direction is a reader
 # glancing at a row that turns out to be fine.
@@ -109,6 +115,10 @@ _OUTCOME_SYNONYMS = {
     "red": "fail", "không đạt": "fail",
     "blocked": "blocked", "block": "blocked", "skip": "blocked", "skipped": "blocked",
     "n/a": "blocked", "na": "blocked", "not run": "blocked", "untested": "blocked",
+    "pending_deploy": "pending_deploy", "pending deploy": "pending_deploy",
+    "pending-deploy": "pending_deploy", "awaiting deploy": "pending_deploy",
+    "needs deploy": "pending_deploy", "after deploy": "pending_deploy",
+    "deferred": "pending_deploy", "chờ deploy": "pending_deploy",
 }
 
 

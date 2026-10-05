@@ -297,6 +297,31 @@ class SpecDrift(Base):
     resolved_by: Mapped[str] = mapped_column(String(200), default="")
 
 
+class DeferredVerification(Base):
+    """A test case that can only be checked once the item is DEPLOYED.
+
+    Kept here, not only in the run's comment, because the hand-off happens later and
+    elsewhere — on a deploy the run never sees — and because "which changes were never
+    verified on a real environment" is a question someone has to be able to ask.
+
+    ``status``: ``pending`` (waiting for a deploy/testing state), ``handed_off`` (the
+    hand-off comment was posted), ``unverified`` (the item reached Done first).
+    """
+
+    __tablename__ = "deferred_verifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    work_item_id: Mapped[int] = mapped_column(Integer, index=True)
+    project: Mapped[str] = mapped_column(String(200), default="")
+    item_title: Mapped[str] = mapped_column(String(500), default="")
+    case_title: Mapped[str] = mapped_column(String(500), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    released_state: Mapped[str] = mapped_column(String(100), default="")
+
+
 class PrCommandState(Base):
     """PR babysitter memory per work item: how much of the revision budget /ai
     commands have spent — persisted so a restart neither resets the cap (runaway

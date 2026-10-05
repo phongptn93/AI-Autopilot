@@ -111,6 +111,26 @@
       </ul>
     {% else %}<div class="tr-empty">Chưa có lần chạy nào được ghi lại.</div>{% endif %}
   </div>
+  {% if room.deferred %}
+  <div class="tr-card">
+    <h4>⏳ Xác minh sau deploy</h4>
+    <p class="tr-when">Case cần môi trường chạy chính bản build này. Autopilot giao cho QC khi
+      item sang trạng thái deploy / testing; nếu item đóng trước đó, nó cảnh báo trên ADO.</p>
+    <ul class="tr-list">
+      {% for row in room.deferred %}
+        <li>
+          {% if row.status == 'pending' %}<span class="pill pill-warn">chờ deploy</span>
+          {% elif row.status == 'handed_off' %}<span class="pill pill-ok">đã giao QC</span>
+          {% else %}<span class="pill pill-warn">đóng khi chưa xác minh</span>{% endif %}
+          {{ row.case_title }}
+          {% if row.released_state %} · <span class="tr-when">{{ row.released_state }}
+            {{ row.released_at.strftime('%d/%m %H:%M') if row.released_at else '' }}</span>{% endif %}
+          {% if row.note %}<div class="tr-when">{{ row.note }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
 {% elif tab == 'conversation' %}
   <div class="tr-card">

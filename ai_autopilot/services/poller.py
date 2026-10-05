@@ -38,6 +38,7 @@ from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.outcomes import all_outcome_tags, apply_outcome, outcome_policy
 from ai_autopilot.routing import plan_schedule, sort_by_priority
 from ai_autopilot.routing.planning_groups import group_by_links
+from ai_autopilot.services.deferred_verification import DeferredVerificationService
 from ai_autopilot.services.planning_analyzer import run_due_plans
 from ai_autopilot.services.pr_feedback import is_bot_branch, parse_pr_url
 from ai_autopilot.services.spec_guard import SpecGuard
@@ -104,6 +105,11 @@ class AdoPollerService:
         # Post-run obligations: the PR names its work item, and decisions the agent had
         # to make on the team's behalf reach a human.
         self._spec_guard = SpecGuard(c)
+        # Cases that need a deployed build: recorded at the end of a run, handed to QC
+        # when the item reaches a deploy/testing state.
+        self._deferred = DeferredVerificationService(
+            getattr(c, "deferred_repo", None), c.config, self._provider
+        )
         self._processed: dict[int, datetime] = {}
         # Interactive mode: live Remote-Control sessions awaiting their result.json.
         self._live: dict[int, int] = {}  # work_item_id → execution record id
@@ -341,6 +347,8 @@ class AdoPollerService:
         # progress and dispatch immediately (from any state) — see method docstring.
         await self._reconcile_restart_requests()
         await self._reconcile_stage_entries()
+        # Hand cases that waited for a deploy to QC, now that the build is out.
+        await self._deferred.reconcile()
 
         self._log.debug("polling ADO for pending work items")
         items = await self._from_every_provider("get_pending_work_items")
@@ -1884,6 +1892,9 @@ class AdoPollerService:
         results = list(result.test_results or [])
         if not results or self._config.dry_run:
             return 0
+        # Before the comment, and regardless of whether it posts: the hand-off later
+        # reads these rows, not the comment.
+        await self._deferred.record(item, results)
         report = test_report.render_comment(
             results, dashboard_url=self._config.dashboard_public_url or ""
         )
@@ -1897,6 +1908,7 @@ class AdoPollerService:
         self._log.info(
             "test results posted", id=item.id, total=report.total,
             passed=report.passed, failed=report.failed, blocked=report.blocked,
+            pending_deploy=report.pending,
         )
         return report.total
 

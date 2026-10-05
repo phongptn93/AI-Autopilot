@@ -913,6 +913,24 @@ def check_autonomy(config: Settings) -> list[Finding]:
     return [Finding(OK, "Unattended autonomy has guardrails")]
 
 
+def check_deferred_handoff(config: Settings) -> list[Finding]:
+    """A case that waits for a deploy is handed to QC when the item enters a deploy or
+    testing state. With neither configured nothing can ever release it, and the only
+    signal left is the warning when the item closes — after the chance to test it."""
+    from ai_autopilot.services.deferred_verification import has_trigger
+
+    if has_trigger(config):
+        return [Finding(OK, "Deferred test cases have a hand-off trigger")]
+    return [Finding(
+        WARN, "Nothing hands deploy-dependent test cases to QC",
+        "A run that marks a case pending_deploy waits for the item to reach its deploy "
+        "state or a testing state — and neither on_deploy_state nor board_testing_state "
+        "is set, so the hand-off never comes.",
+        "Set '🚀 Deployed' at /dashboard/flow, or board_testing_state (the board's "
+        "'Ready for testing' column) in Settings.",
+    )]
+
+
 def check_dashboard_security(config: Settings) -> list[Finding]:
     exposed = config.health_host not in ("127.0.0.1", "localhost", "::1")
     has_auth = bool(config.dashboard_auth_password_hash or config.dashboard_auth_token)
@@ -1666,7 +1684,7 @@ CHECKS = (
     check_workspace_context, check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,
-    check_autonomy, check_dashboard_security, check_notifications, check_alerts,
+    check_autonomy, check_deferred_handoff, check_dashboard_security, check_notifications, check_alerts,
     check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
     check_board_processes,

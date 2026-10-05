@@ -15,6 +15,7 @@ from ai_autopilot.data.entities import (
     AlertState,
     AuditEvent,
     ClaudeSession,
+    DeferredVerification,
     ExecutionRecord,
     ExecutionStatus,
     FleetKnowledge,
@@ -1319,6 +1320,101 @@ def _hours_label(hours: float) -> str:
     if hours < 48:
         return f"{int(hours)} giờ"
     return f"{int(hours // 24)} ngày"
+
+
+class DeferredVerificationRepository:
+    """Test cases waiting for the item to be deployed, and what became of them."""
+
+    PENDING, HANDED_OFF, UNVERIFIED = "pending", "handed_off", "unverified"
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def add(self, item: WorkItemInfo, cases: list) -> int:
+        """Record ``cases`` for ``item``; returns how many are NEW.
+
+        A re-run of the same item reports the same deferred cases again. One row per
+        (item, case) still pending — the note is refreshed, a duplicate is not added, so
+        the eventual hand-off lists each case once.
+        """
+        if not cases:
+            return 0
+        now = datetime.now(UTC)
+        added = 0
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(DeferredVerification).where(
+                    DeferredVerification.work_item_id == item.id,
+                    DeferredVerification.status == self.PENDING,
+                )
+            )
+            open_rows = {r.case_title.strip().lower(): r for r in rows.scalars().all()}
+            for case in cases:
+                title = (getattr(case, "title", "") or "").strip()[:500]
+                if not title:
+                    continue
+                note = (getattr(case, "note", "") or "").strip()
+                existing = open_rows.get(title.lower())
+                if existing is not None:
+                    existing.note = note or existing.note
+                    continue
+                row = DeferredVerification(
+                    work_item_id=item.id, project=item.project or "",
+                    item_title=(item.title or "")[:500], case_title=title, note=note,
+                    status=self.PENDING, created_at=now,
+                )
+                session.add(row)
+                open_rows[title.lower()] = row
+                added += 1
+            await session.commit()
+        return added
+
+    async def pending_items(self) -> dict[int, str]:
+        """{work item id: project} for every item with a case still waiting."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(DeferredVerification.work_item_id, DeferredVerification.project)
+                .where(DeferredVerification.status == self.PENDING)
+            )
+            return {int(wid): project or "" for wid, project in rows.all()}
+
+    async def pending_for(self, work_item_id: int) -> list[DeferredVerification]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(DeferredVerification)
+                .where(DeferredVerification.work_item_id == work_item_id,
+                       DeferredVerification.status == self.PENDING)
+                .order_by(DeferredVerification.id)
+            )
+            return list(rows.scalars().all())
+
+    async def for_item(self, work_item_id: int) -> list[DeferredVerification]:
+        """Every deferred case ever recorded on one item, newest first."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(DeferredVerification)
+                .where(DeferredVerification.work_item_id == work_item_id)
+                .order_by(DeferredVerification.created_at.desc(), DeferredVerification.id)
+            )
+            return list(rows.scalars().all())
+
+    async def release(self, work_item_id: int, status: str, state: str) -> int:
+        """Close every pending case of one item as ``status``; returns how many."""
+        now = datetime.now(UTC)
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(DeferredVerification).where(
+                    DeferredVerification.work_item_id == work_item_id,
+                    DeferredVerification.status == self.PENDING,
+                )
+            )
+            found = list(rows.scalars().all())
+            for row in found:
+                row.status = status
+                row.released_at = now
+                row.released_state = (state or "")[:100]
+            await session.commit()
+        return len(found)
 
 
 class SpecDriftRepository:

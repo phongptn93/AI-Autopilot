@@ -72,6 +72,7 @@ class TaskRoom:
     timeline: list = field(default_factory=list)
     runs: list = field(default_factory=list)
     drifts: list = field(default_factory=list)
+    deferred: list = field(default_factory=list)   # cases waiting for a deploy
     audit: list = field(default_factory=list)
     prs: list[PrView] = field(default_factory=list)
     artifacts: list[Artifact] = field(default_factory=list)
@@ -79,6 +80,10 @@ class TaskRoom:
     @property
     def open_drifts(self) -> list:
         return [d for d in self.drifts if d.resolved_at is None]
+
+    @property
+    def pending_deferred(self) -> list:
+        return [d for d in self.deferred if d.status == "pending"]
 
     @property
     def files_changed(self) -> int:
@@ -169,6 +174,9 @@ class TaskRoomService:
         room.drifts = await _safe_async(
             self._c.spec_drift_repo.for_item(work_item_id), [], "drifts"
         )
+        repo = getattr(self._c, "deferred_repo", None)
+        if repo is not None:
+            room.deferred = await _safe_async(repo.for_item(work_item_id), [], "deferred")
         room.audit = await _safe_async(
             self._c.audit_repo.for_target(str(work_item_id)), [], "audit"
         )

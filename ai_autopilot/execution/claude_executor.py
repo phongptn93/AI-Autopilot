@@ -1696,11 +1696,26 @@ class ClaudeExecutor:
             # could, and the next run did the same work invisibly because it could not.
             qc_rules.append(
                 "- If you EXECUTE any case, put one entry per case in the result file's "
-                "`test_results` with `outcome` = pass | fail | blocked, and a `note` saying "
-                "what happened for anything that is not a pass. The control plane renders "
-                f"them as a table onto #{item.id} — do NOT write that comment yourself, and "
-                "do NOT report outcomes in `summary` instead: a summary is prose nobody can "
-                "count. Cases you only WROTE and did not run belong in `test_cases` alone."
+                "`test_results` with `outcome` = pass | fail | blocked | pending_deploy, and "
+                "a `note` saying what happened for anything that is not a pass. The control "
+                f"plane renders them as a table onto #{item.id} — do NOT write that comment "
+                "yourself, and do NOT report outcomes in `summary` instead: a summary is "
+                "prose nobody can count. Cases you only WROTE and did not run belong in "
+                "`test_cases` alone."
+            )
+            # blocked vs pending_deploy: the first is an incident and holds the item; the
+            # second is the pipeline's normal order and is handed to QC after the deploy.
+            # Merging them made every change that needs a real environment read as a
+            # partial failure and sit in "Held for human" (observed on a TLLA item).
+            qc_rules.append(
+                "- `pending_deploy` is ONLY for a case that needs an environment running "
+                "THIS change — a tenant database, the deployed app in a browser — which "
+                "cannot exist before the change is deployed. Its `note` must say exactly "
+                "what to check and any precondition (e.g. which setting to enable, on which "
+                "tenant); it is handed to QC verbatim once the item is deployed. A case you "
+                "TRIED to run and could not (tool missing, environment broken) is "
+                "`blocked`, not `pending_deploy`. Run everything you can reach first: a "
+                "case you could have run here must never be deferred."
             )
 
         # "Completed means a PR was opened" is false for a role that must not open one —
@@ -1779,7 +1794,8 @@ class ClaudeExecutor:
             '   "test_cases":[{"title":"<short, specific>","steps":["<step>","<step>"],',
             '                  "expected":"<what must be true afterwards>",',
             '                  "preconditions":"<state needed first, or empty>"}],',
-            '   "test_results":[{"title":"<the case you ran>","outcome":"pass|fail|blocked",',
+            '   "test_results":[{"title":"<the case you ran>",',
+            '                    "outcome":"pass|fail|blocked|pending_deploy",',
             '                    "note":"<what happened — REQUIRED unless pass>"}]}',
             completion_rule,
             "",

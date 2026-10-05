@@ -1,9 +1,0 @@
-[16:47:27] 🔁 SDLC start · profile 'dev' · 3 stage(s)
-[16:47:27] ▶ stage: implement (dev)
-[16:47:27] … working
-[16:47:27] ▶ stage: review (review)
-[16:47:27] … working
-[16:47:27] 🔍 auto-review passed
-[16:47:27] ▶ stage: pr (pr)
-[16:47:27] … working
-[16:47:27] ✅ SDLC completed · profile 'dev'

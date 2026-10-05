@@ -10,6 +10,7 @@ import secrets
 import time
 from collections import Counter, OrderedDict
 from datetime import UTC, datetime, timedelta
+from html import escape as html_escape
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 
@@ -24,11 +25,10 @@ from fastapi.responses import (
 )
 from fastapi.templating import Jinja2Templates
 
-from html import escape as html_escape
-
 from ai_autopilot import (
     activity,
     delivery,
+    markdown_lite,
     security,
     spec_drift,
 )
@@ -40,9 +40,6 @@ from ai_autopilot import (
 )
 from ai_autopilot import (
     lenses as lenses_mod,
-)
-from ai_autopilot import (
-    markdown_lite,
 )
 from ai_autopilot import (
     pr_conflicts as pr_conflicts_mod,
@@ -499,7 +496,7 @@ def _pr_age(created: str | None) -> str:
     except ValueError:
         return ""
     from datetime import timezone
-    delta = datetime.now(timezone.utc) - dt
+    delta = datetime.now(UTC) - dt
     days, secs = delta.days, delta.seconds
     if days >= 1:
         return f"{days}d"
@@ -1124,7 +1121,10 @@ def create_dashboard_router() -> APIRouter:
         nxt = _safe_next(str(form.get("next") or ""))
         password = str(form.get("password") or "")
         ok = (
-            security.verify_password(password, cfg.dashboard_auth_password_hash)
+            # Off the loop: PBKDF2 at 480k iterations would stall every other request.
+            await asyncio.to_thread(
+                security.verify_password, password, cfg.dashboard_auth_password_hash
+            )
             if cfg.dashboard_auth_password_hash
             else bool(cfg.dashboard_auth_token) and secrets.compare_digest(
                 password, cfg.dashboard_auth_token
@@ -3802,8 +3802,12 @@ def create_dashboard_router() -> APIRouter:
             headers={
                 # Belt and braces with the iframe sandbox: even if the artifact is
                 # hostile, it gets no network and no frame ancestors but ours.
+                # `sandbox` holds when the URL is opened directly too — outside the
+                # iframe the page would otherwise run agent-written script with the
+                # dashboard session (fetch to 'self' is the dashboard's own API).
                 "Content-Security-Policy":
-                    "default-src 'self' 'unsafe-inline' data:; frame-ancestors 'self'",
+                    "sandbox; default-src 'self' 'unsafe-inline' data:; "
+                    "connect-src 'none'; form-action 'none'; frame-ancestors 'self'",
                 "X-Content-Type-Options": "nosniff",
             },
         )

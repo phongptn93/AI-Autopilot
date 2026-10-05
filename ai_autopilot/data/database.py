@@ -6,7 +6,7 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ai_autopilot.data.entities import Base
@@ -52,9 +52,29 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+def _sqlite_pragmas(dbapi_conn, _record) -> None:
+    """Per-connection SQLite settings for many concurrent writers.
+
+    The poller, PR monitor, reviewer tracker, Teams bot, loop scheduler and dashboard
+    all write to one file. In the default rollback-journal mode a reader blocks a
+    writer, and with no busy timeout the loser fails at once with "database is
+    locked" — which most callers log and drop. WAL lets reads run beside the one
+    writer, and the busy timeout makes a contended write wait instead of fail.
+    """
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("PRAGMA journal_mode=WAL")       # no-op (stays "memory") in-memory
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA synchronous=NORMAL")     # safe under WAL; fewer fsyncs
+    finally:
+        cur.close()
+
+
 class Database:
     def __init__(self, url: str) -> None:
         self._engine = create_async_engine(url, future=True)
+        if self._engine.dialect.name == "sqlite":
+            event.listen(self._engine.sync_engine, "connect", _sqlite_pragmas)
         self._sessionmaker = async_sessionmaker(self._engine, expire_on_commit=False)
         self._log = get_logger("data.database")
 

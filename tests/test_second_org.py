@@ -140,9 +140,7 @@ def test_a_container_without_the_helper_still_answers():
 def test_doctor_names_what_does_not_follow_the_item_to_the_other_org():
     """The failure is quiet: the babysitter finds no pull requests in an org it never
     looks at, which reads exactly like "nobody opened one"."""
-    from ai_autopilot.doctor import check_second_organization
-
-    from ai_autopilot.doctor import ERROR
+    from ai_autopilot.doctor import ERROR, check_second_organization
 
     findings = check_second_organization(_with_second_org())
     assert any("Pull requests" in f.detail for f in findings)

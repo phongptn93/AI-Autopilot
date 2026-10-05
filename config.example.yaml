@@ -124,6 +124,10 @@ claude_max_turns: 0          # 0 → unbounded
 #   "bypassPermissions" – fully autonomous, but the CLI refuses it under root;
 #                          only use when the service runs as a non-root user
 claude_permission_mode: "acceptEdits"
+# Interactive (Remote-Control) sessions use the mode above unless this is true. True =
+# no permission prompts while nobody is attached — and a prompt injected through a work
+# item then runs any command on this machine.
+interactive_bypass_permissions: false
 claude_allowed_tools: []     # empty = all tools available
 
 # ── Retry & recovery ──
@@ -323,7 +327,11 @@ health_port: 5080
 # below set, the CLI prompts for a password and stores its PBKDF2 hash here.
 # dashboard_auth_password_hash: ""   # auto-filled by the first-run prompt (never plaintext)
 # dashboard_auth_token: ""           # legacy plaintext alternative (prefer the hash above)
-# webhook_secret: ""                 # require X-Webhook-Secret on POST /api/webhook/*
+# webhook_secret: ""                 # require the X-Webhook-Secret HEADER on POST /api/webhook/*
+#                                    # (a ?secret= query string is refused — it lands in proxy logs)
+# With no password the dashboard answers localhost only. True = serve it to the network
+# anyway (only behind a reverse proxy that authenticates on its own).
+# dashboard_allow_remote_without_auth: false
 # Password that encrypts the FULL config export (the download that INCLUDES
 # secrets). Needed to decrypt the exported .enc file. Override via env in prod.
 config_export_password: "Export#12345"

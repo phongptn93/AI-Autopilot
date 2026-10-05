@@ -16,7 +16,9 @@ import re
 import time
 from pathlib import Path
 
+from ai_autopilot import activity
 from ai_autopilot.config import SdlcStage, Settings
+from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.claude_client import ClaudeRun, Usage
 from ai_autopilot.execution.claude_executor import ClaudeExecutor, _branch_name, pretrust_claude_dir
 from ai_autopilot.execution.pr_scorer import score_badge_html, score_run
@@ -32,8 +34,6 @@ from ai_autopilot.execution.sdlc_plan import (
     resolve_stages,
     stage_score_input,
 )
-from ai_autopilot import activity
-from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, WorkItemInfo
@@ -293,6 +293,12 @@ class SdlcLoopEngine:
         # (sdlc_plan hard-fails on ci_passed is False).
         tests = await self._test_gate.run(primary)
         self._pending_tests = tests  # consumed in _absorb
+        if not tests.ran and not tests.passed:
+            activity.append(ws, item.id, "🧪 tests could not run — blocked by policy")
+            await self._record_quality(
+                item.id, QualityKind.TEST_FAILED, stage=stage.name,
+                actor="test-gate", detail=tests.summary,
+            )
         if tests.ran:
             activity.append(ws, item.id, "🧪 tests " + ("passed" if tests.passed else "FAILED"))
             if not tests.passed:
@@ -316,7 +322,8 @@ class SdlcLoopEngine:
             self._pending_review = None
         tests = getattr(self, "_pending_tests", None)
         if tests is not None and stage.role == "review":
-            signals.ci_passed = tests.passed if tests.ran else None
+            # Not run + not passed = blocked by test_gate_block_when_not_run: a fail.
+            signals.ci_passed = tests.passed if (tests.ran or not tests.passed) else None
             self._pending_tests = None
 
     def _stage_prompt(self, item: WorkItemInfo, stage: SdlcStage, branch: str) -> str:

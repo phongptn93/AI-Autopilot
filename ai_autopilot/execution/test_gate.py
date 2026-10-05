@@ -35,7 +35,11 @@ _MAX_FAILURES = 50
 class TestResult:
     __test__ = False  # not a pytest test class (name starts with "Test")
     passed: bool = True
-    ran: bool = False          # False = gate disabled OR no runner detected (skip)
+    # False = the suite did not run. Then `passed` is True for a skip (gate off, no
+    # runner, or a runner that could not start under the default policy) and False
+    # when test_gate_block_when_not_run turns "could not start" into a block. Callers
+    # block on `not passed`, never on `ran`.
+    ran: bool = False
     summary: str = ""
     output_tail: str = ""
     # What failed, one normalised line each (see :func:`failure_signatures`) — what a
@@ -223,6 +227,11 @@ class TestGate:
         self._config = config
         self._log = get_logger("execution.test_gate")
 
+    @property
+    def _unrun_passes(self) -> bool:
+        """Whether a suite that could not START lets the change through."""
+        return not self._config.test_gate_block_when_not_run
+
     async def run(self, work_dir: str) -> TestResult:
         if not self._config.test_gate_enabled:
             return TestResult(passed=True, ran=False, summary="test gate disabled")
@@ -246,7 +255,7 @@ class TestGate:
                                   repo=repo, runner=runner,
                                   hint="add it to PATH, or set test_commands for this repo")
                 return TestResult(
-                    passed=True, ran=False,
+                    passed=self._unrun_passes, ran=False,
                     summary=f"test runner '{runner}' not found on PATH "
                             f"(add it to PATH or set test_commands for {repo or 'this repo'})",
                 )
@@ -257,7 +266,7 @@ class TestGate:
         if not configured and self._config.test_install_dependencies:
             problem = await self._install_node_deps(work_dir, repo, timeout)
             if problem:
-                return TestResult(passed=True, ran=False,
+                return TestResult(passed=self._unrun_passes, ran=False,
                                   summary=f"skipped — test environment not ready: {problem}")
 
         self._log.info("running test gate", dir=work_dir, repo=repo, cmd=cmd, timeout=timeout)
@@ -282,14 +291,15 @@ class TestGate:
         except Exception as exc:  # noqa: BLE001 — a broken command must not crash the run
             self._log.warning("test gate failed to launch", cmd=cmd, error=describe_exc(exc))
             # Couldn't even start the runner → treat as skip (don't block on our own error).
-            return TestResult(passed=True, ran=False, summary=f"could not run tests: {exc}")
+            return TestResult(passed=self._unrun_passes, ran=False,
+                              summary=f"could not run tests: {exc}")
 
         passed = code == 0
         if not passed and (why := environment_failure(text)):
             # Red because the suite could not START — the machine, not the change.
             self._log.warning("test gate: environment not ready — skipping", dir=work_dir,
                               repo=repo, reason=why)
-            return TestResult(passed=True, ran=False,
+            return TestResult(passed=self._unrun_passes, ran=False,
                               summary=f"skipped — test environment not ready: {why}",
                               output_tail=text[-_OUTPUT_TAIL_CHARS:])
         failures = [] if passed else failure_signatures(text, work_dir)

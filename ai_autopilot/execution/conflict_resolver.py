@@ -333,6 +333,11 @@ class ConflictResolver:
             res.error = "bản giải conflict tạo ra lỗi bảo mật mới: " + "; ".join(new_issues[:3])
             return res
         tests = await ex._test_gate.run(wd)
+        if not tests.ran and not tests.passed:
+            # test_gate_block_when_not_run: no evidence is not good enough to push.
+            res.checks["tests"] = f"could not run ({tests.summary})"
+            res.error = "không chạy được test, chính sách yêu cầu chặn: " + tests.summary
+            return res
         if not tests.ran:
             res.checks["tests"] = f"skipped ({tests.summary})"
         elif tests.passed:

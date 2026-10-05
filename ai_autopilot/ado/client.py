@@ -33,6 +33,8 @@ _MAX_IDS_PER_BATCH = 200
 _TYPE_STATE_TTL_SECONDS = 300.0
 # How long a project whose type listing failed is left alone before trying again.
 _TYPE_DENIED_RETRY_SECONDS = 600.0
+# Longest a single Retry-After is honoured for.
+_MAX_RETRY_AFTER_SECONDS = 60.0
 
 
 def _terse(body: str, limit: int = 300) -> str:
@@ -153,6 +155,9 @@ class AdoClient:
                 return resp
             ra = resp.headers.get("Retry-After", "")
             delay = float(ra) if ra.replace(".", "", 1).isdigit() else min(2**attempt, 8)
+            # Capped: the header is the server's to set, and an hour-long value would
+            # stall the whole poll cycle on one read.
+            delay = min(delay, _MAX_RETRY_AFTER_SECONDS)
             self._log.warning(
                 "ADO throttled/5xx — backing off",
                 status=resp.status_code, attempt=attempt + 1, delay=delay,

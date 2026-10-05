@@ -138,8 +138,11 @@ class ReviseSessions:
                 if ln.strip()]
 
             tests = await ex._test_gate.run(wd)
-            if tests.ran and not tests.passed:
-                res = ExecutionResult.fail(item_id, SKILL, "Tests failed: " + tests.summary)
+            if not tests.passed:
+                res = ExecutionResult.fail(
+                    item_id, SKILL,
+                    ("Tests failed: " if tests.ran else "Tests could not run: ") + tests.summary,
+                )
                 res.files_changed = files
                 return res
             reviewer = getattr(ex, "_reviewer", None)

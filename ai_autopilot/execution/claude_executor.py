@@ -48,6 +48,7 @@ from ai_autopilot.execution.result_contract import (
 from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
+from ai_autopilot.proc import spawn_kwargs, terminate_tree
 from ai_autopilot.workspace import discover_repos, parse_repo_descriptions
 
 _log = get_logger("execution.claude_executor")
@@ -68,6 +69,14 @@ _BRANCH_PREFIX = {
     TaskCategory.FRONTEND_TASK: "feature/fe",
     TaskCategory.BACKEND_TASK: "feature/be",
 }
+
+
+# Upper bound on one git command. Generous — a first fetch of a large repo is slow —
+# but finite: a stalled network or a credential prompt otherwise holds the repo lock
+# and a concurrency slot forever, and the whole pipeline queues behind it.
+_GIT_TIMEOUT_SECONDS = 900.0
+# git must fail rather than ask: there is no one at a terminal to answer.
+_GIT_ENV_OVERRIDES = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
 
 
 class GitError(RuntimeError):
@@ -1097,16 +1106,17 @@ class ClaudeExecutor:
         conflict resolution both come through here, so they are attached to, steered
         and closed the same way.
         """
-        # Remote-Control sessions run locally as a normal (non-root) user and are
-        # meant to proceed UNATTENDED — the human *attaches* to steer when they want
-        # to, they shouldn't have to answer a permission prompt for every Bash/MCP
-        # tool call (which is what stalls a rework). So default this path to
-        # `bypassPermissions` (no prompts); only honour a different configured mode
-        # if the operator explicitly pinned one (i.e. changed it away from the
-        # `acceptEdits` default). The root-only restriction on bypassPermissions
-        # applies to headless container runs, not this local interactive path.
-        perm = self._config.claude_permission_mode
-        interactive_perm = "bypassPermissions" if perm == "acceptEdits" else perm
+        # bypassPermissions lets a session proceed with nobody attached — and lets a
+        # prompt injected through the work item run any command on this machine. So
+        # it is the operator's explicit choice, never a silent default.
+        interactive_perm = self._config.claude_permission_mode
+        if self._config.interactive_bypass_permissions:
+            interactive_perm = "bypassPermissions"
+            self._log.warning(
+                "interactive session runs with bypassPermissions — tool calls are not "
+                "confirmed; a prompt injection in the work item runs unasked",
+                session=session,
+            )
         cli_args = [
             "--remote-control", session,
             "--permission-mode", interactive_perm,
@@ -2073,12 +2083,15 @@ class ClaudeExecutor:
             # PR (mirrors the auto-review block above). A red run blocks the PR; a
             # skip (gate off / no runner) passes through.
             tests = await self._test_gate.run(work_dir)
-            if tests.ran and not tests.passed:
+            if not tests.passed:
                 self._log.warning("test gate blocked PR", id=item_id, summary=tests.summary)
-                result = ExecutionResult.fail(item_id, prompt, "Tests failed: " + tests.summary)
+                result = ExecutionResult.fail(
+                    item_id, prompt,
+                    ("Tests failed: " if tests.ran else "Tests could not run: ") + tests.summary,
+                )
                 result.branch_name = branch
                 result.files_changed = changed_files
-                result.tests_passed = False
+                result.tests_passed = False if tests.ran else None
                 result.output = tests.output_tail
                 result.duration_seconds = time.monotonic() - started
                 apply_usage(result, claude_run)
@@ -2461,7 +2474,13 @@ class ClaudeExecutor:
 
     # ── git helpers ─────────────────────────────────────────────────────────
 
-    async def _git(self, args: str | list[str], work_dir: str, check: bool = True) -> str:
+    async def _git(
+        self,
+        args: str | list[str],
+        work_dir: str,
+        check: bool = True,
+        timeout_seconds: float = _GIT_TIMEOUT_SECONDS,
+    ) -> str:
         argv = args.split() if isinstance(args, str) else args
         # A cwd that is not a directory makes the SPAWN fail, not git — on Windows with
         # `NotADirectoryError: [WinError 267] The directory name is invalid`, which is an
@@ -2480,8 +2499,21 @@ class ClaudeExecutor:
             cwd=work_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, **_GIT_ENV_OVERRIDES},
+            **spawn_kwargs(),
         )
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_seconds
+            )
+        except TimeoutError:
+            await terminate_tree(proc)
+            self._log.warning("git timed out", args=argv, timeout=timeout_seconds)
+            if check:
+                raise GitError(
+                    f"git {' '.join(argv)} timed out after {timeout_seconds:.0f}s"
+                ) from None
+            return ""
         out = stdout.decode(errors="replace")
         if proc.returncode != 0:
             err = stderr.decode(errors="replace") or out

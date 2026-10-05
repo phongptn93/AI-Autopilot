@@ -917,12 +917,19 @@ def check_dashboard_security(config: Settings) -> list[Finding]:
     exposed = config.health_host not in ("127.0.0.1", "localhost", "::1")
     has_auth = bool(config.dashboard_auth_password_hash or config.dashboard_auth_token)
     out: list[Finding] = []
-    if exposed and not has_auth:
+    if exposed and not has_auth and config.dashboard_allow_remote_without_auth:
         out.append(Finding(
             ERROR, "Dashboard reachable from the network with no password",
-            f"health_host={config.health_host}",
+            f"health_host={config.health_host}, dashboard_allow_remote_without_auth=true",
             "Anyone who can reach it can read and rewrite the config, including the ADO "
-            "PAT. Set a dashboard password, or bind health_host to 127.0.0.1.",
+            "PAT. Set a dashboard password, or turn dashboard_allow_remote_without_auth off.",
+        ))
+    elif exposed and not has_auth:
+        out.append(Finding(
+            WARN, "Dashboard has no password — localhost only",
+            f"health_host={config.health_host}",
+            "Other machines get 403 on /dashboard. Set a dashboard password to open it "
+            "to the network.",
         ))
     if exposed and not config.webhook_secret:
         out.append(Finding(

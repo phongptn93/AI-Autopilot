@@ -28,8 +28,8 @@ from ai_autopilot.data import (
     PlannedRunRepository,
     PrCommandRepository,
     PrConflictRepository,
-    PrSessionRepository,
     PrReviewerRepository,
+    PrSessionRepository,
     QualityRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
@@ -45,8 +45,8 @@ from ai_autopilot.execution import (
     FeedbackHandler,
     RetryPolicy,
     SdlcLoopEngine,
+    claude_client,
 )
-from ai_autopilot.execution import claude_client
 from ai_autopilot.execution.sdlc_plan import handoff_collisions
 from ai_autopilot.learning import QualityLog
 from ai_autopilot.logging_config import describe_exc, get_logger

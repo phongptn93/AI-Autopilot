@@ -19,6 +19,8 @@ htmlcov/
 # Runtime data (anchored to repo root so the ai_autopilot/data package is NOT ignored)
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 /logs/
 /data/
 .ado-autopilot-token.json
@@ -40,3 +42,7 @@ config.*.bak
 
 # Office lock files
 ~$*
+
+# Crash dumps and per-run scratch
+*.stackdump
+/.autopilot/

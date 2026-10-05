@@ -268,6 +268,13 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "PR feedback runs in that session's own worktree and RESUMES its conversation, "
           "instead of a fresh worktree and a fresh read of the codebase. Claude Code keys "
           "transcripts by folder, so running anywhere else throws the context away."),
+    Field("interactive_bypass_permissions", "↳ ⚠️ Skip permission prompts (bypassPermissions)",
+          "bool", "Execution & Autonomy",
+          "The session never stops to ask before a Bash/MCP call, so it proceeds while "
+          "nobody is attached. The cost: its brief is built from work-item text, so a "
+          "prompt injection in a ticket runs any command on THIS machine, unasked. Off = "
+          "the session uses the Permission mode like any run, and waits for whoever "
+          "attaches."),
     Field("autonomy_level", "Autonomy level", "select", "Execution & Autonomy",
           "report = comment only, assisted = draft PR, unattended = auto PR.",
           ("report", "assisted", "unattended")),
@@ -331,6 +338,11 @@ _BASE_FIELDS: tuple[Field, ...] = (
     Field("test_gate_enabled", "🧪 Auto-test-gate", "bool", "🧪 Quality gates",
           "Run the repo's test suite in the worktree before opening a PR; a red run blocks "
           "the PR and lowers the run score. Off = no test run."),
+    Field("test_gate_block_when_not_run", "↳ Block the PR when tests could not run",
+          "bool", "🧪 Quality gates",
+          "A runner that cannot start (missing tool, environment not ready) says nothing "
+          "about the change. Off = the PR goes through, marked 'tests not run'. On = it is "
+          "blocked like a red run."),
     Field("test_commands", "↳ Test command per repo", "list", "🧪 Quality gates",
           "One line per repo, <code>Repo = command</code>. A project with more than one "
           "stack cannot be served by a single command — set dotnet test and every "
@@ -862,6 +874,7 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     "interactive_close_on": ("execution_mode", ("interactive",)),
     "interactive_idle_timeout_minutes": ("execution_mode", ("interactive",)),
     "interactive_resume_on_rework": ("execution_mode", ("interactive",)),
+    "interactive_bypass_permissions": ("execution_mode", ("interactive",)),
     "claude_session_ttl_hours": ("reuse_claude_session", ("1",)),
     # ⬆️ Cập nhật — all four are dead weight on a machine that is not checking.
     "update_repo": ("update_check_enabled", ("1",)),
@@ -873,6 +886,7 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     "test_commands": ("test_gate_enabled", ("1",)),
     "test_timeouts": ("test_gate_enabled", ("1",)),
     "test_command": ("test_gate_enabled", ("1",)),
+    "test_gate_block_when_not_run": ("test_gate_enabled", ("1",)),
     "test_timeout_seconds": ("test_gate_enabled", ("1",)),
     "pr_score_auto_min": ("pr_scoring_enabled", ("1",)),
     "pr_score_review_min": ("pr_scoring_enabled", ("1",)),
@@ -1061,6 +1075,7 @@ NEVER_SHARED = frozenset({
     # sharing them would pin a teammate to folders that do not exist on their machine.
     "workspace_map", "workspaces",
     "database_url", "health_host", "health_port", "plugins_directory",
+    "dashboard_allow_remote_without_auth",
     "trigger_tag",          # per-host default tag
     # ── fleet wiring: identity, never shared ──
     # A central that exported these would turn every worker that applied the document

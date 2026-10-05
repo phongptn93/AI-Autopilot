@@ -126,7 +126,9 @@
           <li>
             <div class="tr-when">{{ cmt.get('createdBy', {}).get('displayName', '?') }} ·
               {{ (cmt.get('createdDate') or '')[:16] | replace('T', ' ') }}</div>
-            <div>{{ cmt.get('text', '') | safe }}</div>
+            {# Text, not markup: a comment is written by anyone who can comment on the
+               item, and |safe would hand them script in the dashboard's origin. #}
+            <div>{{ cmt.get('text', '') | striptags }}</div>
           </li>
         {% endfor %}
       </ul>

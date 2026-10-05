@@ -912,7 +912,11 @@ def test_review_belongs_to_dev_once_qc_has_a_queue_of_its_own():
     """
     from ai_autopilot.board import board_columns
     from ai_autopilot.lenses import (
-        SHARED_COLUMNS, coverage_gaps, default_lenses, my_turn_claims, my_turn_columns,
+        SHARED_COLUMNS,
+        coverage_gaps,
+        default_lenses,
+        my_turn_claims,
+        my_turn_columns,
         view_of,
     )
 

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import ipaddress
 import secrets
 from contextlib import asynccontextmanager
 from urllib.parse import quote
@@ -59,7 +60,21 @@ def _dashboard_auth_ok(header: str | None, config: Settings) -> bool:
     )
 
 
-def _dashboard_authenticated(request: Request, config: Settings) -> bool:
+def _is_loopback_client(request: Request) -> bool:
+    """True when the TCP peer is this machine.
+
+    Not authentication: a reverse proxy or tunnel on the same host makes every visitor
+    look local. It only narrows an unprotected dashboard to the operator's own browser
+    until a password is set.
+    """
+    host = request.client.host if request.client else ""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
+
+
+async def _dashboard_authenticated(request: Request, config: Settings) -> bool:
     """Either a valid session cookie (browsers) or HTTP Basic (scripts, curl, probes).
 
     Basic stays supported deliberately: the login page is for people, but automation that
@@ -67,7 +82,11 @@ def _dashboard_authenticated(request: Request, config: Settings) -> bool:
     """
     if security.verify_session_token(request.cookies.get(security.SESSION_COOKIE), config):
         return True
-    return _dashboard_auth_ok(request.headers.get("authorization"), config)
+    # In a thread: the PBKDF2 check costs ~0.3 s of CPU, and on the loop every
+    # Basic-auth attempt (good or bad) would freeze the poller and every other request.
+    return await asyncio.to_thread(
+        _dashboard_auth_ok, request.headers.get("authorization"), config
+    )
 
 
 def _dashboard_challenge(request: Request) -> Response:
@@ -303,12 +322,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
             exposed = config.health_host not in ("127.0.0.1", "localhost", "::1")
             if exposed and not dashboard_has_auth:
-                log.warning(
-                    "dashboard is exposed on a non-loopback host with NO auth — anyone who "
-                    "can reach it can rewrite config (incl. the ADO PAT) and trigger runs. "
-                    "Set dashboard_auth_token (and webhook_secret), or bind health_host to 127.0.0.1.",
-                    health_host=config.health_host, health_port=config.health_port,
-                )
+                if config.dashboard_allow_remote_without_auth:
+                    log.warning(
+                        "dashboard is exposed on a non-loopback host with NO auth — anyone "
+                        "who can reach it can rewrite config (incl. the ADO PAT) and "
+                        "trigger runs. Set a dashboard password.",
+                        health_host=config.health_host, health_port=config.health_port,
+                    )
+                else:
+                    log.warning(
+                        "dashboard has no password — serving it to localhost only. Set a "
+                        "password to open it to the network.",
+                        health_host=config.health_host, health_port=config.health_port,
+                    )
             log.info("autopilot online", health_port=config.health_port)
         except Exception:
             log.error("startup failed — tearing down partially-started services")
@@ -334,16 +360,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         path = request.url.path
         if config.webhook_secret and path.startswith("/api/webhook"):
-            got = request.headers.get("x-webhook-secret") or request.query_params.get("secret", "")
+            got = request.headers.get("x-webhook-secret") or ""
             if not secrets.compare_digest(got, config.webhook_secret):
+                if "secret" in request.query_params:
+                    # Say why: a hook that used to work with ?secret= would otherwise
+                    # just start failing with a bare 401.
+                    log.warning("webhook secret sent in the query string — refused; "
+                                "send it as the X-Webhook-Secret header", path=path)
                 return Response(status_code=401, content="unauthorized")
         dashboard_locked = bool(config.dashboard_auth_password_hash or config.dashboard_auth_token)
         if dashboard_locked and path.startswith("/dashboard"):
             # The login page itself must stay reachable while locked, or there is no way in.
-            if path.rstrip("/") != "/dashboard/login" and not _dashboard_authenticated(
+            if path.rstrip("/") != "/dashboard/login" and not await _dashboard_authenticated(
                 request, config
             ):
                 return _dashboard_challenge(request)
+        elif (
+            path.startswith("/dashboard")
+            and not config.dashboard_allow_remote_without_auth
+            and not _is_loopback_client(request)
+        ):
+            # No password: the dashboard can rewrite config, PAT included, so it is
+            # served to this machine only. /health, /metrics and the webhooks are not
+            # affected — they are what the network legitimately needs.
+            return Response(
+                status_code=403, media_type="text/plain; charset=utf-8",
+                content="Dashboard chưa đặt mật khẩu nên chỉ mở từ chính máy chủ "
+                        "(localhost). Đặt mật khẩu: `ai-autopilot` sẽ hỏi khi khởi động, "
+                        "hoặc vào Settings từ localhost.\n"
+                        "The dashboard has no password, so it only answers localhost.",
+            )
         response = await call_next(request)
         # Dashboard pages are server-rendered snapshots of mutable config, and nothing
         # told the browser so. After a save the 303 lands back on the same URL, which a

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from ai_autopilot.markdown_lite import render
 
-
 # ── nothing in the source may become markup ──────────────────────────────────
 
 

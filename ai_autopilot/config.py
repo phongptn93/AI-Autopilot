@@ -1203,6 +1203,12 @@ class Settings(BaseSettings):
     # the underlying CLI refuses to run it as root for safety — use it only when
     # the service runs as a non-root user.
     claude_permission_mode: str = "acceptEdits"
+    # Interactive (Remote-Control) sessions run on the operator's machine, and the
+    # brief they start from is built from work-item text. True = run them with
+    # `bypassPermissions` so no tool call waits on a prompt — but then a prompt
+    # injection in a ticket runs any command it likes, unasked. False = they use
+    # claude_permission_mode like every other run; whoever attaches answers prompts.
+    interactive_bypass_permissions: bool = False
     # When to close the console launched for an interactive task. The CLI is a REPL:
     # it writes its result and then sits idle forever, so nothing closes on its own.
     #   "pr_closed" – keep it (and its scratch worktree) alive while the PR is open,
@@ -1785,6 +1791,10 @@ class Settings(BaseSettings):
     # BEFORE a PR is opened; a red run blocks the PR (mirrors auto-review) and feeds
     # the CI signal into pr_scorer. Opt-in — off = no behaviour change.
     test_gate_enabled: bool = False
+    # When the suite cannot even START (runner missing, environment not ready), the
+    # gate has nothing to say about the change. False = let the PR through, marked
+    # "tests not run"; True = block it like a red run.
+    test_gate_block_when_not_run: bool = False
     # Explicit test command; blank = auto-detect (pytest / dotnet test / npm test)
     # from the files in the worktree. No runner detected = skip (never blocks).
     test_command: str = ""
@@ -1927,11 +1937,17 @@ class Settings(BaseSettings):
     #     start with neither set, the CLI prompts for a password and persists its
     #     hash here. Either one being set enables the /dashboard auth gate.
     #   webhook_secret – when set, POST /api/webhook/* requires a matching
-    #     `X-Webhook-Secret` header (or `?secret=`), so the run/command trigger
-    #     can't be fired by an unauthenticated request.
+    #     `X-Webhook-Secret` header, so the run/command trigger can't be fired by an
+    #     unauthenticated request. Header only: a `?secret=` query string lands in
+    #     every proxy and access log on the way.
     dashboard_auth_token: str = ""
     dashboard_auth_password_hash: str = ""
     webhook_secret: str = ""
+    # With no dashboard password, /dashboard answers loopback clients only — anyone
+    # else who can reach health_host would otherwise rewrite config (incl. the PAT).
+    # True = serve it to the network anyway; only for a host whose reverse proxy does
+    # its own authentication.
+    dashboard_allow_remote_without_auth: bool = False
     # Symmetric password that encrypts the FULL config export (the download that
     # deliberately includes secrets — PAT, SMTP/Zalo tokens, per-tenant PATs).
     # Must stay usable to encrypt, so it is stored as-is (not hashed); the same

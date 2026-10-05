@@ -87,7 +87,9 @@ async def test_failed_accept_retries_instead_of_killing_the_listener():
     assert (conn, addr) == ("conn", ("10.0.0.2", 51234))
     assert proactor.calls == 2                 # retried rather than gave up
     assert listener.fileno() == 7              # and never closed the listening socket
-    assert log.warnings and log.warnings[0]["winerror"] == 64
+    # Routine on an Internet-facing port, and handled: recorded, not a warning.
+    assert not log.warnings
+    assert log.debugs and log.debugs[0]["winerror"] == 64
 
 
 @pytest.mark.asyncio
@@ -137,3 +139,46 @@ async def test_peer_gone_errors_are_demoted_but_real_ones_are_not():
     boom = ValueError("a real bug")
     handler(loop, {"message": "boom", "exception": boom})
     assert [c["exception"] for c in seen] == [boom]  # delegated to the previous handler
+
+
+@pytest.mark.asyncio
+async def test_a_storm_of_dropped_accepts_warns_once():
+    """Fifty in a minute is a scan or a network fault — worth one line, not fifty."""
+    from ai_autopilot import app as app_mod
+
+    drops = [_win_error(64)] * (app_mod._ACCEPT_STORM_THRESHOLD + 5)
+    proactor = _Proactor([*drops, ("conn", ("10.0.0.2", 1))])
+    log = _Log()
+    _keep_listener_alive_on_accept_error(log, loop=SimpleNamespace(_proactor=proactor))
+    await proactor.accept(_Listener())
+
+    assert len(log.warnings) == 1
+    assert log.warnings[0]["count"] == app_mod._ACCEPT_STORM_THRESHOLD
+
+
+def test_uvicorn_invalid_request_is_counted_not_warned(tmp_path):
+    """A TLS handshake or a scanner's bytes on the plain port: nothing failed."""
+    import logging
+
+    from ai_autopilot import metrics
+    from ai_autopilot.logging_config import configure_logging
+
+    configure_logging(level="INFO", log_dir=str(tmp_path))
+    counter = metrics.HTTP_CLIENT_DROPPED_TOTAL.labels(stage="invalid_request")
+    before = counter._value.get()
+    seen: list[logging.LogRecord] = []
+
+    class _Grab(logging.Handler):
+        def emit(self, record):
+            seen.append(record)
+
+    grab = _Grab()
+    logging.getLogger().addHandler(grab)
+    try:
+        logging.getLogger("uvicorn.error").warning("Invalid HTTP request received.")
+        logging.getLogger("uvicorn.error").warning("something else went wrong")
+    finally:
+        logging.getLogger().removeHandler(grab)
+
+    assert counter._value.get() == before + 1
+    assert [r.getMessage() for r in seen] == ["something else went wrong"]

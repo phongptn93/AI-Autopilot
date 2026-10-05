@@ -8,6 +8,7 @@ import binascii
 import contextlib
 import ipaddress
 import secrets
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
@@ -15,7 +16,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from ai_autopilot import fleet, health, security
+from ai_autopilot import fleet, health, metrics, security
 from ai_autopilot.config import Settings, load_settings
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import create_dashboard_router, forget_scans
@@ -155,6 +156,11 @@ def _quiet_proactor_connection_reset(log) -> None:
     loop.set_exception_handler(handler)
 
 
+# Dropped accepts per window before one warning is worth a person's attention.
+_ACCEPT_STORM_THRESHOLD = 50
+_ACCEPT_STORM_WINDOW_SECONDS = 60.0
+
+
 def _keep_listener_alive_on_accept_error(log, loop=None) -> None:
     """Stop one dead client connection from taking the whole HTTP listener down.
 
@@ -191,6 +197,30 @@ def _keep_listener_alive_on_accept_error(log, loop=None) -> None:
     if accept is None or getattr(proactor, "_autopilot_accept_guard", False):
         return  # not a Proactor loop (POSIX), or already wrapped
 
+    # One client giving up mid-connect is routine on a port the Internet can reach, and
+    # it is handled — logging each as a warning made the log read as if something were
+    # broken. Counted always; a warning only when they arrive as a storm, which is the
+    # case worth a person's attention (a scan, or the network itself failing).
+    window = {"start": 0.0, "count": 0, "warned": False}
+
+    def _note_drop(exc: OSError) -> None:
+        metrics.HTTP_CLIENT_DROPPED_TOTAL.labels(stage="accept").inc()
+        now = time.monotonic()
+        if now - window["start"] > _ACCEPT_STORM_WINDOW_SECONDS:
+            window.update(start=now, count=0, warned=False)
+        window["count"] += 1
+        detail = {"winerror": getattr(exc, "winerror", None), "error": str(exc)}
+        if window["count"] >= _ACCEPT_STORM_THRESHOLD and not window["warned"]:
+            window["warned"] = True
+            log.warning(
+                "many clients dropped during accept — listener kept open",
+                count=window["count"], window_seconds=_ACCEPT_STORM_WINDOW_SECONDS,
+                hint="a port scan, or a network fault between clients and this host",
+                **detail,
+            )
+        else:
+            log.debug("client dropped during accept; listener kept open", **detail)
+
     async def _accept_until_one_succeeds(listener):
         while True:
             try:
@@ -198,10 +228,7 @@ def _keep_listener_alive_on_accept_error(log, loop=None) -> None:
             except OSError as exc:
                 if listener.fileno() == -1:
                     raise  # the listener really is closed — we are shutting down
-                log.warning(
-                    "client dropped during accept; listener kept open",
-                    winerror=getattr(exc, "winerror", None), error=str(exc),
-                )
+                _note_drop(exc)
                 # A storm of failing accepts must not turn into a busy loop.
                 await asyncio.sleep(0.05)
 

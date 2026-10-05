@@ -70,6 +70,31 @@ def configure_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    error_log = logging.getLogger("uvicorn.error")
+    if not any(isinstance(f, _MalformedRequestFilter) for f in error_log.filters):
+        error_log.addFilter(_MalformedRequestFilter())
+
+
+class _MalformedRequestFilter(logging.Filter):
+    """Demote uvicorn's "Invalid HTTP request received." from warning to debug.
+
+    It means bytes arrived that are not HTTP — a TLS handshake against the plain port,
+    a scanner's probe. Nothing failed and nothing can be done about it, yet each one
+    was a warning line next to real problems. It is counted instead
+    (``autopilot_http_client_dropped_total{stage="invalid_request"}``) and still shown
+    when the log level is DEBUG.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno != logging.WARNING or not record.getMessage().startswith(
+            "Invalid HTTP request received"
+        ):
+            return True
+        from ai_autopilot import metrics
+
+        metrics.HTTP_CLIENT_DROPPED_TOTAL.labels(stage="invalid_request").inc()
+        record.levelno, record.levelname = logging.DEBUG, "DEBUG"
+        return logging.getLogger().isEnabledFor(logging.DEBUG)
 
 
 def describe_exc(exc: BaseException) -> str:

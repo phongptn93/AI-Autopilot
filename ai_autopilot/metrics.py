@@ -28,6 +28,14 @@ ACTIVE_EXECUTIONS = Gauge(
 )
 
 RETRY_TOTAL = Counter("autopilot_retry_total", "Total retry attempts")
+# Connections a client abandoned or garbled before they could be served — normal for a
+# port reachable from the Internet (scanners, sleeping laptops, VPN flaps), so counted
+# here instead of logged as a warning each time. stage: accept | invalid_request.
+HTTP_CLIENT_DROPPED_TOTAL = Counter(
+    "autopilot_http_client_dropped_total",
+    "HTTP connections dropped or malformed before a request was served",
+    ["stage"],
+)
 COST_TOKENS_TOTAL = Counter("autopilot_cost_tokens_total", "Total tokens consumed")
 
 # ── PR reviewer tracking ──

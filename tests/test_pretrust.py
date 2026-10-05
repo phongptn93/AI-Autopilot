@@ -74,3 +74,26 @@ def test_no_temp_file_left_behind(tmp_path, monkeypatch):
     pretrust_claude_dir(str(scratch))
 
     assert [p.name for p in cfg.parent.iterdir()] == [".claude.json"]
+
+
+def test_every_console_launch_pretrusts_its_folder(tmp_path, monkeypatch):
+    """The conflict and revise sessions opened a console without pre-trusting their
+    scratch, and sat on "Do you trust this folder?" until a human pressed Enter. The
+    launch itself must do it, so no caller can forget."""
+    from ai_autopilot.config import Settings
+    from ai_autopilot.execution import claude_executor
+    from ai_autopilot.execution.claude_executor import ClaudeExecutor
+
+    cfg = _fake_home(tmp_path, monkeypatch, {"projects": {}})
+    scratch = tmp_path / ".aiwt" / "agent-conflict-7"
+    scratch.mkdir(parents=True)
+
+    class _Proc:
+        pid = 7
+
+    monkeypatch.setattr(claude_executor.subprocess, "Popen", lambda *a, **k: _Proc())
+    assert ClaudeExecutor(Settings(), None)._launch_console(str(scratch), "s", "go") == 7
+
+    projects = json.loads(cfg.read_text(encoding="utf-8"))["projects"]
+    key = next(k for k in projects if k.endswith("agent-conflict-7"))
+    assert projects[key]["hasTrustDialogAccepted"] is True

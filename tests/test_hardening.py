@@ -160,6 +160,8 @@ def test_webhook_secret_is_not_accepted_from_the_query_string(tmp_path):
 # ── B: bypassPermissions is opt-in ──────────────────────────────────────────
 def _launched_args(monkeypatch, **over) -> list[str]:
     seen: list[str] = []
+    # A launch pre-trusts its folder in ~/.claude.json — keep that off the real one.
+    monkeypatch.setattr(claude_executor, "pretrust_claude_dir", lambda _p: True)
 
     class _P:
         pid = 1

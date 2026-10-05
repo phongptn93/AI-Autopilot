@@ -1106,6 +1106,12 @@ class ClaudeExecutor:
         conflict resolution both come through here, so they are attached to, steered
         and closed the same way.
         """
+        # Every console opens on a scratch path Claude Code has never seen, and an
+        # untrusted path stops at "Do you trust this folder?" before the session does
+        # anything — no permission mode answers it. Done HERE, not by each caller: the
+        # conflict and revise sessions launched through this method without it and
+        # sat on the dialog until someone pressed Enter.
+        pretrust_claude_dir(cwd)
         # bypassPermissions lets a session proceed with nobody attached — and lets a
         # prompt injected through the work item run any command on this machine. So
         # it is the operator's explicit choice, never a silent default.

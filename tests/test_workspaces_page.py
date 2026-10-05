@@ -11,16 +11,16 @@ import pytest
 import yaml
 from starlette.testclient import TestClient
 
-from ai_autopilot import dashboard
 from ai_autopilot.app import create_app
 from ai_autopilot.config import Settings
+from ai_autopilot.dashboard.routes import workspaces as workspaces_routes
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch) -> TestClient:
     config_file = tmp_path / "config.yaml"
     config_file.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(dashboard, "config_file_path", lambda: config_file)
+    monkeypatch.setattr(workspaces_routes, "config_file_path", lambda: config_file)
     settings = Settings(
         dry_run=True,
         ado_organization="https://dev.azure.com/o",

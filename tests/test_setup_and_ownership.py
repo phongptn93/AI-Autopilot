@@ -61,7 +61,7 @@ def test_the_two_reasons_stay_separate():
     a page that says the first about max_concurrent is lying."""
     assert not (sf.MACHINE_LOCAL & sf.NEVER_SHARED)
     assert sf.EXPORT_EXCLUDE == sf.NEVER_SHARED | sf.MACHINE_LOCAL
-    assert sf.MACHINE_LOCAL <= set(Settings.model_fields)
+    assert set(Settings.model_fields) >= sf.MACHINE_LOCAL
 
 
 def test_scheduled_loops_are_per_machine():
@@ -698,21 +698,9 @@ def test_a_genuinely_missing_essential_is_still_named(tmp_path):
 
 def _step_keys(role: str, source: str = "ado") -> dict:
     """{step id: field keys} for a role, read out of the wizard's own flow."""
-    from ai_autopilot import dashboard
+    from ai_autopilot.dashboard.routes._shared import _setup_flow
 
-    router = dashboard.create_dashboard_router()
-    flow = None
-    for route in router.routes:
-        fn = getattr(route, "endpoint", None)
-        for cell in (fn.__closure__ or ()) if fn else ():
-            try:
-                candidate = cell.cell_contents
-            except ValueError:
-                continue
-            if getattr(candidate, "__name__", "") == "_setup_flow":
-                flow = candidate
-    assert flow is not None, "_setup_flow not found in the router"
-    return {sid: keys for sid, _title, keys in flow(role, source)}
+    return {sid: keys for sid, _title, keys in _setup_flow(role, source)}
 
 
 def test_the_wizard_asks_how_work_is_picked_up():
@@ -747,20 +735,9 @@ def test_a_worker_is_not_offered_settings_its_central_serves():
 def test_the_pickup_step_comes_after_the_tracker_connection():
     """Its state list is read from the project. Asking which states mean "start here"
     before we can name them leaves the operator typing them from memory."""
-    from ai_autopilot import dashboard
+    from ai_autopilot.dashboard.routes._shared import _setup_flow
 
-    router = dashboard.create_dashboard_router()
-    flow = None
-    for route in router.routes:
-        fn = getattr(route, "endpoint", None)
-        for cell in (fn.__closure__ or ()) if fn else ():
-            try:
-                candidate = cell.cell_contents
-            except ValueError:
-                continue
-            if getattr(candidate, "__name__", "") == "_setup_flow":
-                flow = candidate
-    ids = [sid for sid, _t, _k in flow("standalone", "ado")]
+    ids = [sid for sid, _t, _k in _setup_flow("standalone", "ado")]
     assert ids.index("ado") < ids.index("pickup")
 
 

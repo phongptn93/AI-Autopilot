@@ -633,7 +633,10 @@ def test_every_flash_redirect_uses_a_code_that_has_wording(tmp_path):
     silently. Catch a typo'd code at test time rather than in a user's browser."""
     import re
 
-    source = (Path(dashboard.__file__)).read_text(encoding="utf-8")
+    # Every module of the dashboard package — the redirects live in routes/ now.
+    source = "\n".join(
+        p.read_text(encoding="utf-8") for p in Path(dashboard.__file__).parent.rglob("*.py")
+    )
     used = set(re.findall(r'_flash\(\s*"[^"]*"\s*,\s*"([^"]+)"', source))
     assert used, "no _flash() call sites found — did the redirects move?"
     assert used <= set(dashboard.FLASH_MESSAGES), used - set(dashboard.FLASH_MESSAGES)
@@ -1104,17 +1107,6 @@ async def test_scan_cache_invalidate_forces_a_rescan():
     assert await cache.blocking(lambda: _async_value(2)) == 2
 
 
-def _find_closure(router, name):
-    """Pull a closure defined inside create_dashboard_router out of a route handler."""
-    for route in router.routes:
-        fn = getattr(route, "endpoint", None)
-        for cell in (fn.__closure__ or ()) if fn else ():
-            with contextlib.suppress(ValueError):
-                if getattr(cell.cell_contents, "__name__", "") == name:
-                    return cell.cell_contents
-    raise AssertionError(f"{name} not found in router closures")
-
-
 async def _no_reviewers():
     return []
 
@@ -1146,7 +1138,7 @@ async def test_reviews_scan_asks_for_each_pr_link_once_and_concurrently():
         config=Settings(),
         pr_reviewer_repo=SimpleNamespace(all_reviewers=_no_reviewers),
     )
-    scan = _find_closure(dashboard.create_dashboard_router(), "_scan_reviews")
+    from ai_autopilot.dashboard.routes.reviews import _scan_reviews as scan
     prs = await scan(c)
     assert len(prs) == 2
     assert ado.link_calls == 2              # one per PR, no repeats
@@ -1164,7 +1156,7 @@ async def test_reviews_scan_raises_instead_of_publishing_a_short_list():
         config=Settings(),
         pr_reviewer_repo=SimpleNamespace(all_reviewers=_no_reviewers),
     )
-    scan = _find_closure(dashboard.create_dashboard_router(), "_scan_reviews")
+    from ai_autopilot.dashboard.routes.reviews import _scan_reviews as scan
     with pytest.raises(RuntimeError):
         await scan(c)
 

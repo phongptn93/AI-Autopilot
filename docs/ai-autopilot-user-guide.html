@@ -110,6 +110,7 @@
   <a href="#cfg-teams">29. Bot Teams &amp; effort</a>
   <a href="#cfg-misc">30. Schedule · budget · notify · RBAC</a>
   <h4>Vận hành</h4>
+  <a href="#fleet">30b. 🛰 Fleet (trung tâm &amp; máy trạm)</a>
   <a href="#scenarios">31. Các kịch bản mẫu</a>
   <a href="#pitfalls">32. Lưu ý &amp; lỗi thường gặp</a>
 </nav>
@@ -188,6 +189,7 @@
 <!-- 3 -->
 <section id="setup">
 <h2>3. Cài đặt &amp; khởi động</h2>
+<div class="callout c-ok"><div class="h">⚡ Cài nhanh</div>Bản tóm tắt 5 phút (cài đặt → doctor → cấu hình an toàn → bật Fleet) ở <span class="path">docs/QUICK-SETUP.md</span>.</div>
 <h3>3.1 Chuẩn bị</h3>
 <ul>
 <li><b>Azure DevOps PAT</b> (quyền Work Items read/write, Code read/write, Build read).</li>
@@ -1137,6 +1139,28 @@ sdlc_profile_states: { dev: <span class="s">"Ready to Test"</span> }</pre>
 <h4>D. Team dùng chung 1 tag, mỗi người 1 máy</h4>
 <pre>assignee_trigger_tag: <span class="s">ai-autopilot</span>
 assignee_trigger_user: <span class="s">phong.pham@nois.vn</span>   <span class="c"># máy của Phong chỉ lo việc gán cho Phong</span></pre>
+</section>
+
+<section id="fleet">
+<h2>30b. 🛰 Fleet — máy trung tâm &amp; máy trạm</h2>
+<p>Một <b>máy trung tâm</b> giữ cấu hình chung, theo dõi, điều khiển và giao việc cho nhiều <b>máy trạm</b>. Chỉ máy trạm gọi đi (heartbeat mỗi <span class="def">10 phút</span>, hỏi lệnh mỗi <span class="def">60 giây</span>) — trung tâm không bao giờ gọi vào máy trạm, nên máy sau NAT/VPN vẫn tham gia được. Hướng dẫn đầy đủ: <span class="path">docs/fleet-guide.md</span>.</p>
+<h3>Bật Fleet</h3>
+<table>
+<tr><th>Máy</th><th>Settings → 🛰 Fleet</th></tr>
+<tr><td>Trung tâm</td><td><code>fleet_role: central</code> · sinh <b>Token chung</b> (✨) · <code>health_host: 0.0.0.0</code> + mật khẩu dashboard</td></tr>
+<tr><td>Máy trạm</td><td><code>fleet_role: worker</code> · <code>fleet_central_url</code> · token khớp (ENV <code>AUTOPILOT_FLEET_TOKEN</code>)</td></tr>
+</table>
+<h3>Trên trang Fleet của trung tâm</h3>
+<ul>
+<li><b>Dải tổng quan</b>: online/offline · đang chạy / sức chứa · tạm dừng · xong/lỗi hôm nay · config lệch · cần cập nhật · disk thấp.</li>
+<li><b>🎯 Giao việc</b>: nhập mã work item → máy cụ thể hoặc <b>⚡ máy rảnh nhất</b> (bỏ máy offline/tạm dừng/đang cập nhật; ưu tiên đúng vai; tải = đang chạy ÷ sức chứa). Máy nhận gắn <b>trigger tag của nó</b> lên item.</li>
+<li><b>Điều khiển</b> từng máy hoặc toàn fleet: ⏸ Tạm dừng · ▶ Tiếp tục · ⟳ Đồng bộ · ⬆ Cập nhật (đợi run xong rồi mới cài). Lệnh có trạng thái <i>chờ → đã nhận → xong/thất bại</i>, hoặc <i>hết hạn/đã huỷ</i>.</li>
+<li><b>Sức khỏe</b> từng máy: disk, uptime, tracker, run lỗi liên tiếp, lỗi gần nhất.</li>
+<li><b>Cảnh báo</b>: 🔴 máy offline / 🟢 online lại qua kênh thông báo (<code>fleet_alert_offline</code>).</li>
+</ul>
+<h3>Trên trang Fleet của máy trạm</h3>
+<p>Trạng thái kết nối, lệnh vừa xử lý, nút <b>⏸ Tạm dừng máy này / ▶ Tiếp tục</b> tại chỗ. Máy trạm luôn có quyền cuối: <code>fleet_accept_commands: false</code> từ chối mọi lệnh, <code>fleet_accept_remote_update: false</code> từ chối cài bản mới, <code>fleet_local_keys</code> giữ thiết lập riêng.</p>
+<div class="callout c-warn"><div class="h">⚠️ Lưu ý</div>Tạm dừng nằm trong bộ nhớ — khởi động lại tiến trình máy trạm sẽ bỏ tạm dừng. Cập nhật <b>trung tâm trước</b>, rồi mới bấm "Cập nhật máy cũ". Máy chạy bản cũ chưa hiểu hàng đợi lệnh → lệnh sẽ <i>hết hạn</i>; cập nhật tay lần đầu.</div>
 </section>
 
 <!-- 20 -->

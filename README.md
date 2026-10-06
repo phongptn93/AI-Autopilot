@@ -69,6 +69,8 @@ a restart resumes exactly where it left off.
 
 ## 🚀 Quick start
 
+> **New here?** [`docs/QUICK-SETUP.md`](docs/QUICK-SETUP.md) is the 5-minute version — install, first config, `doctor`, and turning on Fleet.
+
 ```bash
 # 1. Install (Python 3.11+)
 python -m venv .venv && source .venv/bin/activate
@@ -277,6 +279,25 @@ unresolved review comments and feed them back to Claude to revise (bounded by
 `max_revisions`).
 
 ---
+
+## 🛰 Fleet — one central, many worker machines
+
+Every machine is a complete autopilot. Fleet mode adds a **centre**: one VM holds the shared
+configuration and watches/controls every worker. Connectivity is **one-way** (worker → central),
+so a machine behind NAT or VPN takes part without opening a port.
+
+| Capability | What it does |
+|---|---|
+| **Shared config** | Workers pull the central's settings by hash; secrets, paths, tags and `fleet_*` never travel (filtered on both ends). `fleet_local_keys` keeps a setting per machine. |
+| **Remote control** | Pause / resume / sync / update one machine or the whole fleet. Commands are a queue the worker polls every `fleet_command_poll_seconds` (60s) — each one ends `done`, `failed` (with the worker's reason), `expired` or `cancelled`. |
+| **Dispatch** | Hand a work item to a named machine or the freest eligible one (role-aware, load = running ÷ capacity). The worker claims it with its own trigger tag. |
+| **Health** | Disk, uptime, capacity, tracker auth, failure streak, last error, poller state — per machine, plus a fleet-wide KPI strip. |
+| **Alerts** | One notice when a worker goes offline, one when it returns — through the normal channels and alert policy. |
+| **Shared knowledge** | Lessons learned on one machine are pooled at the centre and handed back once approved (or corroborated by N machines). |
+
+Workers keep the last word: `fleet_accept_commands: false` refuses remote commands,
+`fleet_accept_remote_update: false` refuses remote installs, and a paused worker can always be
+resumed from its own Fleet page. Full guide: [`docs/fleet-guide.md`](docs/fleet-guide.md).
 
 ## 🔐 Security scanning
 
@@ -518,6 +539,8 @@ conflicts with the new one). Fix, in order:
 
 | Doc | Contents |
 |-----|----------|
+| [`docs/QUICK-SETUP.md`](docs/QUICK-SETUP.md) | ⚡ 5-minute install & first-run checklist, including Fleet. |
+| [`docs/fleet-guide.md`](docs/fleet-guide.md) | 🛰 Fleet: central & worker pages, remote commands, dispatch, health, alerts, every setting. |
 | [`docs/ai-autopilot-user-guide.html`](docs/ai-autopilot-user-guide.html) | Full usage & configuration guide (every setting explained). |
 | [`docs/planning-sdlc-v2-full-guide.html`](docs/planning-sdlc-v2-full-guide.html) | Technical deep‑dive on Planning + SDLC v2. |
 | [`docs/security-scan.md`](docs/security-scan.md) | Security scanning: scanners, AI triage, fingerprints/baseline, suppressions, CLI & CI usage. |

@@ -414,6 +414,44 @@
 </div>
 {% endif %}
 
+{% if health and health.total %}
+{# The store in five numbers. "Lặp lại" is the one to act on: a guess the skill
+   already carried that keeps biting — the skill is not preventing it, a rule would. #}
+<div class="card kh-card">
+  <div class="kh-grid">
+    <div class="kh"><b>{{ health.total }}</b><span>tri thức</span></div>
+    <div class="kh"><b>{{ health.rules }}</b><span>quy tắc (luôn nạp)</span></div>
+    <div class="kh"><b>{{ health.learned }}</b><span>máy tự rút (skill)</span></div>
+    <div class="kh {{ 'warn' if health.recurring }}"><b>{{ health.recurring }}</b><span>lặp lại ≥{{ recurring_at }} lần</span></div>
+    <div class="kh {{ 'mute' if health.stale }}"><b>{{ health.stale }}</b><span>cũ &gt; {{ stale_days }} ngày</span></div>
+  </div>
+  {% if health.recurring or health.stale %}
+  <div class="kh-advice">
+    {% if health.recurring %}<div>⚠️ <b>{{ health.recurring }}</b> bài học vẫn <b>lặp lại</b> dù đã có trong skill —
+      skill không ngăn được. Bấm <b>📌 Nâng thành quy tắc</b> ở dòng đó để nó vào file rule mà mọi run đều nạp.</div>{% endif %}
+    {% if health.stale %}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">🧹 <span><b>{{ health.stale }}</b> bài học chỉ gặp một lần,
+      đã hơn {{ stale_days }} ngày — đã tự rút khỏi skill/brief.</span>
+      <form method="post" action="/dashboard/learning/prune-stale" style="margin:0"
+            onsubmit="return confirm('Xoá hẳn các bài học cũ chỉ gặp một lần?');">
+        <button class="btn-ghost" type="submit">Dọn bài học cũ</button></form></div>{% endif %}
+  </div>
+  {% endif %}
+</div>
+<style>
+  .kh-card { padding:14px 16px; }
+  .kh-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+  .kh { border:1px solid var(--border); border-radius:10px; padding:9px 12px; }
+  .kh b { display:block; font-size:20px; }
+  .kh span { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
+  .kh.warn b { color:#d29922; } .kh.mute b { color:var(--text-dim); }
+  .kh-advice { margin-top:12px; display:flex; flex-direction:column; gap:8px; font-size:13px; line-height:1.55; }
+  .krow.stale { opacity:.55; }
+  .rep.hot { background:rgba(210,153,34,.18); color:#d29922; }
+  .promote-btn { font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid #d29922; color:#d29922;
+    background:none; cursor:pointer; font-family:inherit; white-space:nowrap; }
+</style>
+{% endif %}
+
 {% for repo, rows in groups %}
 <div class="card">
   <div class="card-header repo-head">
@@ -440,7 +478,7 @@
       </div>
       {% for lesson, live in rows %}
       {% set rid = repo | replace('.','_') | replace('-','_') ~ '_' ~ loop.index %}
-      <div class="krow {{ ('live' if live else 'off') if max_injected else '' }}">
+      <div class="krow {{ ('live' if live else 'off') if max_injected else '' }}{{ ' stale' if lesson.stale() }}">
         <span class="kwhen">{{ lesson.date or '—' }}</span>
         <span class="ksrc">
           {% if lesson.authored %}
@@ -463,7 +501,8 @@
           </form>
         </span>
         <span class="kmark">
-          {% if lesson.count > 1 %}<span class="rep"
+          {% if lesson.stale() %}<span class="noinj" title="Chỉ gặp một lần, đã hơn {{ stale_days }} ngày — không còn vào skill/brief.">cũ</span>{% endif %}
+          {% if lesson.count > 1 %}<span class="rep {{ 'hot' if lesson.recurring }}"
             title="Chuyện này đã xảy ra {{ lesson.count }} lần. Trước đây nó nằm thành {{ lesson.count }} dòng riêng và chiếm {{ lesson.count }} suất nạp của brief — giờ gộp làm một.">{{ lesson.count }} lần</span>{% endif %}
           {# Mark the EXCEPTION, not the rule. Marking every injected row put the same
              chip on all four rows of a four-row table — four labels carrying no
@@ -474,6 +513,14 @@
             title="Quá suất — dòng này KHÔNG vào brief. Xoá bớt dòng cũ, hoặc tăng lessons_max_injected ở Settings.">ngoài suất</span>{% endif %}
         </span>
         <span class="kact">
+          {% if lesson.recurring %}
+          <form method="post" action="/dashboard/learning/promote" style="display:inline">
+            <input type="hidden" name="repo" value="{{ repo }}"/>
+            <input type="hidden" name="text" value="{{ lesson.text }}"/>
+            <button class="promote-btn" type="submit"
+                    title="Lặp lại {{ lesson.count }} lần dù đã có trong skill — đưa vào file rule mà mọi run đều nạp">📌 Nâng thành quy tắc</button>
+          </form>
+          {% endif %}
           <button class="x-btn" type="button" title="Sửa câu chữ, giữ nguyên ngày và số lần"
                   onclick="document.getElementById('e{{ rid }}').classList.toggle('on')">✎</button>
           <form method="post" action="/dashboard/learning/delete" style="display:inline"

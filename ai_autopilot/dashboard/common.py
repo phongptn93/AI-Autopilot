@@ -139,6 +139,9 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "req_feedback_sent": ("green", "💬 Đã gửi góp ý lên work item."),
     "req_approved": ("green", "✅ Đã duyệt spec (comment SPEC APPROVED trên work item)."),
     "req_approved_dev": ("green", "✅ Đã duyệt spec và giao cho vai Dev."),
+    "lesson_promoted": ("green", "📌 Đã nâng thành quy tắc — từ giờ nó nằm trong file rule mà "
+                                 "mọi run đều nạp, không còn là suy đoán trong skill."),
+    "lessons_pruned": ("green", "🧹 Đã dọn các bài học cũ chỉ gặp một lần."),
     "preset_applied": ("green", "✅ Đã áp dụng preset. Các thiết lập cũ được ghi trong Audit "
                                 "(<code>config.preset_applied</code>) nếu cần đặt lại."),
     "preset_unknown": ("red", "⛔ Không có preset đó."),

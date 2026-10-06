@@ -144,6 +144,9 @@ def create_router() -> APIRouter:
                 memory_file=memory_file, memory_body=memory_body,
                 memory_pointer=memory_pointer,
                 memory_live=memory_live,
+                health=lessons_mod.health(workspace) if workspace else {},
+                stale_days=lessons_mod.STALE_AFTER_DAYS,
+                recurring_at=lessons_mod.RECURRING_AT,
                 total=sum(len(rows) for _, rows in groups),
                 authored=authored,
                 # Repeats are collapsed now, so this counts the occurrences BEHIND the
@@ -275,6 +278,41 @@ def create_router() -> APIRouter:
             _log.info("knowledge compacted via dashboard", merged=merged, dropped=dropped)
         return _flash("/dashboard/learning",
                       "compacted" if (merged or dropped) else "compact_clean")
+
+    @router.post("/learning/promote")
+    async def learning_promote(request: Request):
+        """Turn a learned line that keeps recurring into a rule (always loaded)."""
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        form = await request.form()
+        repo, text = str(form.get("repo") or ""), str(form.get("text") or "")
+        workspace = c.config.workspace_directory
+        if not lessons_mod.promote(workspace, repo, text):
+            return _flash("/dashboard/learning", "lesson_none_added")
+        with contextlib.suppress(Exception):
+            lessons_mod.sync_memory(workspace)     # the rule file must carry it now
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="knowledge.promoted",
+            target=f"{repo}: {text}"[:300],
+        )
+        return _flash("/dashboard/learning", "lesson_promoted")
+
+    @router.post("/learning/prune-stale")
+    async def learning_prune_stale(request: Request):
+        from ai_autopilot import lessons as lessons_mod
+
+        c: Container = request.app.state.container
+        workspace = c.config.workspace_directory
+        removed = lessons_mod.prune_stale(workspace)
+        if removed:
+            with contextlib.suppress(Exception):
+                lessons_mod.sync_memory(workspace)
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="knowledge.pruned_stale",
+                target=f"{removed} lines",
+            )
+        return _flash("/dashboard/learning", "lessons_pruned" if removed else "compact_clean")
 
     @router.post("/learning/edit")
     async def learning_edit(request: Request):

@@ -43,6 +43,15 @@ _LESSONS_SUBDIR = Path(".autopilot") / "lessons"
 #: unattributable signal still teaches.
 SHARED_BUCKET = "_workspace"
 _MAX_LESSONS = 50  # keep the file bounded — oldest lines drop off
+#: A machine-learned line seen ONCE and not again for this long has stopped being
+#: news: whatever caused it was fixed, or it was a one-off. It stays in the file (a
+#: human may still want it) but leaves the skill and the brief, so it stops costing
+#: every run a line of attention.
+STALE_AFTER_DAYS = 90
+#: A machine-learned line that keeps coming back this many times was already in the
+#: repo's skill for every repeat after the first — the skill is not preventing it. That
+#: is the signal to stop treating it as a guess and make it a rule (always loaded).
+RECURRING_AT = 3
 _SAFE_REPO = re.compile(r"[^A-Za-z0-9._-]+")
 # ``- [2026-09-18] text``            legacy + machine-learned, seen once
 # ``- [2026-09-18][a] text``         a human typed this one
@@ -82,6 +91,21 @@ class Lesson:
     def pinned(self) -> bool:
         """Is this a standing instruction (typed by a human, here or at the centre)?"""
         return self.source in _PINNED
+
+    @property
+    def recurring(self) -> bool:
+        """A guess that keeps biting despite being known — ripe to become a rule."""
+        return not self.pinned and self.count >= RECURRING_AT
+
+    def stale(self, today: date | None = None) -> bool:
+        """Seen once, long ago, never again. Pinned lines and repeats never go stale."""
+        if self.pinned or self.count > 1:
+            return False
+        try:
+            seen = date.fromisoformat((self.date or "")[:10])
+        except ValueError:
+            return False
+        return ((today or date.today()) - seen).days > STALE_AFTER_DAYS
 
 
 def normalize(text: str) -> str:
@@ -337,12 +361,12 @@ def render_skill(workspace: str, repo: str) -> str:
     in scope, and a description that stands up on its own covers the case where somebody
     runs the agent by hand.
     """
-    learned = [le for le in _read(workspace, repo) if not le.pinned]
+    learned = [le for le in _read(workspace, repo) if not le.pinned and not le.stale()]
     if not learned:
         return ""
-    # Newest first: the same order the store shows a human, and the order in which a
-    # reader who stops halfway has read the most useful half.
-    learned = list(reversed(learned))
+    # What keeps happening first, then newest first: a reader who stops halfway has
+    # read the lines most likely to bite this run. Stale one-offs are left out.
+    learned = sorted(reversed(learned), key=lambda le: -le.count)
     repeated = [le for le in learned if le.count > 1]
     topic = "; ".join(le.text[:60].rstrip() for le in (repeated or learned)[:3])
     desc = (
@@ -602,11 +626,14 @@ def recent(workspace: str, repos: list[str], *, limit: int = 8) -> list[str]:
                 seen.add(key)
                 picked.append(lesson)
     authored = [le.text for le in picked if le.pinned]
-    learned = [le.text for le in picked if not le.pinned]
-    # Authored lines keep the whole budget if they need it; whatever is left goes to
-    # the newest learned ones (the tail, because these lists are oldest-first).
+    learned = [le for le in picked if not le.pinned and not le.stale()]
+    # Authored lines keep the whole budget if they need it. What is left goes to the
+    # learned lines that keep RECURRING, then the newest — recency alone let one noisy
+    # afternoon of one-off findings push out the mistake that has happened six times.
     room = max(0, limit - len(authored))
-    return [*authored[-limit:], *learned[-room:]]
+    ranked = sorted(range(len(learned)), key=lambda i: (learned[i].count, i), reverse=True)
+    chosen = sorted(ranked[:room])          # back to file order, oldest first
+    return [*authored[-limit:], *(learned[i].text for i in chosen)]
 
 
 def lessons_brief(workspace: str, repos: list[str], *, limit: int = 8) -> str:
@@ -692,6 +719,54 @@ def edit(workspace: str, repo: str, old: str, new: str) -> bool:
         else:
             out.append(le)
     return _write(workspace, repo, out) if hit else False
+
+
+def promote(workspace: str, repo: str, text: str) -> bool:
+    """Make a learned line a rule: pinned, always loaded, never dropped.
+
+    The step that closes the loop. A line the skill already carried kept recurring,
+    so the skill is not preventing it; a rule in ``.claude/rules`` is in front of every
+    run. Keeps the line's history (date, count) — only its standing changes.
+    """
+    if not workspace or not repo or not text.strip():
+        return False
+    items = _read(workspace, repo)
+    out, hit = [], False
+    for le in items:
+        if not hit and le.text == text.strip() and not le.pinned:
+            out.append(Lesson(repo=repo, date=le.date, text=le.text,
+                              source=SOURCE_AUTHORED, count=le.count))
+            hit = True
+        else:
+            out.append(le)
+    return _write(workspace, repo, out) if hit else False
+
+
+def prune_stale(workspace: str, *, today: date | None = None) -> int:
+    """Delete every stale line (see :meth:`Lesson.stale`). Returns how many went."""
+    removed = 0
+    for repo in list_repos(workspace):
+        items = _read(workspace, repo)
+        keep = [le for le in items if not le.stale(today)]
+        if len(keep) != len(items) and _write(workspace, repo, keep):
+            removed += len(items) - len(keep)
+    return removed
+
+
+def health(workspace: str, *, today: date | None = None) -> dict[str, int]:
+    """The knowledge store in five numbers — what the Learning page leads with.
+
+    ``recurring`` is the one to act on: guesses that keep biting although the skill
+    already carried them. ``stale`` is the one to clean.
+    """
+    every = [le for repo in list_repos(workspace) for le in _read(workspace, repo)]
+    return {
+        "total": len(every),
+        "rules": sum(1 for le in every if le.pinned),
+        "learned": sum(1 for le in every if not le.pinned),
+        "recurring": sum(1 for le in every if le.recurring),
+        "stale": sum(1 for le in every if le.stale(today)),
+    }
 
 
 def all_entries(workspace: str) -> list[Lesson]:

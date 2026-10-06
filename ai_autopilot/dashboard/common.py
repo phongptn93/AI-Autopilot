@@ -64,6 +64,11 @@ class _DriftGroup(dict):
 
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+# The sidebar is rendered on every page, including the few that build their context
+# without ``_ctx`` — so it is a global, not a context key someone can forget.
+from ai_autopilot.dashboard import nav as _nav  # noqa: E402
+
+_TEMPLATES.env.globals["nav_groups"] = _nav.groups
 
 # ── Flash messages ────────────────────────────────────────────────────────────
 # The outcome of a POST used to travel in the query string of the redirect that follows

@@ -244,6 +244,13 @@
             font-family: inherit; cursor: pointer; }
         .ws-picker select:hover { border-color: var(--accent); }
         .ws-picker button { margin-top: 6px; width: 100%; }
+        details.nav-group > summary { list-style: none; cursor: pointer; user-select: none;
+            display: flex; align-items: center; justify-content: space-between; }
+        details.nav-group > summary::-webkit-details-marker { display: none; }
+        details.nav-group > summary::after { content: "▾"; font-size: 10px; opacity: .55;
+            transition: transform .15s; margin-right: 6px; }
+        details.nav-group:not([open]) > summary::after { transform: rotate(-90deg); }
+        details.nav-group > summary:hover { color: var(--text); }
     </style>
 </head>
 <body>
@@ -268,42 +275,38 @@
         </form>
         {% endif %}
         <div class="nav-scroll">
-        <div class="nav-section">Operate</div>
-        <nav>
-            <a class="nav-link {{ 'active' if active == 'overview' else '' }}" href="/dashboard"><span class="ico">📊</span> Overview</a>
-            <a class="nav-link {{ 'active' if active == 'delivery' else '' }}" href="/dashboard/delivery"><span class="ico">🚚</span> Delivery</a>
-            <a class="nav-link {{ 'active' if active == 'now' else '' }}" href="/dashboard/now"><span class="ico">⏱</span> In flight</a>
-            <a class="nav-link {{ 'active' if active == 'board' else '' }}" href="/dashboard/board"><span class="ico">🗂️</span> Board</a>
-            <a class="nav-link {{ 'active' if active == 'planning' else '' }}" href="/dashboard/planning"><span class="ico">🧭</span> Planning</a>
-            <a class="nav-link {{ 'active' if active == 'reviews' else '' }}" href="/dashboard/reviews"><span class="ico">👀</span> Reviews</a>
-            <a class="nav-link {{ 'active' if active == 'conflicts' else '' }}" href="/dashboard/conflicts"><span class="ico">⚔️</span> Conflicts</a>
-            <a class="nav-link {{ 'active' if active == 'queue' else '' }}" href="/dashboard/queue"><span class="ico">🙋</span> Needs human</a>
-            <a class="nav-link {{ 'active' if active == 'history' else '' }}" href="/dashboard/history"><span class="ico">📜</span> History</a>
-            <a class="nav-link {{ 'active' if active == 'analytics' else '' }}" href="/dashboard/analytics"><span class="ico">📈</span> Analytics</a>
-            <a class="nav-link {{ 'active' if active == 'quality' else '' }}" href="/dashboard/quality"><span class="ico">🔁</span> Quality</a>
-            <a class="nav-link {{ 'active' if active == 'specs' else '' }}" href="/dashboard/specs"><span class="ico">📐</span> Spec drift</a>
-            <a class="nav-link {{ 'active' if active == 'learning' else '' }}" href="/dashboard/learning"><span class="ico">🧠</span> Learning</a>
-            <a class="nav-link {{ 'active' if active == 'security' else '' }}" href="/dashboard/security"><span class="ico">🔐</span> Security</a>
-            <a class="nav-link {{ 'active' if active == 'reports' else '' }}" href="/dashboard/reports"><span class="ico">🛡️</span> Audit reports</a>
-            <a class="nav-link {{ 'active' if active == 'audit' else '' }}" href="/dashboard/audit"><span class="ico">🧾</span> Audit</a>
-        </nav>
-        <div class="nav-section">Configure</div>
-        <nav>
-{# Both roles, different pages: a central watches its machines, a worker watches its one
-   link to the centre and presses "sync now". Only a standalone machine has neither. #}
-{% if fleet_role in ('central', 'worker') %}
-            <a class="nav-link {{ 'active' if active == 'fleet' else '' }}" href="/dashboard/fleet"><span class="ico">🛰</span> Fleet</a>
-{% endif %}
-            <a class="nav-link {{ 'active' if active == 'workspaces' else '' }}" href="/dashboard/workspaces"><span class="ico">🗂</span> Workspaces</a>
-            <a class="nav-link {{ 'active' if active == 'config' else '' }}" href="/dashboard/config"><span class="ico">⚙️</span> Configuration</a>
-            <a class="nav-link {{ 'active' if active == 'setup' else '' }}" href="/dashboard/setup"><span class="ico">🚀</span> Cài đặt ban đầu</a>
-            <a class="nav-link {{ 'active' if active == 'settings' else '' }}" href="/dashboard/settings"><span class="ico">🛠️</span> Settings</a>
-            <a class="nav-link {{ 'active' if active == 'flow' else '' }}" href="/dashboard/flow"><span class="ico">🔀</span> State flow</a>
-            <a class="nav-link {{ 'active' if active == 'board-views' else '' }}" href="/dashboard/board-views"><span class="ico">🧩</span> Board processes</a>
-            <a class="nav-link {{ 'active' if active == 'roles' else '' }}" href="/dashboard/roles"><span class="ico">🔗</span> Roles</a>
-            <a class="nav-link {{ 'active' if active == 'loops' else '' }}" href="/dashboard/loops"><span class="ico">⏰</span> Scheduled agents</a>
-            <a class="nav-link {{ 'active' if active == 'capabilities' else '' }}" href="/dashboard/capabilities"><span class="ico">✨</span> Capabilities</a>
-        </nav>
+        {# The menu is data (dashboard/nav.py): six groups by the question a person
+           arrives with. A group folds; the one holding the current page always opens. #}
+        {% for g in nav_groups(fleet_role) %}
+        <details class="nav-group" data-group="{{ g.key }}" open>
+            <summary class="nav-section">{{ g.label }}</summary>
+            <nav>
+            {% for i in g["items"] %}
+                <a class="nav-link {{ 'active' if active == i.key else '' }}" href="{{ i.href }}"
+                   title="{{ i.hint }}"><span class="ico">{{ i.icon }}</span> {{ i.label }}</a>
+            {% endfor %}
+            </nav>
+        </details>
+        {% endfor %}
+        <script>
+        // Remember which groups a person folded. Per browser only, and optional: a
+        // blocked storage leaves every group open, which is the default anyway.
+        (function () {
+            var KEY = "nav-folded";
+            var folded = [];
+            try { folded = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) {}
+            document.querySelectorAll("details.nav-group").forEach(function (d) {
+                var hasActive = !!d.querySelector(".nav-link.active");
+                if (!hasActive && folded.indexOf(d.dataset.group) !== -1) d.open = false;
+                d.addEventListener("toggle", function () {
+                    var set = folded.filter(function (k) { return k !== d.dataset.group; });
+                    if (!d.open) set.push(d.dataset.group);
+                    folded = set;
+                    try { localStorage.setItem(KEY, JSON.stringify(set)); } catch (e) {}
+                });
+            });
+        })();
+        </script>
         </div>
         <div class="sidebar-foot">
             <span class="live-dot"></span> autopilot online · v{{ version }}

@@ -158,6 +158,28 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "fleet_no_agent": ("red", "⛔ Tiến trình này không chạy fleet agent. Vai đang là "
                               "<code>worker</code> nhưng service chưa khởi động — "
                               "khởi động lại autopilot."),
+    # Queued is NOT done: the worker picks a command up when it next asks, so the
+    # banner says where to watch for the outcome instead of claiming one.
+    "fleet_cmd_queued": ("green", "📨 Đã xếp lệnh — máy trạm nhận ở lần hỏi kế tiếp (thường "
+                                  "dưới 1 phút). Kết quả hiện ở mục <b>Lệnh gần đây</b> của máy."),
+    "fleet_cmd_all_queued": ("green", "📨 Đã xếp lệnh cho các máy đang online. Theo dõi kết quả "
+                                      "ở từng máy bên dưới."),
+    "fleet_cmd_all_none": ("amber", "Không có máy nào cần lệnh này (không máy online, hoặc mọi "
+                                    "máy đã có lệnh đó đang chờ)."),
+    "fleet_cmd_duplicate": ("amber", "Máy này đã có đúng lệnh đó đang chờ — không xếp thêm."),
+    "fleet_cmd_invalid": ("red", "⛔ Lệnh không hợp lệ."),
+    "fleet_cmd_unknown_worker": ("red", "⛔ Trung tâm không biết máy trạm này."),
+    "fleet_cmd_cancelled": ("green", "✕ Đã huỷ lệnh."),
+    "fleet_cmd_not_pending": ("amber", "Lệnh không còn ở trạng thái chờ — máy trạm đã nhận nó."),
+    "fleet_dispatch_queued": ("green", "🎯 Đã giao việc — máy trạm sẽ gắn tag của nó lên work "
+                                       "item ở lần hỏi kế tiếp và poller nhận ở vòng sau."),
+    "fleet_dispatch_bad_id": ("red", "⛔ Nhập mã work item (số)."),
+    "fleet_dispatch_nobody": ("amber", "Không có máy nào nhận được việc lúc này: không máy nào "
+                                       "online, hoặc tất cả đang tạm dừng / đang cập nhật."),
+    "fleet_local_pause": ("amber", "⏸ Máy này đã tạm dừng nhận việc mới. Run đang chạy vẫn "
+                                   "chạy tiếp. Khởi động lại tiến trình cũng sẽ bỏ tạm dừng."),
+    "fleet_local_resume": ("green", "▶ Máy này tiếp tục nhận việc."),
+    "fleet_local_failed": ("red", "⛔ Không làm được — tiến trình này không chạy poller."),
     "sec_suppressed": ("green", "✅ Đã suppress — ghi cả DB lẫn "
                                 "<code>.autopilot/security-suppressions.yaml</code>."),
     "sec_reopened": ("green", "↩ Đã mở lại finding."),

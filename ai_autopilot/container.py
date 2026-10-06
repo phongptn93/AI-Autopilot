@@ -21,6 +21,7 @@ from ai_autopilot.data import (
     Database,
     DeferredVerificationRepository,
     ExecutionRepository,
+    FleetCommandRepository,
     FleetKnowledgeRepository,
     FleetWorkerRepository,
     LoopReportRepository,
@@ -100,6 +101,8 @@ class Container:
         # changed on the Settings page without a restart, and a repository that only
         # exists when the process started as a central would not be there afterwards.
         self.fleet_knowledge_repo = FleetKnowledgeRepository(self.database)
+        # Central: the queue of remote commands its workers pick up when they ask.
+        self.fleet_command_repo = FleetCommandRepository(self.database)
         # Scheduled audits. Their own table: a report's deliverable is its text, which
         # does not fit an execution row's summary column — see ``LoopReport``.
         self.loop_report_repo = LoopReportRepository(self.database)

@@ -25,6 +25,7 @@ from ai_autopilot.services import (
     AdoPollerService,
     DeliveryTrackerService,
     FleetAgentService,
+    FleetWatchService,
     LoopScheduler,
     PrConflictService,
     PrMonitorService,
@@ -313,6 +314,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     (FleetAgentService(container),)
                     if config.fleet_role == fleet.ROLE_WORKER else ()
                 ),
+                # Central only: announce machines that went silent, expire commands
+                # nobody picked up.
+                *(
+                    (FleetWatchService(container),)
+                    if config.fleet_role == fleet.ROLE_CENTRAL else ()
+                ),
             ):
                 svc.start()
                 started.append(svc)
@@ -336,6 +343,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # The Fleet page's "sync now" button beats through THIS instance —
                     # a second agent would report a second machine under the same name.
                     app.state.fleet_agent = svc
+            # The agent's commands act on the poller and the updater, which only exist
+            # once the loop above has started them.
+            fleet_agent = getattr(app.state, "fleet_agent", None)
+            if fleet_agent is not None:
+                fleet_agent.attach(
+                    poller=getattr(app.state, "poller", None),
+                    updater=getattr(app.state, "updater", None),
+                )
 
             teams_bot = build_teams_agent(config, container, reviewer_tracker)
             if teams_bot is not None:

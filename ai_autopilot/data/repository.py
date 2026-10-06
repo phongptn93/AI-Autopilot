@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, false, func, or_, select
+from sqlalchemy import delete, false, func, or_, select, update
 
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
@@ -18,6 +18,7 @@ from ai_autopilot.data.entities import (
     DeferredVerification,
     ExecutionRecord,
     ExecutionStatus,
+    FleetCommand,
     FleetKnowledge,
     FleetWorker,
     HandledPrComment,
@@ -1965,13 +1966,22 @@ class FleetWorkerRepository:
         self._db = db
         self._log = get_logger("data.fleet")
 
-    async def upsert(self, report, *, config_hash: str = "", now: datetime | None = None) -> None:
+    async def upsert(self, report, *, config_hash: str = "", now: datetime | None = None) -> bool:
         """Record one heartbeat. ``report`` is a ``fleet.WorkerReport``.
 
         ``config_hash`` is what the CENTRAL is serving right now; the worker's own hash
         comes from the report. Storing both is what lets the page say "this machine has
         not caught up" without re-deriving the document per row.
+
+        Returns True when this beat ended an offline episode that had been announced —
+        the caller owes the team a "back online" notice. Cleared here, in the same
+        write, so two beats racing cannot both claim the recovery.
         """
+        health = getattr(report, "health", None)
+        health_json = json.dumps(
+            health.model_dump() if hasattr(health, "model_dump") else (health or {}),
+            ensure_ascii=False,
+        )
         stamp = _naive(now or datetime.now(UTC))
         running = json.dumps(
             [r.model_dump() if hasattr(r, "model_dump") else dict(r) for r in report.running],
@@ -2000,8 +2010,35 @@ class FleetWorkerRepository:
             row.running = running
             row.done_today = int(report.done_today or 0)
             row.failed_today = int(report.failed_today or 0)
+            row.health = health_json
             row.last_seen = stamp
+            recovered = bool(row.offline_alerted)
+            row.offline_alerted = False
             await session.commit()
+            return recovered
+
+    async def mark_offline_alerted(self, name: str) -> bool:
+        """Claim the offline notice for ``name``. False = already claimed (or gone).
+
+        A conditional UPDATE rather than read-then-write, so a second watcher tick (or a
+        second process on the same database) cannot send the same alert twice.
+        """
+        async with self._db.session() as session:
+            result = await session.execute(
+                update(FleetWorker)
+                .where(FleetWorker.name == name, or_(
+                    FleetWorker.offline_alerted.is_(None), FleetWorker.offline_alerted == false(),
+                ))
+                .values(offline_alerted=True)
+            )
+            await session.commit()
+            return bool(result.rowcount)
+
+    async def get(self, name: str) -> FleetWorker | None:
+        async with self._db.session() as session:
+            return (await session.execute(
+                select(FleetWorker).where(FleetWorker.name == name)
+            )).scalar_one_or_none()
 
     async def list_all(self) -> list[FleetWorker]:
         """Every known worker, most recently seen first."""
@@ -2022,6 +2059,109 @@ class FleetWorkerRepository:
             result = await session.execute(delete(FleetWorker).where(FleetWorker.name == name))
             await session.commit()
             return bool(result.rowcount)
+
+
+class FleetCommandRepository:
+    """The central's queue of instructions for its workers. See ``FleetCommand``.
+
+    Every transition is a conditional UPDATE on the current status, so a command can be
+    delivered once, finished once, and never resurrected — a worker reporting late on a
+    command that already expired does not flip it back to "done".
+    """
+
+    #: Statuses a command can still move out of.
+    OPEN = ("pending", "delivered")
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def enqueue(self, worker: str, kind: str, args: dict | None = None, *,
+                      created_by: str = "", now: datetime | None = None) -> int:
+        stamp = _naive(now or datetime.now(UTC))
+        async with self._db.session() as session:
+            row = FleetCommand(
+                worker=worker[:200], kind=kind[:40],
+                args=json.dumps(args or {}, ensure_ascii=False),
+                status="pending", created_by=created_by[:200], created_at=stamp,
+            )
+            session.add(row)
+            await session.commit()
+            return int(row.id)
+
+    async def take_pending(self, worker: str, *, now: datetime | None = None,
+                           limit: int = 20) -> list[FleetCommand]:
+        """Hand ``worker`` its pending commands, oldest first, and mark them delivered."""
+        stamp = _naive(now or datetime.now(UTC))
+        async with self._db.session() as session:
+            rows = list((await session.execute(
+                select(FleetCommand)
+                .where(FleetCommand.worker == worker, FleetCommand.status == "pending")
+                .order_by(FleetCommand.id).limit(limit)
+            )).scalars().all())
+            for row in rows:
+                row.status, row.delivered_at = "delivered", stamp
+            await session.commit()
+            return rows
+
+    async def finish(self, worker: str, command_id: int, ok: bool, detail: str = "", *,
+                     now: datetime | None = None) -> bool:
+        """Record the worker's outcome. Only the worker it was addressed to may close it,
+        and only while it is still open."""
+        stamp = _naive(now or datetime.now(UTC))
+        async with self._db.session() as session:
+            result = await session.execute(
+                update(FleetCommand)
+                .where(FleetCommand.id == int(command_id), FleetCommand.worker == worker,
+                       FleetCommand.status.in_(self.OPEN))
+                .values(status="done" if ok else "failed", detail=(detail or "")[:1000],
+                        finished_at=stamp)
+            )
+            await session.commit()
+            return bool(result.rowcount)
+
+    async def cancel(self, command_id: int, *, now: datetime | None = None) -> bool:
+        """Withdraw a command nobody has picked up yet. Delivered ones are already running."""
+        async with self._db.session() as session:
+            result = await session.execute(
+                update(FleetCommand)
+                .where(FleetCommand.id == int(command_id), FleetCommand.status == "pending")
+                .values(status="cancelled", detail="huỷ trên trung tâm",
+                        finished_at=_naive(now or datetime.now(UTC)))
+            )
+            await session.commit()
+            return bool(result.rowcount)
+
+    async def expire(self, older_than_minutes: int, *, now: datetime | None = None) -> int:
+        """Close open commands nobody answered — the machine is off or too old to know them."""
+        stamp = _naive(now or datetime.now(UTC))
+        cutoff = stamp - timedelta(minutes=max(1, int(older_than_minutes)))
+        async with self._db.session() as session:
+            result = await session.execute(
+                update(FleetCommand)
+                .where(FleetCommand.status.in_(self.OPEN), FleetCommand.created_at < cutoff)
+                .values(status="expired", detail="máy trạm không phản hồi kịp",
+                        finished_at=stamp)
+            )
+            await session.commit()
+            return int(result.rowcount or 0)
+
+    async def recent(self, worker: str | None = None, limit: int = 50) -> list[FleetCommand]:
+        """Newest first — what the page lists under each machine."""
+        async with self._db.session() as session:
+            query = select(FleetCommand).order_by(FleetCommand.id.desc()).limit(limit)
+            if worker:
+                query = query.where(FleetCommand.worker == worker)
+            return list((await session.execute(query)).scalars().all())
+
+    async def open_count(self, worker: str, kind: str) -> int:
+        """How many commands of ``kind`` are still open for ``worker`` — so pressing a
+        button twice queues one command, not two."""
+        async with self._db.session() as session:
+            return int((await session.execute(
+                select(func.count()).select_from(FleetCommand)
+                .where(FleetCommand.worker == worker, FleetCommand.kind == kind,
+                       FleetCommand.status.in_(self.OPEN))
+            )).scalar() or 0)
 
 
 class FleetKnowledgeRepository:

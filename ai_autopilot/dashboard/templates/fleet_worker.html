@@ -34,6 +34,10 @@
              padding:7px 15px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
   .fl-sync:hover { filter:brightness(1.1); }
   .fl-sync:disabled { opacity:.45; cursor:not-allowed; filter:none; }
+  .fl-btn { background:var(--bg,#0d0d12); color:var(--text); border:1px solid var(--border,#23232b); border-radius:8px;
+            padding:7px 14px; font-size:13px; font-family:inherit; cursor:pointer; }
+  .fl-btn:hover { border-color:var(--accent,#6366f1); }
+  .fl-cmd { font-size:12.5px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; color:var(--text-dim); }
 </style>
 
 <h1>🛰 Fleet — máy trạm</h1>
@@ -58,6 +62,23 @@
       Cập nhật rồi khởi động lại:
     </div>
     <div class="val mono" style="margin-top:8px;word-break:break-all;font-size:12px">{{ upgrade_cmd }}</div>
+  </div>
+</div>
+{% endif %}
+
+{% if paused %}
+<div class="fl-card" style="border-color:var(--amber,#f5a524)">
+  <div style="padding:13px 16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    <div style="flex:1;min-width:240px">
+      <div style="color:var(--amber,#f5a524);font-weight:600">⏸ Máy này đang TẠM DỪNG nhận việc mới</div>
+      <div style="font-size:12.5px;color:var(--text-muted);margin-top:4px">
+        {{ paused_reason or 'Không ghi lý do.' }} Run đang chạy vẫn chạy tiếp. Khởi động lại tiến trình cũng bỏ tạm dừng.
+      </div>
+    </div>
+    <form method="post" action="/dashboard/fleet/local" style="margin:0">
+      <input type="hidden" name="action" value="resume">
+      <button type="submit" class="fl-sync">▶ Tiếp tục nhận việc</button>
+    </form>
   </div>
 </div>
 {% endif %}
@@ -130,6 +151,30 @@
     </div>
     {% endif %}
 
+    <div class="fl-f">
+      <label>Lệnh từ trung tâm</label>
+      <div class="val">
+        {% if not accept_commands %}<span style="color:var(--amber,#f5a524)">đang TỪ CHỐI mọi lệnh</span>
+        {% else %}nhận — hỏi mỗi {{ command_poll }} giây
+          {% if command_poll_ok is false %}<span style="color:var(--red,#e5484d)"> · lần hỏi cuối lỗi</span>{% endif %}
+          {% if not accept_update %}<br><span style="color:var(--text-dim);font-size:12px">không cho cập nhật từ xa</span>{% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    {% if recent_commands %}
+    <div class="fl-f fl-wide">
+      <label>Lệnh vừa xử lý</label>
+      {% for cmd in recent_commands %}
+      <div class="fl-cmd">
+        <span>{{ '✅' if cmd.ok else '⛔' }}</span>
+        <b style="color:var(--text)">{{ cmd.label }}{% if cmd.args.id %} #{{ cmd.args.id }}{% endif %}</b>
+        <span>{{ fmt_ago(cmd.ago) }} trước — {{ cmd.detail }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="fl-f fl-wide">
       <label>Máy này tự giữ ({{ local_keys|length }})</label>
       <div class="fl-tags">
@@ -151,6 +196,14 @@
       </button>
     </form>
     <span>Không cần đợi hết {{ interval }} phút — bấm là gọi về trung tâm ngay và báo lại kết quả.</span>
+    <span style="flex:1"></span>
+    {% if has_poller and not paused %}
+    <form method="post" action="/dashboard/fleet/local" style="margin:0"
+          onsubmit="return confirm('Tạm dừng nhận việc mới trên máy này? Run đang chạy vẫn chạy tiếp.')">
+      <input type="hidden" name="action" value="pause">
+      <button type="submit" class="fl-btn">⏸ Tạm dừng máy này</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

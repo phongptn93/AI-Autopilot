@@ -827,6 +827,29 @@ _BASE_FIELDS: tuple[Field, ...] = (
     Field("fleet_offline_after_minutes", "↳ Coi là offline sau (phút)", "int", "🛰 Fleet",
           "Trung tâm: máy im lặng lâu hơn mức này sẽ hiện đỏ trên trang Fleet.",
           show_when_key="fleet_role", show_when_values=("central",)),
+    Field("fleet_alert_offline", "↳ Báo khi máy trạm offline", "bool", "🛰 Fleet",
+          "Trung tâm gửi thông báo (qua các kênh đã cấu hình) khi một máy trạm im lặng quá "
+          "ngưỡng offline, và một lần nữa khi máy đó gọi về lại. Mỗi đợt chỉ báo một lần.",
+          show_when_key="fleet_role", show_when_values=("central",)),
+    Field("fleet_command_expire_minutes", "↳ Lệnh hết hạn sau (phút)", "int", "🛰 Fleet",
+          "Lệnh gửi máy trạm mà không được xác nhận trong khoảng này sẽ chuyển 'hết hạn' — "
+          "máy đang tắt hoặc chạy bản cũ không hiểu lệnh.",
+          show_when_key="fleet_role", show_when_values=("central",)),
+    Field("fleet_disk_warn_gb", "↳ Cảnh báo disk trống dưới (GB)", "float", "🛰 Fleet",
+          "Máy trạm có dung lượng trống thấp hơn mức này sẽ hiện đỏ trên trang Fleet.",
+          show_when_key="fleet_role", show_when_values=("central",)),
+    Field("fleet_command_poll_seconds", "↳ Hỏi lệnh mỗi (giây)", "int", "🛰 Fleet",
+          "Máy trạm hỏi trung tâm có lệnh mới không (tạm dừng, cập nhật, nhận việc…). Nhẹ "
+          "hơn heartbeat nhiều nên chạy dày hơn. Tối thiểu 15 giây.",
+          show_when_key="fleet_role", show_when_values=("worker",)),
+    Field("fleet_accept_commands", "↳ Nhận lệnh từ trung tâm", "bool", "🛰 Fleet",
+          "Tắt = máy vẫn báo cáo và đồng bộ cấu hình nhưng TỪ CHỐI mọi lệnh điều khiển từ xa.",
+          show_when_key="fleet_role", show_when_values=("worker",)),
+    Field("fleet_accept_remote_update", "↳ Cho phép trung tâm cập nhật máy này", "bool",
+          "🛰 Fleet",
+          "Lệnh 'Cập nhật' cài bản mới lên máy này (đợi run đang chạy xong rồi mới cài). "
+          "Tắt nếu máy này phải được cập nhật bằng tay.",
+          show_when_key="fleet_role", show_when_values=("worker",)),
     # ── ⬆️ Cập nhật ──
     Field("update_check_enabled", "⬆️ Kiểm tra bản mới", "bool", "⬆️ Cập nhật",
           "Hỏi GitHub Releases xem có bản mới hơn không, và hiện một nút để cập nhật. "
@@ -1089,7 +1112,12 @@ NEVER_SHARED = frozenset({
     # machine that only contributes. The first is each machine's own answer to "do I
     # share what I learn" — not the centre's to decide.
     "fleet_knowledge_sync", "fleet_knowledge_auto_promote",
-    "repos",                # RepoConfig entries embed local filesystem paths
+    # Each side's own answer: whether THIS worker obeys, how often it asks, and how the
+    # central watches. A centre that could switch "accept commands" back on remotely
+    # would make the switch meaningless.
+    "fleet_command_poll_seconds", "fleet_accept_commands", "fleet_accept_remote_update",
+    "fleet_alert_offline", "fleet_command_expire_minutes", "fleet_disk_warn_gb",
+    "repos",               # RepoConfig entries embed local filesystem paths
 })
 
 # Settings each machine answers for ITSELF. Not secret, not a path — every one of them
@@ -1524,6 +1552,7 @@ RESET_KEEP = frozenset({
     "database_url", "health_host", "health_port",
     "fleet_role", "fleet_central_url", "fleet_token", "fleet_worker_name",
     "fleet_local_keys", "fleet_sync_interval_minutes", "fleet_offline_after_minutes",
+    "fleet_accept_commands", "fleet_accept_remote_update",
 })
 
 

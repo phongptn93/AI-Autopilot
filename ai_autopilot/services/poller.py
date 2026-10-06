@@ -151,6 +151,13 @@ class AdoPollerService:
         # every RUNNING execution FAILED "Interrupted (process restarted)", so cutting in
         # loses the work AND writes a lie into its history.
         self.draining: bool = False
+        # Set by an operator — on the central's Fleet page or on this machine's own.
+        # Same effect as draining (nothing new is picked up, running work finishes) but
+        # reversible and with nothing waiting on it. Held in memory on purpose: a
+        # restart is somebody touching the machine, and a pause that outlived it would
+        # leave a host silently idle with nobody remembering why.
+        self.paused: bool = False
+        self.paused_reason: str = ""
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
         self._comment_task: asyncio.Task | None = None
@@ -264,6 +271,8 @@ class AdoPollerService:
                     # Taking one more item here would restart on top of it.
                     self._log.info("poll skipped — draining for an update",
                                    in_flight=len(self._inflight), live=len(self._live))
+                elif self.paused:
+                    self._log.debug("poll skipped — paused", reason=self.paused_reason)
                 else:
                     await self._poll_and_process()
             except asyncio.CancelledError:

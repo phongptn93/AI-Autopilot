@@ -1309,6 +1309,26 @@ class Settings(BaseSettings):
     # tripping over something is an anecdote; several is corroboration. 0 disables
     # auto-promotion entirely — then a human approves every line by hand.
     fleet_knowledge_auto_promote: int = 2
+    # ── Fleet: remote control, health, alerts ──
+    # Commands still travel worker → central: the worker ASKS for its queue on its own
+    # short cadence, so a machine behind NAT is controllable without opening a port.
+    # This is the floor between asking — the heartbeat stays on its own, longer interval.
+    fleet_command_poll_seconds: int = 60
+    # Worker: whether this machine obeys the centre at all. Off = it still reports and
+    # syncs config, but every queued command comes back "refused here".
+    fleet_accept_commands: bool = True
+    # Worker: a remote "update to vN" installs code on this machine. Separable from the
+    # rest because pausing a poller is reversible and a pip install is not.
+    fleet_accept_remote_update: bool = True
+    # Central: post a notice when a worker goes silent past fleet_offline_after_minutes,
+    # and another when it comes back. Once per episode, never per minute.
+    fleet_alert_offline: bool = True
+    # Central: a command nobody acknowledged within this many minutes is marked expired
+    # — the machine is off, or on a build that does not understand it.
+    fleet_command_expire_minutes: int = 60
+    # Central: free disk (GB) below which a worker's card turns red. Worktrees and
+    # build output fill a dev machine quietly until a run fails half-way through.
+    fleet_disk_warn_gb: float = 5.0
 
     # ── Multi-workspace (one connection, several projects) ──
     # What to call the workspace backed by the global fields above (its directory, base

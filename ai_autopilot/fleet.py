@@ -23,6 +23,7 @@ centre still cannot write a PAT, a filesystem path, or another machine's tag ont
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 from typing import Any
 
@@ -42,6 +43,25 @@ TOKEN_HEADER = "x-fleet-token"
 ROLE_CENTRAL = "central"
 ROLE_WORKER = "worker"
 
+# What the central may ask a worker to do. A closed list on BOTH sides: the worker
+# refuses a kind it does not know rather than guessing, so a newer central talking to
+# an older worker produces a clear "không hỗ trợ" instead of a half-done action.
+CMD_PAUSE = "pause"          # stop picking up new work; whatever is running finishes
+CMD_RESUME = "resume"
+CMD_SYNC = "sync"            # beat now: report in and pull the config immediately
+CMD_UPDATE = "update"        # install the central's version (drains first)
+CMD_RUN_ITEM = "run_item"    # take work item {"id": N} with THIS machine's own trigger tag
+COMMAND_KINDS = (CMD_PAUSE, CMD_RESUME, CMD_SYNC, CMD_UPDATE, CMD_RUN_ITEM)
+COMMAND_LABELS = {
+    CMD_PAUSE: "Tạm dừng", CMD_RESUME: "Tiếp tục", CMD_SYNC: "Đồng bộ ngay",
+    CMD_UPDATE: "Cập nhật", CMD_RUN_ITEM: "Nhận việc",
+}
+
+# Poller states a worker reports. "absent" = this process runs no poller at all.
+POLLER_RUNNING, POLLER_PAUSED, POLLER_DRAINING, POLLER_ABSENT = (
+    "running", "paused", "draining", "absent",
+)
+
 
 class RunningRun(BaseModel):
     """One run the worker has in flight right now — what "in flight" means on /now."""
@@ -51,6 +71,53 @@ class RunningRun(BaseModel):
     role: str = ""
     skill: str = ""
     elapsed: int = 0        # seconds since it started
+
+
+class WorkerHealth(BaseModel):
+    """How the machine itself is doing — the part of a report that answers "can it work".
+
+    Everything has a neutral default: a worker on an older build sends no health at
+    all, and the page must read that as "không rõ", never as "disk 0 GB".
+    """
+
+    uptime: int = 0                     # seconds this process has been up
+    disk_free_gb: float | None = None   # on the workspace drive
+    disk_total_gb: float | None = None
+    poller: str = ""                    # running | paused | draining | absent
+    paused_reason: str = ""
+    capacity: int = 0                   # max_concurrent — how many runs it can hold
+    tracker_ok: bool | None = None      # has tracker credentials configured
+    last_error: str = ""                # newest failed run's error, trimmed
+    last_error_item: int = 0
+    fail_streak: int = 0                # consecutive failed runs, newest first
+    platform: str = ""
+    dry_run: bool = False
+    accepts_commands: bool = True
+
+
+class CommandResult(BaseModel):
+    """A worker's outcome for one command it was handed."""
+
+    id: int = 0
+    ok: bool = False
+    detail: str = ""
+
+
+class Command(BaseModel):
+    id: int = 0
+    kind: str = ""
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class CommandExchange(BaseModel):
+    """Worker → central: "here is how the last ones went, what is next for me?"."""
+
+    worker: str = ""
+    results: list[CommandResult] = Field(default_factory=list)
+
+
+class CommandResponse(BaseModel):
+    commands: list[Command] = Field(default_factory=list)
 
 
 class WorkerReport(BaseModel):
@@ -71,6 +138,7 @@ class WorkerReport(BaseModel):
     running: list[RunningRun] = Field(default_factory=list)
     done_today: int = 0
     failed_today: int = 0
+    health: WorkerHealth = Field(default_factory=WorkerHealth)
     # "Prove this URL and token, do not enrol me." The setup wizard's "test it now"
     # button has to send a REAL heartbeat — reachability proves nothing about whether
     # the token matches — but the machine pressing it is usually not configured yet, so
@@ -206,6 +274,62 @@ def strip_local(updates: dict[str, Any], local_keys: list[str] | None = None) ->
     }
 
 
+def pick_worker(workers: list[dict[str, Any]], profile: str = "") -> dict[str, Any] | None:
+    """The machine a dispatched item should go to, or None when nobody can take it.
+
+    Only machines that can act on it within a minute or two: online, not paused or
+    draining, obeying commands. Among those, a machine running ``profile`` (when one is
+    asked for) beats one that is not, then the lowest load — running ÷ capacity, so a
+    machine with 1 of 4 slots busy is freer than one with 1 of 1.
+    """
+    def eligible(w: dict[str, Any]) -> bool:
+        h = w.get("health") or {}
+        return bool(w.get("online")) and h.get("poller") not in (
+            POLLER_PAUSED, POLLER_DRAINING, POLLER_ABSENT,
+        ) and h.get("accepts_commands", True) is not False
+
+    pool = [w for w in workers if eligible(w)]
+    if not pool:
+        return None
+    want = (profile or "").strip().lower()
+
+    def load(w: dict[str, Any]) -> float:
+        cap = max(1, int((w.get("health") or {}).get("capacity") or 1))
+        return len(w.get("running") or []) / cap
+
+    return min(pool, key=lambda w: (
+        bool(want) and (w.get("profile") or "").strip().lower() != want,
+        load(w), w.get("name") or "",
+    ))
+
+
+def _authorised(cfg: Any, presented: str | None) -> bool:
+    """Same answer for "no token configured" and "wrong token": a different one would
+    tell an unauthenticated caller whether this central is armed."""
+    token = (cfg.fleet_token or "").strip()
+    return bool(token) and secrets.compare_digest((presented or "").strip(), token)
+
+
+async def announce(c: Any, heading: str, text: str, *, warning: bool) -> None:
+    """Fleet notices through the normal notifier, so the alert policy and quiet hours
+    apply to them like to everything else. Never raises — a channel being down must not
+    turn into a failed heartbeat."""
+    from ai_autopilot.models import WorkItemInfo
+    from ai_autopilot.notifications.base import NotificationMessage, NotificationType
+
+    notifier = getattr(c, "notifier", None)
+    if notifier is None:
+        return
+    try:
+        await notifier.notify(NotificationMessage(
+            work_item=WorkItemInfo(id=0),
+            type=NotificationType.ERROR if warning else NotificationType.INFO,
+            heading=heading, text=text,
+        ))
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("fleet notice failed", error=str(exc))
+
+
 def create_fleet_router() -> APIRouter:
     """The central's side: one endpoint, mounted only when ``fleet_role`` is central.
 
@@ -228,10 +352,7 @@ def create_fleet_router() -> APIRouter:
         """
         c = request.app.state.container
         cfg = c.config
-        token = (cfg.fleet_token or "").strip()
-        if not token or not secrets.compare_digest((x_fleet_token or "").strip(), token):
-            # Same answer for "no token configured" and "wrong token": a different one
-            # would tell an unauthenticated caller whether this central is armed.
+        if not _authorised(cfg, x_fleet_token):
             raise HTTPException(status_code=401, detail="unauthorized")
         if not (report.name or "").strip():
             raise HTTPException(status_code=422, detail="worker name is required")
@@ -245,7 +366,13 @@ def create_fleet_router() -> APIRouter:
             from ai_autopilot import __version__ as central_version
 
             return SyncResponse(config_hash=digest, central_version=central_version)
-        await c.fleet_repo.upsert(report, config_hash=digest)
+        recovered = await c.fleet_repo.upsert(report, config_hash=digest)
+        if recovered and cfg.fleet_alert_offline:
+            await announce(
+                c, f"🟢 Máy trạm {report.name} đã online lại",
+                f"{report.name} (v{report.version or '?'}) đã gọi về trung tâm trở lại.",
+                warning=False,
+            )
         _log.info(
             "fleet heartbeat", worker=report.name, version=report.version,
             running=len(report.running), in_sync=report.config_hash == digest,
@@ -257,6 +384,45 @@ def create_fleet_router() -> APIRouter:
             config=None if report.config_hash == digest else document,
             central_version=central_version,
         )
+
+    @router.post("/commands", response_model=CommandResponse)
+    async def commands(
+        request: Request,
+        exchange: CommandExchange,
+        x_fleet_token: str | None = Header(default=None),
+    ) -> CommandResponse:
+        """Close what the worker finished, hand it what is queued next.
+
+        Its own endpoint rather than part of the heartbeat: a heartbeat is the expensive
+        call (config document, knowledge pool) on a ten-minute cadence, and a "pause"
+        that takes ten minutes to land is not remote control. This one is a single
+        indexed query, cheap enough to ask every minute.
+        """
+        c = request.app.state.container
+        if not _authorised(c.config, x_fleet_token):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        worker = (exchange.worker or "").strip()
+        if not worker:
+            raise HTTPException(status_code=422, detail="worker name is required")
+        repo = getattr(c, "fleet_command_repo", None)
+        if repo is None:
+            return CommandResponse()
+        for result in exchange.results:
+            if await repo.finish(worker, result.id, result.ok, result.detail):
+                _log.info("fleet command finished", worker=worker, id=result.id,
+                          ok=result.ok, detail=result.detail[:200])
+        out: list[Command] = []
+        for row in await repo.take_pending(worker):
+            try:
+                args = json.loads(row.args or "{}")
+            except ValueError:
+                args = {}
+            out.append(Command(id=row.id, kind=row.kind,
+                               args=args if isinstance(args, dict) else {}))
+        if out:
+            _log.info("fleet commands delivered", worker=worker,
+                      kinds=[cmd.kind for cmd in out])
+        return CommandResponse(commands=out)
 
     @router.post("/knowledge", response_model=KnowledgeResponse)
     async def knowledge(
@@ -278,8 +444,7 @@ def create_fleet_router() -> APIRouter:
         """
         c = request.app.state.container
         cfg = c.config
-        token = (cfg.fleet_token or "").strip()
-        if not token or not secrets.compare_digest((x_fleet_token or "").strip(), token):
+        if not _authorised(cfg, x_fleet_token):
             raise HTTPException(status_code=401, detail="unauthorized")
         if not (exchange.worker or "").strip():
             raise HTTPException(status_code=422, detail="worker name is required")

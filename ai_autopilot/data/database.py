@@ -49,6 +49,8 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("security_findings", "kev_ransomware", "BOOLEAN"),
     ("security_findings", "epss", "FLOAT"),
     ("security_findings", "epss_percentile", "FLOAT"),
+    ("fleet_workers", "health", "TEXT"),
+    ("fleet_workers", "offline_alerted", "BOOLEAN"),
 )
 
 

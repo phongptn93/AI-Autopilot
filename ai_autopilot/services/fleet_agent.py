@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import platform
+import shutil
 import socket
+import time
+from collections import deque
 from datetime import UTC, datetime
 
 import httpx
@@ -26,7 +30,14 @@ from ai_autopilot.logging_config import describe_exc, get_logger
 
 
 class FleetAgentService:
-    """Heartbeat + config pull, every ``fleet_sync_interval_minutes``."""
+    """Heartbeat + config pull every ``fleet_sync_interval_minutes``, and the central's
+    command queue every ``fleet_command_poll_seconds``."""
+
+    # Class-level so a partially-built instance (tests build one without __init__)
+    # still reads as "not attached" rather than raising mid-heartbeat.
+    _poller = None
+    _updater = None
+    _started: float | None = None
 
     def __init__(self, container: Container) -> None:
         self._c = container
@@ -50,6 +61,24 @@ class FleetAgentService:
         #: Drafts waiting for a human at the CENTRE — shown on this worker's page so a
         #: contributor can see their lesson is queued rather than lost.
         self.knowledge_pending: int = 0
+        self._started = time.monotonic()
+        self._cmd_task: asyncio.Task | None = None
+        # Outcomes not yet reported back. Kept until the central has acknowledged them
+        # by answering the next ask, so a failed round trip does not lose a result.
+        self._results: list[fleet.CommandResult] = []
+        #: The last few commands this machine handled — shown on its own Fleet page,
+        #: because "why did my machine stop picking up work" is asked AT the machine.
+        self.recent_commands: deque[dict] = deque(maxlen=15)
+        self.last_command_poll_at: datetime | None = None
+        self.last_command_poll_ok: bool | None = None
+
+    def attach(self, *, poller=None, updater=None) -> None:
+        """Give the agent the services its commands act on.
+
+        Passed in rather than found: they live on ``app.state``, and a silent lookup
+        miss here would make "pause" report success while the poller kept polling.
+        """
+        self._poller, self._updater = poller, updater
 
     @property
     def worker_name(self) -> str:
@@ -60,13 +89,176 @@ class FleetAgentService:
     def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._run())
+        if self._cmd_task is None:
+            self._cmd_task = asyncio.create_task(self._command_run(), name="fleet-commands")
 
     async def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-            self._task = None
+        for name in ("_task", "_cmd_task"):
+            task = getattr(self, name)
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                setattr(self, name, None)
+
+    # ── remote control ───────────────────────────────────────────────────────
+
+    async def _command_run(self) -> None:
+        # Settle first so the startup beat (which may rewrite config) lands before the
+        # first command is acted on.
+        await asyncio.sleep(5)
+        while True:
+            try:
+                await self.poll_commands()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — the loop must outlive any one ask
+                self._log.warning("fleet command poll failed", error=describe_exc(exc))
+            await asyncio.sleep(max(15, int(self._config.fleet_command_poll_seconds or 60)))
+
+    async def poll_commands(self) -> int:
+        """Report finished commands, fetch and run the next ones. Returns how many ran.
+
+        Never raises on a network error, like ``beat``: a central that is down means no
+        new commands, not a dead loop.
+        """
+        cfg = self._config
+        base = (cfg.fleet_central_url or "").strip().rstrip("/")
+        if not base or not (cfg.fleet_token or "").strip():
+            return 0
+        self.last_command_poll_at = datetime.now(UTC)
+        sending = list(self._results)
+        try:
+            resp = await self._c.http.post(
+                f"{base}/api/fleet/commands",
+                json=fleet.CommandExchange(
+                    worker=self.worker_name, results=sending,
+                ).model_dump(mode="json"),
+                headers={fleet.TOKEN_HEADER: cfg.fleet_token},
+            )
+        except httpx.HTTPError as exc:
+            self._log.debug("fleet command poll unreachable", error=describe_exc(exc))
+            self.last_command_poll_ok = False
+            return 0
+        if resp.status_code == 404:
+            # A central on an older build has no queue. Nothing to do, nothing to nag.
+            self.last_command_poll_ok = None
+            return 0
+        if resp.status_code >= 400:
+            self.last_command_poll_ok = False
+            self._log.debug("fleet command poll refused", status=resp.status_code)
+            return 0
+        self.last_command_poll_ok = True
+        # Delivered: drop exactly what was sent, keep anything added meanwhile.
+        self._results = self._results[len(sending):]
+        ran = 0
+        for raw in (resp.json() or {}).get("commands") or []:
+            try:
+                cmd = fleet.Command(**raw)
+            except Exception:  # noqa: BLE001 — a malformed entry is skipped, not fatal
+                continue
+            ok, detail = await self.execute(cmd)
+            ran += 1
+            self._results.append(fleet.CommandResult(id=cmd.id, ok=ok, detail=detail[:900]))
+            self.recent_commands.appendleft({
+                "id": cmd.id, "kind": cmd.kind, "args": cmd.args, "ok": ok,
+                "detail": detail, "at": datetime.now(UTC),
+            })
+            self._log.info("fleet command handled", id=cmd.id, kind=cmd.kind, ok=ok,
+                           detail=detail[:200])
+            with contextlib.suppress(Exception):
+                await self._c.audit_repo.record(
+                    actor=f"fleet:{(cfg.fleet_central_url or '')[:80]}", source="fleet",
+                    action=f"fleet.command.{cmd.kind}",
+                    target=str(cmd.args.get("id") or self.worker_name)[:300],
+                    detail=("ok: " if ok else "refused: ") + detail[:500],
+                )
+        return ran
+
+    async def execute(self, cmd: fleet.Command) -> tuple[bool, str]:
+        """Carry out one command. Returns (ok, what happened — in words for the page)."""
+        cfg = self._config
+        if not cfg.fleet_accept_commands:
+            return False, "Máy trạm đã tắt 'Nhận lệnh từ trung tâm'."
+        kind = (cmd.kind or "").strip()
+        if kind == fleet.CMD_PAUSE:
+            return self.pause(str(cmd.args.get("reason") or "tạm dừng từ trung tâm"))
+        if kind == fleet.CMD_RESUME:
+            return self.resume()
+        if kind == fleet.CMD_SYNC:
+            ok = await self.beat()
+            return ok, self.last_detail
+        if kind == fleet.CMD_UPDATE:
+            return await self._remote_update(str(cmd.args.get("version") or ""))
+        if kind == fleet.CMD_RUN_ITEM:
+            return await self._run_item(cmd.args.get("id"))
+        return False, f"Lệnh '{kind}' không được bản v{self._version()} hỗ trợ."
+
+    def pause(self, reason: str = "") -> tuple[bool, str]:
+        if self._poller is None:
+            return False, "Tiến trình này không chạy poller — không có gì để tạm dừng."
+        self._poller.paused = True
+        self._poller.paused_reason = (reason or "").strip()[:200]
+        return True, "Đã tạm dừng nhận việc mới; run đang chạy vẫn chạy tiếp."
+
+    def resume(self) -> tuple[bool, str]:
+        if self._poller is None:
+            return False, "Tiến trình này không chạy poller."
+        was = bool(getattr(self._poller, "paused", False))
+        self._poller.paused, self._poller.paused_reason = False, ""
+        return True, "Đã tiếp tục nhận việc." if was else "Máy vốn không tạm dừng."
+
+    async def _remote_update(self, version: str) -> tuple[bool, str]:
+        if not self._config.fleet_accept_remote_update:
+            return False, "Máy trạm không cho phép cập nhật từ xa (fleet_accept_remote_update)."
+        updater = self._updater
+        if updater is None:
+            return False, "Tiến trình này không có bộ cập nhật."
+        if updater.job.running:
+            return True, "Đang cập nhật sẵn rồi."
+        block = updater.blocked()
+        if block:
+            return False, f"Bản cài này không tự cập nhật được ({block})."
+        try:
+            await asyncio.wait_for(updater.check(), timeout=25)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"Không hỏi được GitHub: {describe_exc(exc)}"
+        latest = getattr(updater.latest, "version", "") or ""
+        if not updater.available:
+            return True, f"Đã ở bản mới nhất (v{self._version()})."
+        if version and fleet.version_tuple(latest) < fleet.version_tuple(version):
+            return False, f"GitHub chỉ có v{latest}, chưa có v{version}."
+        # Detached like the dashboard button: draining can take most of an hour, and the
+        # outcome is visible anyway — the next heartbeat carries the new version.
+        self._update_task = asyncio.create_task(updater.apply(self._poller), name="update-apply")
+        return True, f"Bắt đầu cập nhật lên v{latest} (đợi run đang chạy xong rồi cài)."
+
+    async def _run_item(self, raw_id) -> tuple[bool, str]:
+        try:
+            item_id = int(raw_id)
+        except (TypeError, ValueError):
+            return False, "Thiếu mã work item."
+        if item_id <= 0:
+            return False, "Mã work item không hợp lệ."
+        if self._config.dry_run:
+            return False, "Máy trạm đang dry_run — không ghi gì lên tracker."
+        if not self._config.has_tracker_auth:
+            return False, "Máy trạm chưa có thông tin đăng nhập tracker."
+        from ai_autopilot.services import planning_analyzer
+
+        started = await planning_analyzer.start_items(self._c, [item_id])
+        if not started:
+            return False, f"Không tìm thấy #{item_id} trong dự án máy này theo dõi."
+        tag = self._config.trigger_tag or ""
+        note = " (đang tạm dừng — sẽ chạy khi tiếp tục)" if getattr(
+            self._poller, "paused", False) else ""
+        return True, f"Đã nhận #{item_id} (gắn tag {tag}){note}."
+
+    @staticmethod
+    def _version() -> str:
+        from ai_autopilot import __version__
+
+        return __version__
 
     async def _run(self) -> None:
         # Beat once at startup rather than after a full interval: a machine that has just
@@ -221,6 +413,7 @@ class FleetAgentService:
                 ))
             midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
             done, failed = await self._today_counts(midnight)
+        health = await self.build_health()
         return fleet.WorkerReport(
             name=self.worker_name,
             hostname=socket.gethostname(),
@@ -239,7 +432,50 @@ class FleetAgentService:
             ) if t],
             config_hash=self._local_hash(),
             running=running, done_today=done, failed_today=failed,
+            health=health,
         )
+
+    async def build_health(self) -> fleet.WorkerHealth:
+        """What the centre needs to judge this machine from afar. Every probe is
+        best-effort: a failed one leaves its field at "unknown", never the report."""
+        cfg = self._config
+        poller = self._poller
+        if poller is None:
+            state = fleet.POLLER_ABSENT
+        elif getattr(poller, "draining", False):
+            state = fleet.POLLER_DRAINING
+        elif getattr(poller, "paused", False):
+            state = fleet.POLLER_PAUSED
+        else:
+            state = fleet.POLLER_RUNNING
+        health = fleet.WorkerHealth(
+            uptime=int(time.monotonic() - self._started) if self._started else 0,
+            poller=state,
+            paused_reason=getattr(poller, "paused_reason", "") or "",
+            capacity=int(cfg.max_concurrent or 1),
+            platform=f"{platform.system()} {platform.release()}".strip(),
+            dry_run=bool(cfg.dry_run),
+            accepts_commands=bool(cfg.fleet_accept_commands),
+        )
+        with contextlib.suppress(Exception):
+            health.tracker_ok = bool(cfg.has_tracker_auth)
+        with contextlib.suppress(Exception):
+            usage = shutil.disk_usage((cfg.workspace_directory or "").strip() or ".")
+            health.disk_free_gb = round(usage.free / 1024**3, 1)
+            health.disk_total_gb = round(usage.total / 1024**3, 1)
+        with contextlib.suppress(Exception):
+            rows, _ = await self._c.execution_repo.search(limit=30)
+            finished = [r for r in rows if r.completed_at is not None]
+            for r in finished:
+                if getattr(r.status, "value", str(r.status)) == "Success":
+                    break
+                health.fail_streak += 1
+            failed = next((r for r in finished
+                           if getattr(r.status, "value", str(r.status)) != "Success"), None)
+            if failed is not None:
+                health.last_error = (failed.error or "")[:300]
+                health.last_error_item = int(failed.work_item_id or 0)
+        return health
 
     async def _today_counts(self, since: datetime) -> tuple[int, int]:
         """Runs finished today, split success/failure. Zero when the query is unavailable

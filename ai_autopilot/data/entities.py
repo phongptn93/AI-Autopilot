@@ -489,6 +489,41 @@ class FleetWorker(Base):
     running: Mapped[str] = mapped_column(Text, default="[]")          # JSON snapshot
     done_today: Mapped[int] = mapped_column(Integer, default=0)
     failed_today: Mapped[int] = mapped_column(Integer, default=0)
+    #: JSON ``fleet.WorkerHealth`` — disk, uptime, poller state, last error. Replaced
+    #: every beat like ``running``; a worker on an older build leaves it "{}".
+    health: Mapped[str] = mapped_column(Text, default="{}")
+    #: Set once the "machine went offline" notice has been sent, cleared by the next
+    #: beat — which is what makes the alert once per episode and the recovery notice
+    #: possible at all.
+    offline_alerted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class FleetCommand(Base):
+    """One instruction the central queued for one worker.
+
+    The central cannot call a worker (NAT, sleep, changing IPs — see ``fleet``), so a
+    command is a row the worker picks up when it next asks. That makes every command a
+    small state machine the page can show honestly: ``pending`` (nobody has asked yet),
+    ``delivered`` (the worker took it), then ``done`` / ``failed`` with the worker's
+    own words, or ``expired`` / ``cancelled`` when it never got that far.
+
+    Kept after completion: "who paused dev-02, and when" is the question people ask the
+    morning after, and the audit log only says that somebody pressed a button.
+    """
+
+    __tablename__ = "fleet_commands"
+    __table_args__ = (Index("ix_fleet_commands_worker_status", "worker", "status"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    worker: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(40))
+    args: Mapped[str] = mapped_column(Text, default="{}")          # JSON
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    detail: Mapped[str] = mapped_column(String(1000), default="")
+    created_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class FleetKnowledge(Base):

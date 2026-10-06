@@ -43,9 +43,107 @@
   .fl-forget:hover { color:var(--red,#e5484d); }
   .fl-empty { text-align:center; padding:48px 20px; color:var(--text-muted); }
   .fl-empty code { font-family:var(--mono,monospace); font-size:12px; color:var(--text-dim); }
+  /* ── overview strip ── */
+  .fl-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin-bottom:14px; }
+  .fl-kpi { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:11px; padding:10px 13px; }
+  .fl-kpi .n { font-size:21px; font-weight:700; line-height:1.2; }
+  .fl-kpi .l { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
+  .fl-kpi.bad .n { color:#e5484d; } .fl-kpi.warn .n { color:#d29922; } .fl-kpi.ok .n { color:#3fb950; }
+  /* ── control bar ── */
+  .fl-ctl { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; background:var(--bg-card);
+            border:1px solid var(--border,#23232b); border-radius:12px; padding:12px 16px; margin-bottom:14px; }
+  .fl-ctl form { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin:0; }
+  .fl-ctl .grp { display:flex; flex-direction:column; gap:4px; }
+  .fl-ctl label { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); }
+  .fl-ctl input, .fl-ctl select { background:var(--bg,#0d0d12); color:var(--text); border:1px solid var(--border,#23232b);
+            border-radius:7px; padding:6px 9px; font-size:13px; font-family:inherit; }
+  .fl-ctl input { width:120px; }
+  .fl-sep { width:1px; align-self:stretch; background:var(--border,#23232b); }
+  .fl-btn { background:var(--bg,#0d0d12); color:var(--text); border:1px solid var(--border,#23232b); border-radius:7px;
+            padding:6px 12px; font-size:12.5px; font-family:inherit; cursor:pointer; white-space:nowrap; }
+  .fl-btn:hover { border-color:var(--accent,#6366f1); }
+  .fl-btn.primary { background:var(--accent,#6366f1); border-color:var(--accent,#6366f1); color:#fff; font-weight:600; }
+  .fl-btn:disabled { opacity:.45; cursor:not-allowed; }
+  .fl-actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .fl-actions form { margin:0; }
+  /* ── health + commands ── */
+  .fl-health { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12.5px; color:var(--text-dim); }
+  .fl-health b { color:var(--text); font-weight:600; }
+  .fl-health .bad { color:#e5484d; } .fl-health .warn { color:#d29922; }
+  .fl-err { grid-column:1 / -1; font-size:12px; color:#e5484d; background:rgba(229,72,77,.07);
+            border-radius:7px; padding:6px 10px; word-break:break-word; }
+  .fl-cmds { grid-column:1 / -1; display:flex; flex-direction:column; gap:4px; }
+  .fl-cmd { font-size:12px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; color:var(--text-dim); }
+  .fl-cmd .st { font-size:10.5px; font-weight:600; padding:1px 7px; border-radius:10px; }
+  .st-pending, .st-delivered { background:rgba(99,102,241,.15); color:var(--accent-hover,#818cf8); }
+  .st-done { background:rgba(46,160,67,.16); color:#3fb950; }
+  .st-failed, .st-expired { background:rgba(229,72,77,.14); color:#e5484d; }
+  .st-cancelled { background:rgba(125,125,140,.14); color:var(--text-dim); }
+  .fl-cmd form { display:inline; margin:0; }
 </style>
 
-<h1>🛰 Fleet</h1>
+<h1>🛰 Fleet — trung tâm</h1>
+
+{% if flash %}
+<div class="fl-card" style="border-color:var(--{{ flash[0] }})">
+  <div style="padding:13px 16px;color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+</div>
+{% endif %}
+
+{% if workers %}
+{# Toàn fleet trong một hàng số. Đỏ/vàng chỉ khi có việc phải làm — một dải toàn màu
+   thì không ai đọc nữa. #}
+<div class="fl-kpis">
+  <div class="fl-kpi {{ 'ok' if summary.offline == 0 else '' }}"><div class="n">{{ summary.online }}/{{ summary.total }}</div><div class="l">Online</div></div>
+  <div class="fl-kpi {{ 'bad' if summary.offline else '' }}"><div class="n">{{ summary.offline }}</div><div class="l">Offline</div></div>
+  <div class="fl-kpi"><div class="n">{{ summary.running }}{% if summary.capacity %}<span style="font-size:13px;color:var(--text-dim)"> / {{ summary.capacity }}</span>{% endif %}</div><div class="l">Đang chạy / sức chứa</div></div>
+  <div class="fl-kpi {{ 'warn' if summary.paused else '' }}"><div class="n">{{ summary.paused }}</div><div class="l">Tạm dừng</div></div>
+  <div class="fl-kpi"><div class="n">{{ summary.done_today }}</div><div class="l">Xong hôm nay</div></div>
+  <div class="fl-kpi {{ 'bad' if summary.failed_today else '' }}"><div class="n">{{ summary.failed_today }}</div><div class="l">Lỗi hôm nay</div></div>
+  <div class="fl-kpi {{ 'warn' if summary.out_of_sync else '' }}"><div class="n">{{ summary.out_of_sync }}</div><div class="l">Config lệch</div></div>
+  <div class="fl-kpi {{ 'warn' if summary.behind else '' }}"><div class="n">{{ summary.behind }}</div><div class="l">Cần cập nhật</div></div>
+  <div class="fl-kpi {{ 'bad' if summary.disk_low else '' }}"><div class="n">{{ summary.disk_low }}</div><div class="l">Disk thấp</div></div>
+</div>
+
+<div class="fl-ctl">
+  {# Giao việc: máy trạm tự gắn trigger tag CỦA NÓ lên item, nên quyền sở hữu và
+     pipeline vai chạy y như khi có người gắn tag bằng tay cho máy đó. #}
+  <form method="post" action="/dashboard/fleet/dispatch">
+    <div class="grp"><label>🎯 Giao work item</label>
+      <input name="item_id" placeholder="#12345" inputmode="numeric" required></div>
+    <div class="grp"><label>Cho máy</label>
+      <select name="name">
+        <option value="auto">⚡ Tự chọn máy rảnh nhất</option>
+        {% for w in workers %}{% if w.online %}
+        <option value="{{ w.name }}">{{ w.name }} · {{ w.running|length }}/{{ w.health.capacity or '?' }}{{ ' · tạm dừng' if w.paused else '' }}</option>
+        {% endif %}{% endfor %}
+      </select></div>
+    {% if profiles %}
+    <div class="grp"><label>Ưu tiên vai</label>
+      <select name="profile"><option value="">— bất kỳ —</option>
+        {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+      </select></div>
+    {% endif %}
+    <button class="fl-btn primary" type="submit">Giao việc</button>
+  </form>
+  <span class="fl-sep"></span>
+  <div class="grp"><label>Toàn fleet (máy online)</label>
+    <div class="fl-actions">
+      <form method="post" action="/dashboard/fleet/command/all"
+            onsubmit="return confirm('Tạm dừng nhận việc mới trên TẤT CẢ máy trạm online?')">
+        <input type="hidden" name="kind" value="pause"><button class="fl-btn" type="submit">⏸ Tạm dừng tất cả</button></form>
+      <form method="post" action="/dashboard/fleet/command/all">
+        <input type="hidden" name="kind" value="resume"><button class="fl-btn" type="submit">▶ Tiếp tục tất cả</button></form>
+      <form method="post" action="/dashboard/fleet/command/all">
+        <input type="hidden" name="kind" value="sync"><button class="fl-btn" type="submit">⟳ Đồng bộ tất cả</button></form>
+      <form method="post" action="/dashboard/fleet/command/all"
+            onsubmit="return confirm('Cập nhật mọi máy đang chạy bản cũ hơn lên v{{ version }}? Mỗi máy đợi run đang chạy xong rồi mới cài.')">
+        <input type="hidden" name="kind" value="update">
+        <button class="fl-btn" type="submit" {{ 'disabled' if not summary.behind }}>⬆ Cập nhật máy cũ ({{ summary.behind }})</button></form>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div class="fl-note">
   Máy trạm tự gọi về đây mỗi chu kỳ: đẩy tình trạng, kéo cấu hình chung.
@@ -76,6 +174,12 @@
       v{{ w.version }}{% if w.version_behind %} · cần cập nhật{% endif %}
     </span>
     {% endif %}
+    {% if w.paused %}
+    <span class="fl-badge warn" title="{{ w.health.paused_reason }}">⏸ tạm dừng</span>
+    {% elif w.draining %}
+    <span class="fl-badge warn">⏳ đang cập nhật</span>
+    {% endif %}
+    {% if w.health and w.health.dry_run %}<span class="fl-badge mute">dry-run</span>{% endif %}
     {% if w.in_sync %}
     <span class="fl-badge ok">✅ config đồng bộ</span>
     {% else %}
@@ -121,6 +225,25 @@
       </div>
     </div>
 
+    {# Sức khỏe máy. Máy chạy bản cũ không gửi health → nói "không rõ", không bịa số 0. #}
+    <div class="fl-health">
+      {% if w.health %}
+        {% set h = w.health %}
+        <span>💾 Disk trống: {% if h.disk_free_gb is not none %}<b class="{{ 'bad' if w.disk_low else '' }}">{{ h.disk_free_gb }} GB</b>{% if h.disk_total_gb %} / {{ h.disk_total_gb }} GB{% endif %}{% else %}không rõ{% endif %}</span>
+        <span>⏱ Uptime: <b>{{ fmt_duration(h.uptime or 0) }}</b></span>
+        <span>⚙️ Sức chứa: <b>{{ h.capacity or '?' }}</b> run song song</span>
+        <span>🔑 Tracker: {% if h.tracker_ok is none %}không rõ{% elif h.tracker_ok %}<b>OK</b>{% else %}<b class="bad">chưa đăng nhập</b>{% endif %}</span>
+        {% if h.fail_streak %}<span class="{{ 'bad' if h.fail_streak >= 3 else 'warn' }}">⚠️ {{ h.fail_streak }} run lỗi liên tiếp</span>{% endif %}
+        {% if not h.accepts_commands %}<span class="warn">🚫 máy từ chối lệnh từ xa</span>{% endif %}
+        {% if h.platform %}<span>🖥 {{ h.platform }}</span>{% endif %}
+      {% else %}
+        <span>Máy này chưa gửi thông tin sức khỏe (bản cũ) — cập nhật để thấy disk, uptime, lỗi gần nhất.</span>
+      {% endif %}
+    </div>
+    {% if w.health and w.health.last_error %}
+    <div class="fl-err">Lỗi gần nhất{% if w.health.last_error_item %} (#{{ w.health.last_error_item }}){% endif %}: {{ w.health.last_error }}</div>
+    {% endif %}
+
     <div class="fl-runs">
       <label style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)">
         Đang chạy ({{ w.running | length }})
@@ -135,10 +258,44 @@
       <div style="color:var(--text-dim);font-size:12.5px">Rảnh — không có run nào.</div>
       {% endfor %}
     </div>
+
+    {% if w.commands %}
+    <div class="fl-cmds">
+      <label style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)">Lệnh gần đây</label>
+      {% for cmd in w.commands %}
+      <div class="fl-cmd">
+        <span class="st st-{{ cmd.status }}">{{ {'pending':'chờ máy nhận','delivered':'máy đã nhận','done':'xong','failed':'thất bại','expired':'hết hạn','cancelled':'đã huỷ'}.get(cmd.status, cmd.status) }}</span>
+        <b style="color:var(--text)">{{ cmd.label }}{% if cmd.args.id %} #{{ cmd.args.id }}{% endif %}{% if cmd.args.version %} v{{ cmd.args.version }}{% endif %}</b>
+        <span>{{ fmt_ago(cmd.ago) }} trước</span>
+        {% if cmd.detail %}<span>— {{ cmd.detail }}</span>{% endif %}
+        {% if cmd.status == 'pending' %}
+        <form method="post" action="/dashboard/fleet/command/cancel"><input type="hidden" name="id" value="{{ cmd.id }}"><button class="fl-forget" type="submit">huỷ</button></form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
 
   <div class="fl-foot">
     <span>Heartbeat cuối: {{ fmt_ago(w.quiet) }} trước</span>
+    <div class="fl-actions">
+      {% if w.paused %}
+      <form method="post" action="/dashboard/fleet/command"><input type="hidden" name="name" value="{{ w.name }}">
+        <input type="hidden" name="kind" value="resume"><button class="fl-btn" type="submit">▶ Tiếp tục</button></form>
+      {% else %}
+      <form method="post" action="/dashboard/fleet/command"><input type="hidden" name="name" value="{{ w.name }}">
+        <input type="hidden" name="kind" value="pause"><button class="fl-btn" type="submit">⏸ Tạm dừng</button></form>
+      {% endif %}
+      <form method="post" action="/dashboard/fleet/command"><input type="hidden" name="name" value="{{ w.name }}">
+        <input type="hidden" name="kind" value="sync"><button class="fl-btn" type="submit">⟳ Đồng bộ ngay</button></form>
+      {% if w.version_behind %}
+      <form method="post" action="/dashboard/fleet/command"
+            onsubmit="return confirm('Cập nhật {{ w.name }} lên v{{ version }}? Máy đợi run đang chạy xong rồi mới cài và khởi động lại.')">
+        <input type="hidden" name="name" value="{{ w.name }}">
+        <input type="hidden" name="kind" value="update"><button class="fl-btn" type="submit">⬆ Cập nhật lên v{{ version }}</button></form>
+      {% endif %}
+    </div>
     <span class="fl-spacer"></span>
     <form method="post" action="/dashboard/fleet/forget"
           onsubmit="return confirm('Xoá máy {{ w.name }} khỏi danh sách? Máy vẫn tự xuất hiện lại nếu còn gọi về.')">

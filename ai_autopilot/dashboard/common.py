@@ -121,6 +121,11 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "lens_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                             "vẫn được giữ."),
     "roles_saved": ("green", "✅ Đã lưu vai trò (stage · cửa vào · cửa ra) và áp dụng ngay."),
+    "setup_ws_missing": ("amber", "⚠️ Đã lưu, nhưng thư mục workspace <b>không tồn tại</b> trên "
+                                  "máy này — mọi run sẽ lỗi. Quay lại bước Mã nguồn để sửa."),
+    "setup_ws_no_claude": ("amber", "ℹ️ Đã lưu. Thư mục workspace chưa có <code>.claude/</code> "
+                                    "(skills, rules, MCP) — autopilot vẫn chạy, nhưng không có "
+                                    "skill riêng của dự án."),
     "preset_applied": ("green", "✅ Đã áp dụng preset. Các thiết lập cũ được ghi trong Audit "
                                 "(<code>config.preset_applied</code>) nếu cần đặt lại."),
     "preset_unknown": ("red", "⛔ Không có preset đó."),

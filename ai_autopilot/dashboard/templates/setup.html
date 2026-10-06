@@ -54,6 +54,14 @@
   .wz-role p{font-size:12.3px;color:var(--text-muted);line-height:1.55}
   .wz-role.sel{border-color:var(--accent);background:var(--accent-bg)}
   .wz-role .ico{font-size:20px;line-height:1;margin-bottom:8px;display:block}
+  .wz-presets{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-bottom:14px}
+  .wz-preset{border:1px solid var(--border);border-radius:10px;padding:11px 13px;cursor:pointer;display:flex;gap:10px}
+  .wz-preset:has(input:checked){border-color:var(--accent);background:var(--accent-bg,rgba(99,102,241,.08))}
+  .wz-preset b{display:block;font-size:13px;margin-bottom:3px}
+  .wz-preset span{font-size:12px;color:var(--text-muted);line-height:1.5}
+  .wz-adv>summary{cursor:pointer;font-size:12.5px;color:var(--accent-hover);margin:6px 0 10px}
+  .wz-next-steps ol{margin:6px 0 0 18px;padding:0;font-size:13px;line-height:1.9}
+  .wz-next-steps code{font-size:11.5px}
   .wz-check{margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .wz-test{background:var(--bg);border:1px solid var(--border);color:var(--text);
            border-radius:8px;padding:6px 13px;font-size:12.5px;font-family:inherit;cursor:pointer}
@@ -134,6 +142,20 @@
 
 {# ── Final step: hand over to the real doctor ── #}
 {% elif step_id == 'done' %}
+<div class="wz-card wz-next-steps">
+  <header><b>🚀 Chạy thử với 1 work item</b></header>
+  <div class="wz-body">
+    <ol>
+      <li>Mở một work item nhỏ trên ADO, đưa nó vào state
+        {% for s in trigger_states %}<code>{{ s }}</code>{{ ', ' if not loop.last }}{% else %}<i>(chưa khai trigger state)</i>{% endfor %}.</li>
+      <li>Gắn tag <code>{{ trigger_tag }}</code> — tag riêng của máy này.</li>
+      <li>Trong ~30 giây item xuất hiện ở <a href="/dashboard/now">Đang chạy</a>; hoặc mở
+        <a href="/dashboard/board">Board</a> và bấm ▶ trên item đó.</li>
+      <li>Xong: xem kết quả ở <a href="/dashboard/history">Lịch sử chạy</a>, PR nháp trên repo.</li>
+      <li>Muốn chuyền vai BA → Dev → QC? Chọn preset ở <a href="/dashboard/roles">Vai trò &amp; preset</a>.</li>
+    </ol>
+  </div>
+</div>
 <div class="wz-card">
   <header><b>✅ Xong phần bắt buộc — đây là những gì máy tự kiểm</b></header>
   <div class="wz-body">
@@ -238,6 +260,18 @@
         của máy trung tâm.</div>
       {% endif %}
 
+      {% if step_id == 'policy' %}
+      <div class="wz-note">Chọn một cách làm việc có sẵn — hoặc tự đặt từng thiết lập ở mục Nâng cao.</div>
+      <div class="wz-presets">
+        {% for p in presets %}
+        <label class="wz-preset"><input type="radio" name="preset" value="{{ p.key }}" {{ 'checked' if preset_now == p.key }}>
+          <div><b>{{ p.icon }} {{ p.title }}</b><span>{{ p.summary }}</span></div></label>
+        {% endfor %}
+        <label class="wz-preset"><input type="radio" name="preset" value="" {{ 'checked' if not preset_now }}>
+          <div><b>⚙️ Tự đặt</b><span>Dùng các giá trị trong mục Nâng cao bên dưới.</span></div></label>
+      </div>
+      <details class="wz-adv" {{ 'open' if not preset_now }}><summary>Nâng cao — chế độ chạy, model, số run song song</summary>
+      {% endif %}
       {% for f in step_fields %}
       <div class="wz-f">
         <label for="{{ f.key }}">{{ f.label }}</label>
@@ -293,15 +327,16 @@
         {% if f.help %}<div class="form-help">{{ f.help }}</div>{% endif %}
       </div>
       {% endfor %}
+      {% if step_id == 'policy' %}</details>{% endif %}
 
       {% if check %}
       {# Verify before moving on. A wizard that only collects text and lets the failure
          surface hours later, inside a real run, is a form with extra clicks. #}
       <div class="wz-check">
         <button type="button" class="wz-test" data-check="{{ check }}">
-          {{ '🔌 Kiểm tra kết nối ADO' if check == 'ado' else '🛰 Kiểm tra trung tâm' }}
+          {{ '🔌 Lưu & kiểm tra kết nối ADO' if check == 'ado' else '🛰 Lưu & kiểm tra trung tâm' }}
         </button>
-        <span class="wz-res" id="check-result">Lưu bước này trước, rồi bấm kiểm tra.</span>
+        <span class="wz-res" id="check-result">Lưu những gì vừa nhập rồi kiểm tra thật.</span>
       </div>
       {% endif %}
     </div>
@@ -341,10 +376,18 @@
   document.querySelectorAll('[data-check]').forEach(function (b) {
     b.addEventListener('click', function () {
       var out = document.getElementById('check-result');
-      out.className = 'wz-res'; out.textContent = 'Đang kiểm tra…';
+      out.className = 'wz-res'; out.textContent = 'Đang lưu và kiểm tra…';
       b.disabled = true;
-      fetch('/dashboard/setup/check/' + b.dataset.check,
-            { method: 'POST', credentials: 'same-origin' })
+      // Save first, then check: the check reads the live config, so this is what
+      // makes it prove the values on screen rather than the ones stored before.
+      var data = new FormData(document.getElementById('step-form'));
+      data.append('stay', '1');
+      fetch('/dashboard/setup', { method: 'POST', credentials: 'same-origin', body: data })
+        .then(function (r) {
+          if (!r.ok) throw new Error('save');
+          return fetch('/dashboard/setup/check/' + b.dataset.check,
+                       { method: 'POST', credentials: 'same-origin' });
+        })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           out.className = 'wz-res ' + (d.ok ? 'ok' : 'bad');

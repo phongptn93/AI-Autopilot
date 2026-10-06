@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ai_autopilot import fleet as fleet_mod
-from ai_autopilot import security
+from ai_autopilot import sdlc_presets, security
 from ai_autopilot import workspaces as workspaces_mod
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
@@ -28,6 +29,28 @@ from ai_autopilot.logging_config import describe_exc
 # that only collects text and lets the failure surface hours later during a real run
 # is a form with extra clicks.
 _SETUP_CHECKS = {"ado": "ado", "connect": "fleet"}
+
+
+# The policy step offers these instead of four expert questions. The relay preset is
+# left out on purpose: it needs the board's state names, which the Roles page asks for.
+_SETUP_PRESETS = ("safe", "autonomous")
+
+
+def _workspace_flash(directory: str) -> str:
+    """A flash code when the folder just saved cannot work, else "".
+
+    Checked at the moment it is typed: a wrong path otherwise surfaces as every run
+    failing an hour later with an error about git, not about the path.
+    """
+    path = (directory or "").strip()
+    if not path:
+        return ""
+    folder = Path(path).expanduser()
+    if not folder.is_dir():
+        return "setup_ws_missing"
+    if not (folder / ".claude").is_dir():
+        return "setup_ws_no_claude"
+    return ""
 
 
 def _setup_findings(cfg) -> list[dict]:
@@ -169,6 +192,13 @@ def create_router() -> APIRouter:
                 central_url=(cfg.fleet_central_url or "").strip(),
                 fleet_token_set=bool((cfg.fleet_token or "").strip()),
                 jira=_setup_jira_view(cfg),
+                presets=[sdlc_presets.PRESETS[k] for k in _SETUP_PRESETS],
+                # Pre-select only a preset this machine already matches. Defaulting to
+                # one would overwrite a hand-tuned machine on a casual "save" here.
+                preset_now=next((k for k in _SETUP_PRESETS
+                                 if not sdlc_presets.diff(sdlc_presets.PRESETS[k], cfg)), ""),
+                trigger_tag=cfg.trigger_tag,
+                trigger_states=list(cfg.effective_trigger_states),
             ),
         )
         if flash is not None:
@@ -209,6 +239,14 @@ def create_router() -> APIRouter:
             if keys is None:
                 raise HTTPException(status_code=404, detail="unknown step")
             by_key = {f.key: f for f in settings_form.FIELDS}
+            chosen_preset = sdlc_presets.PRESETS.get(str(form.get("preset", "")).strip())
+            if step_id == "policy" and chosen_preset is not None \
+                    and chosen_preset.key in _SETUP_PRESETS:
+                # A preset answers the whole step; the expert fields under "Nâng cao"
+                # only count when the operator chose to answer them by hand.
+                keys = ()
+                updates.update({k: v for k, v in chosen_preset.settings.items()
+                                if settings_form.writable_here(k, cfg)})
             # Reuse the page's own parser so coercion and the "blank password keeps the
             # stored one" rule cannot drift between the two ways into the same settings.
             parsed = settings_form.parse_form(form)
@@ -245,14 +283,21 @@ def create_router() -> APIRouter:
                 actor="dashboard", source="dashboard", action="setup.step_saved",
                 target=step_id, detail=", ".join(sorted(updates))[:300],
             )
+        # "Lưu & kiểm tra": saved, and the page runs the check itself — so the check
+        # proves what was just typed, not whatever was stored before.
+        if form.get("stay"):
+            return JSONResponse({"ok": True, "saved": sorted(updates)})
+        warn = _workspace_flash(updates.get("workspace_directory", "")) \
+            if "workspace_directory" in updates else ""
         # Recomputed AFTER the save: choosing a role on step zero decides which steps
         # exist, so the "next" of that step only becomes knowable once it is applied.
         ids = ["role", *[s[0] for s in _setup_flow(_setup_role(cfg), source)], "done"]
         here = ids.index(step_id) if step_id in ids else 0
         nxt = ids[here + 1] if here + 1 < len(ids) else "done"
-        return RedirectResponse(
-            f"/dashboard/setup?step={nxt}&src={source}", status_code=303
-        )
+        target = f"/dashboard/setup?step={nxt}&src={source}"
+        if warn:
+            return _flash(target, warn)
+        return RedirectResponse(target, status_code=303)
 
     @router.post("/setup/check/{what}")
     async def setup_check(request: Request, what: str):

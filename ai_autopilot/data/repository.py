@@ -1442,6 +1442,9 @@ class SpecDriftRepository:
                     title=(item.title or "")[:500], pr_url=pr_url or "",
                     kind=dev.kind, summary=dev.summary, detail=dev.detail,
                     where=dev.where, created_at=now,
+                    spec_says=getattr(dev, "spec_says", "") or "",
+                    code_does=getattr(dev, "code_does", "") or "",
+                    needs_decision=bool(getattr(dev, "needs_decision", False)),
                 ))
             await session.commit()
         return len(deviations)
@@ -1493,6 +1496,57 @@ class SpecDriftRepository:
                 select(SpecDrift.work_item_id).where(SpecDrift.resolved_at.is_(None))
             )
             return {int(r) for (r,) in rows.all()}
+
+    async def decide(self, row_id: int, decision: str, note: str = "", by: str = "",
+                     ) -> tuple[int, int]:
+        """Record the BA's decision on ONE point. Returns ``(work_item_id, still_open)``.
+
+        Deciding a point closes it: the question "is this still outstanding" and "has
+        somebody decided it" are the same question for a BA. ``(0, -1)`` = no such open row.
+        """
+        now = datetime.now(UTC)
+        async with self._db.session() as session:
+            row = (await session.execute(
+                select(SpecDrift).where(SpecDrift.id == int(row_id),
+                                        SpecDrift.resolved_at.is_(None))
+            )).scalar_one_or_none()
+            if row is None:
+                return 0, -1
+            row.decision, row.decision_note = decision[:20], (note or "")[:4000]
+            row.resolved_at, row.resolved_by = now, (by or "")[:200]
+            item_id = row.work_item_id
+            await session.commit()
+            left = (await session.execute(
+                select(func.count()).select_from(SpecDrift).where(
+                    SpecDrift.work_item_id == item_id, SpecDrift.resolved_at.is_(None))
+            )).scalar() or 0
+        return item_id, int(left)
+
+    async def stats(self, *, days: int = 30) -> dict:
+        """Ageing and throughput — what a lead asks before "how many are open"."""
+        now = datetime.now(UTC)
+        since = _naive(now - timedelta(days=days))
+        async with self._db.session() as session:
+            open_rows = list((await session.execute(
+                select(SpecDrift.created_at).where(SpecDrift.resolved_at.is_(None))
+            )).scalars().all())
+            done = list((await session.execute(
+                select(SpecDrift.created_at, SpecDrift.resolved_at)
+                .where(SpecDrift.resolved_at.is_not(None), SpecDrift.resolved_at >= since)
+            )).all())
+            ever = (await session.execute(select(func.count()).select_from(SpecDrift))).scalar()
+
+        def age(at):
+            at = at if at.tzinfo else at.replace(tzinfo=UTC)
+            return (now - at).total_seconds() / 86400
+
+        turn = [age(c) - age(r) for c, r in done if c and r]
+        return {
+            "ever": int(ever or 0),
+            "oldest_days": int(max((age(a) for a in open_rows), default=0)),
+            "resolved_recent": len(done),
+            "avg_days": round(sum(turn) / len(turn), 1) if turn else None,
+        }
 
     async def resolve(self, work_item_id: int, by: str = "") -> int:
         """Tick off every outstanding drift on one item; returns how many were closed."""

@@ -607,6 +607,11 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "decision taken on the team's behalf that the work item does not reflect. When on, "
           "those are filed as a ⚠️ SPEC-DRIFT comment, a tag, a PR comment, and a row on "
           "/dashboard/specs a BA ticks off."),
+    Field("spec_drift_sla_days", "↳ Hạn quyết lệch spec (ngày)", "int",
+          "Spec drift & PR traceability",
+          "Điểm lệch spec chưa được BA quyết quá số ngày này hiện đỏ trên trang Lệch spec "
+          "(quá nửa hạn: vàng).",
+          show_when_key="spec_drift_enabled", show_when_values=("1",)),
     Field("spec_drift_tag", "↳ Tag until the spec is updated", "text",
           "Spec drift & PR traceability",
           "Applied to the item until a human marks the specification back in line."),

@@ -16,7 +16,8 @@ The schema (all fields optional; the parser is tolerant):
       "needs_human": false,
       "reason": "why human input is needed / why it failed",
       "deviations": [{"kind": "spec_unclear", "summary": "...", "detail": "...",
-                      "where": "AC-3 / OrderService.cs"}]
+                      "where": "AC-3 / OrderService.cs",
+                      "spec_says": "...", "code_does": "...", "needs_decision": false}]
     }
 
 ``deviations`` is how the agent says "what I built is not exactly what the item
@@ -76,6 +77,13 @@ class Deviation:
     summary: str = ""
     detail: str = ""
     where: str = ""      # AC id, file, endpoint — where to look
+    # The two columns a BA edits from: what the item SAYS (quoted, so it can be found
+    # and replaced) and what the code now DOES. Optional — an older agent omits them,
+    # and the notice falls back to the summary.
+    spec_says: str = ""
+    code_does: str = ""
+    # The agent cannot settle this one: it needs the customer / BA, not just a spec edit.
+    needs_decision: bool = False
 
     @property
     def is_empty(self) -> bool:
@@ -319,6 +327,12 @@ def _parse_test_cases(raw: object) -> list[TestCase]:
     return out
 
 
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in ("1", "true", "yes", "y")
+
+
 def _parse_deviations(raw: object) -> list[Deviation]:
     """Tolerant read of ``deviations``.
 
@@ -339,6 +353,9 @@ def _parse_deviations(raw: object) -> list[Deviation]:
                 summary=str(entry.get("summary", "")).strip(),
                 detail=str(entry.get("detail", "")).strip(),
                 where=str(entry.get("where", "")).strip(),
+                spec_says=str(entry.get("spec_says") or entry.get("current") or "").strip(),
+                code_does=str(entry.get("code_does") or entry.get("adjusted") or "").strip(),
+                needs_decision=_truthy(entry.get("needs_decision")),
             )
         else:
             continue

@@ -1,92 +1,163 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .s-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
-  .s-tile { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px; padding:14px 16px; }
-  .s-tile .n { font-size:26px; font-weight:600; line-height:1.1; }
-  .s-tile .l { color:var(--text-dim); font-size:12px; margin-top:4px; }
-  .s-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px;
-            padding:14px 16px; margin-bottom:12px; }
-  .s-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
-  .s-title { font-weight:600; }
-  .s-meta { color:var(--text-dim); font-size:12px; margin-top:2px; }
-  .s-list { margin:10px 0 0; padding-left:18px; }
-  .s-list li { margin-bottom:8px; }
-  .s-where { font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--text-dim); }
-  .s-detail { color:var(--text-dim); font-size:13px; }
-  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid; }
+  .s-tiles { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin-bottom:16px; }
+  @media (max-width: 1200px) { .s-tiles { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+  .s-tile { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px; padding:12px 14px; }
+  .s-tile .n { font-size:24px; font-weight:700; line-height:1.15; }
+  .s-tile .l { color:var(--text-muted); font-size:11px; margin-top:3px; text-transform:uppercase; letter-spacing:.04em; }
+  .s-tile.warn .n { color:#d29922; } .s-tile.bad .n { color:#e5484d; }
+  .s-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px; }
+  .s-chip { font-size:12.5px; padding:5px 12px; border-radius:20px; border:1px solid var(--border); color:var(--text-muted);
+    text-decoration:none; background:var(--bg-card); }
+  .s-chip.on { border-color:var(--accent); color:var(--text); background:var(--accent-bg,rgba(99,102,241,.12)); }
+  .s-spacer { flex:1; }
+  .s-btn { font-size:12.5px; padding:6px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg-card);
+    color:var(--text); text-decoration:none; cursor:pointer; font-family:inherit; }
+  .s-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:12px; margin-bottom:14px; overflow:hidden; }
+  .s-card.old { border-color:rgba(210,153,34,.5); } .s-card.stale { border-color:rgba(229,72,77,.55); }
+  .s-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:12px 16px;
+    border-bottom:1px solid var(--border-soft,var(--border)); flex-wrap:wrap; }
+  .s-title { font-weight:650; font-size:14px; }
+  .s-title a { color:var(--accent-hover); text-decoration:none; }
+  .s-meta { color:var(--text-dim); font-size:12px; margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11.5px; font-weight:600; border:1px solid; }
   .pill-warn { color:#fbbf24; border-color:#78350f; background:#78350f22; }
-  .pill-ok   { color:#34d399; border-color:#065f46; background:#065f4622; }
-  .s-empty { color:var(--text-dim); padding:24px 0; }
+  .pill-bad { color:#f87171; border-color:#7f1d1d; background:#7f1d1d22; }
+  .pill-ok { color:#34d399; border-color:#065f46; background:#065f4622; }
+  .pill-mute { color:var(--text-dim); border-color:var(--border); }
+  .s-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .s-tbl th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim);
+    padding:8px 12px; border-bottom:1px solid var(--border-soft,var(--border)); background:var(--bg-input,transparent); }
+  .s-tbl td { padding:10px 12px; border-bottom:1px solid var(--border-soft,var(--border)); vertical-align:top; line-height:1.5; }
+  .s-tbl tr:last-child td { border-bottom:0; }
+  .s-where { font-family:var(--mono,monospace); font-size:12px; font-weight:600; }
+  .s-kind { font-size:11.5px; color:var(--text-dim); display:block; margin-top:2px; }
+  .s-quote { color:var(--text-muted); border-left:2px solid var(--border); padding-left:8px; }
+  .s-why { font-size:12px; color:var(--text-dim); display:block; margin-top:4px; }
+  .s-decide { display:flex; flex-direction:column; gap:6px; min-width:210px; }
+  .s-decide input { background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border);
+    border-radius:7px; padding:5px 8px; font-size:12px; font-family:inherit; }
+  .s-decide .row { display:flex; gap:5px; flex-wrap:wrap; }
+  .s-decide button { font-size:11.5px; padding:4px 8px; border-radius:6px; border:1px solid var(--border);
+    background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit; white-space:nowrap; }
+  .s-decide button:hover { border-color:var(--accent); }
+  .s-empty { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:26px 22px;
+    color:var(--text-muted); font-size:13.5px; line-height:1.7; }
   .s-done { width:100%; border-collapse:collapse; font-size:13px; }
   .s-done th, .s-done td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border,#23232b); }
 </style>
 
 <div class="page-header">
-  <h2>📐 Spec drift — chỗ code không khớp mô tả</h2>
-  <p>Agent được yêu cầu tự quyết thay vì hỏi, nên mỗi mục dưới đây là một quyết định nó
-     đưa ra thay cho team — và là một chỗ spec hiện <b>không</b> phản ánh đúng code.
-     BA cập nhật mô tả/AC cho khớp rồi bấm <b>Đã cập nhật spec</b>.</p>
+  <h2 class="page-title">{{ page_title("specs") }}</h2>
+  <p>Agent được yêu cầu tự quyết thay vì hỏi, nên mỗi điểm dưới đây là một quyết định nó đưa ra thay cho đội —
+     chỗ spec hiện <b>không</b> phản ánh đúng code. Với từng điểm, BA chọn <b>cập nhật spec theo code</b>,
+     <b>sửa code theo spec</b>, hoặc <b>giữ nguyên</b>. Khi mọi điểm của item đã quyết, autopilot gỡ tag và ghi
+     một comment tổng hợp lên work item — nơi QC viết test case theo AC.</p>
 </div>
 
 <div class="s-tiles">
-  <div class="s-tile"><div class="n">{{ open_items | length }}</div><div class="l">Work item chờ cập nhật spec</div></div>
-  <div class="s-tile"><div class="n">{{ open_count }}</div><div class="l">Điểm chênh lệch đang mở</div></div>
-  {% for kind, n in kind_totals %}
-    <div class="s-tile"><div class="n">{{ n }}</div><div class="l">{{ icon(kind) }} {{ label(kind) }}</div></div>
-  {% endfor %}
+  <div class="s-tile {{ 'warn' if open_items }}"><div class="n">{{ open_items | length }}</div><div class="l">Work item chờ quyết</div></div>
+  <div class="s-tile"><div class="n">{{ open_count }}</div><div class="l">Điểm lệch đang mở</div></div>
+  <div class="s-tile {{ 'bad' if asks_open }}"><div class="n">{{ asks_open }}</div><div class="l">Cần khách / BA chốt</div></div>
+  <div class="s-tile {{ 'bad' if stats.oldest_days > sla_days else ('warn' if stats.oldest_days > sla_days // 2 else '') }}">
+    <div class="n">{{ (stats.oldest_days ~ ' ngày') if open_count else '—' }}</div><div class="l">Tồn lâu nhất</div></div>
+  <div class="s-tile"><div class="n">{{ stats.resolved_recent }}</div><div class="l">Đã quyết · 30 ngày</div></div>
+  <div class="s-tile"><div class="n">{{ (stats.avg_days ~ ' ngày') if stats.avg_days is not none else '—' }}</div><div class="l">Thời gian xử lý TB</div></div>
 </div>
 
+{% if open_count %}
+<div class="s-bar">
+  <a class="s-chip {{ 'on' if not kind }}" href="/dashboard/specs">Tất cả · {{ open_count }}</a>
+  <a class="s-chip {{ 'on' if kind == 'ask' }}" href="/dashboard/specs?kind=ask">❗ Cần chốt · {{ asks_open }}</a>
+  {% for k, n in kind_totals %}
+  <a class="s-chip {{ 'on' if kind == k }}" href="/dashboard/specs?kind={{ k }}">{{ icon(k) }} {{ label(k) }} · {{ n }}</a>
+  {% endfor %}
+  <span class="s-spacer"></span>
+  <a class="s-btn" href="/dashboard/specs/export.md" title="Bảng Markdown để dán vào tài liệu / email cho BA">⬇ Xuất bảng cho BA</a>
+</div>
+{% endif %}
+
 {% if not open_items %}
-  <div class="s-empty">Không có điểm chênh lệch nào đang mở — spec đang khớp với code. 🎉</div>
+  <div class="s-empty">
+  {% if kind %}
+    Không có điểm nào thuộc bộ lọc này. <a href="/dashboard/specs" style="color:var(--accent-hover)">Xem tất cả</a>.
+  {% elif not stats.ever %}
+    <b>Chưa có run nào báo lệch spec.</b> Mỗi khi agent phải tự quyết một chỗ mô tả chưa nói rõ, nó ghi lại
+    ở đây (kèm câu trích từ spec và hành vi code) và comment <code>⚠️ SPEC-DRIFT</code> lên work item.
+    {% if not spec_drift_enabled %}<br>⚠️ Tính năng đang <b>tắt</b> — bật <code>spec_drift_enabled</code> ở Thiết lập.{% endif %}
+  {% else %}
+    ✅ <b>Không còn điểm lệch nào chờ quyết.</b> {{ stats.resolved_recent }} điểm đã được quyết trong 30 ngày qua.
+  {% endif %}
+  </div>
 {% endif %}
 
 {% for group in open_items %}
-  <div class="s-card">
+  <div class="s-card {{ 'stale' if group.age_days > sla_days else ('old' if group.age_days > sla_days // 2 else '') }}">
     <div class="s-head">
       <div>
         <div class="s-title">
-          {% if work_item_url %}
-            <a href="{{ work_item_url(group.work_item_id) }}" target="_blank" rel="noopener">#{{ group.work_item_id }}</a>
+          {% if work_item_url %}<a href="{{ work_item_url(group.work_item_id) }}" target="_blank" rel="noopener">#{{ group.work_item_id }}</a>
           {% else %}#{{ group.work_item_id }}{% endif %}
           — {{ group.title or '(không có tiêu đề)' }}
-          <a href="/dashboard/task/{{ group.work_item_id }}?tab=drift" class="pill pill-warn"
-             style="text-decoration:none">mở task</a>
         </div>
         <div class="s-meta">
           <span class="pill pill-warn">{{ group.rows | length }} điểm</span>
-          {% if group.project %} · {{ group.project }}{% endif %}
-          {% if group.pr_url %} · <a href="{{ group.pr_url }}" target="_blank" rel="noopener">PR</a>{% endif %}
-          · báo lúc {{ group.created_at.strftime('%d/%m %H:%M') }}
+          {% if group.asks %}<span class="pill pill-bad">❗ {{ group.asks }} cần chốt</span>{% endif %}
+          <span class="pill {{ 'pill-bad' if group.age_days > sla_days else 'pill-mute' }}"
+                title="Báo lúc {{ group.created_at.strftime('%d/%m/%Y %H:%M') }}">tồn {{ group.age_days }} ngày</span>
+          {% if group.project %}<span>{{ group.project }}</span>{% endif %}
+          {% if group.pr_url %}<a href="{{ group.pr_url }}" target="_blank" rel="noopener" style="color:var(--accent-hover)">PR ↗</a>{% endif %}
+          {% if group.spec_q %}<a href="/dashboard/requirements/spec?path={{ group.spec_q }}" style="color:var(--accent-hover)">📖 Mở spec</a>{% endif %}
+          <a href="/dashboard/task/{{ group.work_item_id }}?tab=drift" style="color:var(--accent-hover)">phòng task</a>
         </div>
       </div>
-      <form method="post" action="/dashboard/specs/resolve">
+      <form method="post" action="/dashboard/specs/resolve"
+            onsubmit="return confirm('Đánh dấu TẤT CẢ điểm của #{{ group.work_item_id }} là đã cập nhật spec?')">
         <input type="hidden" name="work_item_id" value="{{ group.work_item_id }}">
-        <button type="submit" class="btn">✅ Đã cập nhật spec</button>
+        <button type="submit" class="s-btn" title="Mọi điểm của item này: spec đã được cập nhật theo code">📝 Đã cập nhật spec (tất cả)</button>
       </form>
     </div>
-    <ul class="s-list">
+    <table class="s-tbl">
+      <thead><tr><th style="width:18%">Mục</th><th style="width:27%">Hiện tại (spec)</th><th style="width:30%">Điều chỉnh (code)</th><th>Quyết định</th></tr></thead>
+      <tbody>
       {% for row in group.rows %}
-        <li>
-          {{ icon(row.kind) }} <b>{{ label(row.kind) }}</b>
-          {% if row.where %}<span class="s-where">{{ row.where }}</span>{% endif %}
-          <div>{{ row.summary }}</div>
-          {% if row.detail %}<div class="s-detail">{{ row.detail }}</div>{% endif %}
-        </li>
+        <tr>
+          <td><span class="s-where">{{ row.where or '—' }}</span>
+              <span class="s-kind">{{ icon(row.kind) }} {{ label(row.kind) }}</span>
+              {% if row.ask %}<span class="pill pill-bad" style="margin-top:4px">❗ cần chốt</span>{% endif %}</td>
+          <td>{% if row.spec_says %}<div class="s-quote">{{ row.spec_says }}</div>{% else %}<span style="color:var(--text-dim)">— (agent không trích)</span>{% endif %}</td>
+          <td>{{ row.code_does or row.summary }}
+              {% if row.detail %}<span class="s-why">Lý do: {{ row.detail }}</span>{% endif %}</td>
+          <td>
+            <form class="s-decide" method="post" action="/dashboard/specs/decide">
+              <input type="hidden" name="row_id" value="{{ row.id }}">
+              <input type="hidden" name="back" value="{{ kind }}">
+              <input name="note" placeholder="Ghi chú (tuỳ chọn)" maxlength="400">
+              <div class="row">
+                {% for key, text in decisions %}
+                <button type="submit" name="decision" value="{{ key }}" title="{{ text }}">{{ text.split(' ')[0] }} {{ text.split(' ', 1)[1].split(' —')[0] }}</button>
+                {% endfor %}
+              </div>
+            </form>
+          </td>
+        </tr>
       {% endfor %}
-    </ul>
+      </tbody>
+    </table>
   </div>
 {% endfor %}
 
 {% if resolved %}
-  <h3 style="margin-top:26px">Đã xử lý gần đây</h3>
+  <h3 style="margin:26px 0 10px">Đã quyết gần đây</h3>
   <table class="s-done">
-    <thead><tr><th>Work item</th><th>Điểm</th><th>Người xác nhận</th><th>Lúc</th></tr></thead>
+    <thead><tr><th>Work item</th><th>Điểm</th><th>Quyết định</th><th>Người xác nhận</th><th>Lúc</th></tr></thead>
     <tbody>
       {% for group in resolved %}
         <tr>
           <td>#{{ group.work_item_id }} — {{ group.title }}</td>
           <td><span class="pill pill-ok">{{ group.rows | length }}</span></td>
+          <td>{% for key, n in group.decided %}<span class="pill pill-mute" style="margin-right:4px">{{ decision_label(key) }} · {{ n }}</span>{% else %}—{% endfor %}</td>
           <td>{{ group.resolved_by or '—' }}</td>
           <td>{{ group.resolved_at.strftime('%d/%m %H:%M') if group.resolved_at else '—' }}</td>
         </tr>

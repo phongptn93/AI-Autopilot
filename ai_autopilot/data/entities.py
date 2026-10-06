@@ -292,9 +292,17 @@ class SpecDrift(Base):
     summary: Mapped[str] = mapped_column(Text, default="")
     detail: Mapped[str] = mapped_column(Text, default="")
     where: Mapped[str] = mapped_column(String(300), default="")
+    spec_says: Mapped[str] = mapped_column(Text, default="")
+    code_does: Mapped[str] = mapped_column(Text, default="")
+    needs_decision: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     resolved_by: Mapped[str] = mapped_column(String(200), default="")
+    #: What the BA decided for THIS point — ``update_spec`` (the spec follows the code),
+    #: ``fix_code`` (the code must follow the spec) or ``accept`` (no change either way).
+    #: Blank on rows closed by the old item-wide button.
+    decision: Mapped[str] = mapped_column(String(20), default="")
+    decision_note: Mapped[str] = mapped_column(Text, default="")
 
 
 class DeferredVerification(Base):

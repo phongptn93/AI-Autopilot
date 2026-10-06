@@ -89,52 +89,125 @@ def _esc(text: str, limit: int = 1200) -> str:
     return html.escape(clean)
 
 
+#: What a BA can decide about one point. Stable keys — stored per row.
+DECISIONS: dict[str, str] = {
+    "update_spec": "📝 Cập nhật spec theo code",
+    "fix_code": "🔧 Sửa code theo spec",
+    "accept": "✅ Giữ nguyên — không cần đổi",
+}
+#: Kinds that are a question for a human by nature, whatever the agent flagged.
+_ASKS = ("spec_unclear", "assumption")
+
+
+def decision_label(key: str) -> str:
+    return DECISIONS.get(key, "—")
+
+
+def needs_decision(dev: Deviation) -> bool:
+    return bool(getattr(dev, "needs_decision", False)) or dev.kind in _ASKS
+
+
 def render_comment(
     deviations: list[Deviation], *, pr_url: str = "", tag: str = "", dashboard_url: str = ""
 ) -> DriftNotice:
-    """The work-item comment: what the agent decided, and what is expected of the reader.
+    """The work-item comment, in the four parts a BA works through.
 
-    Written for a BA opening the item cold, so it says the three things they need in
-    order: that the code and the item disagree, exactly where, and what to do about it.
+    1. what was decided and by whom; 2. a table per affected spec point — *Mục ·
+    Hiện tại · Điều chỉnh* — quoting the spec so the line to replace can be found;
+    3. what landed outside the item's scope (QC cannot read a diff, so unlisted means
+    untested); 4. what needs a business decision rather than a wording fix. The same
+    shape the team's own spec-drift rule asks humans to write.
     """
     items = [d for d in deviations if not d.is_empty]
     if not items:
         return DriftNotice(html="", count=0, kinds=())
 
-    rows = []
-    for dev in items:
-        where = f' <code>{_esc(dev.where, 200)}</code>' if dev.where else ""
-        detail = f"<br/><span>{_esc(dev.detail)}</span>" if dev.detail else ""
-        rows.append(
-            f"<li>{icon_for(dev.kind)} <b>{html.escape(label_for(dev.kind))}</b>{where}"
-            f"<br/>{_esc(dev.summary)}{detail}</li>"
+    in_scope = [d for d in items if d.kind != "out_of_scope"]
+    outside = [d for d in items if d.kind == "out_of_scope"]
+    asks = [d for d in items if needs_decision(d)]
+
+    def row(dev: Deviation) -> str:
+        where = _esc(dev.where, 200) if dev.where else "—"
+        now = _esc(dev.spec_says) if getattr(dev, "spec_says", "") else (
+            "<i>(agent không trích — xem mô tả item)</i>")
+        then = _esc(getattr(dev, "code_does", "") or dev.summary)
+        why = _esc(dev.detail) if dev.detail else ""
+        return (
+            f"<tr><td>{icon_for(dev.kind)} <b>{where}</b><br/>"
+            f"<small>{html.escape(label_for(dev.kind))}</small></td>"
+            f"<td>{now}</td>"
+            f"<td>{then}{f'<br/><small>Lý do: {why}</small>' if why else ''}</td></tr>"
         )
 
     parts = [
         f"<div><b>{DRIFT_PREFIX}</b> — {len(items)} điểm code không khớp mô tả",
-        "<br/><i>Agent được yêu cầu tự quyết thay vì hỏi, nên những chỗ dưới đây là "
-        "quyết định nó đưa ra thay cho bạn. Spec hiện KHÔNG phản ánh đúng code.</i>",
-        f"<ul>{''.join(rows)}</ul>",
+        "<h3>1. Quyết định</h3>"
+        "<p>Agent được yêu cầu tự quyết thay vì hỏi; các điểm dưới đây là quyết định nó "
+        "đưa ra thay cho đội. <b>Spec hiện KHÔNG phản ánh đúng code.</b></p>",
     ]
+    if in_scope:
+        parts.append(
+            "<h3>2. Mục spec bị ảnh hưởng</h3>"
+            "<table border='1' cellpadding='4' style='border-collapse:collapse'>"
+            "<tr><th>Mục</th><th>Hiện tại (spec)</th><th>Điều chỉnh (code)</th></tr>"
+            + "".join(row(d) for d in in_scope) + "</table>"
+        )
+    if outside:
+        parts.append(
+            "<h3>3. Phát sinh ngoài phạm vi</h3><ul>"
+            + "".join(
+                f"<li>{_esc(d.summary)}"
+                f"{f' — <code>{_esc(d.where, 200)}</code>' if d.where else ''}</li>"
+                for d in outside
+            )
+            + "</ul><p><i>QC không đọc được diff — mục nào không nằm ở đây sẽ không ai "
+              "test.</i></p>"
+        )
+    if asks:
+        parts.append(
+            "<h3>4. Cần chốt lại</h3><ul>"
+            + "".join(
+                f"<li>{_esc(d.where, 200) + ': ' if d.where else ''}{_esc(d.summary)}</li>"
+                for d in asks
+            )
+            + "</ul><p><i>Đừng để agent quyết thay khách — BA/khách chốt từng điểm.</i></p>"
+        )
     if pr_url:
         parts.append(f'PR: <a href="{html.escape(pr_url)}">{html.escape(pr_url)}</a><br/>')
     parts.append(
-        "<b>Cần làm:</b> BA đối chiếu và cập nhật mô tả/AC cho khớp code, "
-        "hoặc yêu cầu sửa code cho khớp mô tả."
+        "<b>Cần làm:</b> với từng điểm, BA chọn cập nhật mô tả/AC cho khớp code, "
+        "yêu cầu sửa code cho khớp mô tả, hoặc giữ nguyên."
     )
     if tag:
         parts.append(
-            f" Item được gắn tag <code>{html.escape(tag)}</code> cho tới khi spec được cập nhật."
+            f" Item được gắn tag <code>{html.escape(tag)}</code> cho tới khi mọi điểm được quyết."
         )
     if dashboard_url:
         parts.append(
-            f'<br/>Theo dõi: <a href="{html.escape(dashboard_url)}">'
+            f'<br/>Quyết định trên dashboard: <a href="{html.escape(dashboard_url)}">'
             f'{html.escape(dashboard_url)}</a>'
         )
     parts.append("</div>")
     return DriftNotice(
         html="".join(parts), count=len(items), kinds=tuple(d.kind for d in items)
     )
+
+
+def render_decisions_comment(rows: list, by: str = "") -> str:
+    """The closing note once every point on an item is decided — one comment, not one
+    per click, listing what was decided so QC knows which AC changed and which code
+    still has to change."""
+    lines = []
+    for r in rows:
+        where = f"<b>{_esc(r.where, 200)}</b>: " if getattr(r, "where", "") else ""
+        note = f" — <i>{_esc(r.decision_note, 400)}</i>" if getattr(r, "decision_note", "") else ""
+        lines.append(f"<li>{decision_label(r.decision)} — {where}{_esc(r.summary, 300)}{note}</li>")
+    fix = sum(1 for r in rows if r.decision == "fix_code")
+    tail = (f"<p><b>{fix} điểm cần sửa code</b> — tạo task / rework trước khi nghiệm thu.</p>"
+            if fix else "")
+    who = f" bởi {html.escape(by)}" if by else ""
+    return (f"<div><b>{RESOLVED_PREFIX}</b> — đã quyết {len(rows)} điểm lệch spec{who}."
+            f"<ul>{''.join(lines)}</ul>{tail}</div>")
 
 
 def render_pr_comment(deviations: list[Deviation]) -> str:

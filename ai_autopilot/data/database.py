@@ -51,6 +51,11 @@ _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("security_findings", "epss_percentile", "FLOAT"),
     ("fleet_workers", "health", "TEXT"),
     ("fleet_workers", "offline_alerted", "BOOLEAN"),
+    ("spec_drifts", "spec_says", "TEXT"),
+    ("spec_drifts", "code_does", "TEXT"),
+    ("spec_drifts", "needs_decision", "BOOLEAN"),
+    ("spec_drifts", "decision", "VARCHAR(20)"),
+    ("spec_drifts", "decision_note", "TEXT"),
 )
 
 

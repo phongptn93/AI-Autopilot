@@ -1790,7 +1790,10 @@ class ClaudeExecutor:
             '   "needs_human":false,"reason":"<why, if failed/needs_human>",',
             '   "deviations":[{"kind":"spec_unclear|logic_differs|spec_gap|out_of_scope|assumption",',
             '                  "summary":"<one line: what differs from the item>",',
-            '                  "detail":"<why you chose this>","where":"<AC id / file / endpoint>"}],',
+            '                  "detail":"<why you chose this>","where":"<AC id / file / endpoint>",',
+            '                  "spec_says":"<QUOTE the item\'s sentence/AC as written, or empty>",',
+            '                  "code_does":"<what the code now does instead>",',
+            '                  "needs_decision":false}],',
             '   "test_cases":[{"title":"<short, specific>","steps":["<step>","<step>"],',
             '                  "expected":"<what must be true afterwards>",',
             '                  "preconditions":"<state needed first, or empty>"}],',
@@ -1815,6 +1818,10 @@ class ClaudeExecutor:
             "\"clarified requirements\". Leave the list EMPTY when the item described the work "
             "exactly and you followed it — do not invent entries, and do not use this for "
             "ordinary implementation detail (naming, file layout, refactors).",
+            "Fill `spec_says` with the item's OWN words (quote the AC/sentence) so the BA can "
+            "find the line to replace, and `code_does` with what the code does now. Set "
+            "`needs_decision` to true when the choice belongs to the customer or BA (business "
+            "rule, scope, money, data retention) rather than being a spec wording fix.",
         ]
         return "\n".join(lines)
 

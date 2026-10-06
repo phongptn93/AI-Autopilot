@@ -179,6 +179,32 @@ class SpecGuard:
 
     # ── 3. a human says the specification is back in line ────────────────────
 
+    async def decide(self, row_id: int, decision: str, note: str = "", by: str = "",
+                     ) -> tuple[int, int]:
+        """Record a BA's decision on one point; close the item once nothing is left.
+
+        Returns ``(work_item_id, still_open)``. The closing comment lists every decision
+        on the item — written once, when the last point is decided, so the item carries
+        one readable record instead of a comment per click.
+        """
+        repo = self._c.spec_drift_repo
+        if repo is None or decision not in spec_drift.DECISIONS:
+            return 0, -1
+        item_id, left = await repo.decide(row_id, decision, note, by)
+        if not item_id or left != 0 or self._config.dry_run:
+            return item_id, left
+        rows = [r for r in await repo.for_item(item_id) if r.decision]
+        try:
+            if self._config.spec_drift_tag:
+                await self._c.ado.remove_tag(item_id, self._config.spec_drift_tag)
+            await self._c.ado.add_comment(
+                item_id, spec_drift.render_decisions_comment(rows, by))
+        except Exception as exc:  # noqa: BLE001 — the decision is recorded either way
+            self._log.warning("drift closing comment failed", id=item_id,
+                              error=describe_exc(exc))
+        self._log.info("spec drift decided", id=item_id, points=len(rows))
+        return item_id, 0
+
     async def mark_resolved(self, work_item_id: int, by: str = "") -> int:
         """Close out an item's drifts: clear the tag and say so on the item.
 

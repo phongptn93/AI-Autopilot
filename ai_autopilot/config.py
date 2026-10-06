@@ -1873,6 +1873,9 @@ class Settings(BaseSettings):
     # comment (⚠️ SPEC-DRIFT — stable, so it stays queryable), a tag, a PR comment for
     # the reviewer, and a row the BA ticks off once the spec is back in line.
     spec_drift_enabled: bool = True
+    # A point left undecided longer than this is shown red on the Spec drift page; half
+    # of it amber. A drift nobody decides is a spec QC will test against — and fail.
+    spec_drift_sla_days: int = 7
     spec_drift_tag: str = "spec-update-needed"
     # Hold the item for a human instead of letting it advance while the spec is stale.
     # Off by default: a drift is a documentation debt, not a reason to stop delivery.

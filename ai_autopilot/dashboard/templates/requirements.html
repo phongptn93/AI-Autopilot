@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: 1240px; }
+  .rq-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:110ch; margin:4px 0 16px; }
+  .rq-grid { display:grid; grid-template-columns:minmax(340px,1fr) minmax(340px,1.4fr); gap:16px; align-items:start; }
+  @media (max-width: 980px) { .rq-grid { grid-template-columns:1fr; } }
+  .rq-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .rq-card > header { padding:12px 16px; border-bottom:1px solid var(--border-soft,var(--border)); display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .rq-card > header b { font-size:14px; }
+  .rq-card > header span { font-size:12px; color:var(--text-dim); }
+  .rq-body { padding:14px 16px; display:flex; flex-direction:column; gap:11px; }
+  .rq-f { display:flex; flex-direction:column; gap:5px; }
+  .rq-f label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); }
+  .rq-f input, .rq-f select, .rq-f textarea { background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; font-size:13px; font-family:inherit; }
+  .rq-f textarea { min-height:110px; resize:vertical; line-height:1.5; }
+  .rq-f input:focus, .rq-f textarea:focus { outline:none; border-color:var(--accent); }
+  .rq-hint { font-size:11.5px; color:var(--text-dim); line-height:1.5; }
+  .rq-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .rq-check { display:flex; gap:9px; align-items:flex-start; font-size:13px; padding:10px 12px;
+    border:1px solid var(--border); border-radius:9px; background:var(--bg-input,var(--bg)); }
+  .rq-btn { align-self:flex-start; background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
+  .rq-btn:disabled { opacity:.45; cursor:not-allowed; }
+  .rq-filter { width:100%; background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; font-size:13px; font-family:inherit; }
+  .rq-list { display:flex; flex-direction:column; }
+  .rq-spec { display:flex; gap:10px; align-items:center; padding:10px 16px; border-top:1px solid var(--border-soft,var(--border));
+    text-decoration:none; color:inherit; }
+  .rq-spec:hover { background:var(--bg-input,rgba(255,255,255,.03)); }
+  .rq-spec .ttl { flex:1; min-width:0; }
+  .rq-spec .ttl b { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rq-spec .ttl span { font-size:11px; color:var(--text-dim); font-family:var(--mono,monospace); }
+  .rq-kind { font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; text-transform:uppercase; }
+  .rq-kind.md { background:rgba(99,102,241,.15); color:var(--accent-hover,#818cf8); }
+  .rq-kind.html { background:rgba(46,160,67,.16); color:#3fb950; }
+  .rq-item { font-family:var(--mono,monospace); font-size:12px; color:var(--accent-hover,#818cf8); white-space:nowrap; }
+  .rq-when { font-size:11px; color:var(--text-dim); white-space:nowrap; }
+  .rq-empty { padding:28px 16px; text-align:center; color:var(--text-muted); font-size:13px; line-height:1.7; }
+  .rq-empty code { font-size:11.5px; }
+  .rq-flow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; color:var(--text-muted); margin-bottom:14px; }
+  .rq-flow span.s { background:var(--bg-card); border:1px solid var(--border); border-radius:20px; padding:3px 11px; }
+</style>
+
+<h1>📋 Yêu cầu &amp; Spec</h1>
+<p class="rq-lede">
+  Nơi BA <b>viết yêu cầu</b>, giao cho vai BA của autopilot <b>phân tích &amp; viết spec</b>,
+  rồi <b>đọc, góp ý hoặc duyệt</b> spec trước khi chuyển sang Dev. Mọi quyết định đều được ghi
+  thành comment trên work item — nơi BA, QC và khách hàng cùng đọc.
+</p>
+<div class="rq-flow">
+  <span class="s">✍️ Viết yêu cầu</span>→<span class="s">🤖 BA agent phân tích &amp; viết spec</span>→<span class="s">📖 Đọc spec + mockup</span>→<span class="s">💬 Góp ý / ✅ Duyệt</span>→<span class="s">👩‍💻 Dev</span>
+</div>
+
+{% if flash %}
+<div class="rq-card" style="border-color:var(--{{ flash[0] }});margin-bottom:14px">
+  <div style="padding:12px 16px;color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+</div>
+{% endif %}
+
+<div class="rq-grid">
+  <form class="rq-card" method="post" action="/dashboard/requirements">
+    <header><b>✍️ Yêu cầu mới</b><span>Tạo work item trên tracker</span></header>
+    <div class="rq-body">
+      <div class="rq-f">
+        <label for="rq-title">Tiêu đề</label>
+        <input id="rq-title" name="title" required maxlength="250"
+               placeholder="vd: Xuất báo cáo tồn kho theo kho ra Excel">
+      </div>
+      <div class="rq-row">
+        <div class="rq-f"><label for="rq-type">Loại</label>
+          <select id="rq-type" name="type">{% for t in types %}<option>{{ t }}</option>{% endfor %}</select></div>
+        <div class="rq-f"><label for="rq-project">Dự án</label>
+          <select id="rq-project" name="project">
+            {% for p in projects %}<option>{{ p }}</option>{% else %}<option value="">(mặc định)</option>{% endfor %}
+          </select></div>
+      </div>
+      <div class="rq-f">
+        <label for="rq-need">Nhu cầu / bối cảnh</label>
+        <textarea id="rq-need" name="need" placeholder="Ai cần gì, để làm gì. Có thể dán bảng, ví dụ, trích lời khách (hỗ trợ Markdown)."></textarea>
+      </div>
+      <div class="rq-f">
+        <label for="rq-ac">Tiêu chí chấp nhận (mỗi dòng một tiêu chí)</label>
+        <textarea id="rq-ac" name="criteria" placeholder="Lọc được theo kho và khoảng ngày&#10;File Excel có tổng theo nhóm hàng&#10;Người không có quyền kho không thấy số liệu kho đó"></textarea>
+        <div class="rq-hint">QC viết test case theo đúng các dòng này — viết đo được, tránh "nhanh", "dễ dùng".</div>
+      </div>
+      <label class="rq-check">
+        <input type="checkbox" name="analyse" {{ 'checked' if ba_wired }}>
+        <span><b>Giao ngay cho BA agent</b> phân tích &amp; viết spec (kèm mockup nếu có UI).
+          {% if not ba_wired %}<br><span class="rq-hint">Vai BA chưa được nối state — vẫn chạy được bằng tag vai, nhưng nên chọn preset
+            <a href="/dashboard/roles">Đội Scrum</a> để BA → Dev chuyền tự động.</span>{% endif %}
+          <br><span class="rq-hint">Bỏ chọn = chỉ tạo bản nháp (tag <code>requirement-draft</code>), chưa ai nhận.</span></span>
+      </label>
+      <button class="rq-btn" type="submit" {{ 'disabled title="dry_run đang bật — không ghi lên tracker"' if dry_run }}>Tạo yêu cầu</button>
+      {% if dry_run %}<div class="rq-hint">⚠️ Máy đang <code>dry_run</code>: tắt ở Thiết lập để tạo được work item.</div>{% endif %}
+    </div>
+  </form>
+
+  <div class="rq-card">
+    <header><b>📚 Thư viện spec</b><span>{{ specs|length }} file · {{ spec_dirs|join(', ') }}</span></header>
+    {% if specs %}
+    <div class="rq-body" style="padding-bottom:10px">
+      <input class="rq-filter" id="rq-q" type="search" placeholder="🔎 Lọc theo tên, thư mục hoặc #mã work item…">
+    </div>
+    <div class="rq-list" id="rq-list">
+      {% for s in specs %}
+      <a class="rq-spec" href="/dashboard/requirements/spec?path={{ s.q }}" data-q="{{ (s.title ~ ' ' ~ s.rel ~ ' #' ~ s.item_id)|lower }}">
+        <span class="rq-kind {{ s.kind }}">{{ 'spec' if s.kind == 'md' else 'html' }}</span>
+        <span class="ttl"><b>{{ s.title }}</b><span>{{ s.rel }}</span></span>
+        {% if s.item_id %}<span class="rq-item">#{{ s.item_id }}</span>{% endif %}
+        <span class="rq-when">{{ s.modified }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="rq-empty">
+      Chưa có spec nào trong workspace{% if workspace %} <code>{{ workspace }}</code>{% endif %}.<br>
+      Spec do BA agent (skill <code>spec-with-ui-mockup</code>) viết vào
+      <code>specs/active/&lt;tên-tính-năng&gt;/</code> sẽ hiện ở đây.<br>
+      Ghi <code>ADO: #1234</code> ở đầu file để spec tự gắn với work item.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function () {
+  var q = document.getElementById('rq-q');
+  if (!q) return;
+  q.addEventListener('input', function () {
+    var v = q.value.trim().toLowerCase();
+    document.querySelectorAll('#rq-list .rq-spec').forEach(function (a) {
+      a.style.display = !v || a.dataset.q.indexOf(v) !== -1 ? '' : 'none';
+    });
+  });
+})();
+</script>
+{% endblock %}

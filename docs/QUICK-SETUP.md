@@ -53,6 +53,17 @@ Tất cả ✅ là chạy được. Lỗi nào cũng có kèm cách sửa.
 
 ## 4. Cấu hình khởi đầu an toàn
 
+Cách nhanh nhất: bước **Chính sách** của trình Setup, hoặc **🔄 Quy trình → Vai trò & preset**, chọn một preset:
+
+| Preset | Dùng khi |
+|---|---|
+| 🟢 **An toàn — bắt đầu** | Tuần đầu, repo quan trọng: một vai Dev, PR nháp, bạn lái từng phiên |
+| 🔵 **Đội Scrum — BA → Dev → QC → Review** | Đội tách vai; board có state cho từng chặng (sửa tên state theo board trước khi áp dụng) |
+| 🟣 **Tự động hoàn toàn** | Backlog nhỏ/đều, repo có test tốt, máy chạy không người trực |
+
+Mỗi preset hiện **bảng "sẽ đổi gì"** trước khi áp dụng; giá trị cũ được ghi vào Nhật ký thao tác.
+Hoặc tự đặt trong `config.yaml`:
+
 ```yaml
 autonomy_level: assisted         # PR nháp — người review trước khi merge
 use_worktrees: true              # bắt buộc khi chạy song song
@@ -63,6 +74,12 @@ trigger_states: [Proposed]       # RỜI khỏi mọi state đầu ra
 ```
 
 🔒 Secret luôn để **biến môi trường** (`AUTOPILOT_ADO_PAT`, `AUTOPILOT_FLEET_TOKEN`…), không để trong `config.yaml`. Đặt mật khẩu dashboard trước khi mở cổng ra ngoài localhost.
+
+## 4b. Luồng làm việc cho BA
+
+**📋 Công việc → Yêu cầu & Spec**: viết yêu cầu (tiêu đề, nhu cầu, tiêu chí chấp nhận) → tick
+**Giao ngay cho BA agent** → spec + mockup hiện ở **Thư viện spec** → đọc → **💬 Góp ý** hoặc
+**✅ Duyệt** (tự giao sang Dev). Mọi quyết định thành comment trên work item.
 
 ---
 

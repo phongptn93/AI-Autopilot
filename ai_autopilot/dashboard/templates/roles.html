@@ -110,14 +110,17 @@
   .ps-diff { width:100%; font-size:11.5px; border-collapse:collapse; margin-top:6px; }
   .ps-diff td { padding:3px 4px; border-top:1px solid var(--border-soft); font-family:var(--mono); }
   .ps-diff td.arrow { color:var(--text-dim); }
-  .ps-chain { display:grid; grid-template-columns:auto 1fr 1fr; gap:5px 8px; align-items:center; font-size:11.5px; margin-top:6px; }
+  /* Label on its own row, the two state boxes side by side under it: state names are
+     long ("Ready for Development, Rework Required") and a three-column row cut them off. */
+  .ps-chain { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:4px 8px; font-size:11.5px; margin-top:6px; }
   .ps-chain .h { font-size:9.5px; font-weight:700; text-transform:uppercase; color:var(--text-dim); }
+  .ps-chain .who { grid-column:1 / -1; margin-top:6px; }
   .ps-cav { font-size:11px; color:var(--amber); }
   .ps-apply { align-self:flex-start; background:var(--accent); color:#fff; border:none; border-radius:var(--radius-sm);
     padding:7px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit; }
 </style>
 
-<div class="rl-top"><h2>🔗 Roles</h2></div>
+<div class="rl-top"><h2>🔗 Vai trò &amp; preset</h2></div>
 <p class="rl-lede">
   A work item moves <b>role to role</b>, and on this machine every role runs in one process —
   so which role is due cannot come from the machine, nor from the work-item <em>type</em>
@@ -158,9 +161,9 @@
       <div class="ps-good">👍 Hợp với: {{ p.good_for }}</div>
       {% if item.chain %}
       <div class="ps-chain">
-        <span class="h">Vai</span><span class="h">Nhận ở state</span><span class="h">Xong chuyển sang</span>
+        <span class="h">Nhận ở state</span><span class="h">Xong chuyển sang</span>
         {% for c in item.chain %}{% set st = c.step %}
-        <span><b>{{ st.label }}</b></span>
+        <span class="who"><b>{{ st.label }}</b></span>
         <input class="rl-in" name="{{ st.name }}_waits" value="{{ st.waits_in }}" list="ps-states">
         <input class="rl-in" name="{{ st.name }}_done" value="{{ st.done }}" list="ps-states" placeholder="(dừng — chờ người)">
         {% endfor %}

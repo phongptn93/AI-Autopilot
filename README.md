@@ -280,6 +280,19 @@ unresolved review comments and feed them back to Claude to revise (bounded by
 
 ---
 
+## 🧭 Dashboard map, presets and the BA workflow
+
+The sidebar is grouped by the question you arrive with — **🏠 Tổng quan · 📋 Công việc ·
+📈 Chất lượng & báo cáo · 🔐 Bảo mật & kiểm toán · 🔄 Quy trình · 🛠 Hệ thống** — and every
+link describes itself on hover. Settings has a search box over all ~200 fields.
+
+| Feature | Where | What it gives you |
+|---|---|---|
+| **SDLC presets** | Quy trình → Vai trò & preset (and the Setup wizard's policy step) | 🟢 Safe start · 🔵 BA → Dev → QC → Review relay · 🟣 Fully autonomous. Each previews exactly what changes; a relay chain that would hand off into a trigger state, or put two roles behind one door, is refused before anything is written. |
+| **Steered-relay test gate** | `sdlc_interactive_gate` (on) | In interactive mode the relay now runs the test gate when a session finishes — a red suite holds the item for a person instead of handing it to QC. The per-stage revise loop stays headless-only (a session a person is driving cannot be re-prompted). |
+| **Requirements & specs** | Công việc → Yêu cầu & Spec | BA writes a requirement (need + acceptance criteria) → optionally hands it to the BA role → reads the rendered spec and its sandboxed mockup → sends feedback or approves (hands to Dev). Every decision is a comment on the work item. Specs are found under `specs/`, `specs-dxfac/`, `docs/specs/` and linked to their item by an `ADO: #1234` line. |
+| **Setup wizard** | Hệ thống → Cài đặt nhanh | Presets instead of expert questions, "save & check" that proves what you typed, an immediate warning for a missing workspace folder, and a "try one item" ending. |
+
 ## 🛰 Fleet — one central, many worker machines
 
 Every machine is a complete autopilot. Fleet mode adds a **centre**: one VM holds the shared

@@ -36,6 +36,7 @@ from ai_autopilot.dashboard.routes import (
     loops,
     planning,
     reports,
+    requirements,
     reviews,
     runs,
     security,
@@ -68,7 +69,7 @@ __all__ = [
 # the way it always did instead of by import order.
 _AREAS = (
     auth, board, settings, loops, security, reports, reviews, planning, runs, task,
-    analytics, fleet, workspaces, learning, flow, setup,
+    analytics, fleet, workspaces, learning, flow, setup, requirements,
 )
 
 

@@ -111,6 +111,7 @@
   <a href="#cfg-misc">30. Schedule · budget · notify · RBAC</a>
   <h4>Vận hành</h4>
   <a href="#fleet">30b. 🛰 Fleet (trung tâm &amp; máy trạm)</a>
+  <a href="#ba-flow">30c. 📋 Yêu cầu &amp; Spec · preset quy trình</a>
   <a href="#scenarios">31. Các kịch bản mẫu</a>
   <a href="#pitfalls">32. Lưu ý &amp; lỗi thường gặp</a>
 </nav>
@@ -1161,6 +1162,28 @@ assignee_trigger_user: <span class="s">phong.pham@nois.vn</span>   <span class="
 <h3>Trên trang Fleet của máy trạm</h3>
 <p>Trạng thái kết nối, lệnh vừa xử lý, nút <b>⏸ Tạm dừng máy này / ▶ Tiếp tục</b> tại chỗ. Máy trạm luôn có quyền cuối: <code>fleet_accept_commands: false</code> từ chối mọi lệnh, <code>fleet_accept_remote_update: false</code> từ chối cài bản mới, <code>fleet_local_keys</code> giữ thiết lập riêng.</p>
 <div class="callout c-warn"><div class="h">⚠️ Lưu ý</div>Tạm dừng nằm trong bộ nhớ — khởi động lại tiến trình máy trạm sẽ bỏ tạm dừng. Cập nhật <b>trung tâm trước</b>, rồi mới bấm "Cập nhật máy cũ". Máy chạy bản cũ chưa hiểu hàng đợi lệnh → lệnh sẽ <i>hết hạn</i>; cập nhật tay lần đầu.</div>
+</section>
+
+<section id="ba-flow">
+<h2>30c. 📋 Yêu cầu &amp; Spec · preset quy trình · menu mới</h2>
+<h3>Menu</h3>
+<p>Sidebar chia 6 nhóm: <b>🏠 Tổng quan</b> (tổng quan, đang chạy, cần người xử lý, bàn giao) · <b>📋 Công việc</b> (board, yêu cầu &amp; spec, lập kế hoạch, PR reviews, xung đột PR, lịch sử) · <b>📈 Chất lượng &amp; báo cáo</b> · <b>🔐 Bảo mật &amp; kiểm toán</b> · <b>🔄 Quy trình</b> (vai trò &amp; preset, luồng trạng thái, quy trình board, tác vụ định kỳ, năng lực) · <b>🛠 Hệ thống</b> (cài đặt nhanh, thiết lập, cấu hình hiện tại, workspaces, fleet). Rê chuột lên mục để xem mô tả; nhóm thu gọn được. Trang Thiết lập có ô <b>tìm kiếm</b>.</p>
+<h3>Preset quy trình</h3>
+<table>
+<tr><th>Preset</th><th>Thiết lập chính</th><th>Hợp với</th></tr>
+<tr><td>🟢 An toàn</td><td>assisted · interactive · loop tắt · profile <code>dev</code> · 1 run</td><td>Tuần đầu, repo quan trọng</td></tr>
+<tr><td>🔵 Đội Scrum</td><td>Chuỗi vai BA → Dev → QC → Review với state vào/ra (sửa theo board) · Review dừng chờ người</td><td>Đội tách vai</td></tr>
+<tr><td>🟣 Tự động hoàn toàn</td><td>headless · loop bật · profile <code>full</code> · 5 vòng sửa · 2 run</td><td>Backlog đều, test tốt</td></tr>
+</table>
+<div class="callout c-ok"><div class="h">🔁 SDLC + interactive</div>Chế độ interactive <b>vẫn chuyền vai</b>. Với <code>sdlc_interactive_gate: true</code> (mặc định), khi phiên kết thúc autopilot chạy <b>cổng kiểm thử</b>: test đỏ → item chuyển "cần người" kèm danh sách test lỗi, <b>không</b> chuyển sang vai kế tiếp. Vòng tự sửa giữa các chặng vẫn chỉ có ở headless, vì phiên do người lái không thể bị nhắc lệnh từ bên ngoài.</div>
+<h3>Luồng BA</h3>
+<ol>
+<li><b>Viết yêu cầu</b>: tiêu đề, nhu cầu (Markdown), tiêu chí chấp nhận (mỗi dòng một tiêu chí → danh sách đánh số trong work item).</li>
+<li>Tick <b>Giao ngay cho BA agent</b> → item được ghim vai <code>sdlc:ba</code> và bắt đầu; bỏ tick → bản nháp tag <code>requirement-draft</code>.</li>
+<li><b>Thư viện spec</b> liệt kê mọi file <code>.md</code>/<code>.html</code> trong <code>specs/</code>, <code>specs-dxfac/</code>, <code>docs/specs/</code>; dòng <code>ADO: #1234</code> ở đầu spec gắn cả thư mục tính năng với work item.</li>
+<li><b>Đọc spec</b>: Markdown được render (an toàn, không chạy mã), mockup HTML hiện trong khung sandbox.</li>
+<li><b>💬 Góp ý</b> → comment <code>SPEC FEEDBACK</code>; <b>✅ Duyệt</b> → comment <code>SPEC APPROVED</code>, gỡ pin vai cũ, ghim <code>sdlc:dev</code> và giao cho Dev.</li>
+</ol>
 </section>
 
 <!-- 20 -->

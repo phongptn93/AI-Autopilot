@@ -126,6 +126,19 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "setup_ws_no_claude": ("amber", "ℹ️ Đã lưu. Thư mục workspace chưa có <code>.claude/</code> "
                                     "(skills, rules, MCP) — autopilot vẫn chạy, nhưng không có "
                                     "skill riêng của dự án."),
+    "req_title_required": ("red", "⛔ Cần tiêu đề cho yêu cầu."),
+    "req_dry_run": ("amber", "Máy đang <code>dry_run</code> — không ghi gì lên tracker. Tắt ở "
+                             "Thiết lập để dùng chức năng này."),
+    "req_create_failed": ("red", "⛔ Tracker từ chối tạo work item — kiểm tra loại item có tồn tại "
+                                 "trong dự án và quyền của PAT (xem log)."),
+    "req_created": ("green", "✅ Đã tạo yêu cầu (bản nháp, tag <code>requirement-draft</code>)."),
+    "req_created_analysing": ("green", "🤖 Đã tạo yêu cầu và giao cho BA agent — spec sẽ hiện ở "
+                                       "Thư viện spec khi phân tích xong."),
+    "req_no_item": ("red", "⛔ Cần mã work item để góp ý hoặc duyệt."),
+    "req_feedback_empty": ("amber", "Viết nội dung góp ý trước khi gửi."),
+    "req_feedback_sent": ("green", "💬 Đã gửi góp ý lên work item."),
+    "req_approved": ("green", "✅ Đã duyệt spec (comment SPEC APPROVED trên work item)."),
+    "req_approved_dev": ("green", "✅ Đã duyệt spec và giao cho vai Dev."),
     "preset_applied": ("green", "✅ Đã áp dụng preset. Các thiết lập cũ được ghi trong Audit "
                                 "(<code>config.preset_applied</code>) nếu cần đặt lại."),
     "preset_unknown": ("red", "⛔ Không có preset đó."),

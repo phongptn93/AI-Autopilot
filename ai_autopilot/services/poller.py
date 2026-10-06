@@ -33,6 +33,7 @@ from ai_autopilot.execution.sdlc_plan import (
     role_opens_pr,
     working_state_for,
 )
+from ai_autopilot.execution.test_gate import TestGate
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.models import ExecutionResult, TaskCategory, WorkItemInfo
 from ai_autopilot.outcomes import all_outcome_tags, apply_outcome, outcome_policy
@@ -1450,6 +1451,46 @@ class AdoPollerService:
         if files:
             result.files_changed = list(dict.fromkeys(files))
 
+    async def _gate_interactive(self, item: WorkItemInfo, result, run_dir: str) -> None:
+        """The relay's test gate, for a session a person steered.
+
+        The closed loop's gates used to be headless-only, so an interactive relay
+        handed work to QC whether or not its tests passed — the one check that most
+        decides whether the next role is wasting its time. A steered session cannot be
+        revised from here (a person is driving it), but it CAN be stopped from passing
+        broken work on: a red suite turns the run into "needs a human", with the
+        failing tests in the comment, and the hand-off does not happen.
+
+        Only with the relay on and ``sdlc_interactive_gate`` set; the gate itself
+        follows ``test_gate_enabled`` and its skip rules exactly as the headless loop
+        does, so "no runner here" is a pass, not a block.
+        """
+        cfg = self._config
+        if not (cfg.sdlc_loop_enabled and cfg.sdlc_interactive_gate):
+            return
+        if not result.success or result.needs_human:
+            return
+        try:
+            verdict = await TestGate(cfg).run(run_dir)
+        except Exception as exc:  # noqa: BLE001 — a broken gate must not lose the run
+            self._log.warning("interactive test gate errored", id=item.id,
+                              error=describe_exc(exc))
+            return
+        if verdict.passed:
+            if verdict.ran:
+                self._log.info("interactive test gate passed", id=item.id,
+                               summary=verdict.summary)
+            return
+        failing = "".join(f"<li><code>{html_escape(f)}</code></li>" for f in verdict.failures[:15])
+        result.needs_human = True
+        result.error = (
+            f"Cổng kiểm thử chặn chuyển vai: {html_escape(verdict.summary or '')}"
+            + (f"<ul>{failing}</ul>" if failing else "")
+            + "Sửa test rồi chạy lại item (hoặc gắn lại tag chạy) để chuyển sang vai kế tiếp."
+        )
+        self._log.warning("interactive test gate blocked the hand-off", id=item.id,
+                          summary=verdict.summary, failures=len(verdict.failures))
+
     async def _finalize_live_sessions(self) -> None:
         """Finalise interactive sessions whose result.json has appeared."""
         c, cfg = self._c, self._config
@@ -1471,6 +1512,7 @@ class AdoPollerService:
                 continue
             self._quiet_warned.discard(item_id)
             await self._fill_changed_files(result)
+            await self._gate_interactive(item, result, run_dir)
             await c.execution_repo.complete_execution(record_id, result)
             if result.cost_tokens:
                 await c.cost_tracker.track(record_id, result.cost_tokens)

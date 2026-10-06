@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from ai_autopilot import fleet as fleet_mod
-from ai_autopilot import security
+from ai_autopilot import sdlc_presets, security
 from ai_autopilot.config import SdlcRole, config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
@@ -149,7 +149,18 @@ def create_router() -> APIRouter:
                  entry_tag=cfg.stage_entry_tag,
                  collisions=sdlc_plan.handoff_collisions(cfg),
                  resolved_state=cfg.resolved_state,
-                 in_progress=cfg.state_in_progress),
+                 in_progress=cfg.state_in_progress,
+                 presets=[
+                     {"p": p, "diff": sdlc_presets.diff(p, cfg),
+                      "chain": [
+                          {"step": st, "known": any(
+                              d.strip().lower() in {k.lower() for k in known}
+                              for d in (st.waits_in + "," + st.done).split(",") if d.strip()
+                          )}
+                          for st in p.chain
+                      ]}
+                     for p in sdlc_presets.PRESETS.values()
+                 ]),
         )
         if flash is not None:
             response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
@@ -221,6 +232,50 @@ def create_router() -> APIRouter:
             )[:300],
         )
         return _flash("/dashboard/roles", "roles_saved")
+
+    @router.post("/roles/preset")
+    async def apply_preset(request: Request):
+        """Apply one starter preset: its settings patch, and for a relay its role chain
+        with the state names the operator confirmed. The chain is checked first and
+        refused whole — a half-applied relay is worse than none."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        preset = sdlc_presets.PRESETS.get(str(form.get("preset", "")).strip())
+        if preset is None:
+            return _flash("/dashboard/roles", "preset_unknown")
+        updates: dict = dict(preset.settings)
+        roles: dict = {}
+        if preset.chain:
+            overrides = {
+                st.name: {
+                    "waits_in": str(form.get(f"{st.name}_waits", st.waits_in)),
+                    "done": str(form.get(f"{st.name}_done", st.done)),
+                }
+                for st in preset.chain
+            }
+            roles = sdlc_presets.roles_from_chain(preset, overrides)
+            problems = sdlc_presets.chain_problems(roles, list(c.config.trigger_states))
+            if problems:
+                _log.warning("preset refused", preset=preset.key, problems=problems)
+                return _flash("/dashboard/roles", "preset_chain_invalid")
+        before = {k: getattr(c.config, k, None) for k in updates}
+        yaml_updates = dict(updates)
+        if roles:
+            yaml_updates["sdlc_roles"] = roles
+        settings_form.save_to_yaml(config_file_path(), yaml_updates)
+        if roles:
+            updates["sdlc_roles"] = {k: SdlcRole(**v) for k, v in roles.items()}
+        settings_form.apply_to_config(c.config, updates)
+        with contextlib.suppress(Exception):
+            c.ado.refresh()
+        _log.info("sdlc preset applied", preset=preset.key, keys=sorted(yaml_updates))
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="config.preset_applied",
+            target=preset.key,
+            detail="; ".join(f"{k}: {before[k]!r}→{v!r}" for k, v in preset.settings.items()
+                             if before.get(k) != v)[:2000],
+        )
+        return _flash("/dashboard/roles", "preset_applied")
 
     @router.get("/config", response_class=HTMLResponse)
     async def config_page(request: Request):

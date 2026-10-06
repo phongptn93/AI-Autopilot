@@ -365,13 +365,20 @@ def check_sdlc_needs_headless(config: Settings) -> list[Finding]:
         return []
     if (config.execution_mode or "").strip().lower() != "interactive":
         return []
+    gate = (
+        "The test gate DOES run once the session finishes (sdlc_interactive_gate): a red "
+        "suite holds the item for a person instead of handing it on. "
+        if config.sdlc_interactive_gate else
+        "sdlc_interactive_gate is off, so not even the test gate runs before the hand-off. "
+    )
     return [Finding(
-        WARN, "SDLC roles run, but without the quality gates around them",
+        WARN, "SDLC roles run, but without the per-stage quality loop",
         "Interactive mode still relays: the role scopes the session's brief, and the "
-        "item is handed to the next role when the session finishes. What it does not "
-        "run is the closed loop's quality machinery — the auto test gate, the "
-        "advance / revise decision under an iteration budget, and the automatic "
-        "escalation to a human when a stage keeps failing. Those are headless-only.",
+        "item is handed to the next role when the session finishes. " + gate +
+        "What stays headless-only is the per-stage loop — a test gate between stages, the "
+        "automatic advance / revise decision under an iteration budget, and the "
+        "escalation to a human when a stage keeps failing — because a session a person "
+        "is steering cannot be re-prompted from outside.",
         "Nothing is broken: if your team works by steering each run, this is a "
         "reasonable setup and you can leave it. Switch execution_mode to headless only "
         "if you want the gates to run without somebody watching.",

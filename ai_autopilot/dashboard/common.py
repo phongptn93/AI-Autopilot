@@ -116,6 +116,12 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "lens_invalid": ("red", "⛔ Chưa lưu — xem các lỗi bên dưới. Giá trị bạn vừa nhập "
                             "vẫn được giữ."),
     "roles_saved": ("green", "✅ Đã lưu vai trò (stage · cửa vào · cửa ra) và áp dụng ngay."),
+    "preset_applied": ("green", "✅ Đã áp dụng preset. Các thiết lập cũ được ghi trong Audit "
+                                "(<code>config.preset_applied</code>) nếu cần đặt lại."),
+    "preset_unknown": ("red", "⛔ Không có preset đó."),
+    "preset_chain_invalid": ("red", "⛔ Chuỗi vai chưa hợp lệ — hai vai chung một state vào, "
+                                    "hoặc một vai xong rơi vào Trigger state. Sửa tên state "
+                                    "rồi áp dụng lại; chưa có gì được ghi."),
     "roles_cleared": ("green", "↩ Đã gỡ toàn bộ vai trò — máy quay về dùng Trigger states."),
     "reset_done": ("green", "↩ Đã đưa các thiết lập về mặc định và áp dụng ngay. "
                             "Xem đúng những gì đã đổi ở <a href='/dashboard/audit'>Audit</a>."),

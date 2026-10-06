@@ -518,6 +518,11 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Used when nothing above resolves — no item tag, no pinned profile, no type entry.",
           ("full", "dev", "ba", "qc", "review", "design")),
     # — how much rework the engine may do before it asks a person —
+    Field("sdlc_interactive_gate", "Test gate after a steered session", "bool",
+          "Closed-loop SDLC (v2)",
+          "Interactive mode + relay on: when a session finishes, run the test gate on its "
+          "branch. Red → the item is held for a person (failing tests in the comment) "
+          "instead of being handed to the next role. Follows test_gate_enabled."),
     Field("sdlc_max_iterations", "Max revise iterations", "int", "Closed-loop SDLC (v2)",
           "Shared budget across all stages of one item before escalating to a human. Default 3."),
     # — where the item goes when the profile finishes —
@@ -939,6 +944,7 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     "sdlc_type_profiles": ("sdlc_loop_enabled", ("1",)),
     "sdlc_default_profile": ("sdlc_loop_enabled", ("1",)),
     "sdlc_max_iterations": ("sdlc_loop_enabled", ("1",)),
+    "sdlc_interactive_gate": ("sdlc_loop_enabled", ("1",)),
     "sdlc_advance_on_draft": ("sdlc_loop_enabled", ("1",)),
     # Process health
     "process_health_interval_hours": ("process_health_enabled", ("1",)),

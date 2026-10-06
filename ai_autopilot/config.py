@@ -1673,6 +1673,10 @@ class Settings(BaseSettings):
     sdlc_loop_enabled: bool = False
     # SHARED revise budget across ALL stages of one item.
     sdlc_max_iterations: int = 3
+    # With the relay on in INTERACTIVE mode, run the test gate when a steered session
+    # finishes, and hold the item for a person instead of handing it on when the suite
+    # is red. Headless runs it between stages already; this is the steered half.
+    sdlc_interactive_gate: bool = True
     # PRIMARY per-machine knob: this instance's active profile ("ba"|"dev"|"qc"|
     # "review"|"design"|"full"). Blank → fall through to type-map / default.
     sdlc_profile: str = ""

@@ -65,6 +65,10 @@ def _ctx(request: Request, active: str, **extra) -> dict:
         # The Fleet page only means anything on the central VM — a worker's own
         # table is empty by definition, and a link to an empty page reads as a bug.
         "fleet_role": getattr(cfg, "fleet_role", "") if cfg else "",
+        # One banner in the layout instead of six per-page variants (one of which
+        # printed env-var names at the user): no credentials = nothing on any page is
+        # live, and every empty table should be read in that light.
+        "tracker_ready": bool(cfg and getattr(cfg, "has_tracker_auth", True)),
         "mmss": _mmss,
         "fmt_duration": _fmt_duration,
         "fmt_ago": _fmt_ago,

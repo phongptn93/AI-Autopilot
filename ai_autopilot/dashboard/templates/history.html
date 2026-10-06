@@ -70,7 +70,7 @@
   .hs-empty { padding:26px 18px; color:var(--text-dim); font-size:12.5px; }
 </style>
 
-<div class="hs-top"><h2>📜 Execution history</h2></div>
+<div class="hs-top"><h2 class="page-title">{{ page_title("history") }}</h2></div>
 <p class="hs-lede">Mỗi lượt autopilot chạy một work item, một lệnh trên PR, hay một loop theo lịch — mới nhất trước.</p>
 
 <div class="hs-card">
@@ -164,10 +164,13 @@
   {% endif %}
 </div>
 
-{# Destructive, and rare: kept away from the filters it used to sit beside. #}
+{# Destructive, and rare: kept away from the filters it used to sit beside — and absent
+   when there is nothing to delete. #}
+{% if pager.total %}
 <div class="danger-zone">
   <form method="post" action="/dashboard/history/clear" onsubmit="return confirm('Xoá TOÀN BỘ lịch sử chạy? Không hoàn tác được.');" style="margin:0">
     <button type="submit">🗑 Xoá toàn bộ lịch sử</button>
   </form>
 </div>
+{% endif %}
 {% endblock %}

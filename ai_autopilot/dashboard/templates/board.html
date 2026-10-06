@@ -61,7 +61,7 @@
   /* lanes: fluid when few, horizontally scrollable when many, never squashed */
   .board-cols { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(272px,1fr);
     gap:12px; padding:2px 0 16px; align-items:stretch; overflow-x:auto; }
-  .board-col { min-width:0; display:flex; flex-direction:column; min-height:64vh;
+  .board-col { min-width:0; display:flex; flex-direction:column; min-height:46vh;
     background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
     overflow:hidden; position:relative; }
   /* the tone hairline: the one place a lane's colour is stated */
@@ -141,13 +141,13 @@
 
 <div class="page-header bd-top">
     <div>
-        <h2>Board</h2>
+        <h2 class="page-title">{{ page_title("board") }}</h2>
         <p class="bd-lede">
             {% if view.key == 'pipeline' %}
-            Every work item tagged for the autopilot in
-            <span class="mono">{{ projects | join(', ') if projects else project }}</span> — <b>{{ total }}</b> item(s)
+            Mọi work item autopilot đang theo dõi trong
+            <span class="mono">{{ projects | join(', ') if projects else project }}</span> — <b>{{ total }}</b> item
             {% else %}
-            <b>{{ view.label }}</b> process — <b>{{ in_view }}</b> of {{ total }} item(s)
+            <b>{{ view.label }}</b> — <b>{{ in_view }}</b> / {{ total }} item
             {% if view.tags %}tagged <span class="mono">{{ view.tags | join(', ') }}</span>{% else %}(no tag filter){% endif %}
             {% endif %}
         </p>
@@ -156,7 +156,7 @@
         {% if view.key != 'pipeline' %}<input type="hidden" name="view" value="{{ view.key }}"/>{% endif %}
         <input type="text" name="q" value="{{ q }}" placeholder="🔍 id or title" class="bf-input" style="width:160px"/>
         <select name="cat" class="bf-input">
-            {% for v, lbl in [('all','All types'),('BE','BE'),('FE','FE'),('DB','DB'),('QC','QC')] %}
+            {% for v, lbl in [('all','Mọi loại'),('BE','BE'),('FE','FE'),('DB','DB'),('QC','QC')] %}
             <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
         </select>
         <input type="date" name="from" value="{{ date_from }}" class="bf-input" title="Changed from"/>
@@ -169,11 +169,11 @@
         {% endif %}
         {% if tags %}
         <select name="tag" class="bf-input" onchange="this.form.submit()">
-            <option value="all" {% if selected_tag == 'all' %}selected{% endif %}>All tags</option>
+            <option value="all" {% if selected_tag == 'all' %}selected{% endif %}>Mọi tag</option>
             {% for t in tags %}<option value="{{ t }}" {% if selected_tag == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
         </select>
         {% endif %}
-        <button type="submit" class="btn-ghost">Apply</button>
+        <button type="submit" class="btn-ghost">Lọc</button>
         {% if q or (cat and cat != 'all') or date_from or date_to or selected_tag != 'all' or selected_project != 'all' %}
         <a href="/dashboard/board{% if view.key != 'pipeline' %}?view={{ view.key }}{% endif %}" class="btn-ghost" style="text-decoration:none">Reset</a>{% endif %}
     </form>
@@ -199,22 +199,22 @@
     {% if view.key != 'pipeline' %}
     <a class="bd-toggle {{ 'on' if only_mine else '' }}" href="{{ mine_url }}"
        title="Show only the lanes where the ball is in {{ view.label }}'s court">
-        {{ '✓ ' if only_mine else '' }}Only my turn
+        {{ '✓ ' if only_mine else '' }}Chỉ lượt của vai này
     </a>
     {% endif %}
     <span class="bd-cfg">
         {% if not drop_targets %}
-        <a href="/dashboard/settings#board-columns" title="No column has a drag rule, so cards are not draggable. Set 'Drag &amp; drop (column => tag/state)' in Settings → Board columns.">🔒 drag &amp; drop off</a>
+        <a href="/dashboard/settings#board-columns" title="No column has a drag rule, so cards are not draggable. Set 'Drag &amp; drop (column => tag/state)' in Settings → Board columns.">🔒 kéo-thả đang tắt</a>
         {% endif %}
-        <a href="/dashboard/board-views">⚙ Configure processes</a>
+        <a href="/dashboard/board-views">⚙ Cấu hình quy trình board</a>
         <span class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto 15s</span></span>
     </span>
 </div>
 
-{% if error %}
+{% if error and tracker_ready %}
 <div class="card" style="border-color: var(--red);">
     <div class="card-body" style="padding:14px 22px;color:var(--red)">
-        ⚠️ Could not reach Azure DevOps: {{ error }}
+        ⚠️ Không đọc được Azure DevOps: {{ error|human_error }}
     </div>
 </div>
 {% endif %}

@@ -102,7 +102,7 @@
 {%- endmacro %}
 
 <div class="qa-top">
-  <h2>🔁 Rework &amp; review quality</h2>
+  <h2 class="page-title">{{ page_title("quality") }}</h2>
   <div class="qa-period">
     {% for d in [7, 30, 90, 365] %}<a class="seg {{ 'on' if days == d else '' }}" href="{{ url('', days=d, page=1, epage=1) }}">{{ d }} ngày</a>{% endfor %}
   </div>
@@ -131,12 +131,12 @@
     <div class="l">Lượt làm lại</div>
     <div class="h">trên {{ kpis.reworked }} item — bấm để lọc</div>
   </a>
-  <a class="kpi {{ 'bad' if kpis.blocked else 'good' }}" href="{{ url('#items', view='blocked', page=1) }}">
+  <a class="kpi {{ ('bad' if kpis.blocked else 'good') if kpis.item_count else '' }}" href="{{ url('#items', view='blocked', page=1) }}">
     <div class="v">{{ kpis.blocked }}</div>
     <div class="l">Item bị reviewer chặn</div>
     <div class="h">{{ kpis.block_votes }} vote từ chối / chờ tác giả</div>
   </a>
-  <a class="kpi {{ 'bad' if kpis.tests else 'good' }}" href="{{ url('#log', kind='test_failed', epage=1) }}">
+  <a class="kpi {{ ('bad' if kpis.tests else 'good') if kpis.item_count else '' }}" href="{{ url('#log', kind='test_failed', epage=1) }}">
     <div class="v">{{ kpis.tests }}</div>
     <div class="l">Test gate fail</div>
     <div class="h">bấm để xem log</div>

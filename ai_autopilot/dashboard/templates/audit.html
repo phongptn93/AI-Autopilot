@@ -9,7 +9,7 @@
 
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
   <div>
-    <h2>🧾 Audit trail</h2>
+    <h2 class="page-title">{{ page_title("audit") }}</h2>
     <p>Append-only log of consequential actions — config changes, tickets, resumes, reviews.</p>
   </div>
   <form method="get" action="/dashboard/audit" style="display:flex;gap:6px;align-items:center">
@@ -38,6 +38,6 @@
   </table>
 </div>
 {% else %}
-<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">No audit events yet{% if action %} for filter <code>{{ action }}</code>{% endif %}.</div></div>
+<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">Chưa có thao tác nào được ghi{% if action %} cho bộ lọc <code>{{ action }}</code>{% endif %}. Mọi thay đổi cấu hình, lệnh fleet, nút bấm trên dashboard và lệnh qua Teams/PR sẽ hiện ở đây — ai làm, khi nào, đổi gì.</div></div>
 {% endif %}
 {% endblock %}

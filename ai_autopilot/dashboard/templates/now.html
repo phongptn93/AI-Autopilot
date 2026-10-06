@@ -82,7 +82,7 @@
 </style>
 
 <div class="nw-top">
-  <h2>⏱ Đang chạy</h2>
+  <h2 class="page-title">{{ page_title("now") }}</h2>
   <div class="nw-live" id="nw-live"><span class="dot"></span><span id="nw-live-t">cập nhật {{ refreshed }} · tự làm mới 15s</span>
     <button type="button" class="btn-ghost" id="nw-pause">Tạm dừng</button></div>
 </div>
@@ -143,7 +143,7 @@
 
 <div class="panel">
   <div class="panel-hd"><h3>🧑‍💻 Phiên interactive trên PR</h3><span>giải conflict · lệnh /ai — attach qua Remote Control; tự đóng sau {{ session_limit // 3600 }} giờ</span>
-    <a href="/dashboard/conflicts">Conflicts →</a></div>
+    <a href="/dashboard/conflicts">Xung đột PR →</a></div>
   {% if sessions %}
   <ul class="rows">
     {% for s in sessions %}
@@ -173,7 +173,7 @@
     {% else %}<div class="empty-row">Hàng đợi trống.</div>{% endif %}
   </div>
   <div class="panel">
-    <div class="panel-hd"><h3>✅ Vừa xong</h3><span>6 lượt gần nhất</span><a href="/dashboard/history">History →</a></div>
+    <div class="panel-hd"><h3>✅ Vừa xong</h3><span>tối đa 6 lượt gần nhất</span><a href="/dashboard/history">Lịch sử chạy →</a></div>
     {% if recent %}
     <ul class="rows">
       {% for e in recent %}

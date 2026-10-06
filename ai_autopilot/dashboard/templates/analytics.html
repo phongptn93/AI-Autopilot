@@ -12,7 +12,7 @@
 
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
   <div>
-    <h2>📈 Analytics</h2>
+    <h2 class="page-title">{{ page_title("analytics") }}</h2>
     <p>ROI &amp; throughput over the last {{ days }} days{% if tag %} · tag <code>{{ tag }}</code>{% endif %}</p>
   </div>
   <select onchange="location.href='/dashboard/analytics?days=' + this.value{% if tag %} + '&tag={{ tag }}'{% endif %}"
@@ -30,7 +30,7 @@
   </div>
   <div class="stat-card">
     <div class="stat-card-header"><span class="stat-card-label">Success rate</span><div class="stat-card-icon">✅</div></div>
-    <div class="stat-card-value success-val">{{ report.success_rate }}%</div>
+    <div class="stat-card-value {{ 'success-val' if report.total_runs }}">{{ (report.success_rate ~ '%') if report.total_runs else '—' }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-card-header"><span class="stat-card-label">PR rate</span><div class="stat-card-icon">🔀</div></div>
@@ -83,7 +83,7 @@
       <span>{{ report.per_day[0][0] }}</span><span>peak {{ report.peak_day }}/day</span><span>{{ report.per_day[-1][0] }}</span>
     </div>
   {% else %}
-    <p style="color:var(--text-dim)">No runs in this window.</p>
+    <p style="color:var(--text-dim)">Chưa có run nào trong khoảng này. Gắn trigger tag cho một work item (hoặc bấm ▶ trên <a href="/dashboard/board">Board</a>) — số liệu xuất hiện sau run đầu tiên.</p>
   {% endif %}
 </div>
 
@@ -99,7 +99,7 @@
       </tbody>
     </table>
   {% else %}
-    <p style="color:var(--text-dim)">No data.</p>
+    <p style="color:var(--text-dim)">Chưa có dữ liệu — cần ít nhất một run hoàn tất.</p>
   {% endif %}
 </div>
 {% endblock %}

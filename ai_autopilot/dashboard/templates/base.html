@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -244,6 +244,21 @@
             font-family: inherit; cursor: pointer; }
         .ws-picker select:hover { border-color: var(--accent); }
         .ws-picker button { margin-top: 6px; width: 100%; }
+        /* One title style for every page, whatever wrapper the page puts it in. */
+        h2.page-title, .page-title { font-size: 22px; font-weight: 700; letter-spacing: -.02em;
+            margin: 0; line-height: 1.25; }
+        .page-title .page-sub { font-weight: 500; color: var(--text-dim); font-size: .8em; }
+        .offline-banner { display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+            padding: 10px 16px; margin-bottom: 16px; border-radius: 10px; font-size: 13px;
+            border: 1px solid rgba(210,153,34,.45); background: rgba(210,153,34,.08); color: var(--text); }
+        .offline-banner span { flex: 1; min-width: 260px; }
+        .offline-banner a { color: #d29922; font-weight: 600; white-space: nowrap; text-decoration: none; }
+        /* Long page introductions fold to two lines (see script at the end of body). */
+        .lede-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .lede-more { background: none; border: none; color: var(--accent-hover); font-size: 12px;
+            cursor: pointer; padding: 0; margin: -8px 0 12px; font-family: inherit; }
+        .crumb { font-size: 11.5px; color: var(--text-dim); margin: -8px 0 10px; letter-spacing: .02em; }
+        .crumb span { opacity: .6; margin: 0 3px; }
         details.nav-group > summary { list-style: none; cursor: pointer; user-select: none;
             display: flex; align-items: center; justify-content: space-between; }
         details.nav-group > summary::-webkit-details-marker { display: none; }
@@ -353,8 +368,48 @@
             {% endif %}
         </div>
         {% endif %}
+        {% if tracker_ready is defined and not tracker_ready and active not in ('setup', 'settings', 'config') %}
+        <div class="offline-banner" role="status">
+            <span>🔌 <b>Chưa kết nối tracker.</b> Máy này chưa có thông tin đăng nhập Azure DevOps / Jira —
+                số liệu và danh sách trên trang là <b>trống, không phải "không có việc"</b>.</span>
+            <a href="/dashboard/setup">Mở Cài đặt nhanh →</a>
+        </div>
+        {% endif %}
+        {# Where am I: the menu group, then the page — the same words the sidebar uses. #}
+        {% if active and page_group(active) and active != 'overview' %}
+        <div class="crumb">{{ page_group(active) }} <span>›</span> {{ page_title(active) }}</div>
+        {% endif %}
         {% block content %}{% endblock %}
     </main>
 </div>
+<script>
+// Every page introduces itself under its title; some do it in five lines. Fold any
+// introduction taller than three lines to two, with one click to read the rest — the
+// explanation stays for whoever wants it without pushing the page below the fold.
+(function () {
+  var title = document.querySelector('.main .page-title');
+  if (!title) return;
+  var box = title;
+  while (box.parentElement && !box.parentElement.classList.contains('main')) box = box.parentElement;
+  var el = box.nextElementSibling, seen = 0;
+  while (el && seen < 3) {
+    if (el.tagName === 'P' && el.textContent.trim().length > 0) {
+      var line = parseFloat(getComputedStyle(el).lineHeight) || 20;
+      if (el.scrollHeight > line * 3.2) {
+        el.classList.add('lede-clamp');
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'lede-more'; btn.textContent = 'Chi tiết ▾';
+        btn.addEventListener('click', function () {
+          var open = el.classList.toggle('lede-clamp') === false;
+          btn.textContent = open ? 'Thu gọn ▴' : 'Chi tiết ▾';
+        });
+        el.insertAdjacentElement('afterend', btn);
+      }
+      break;
+    }
+    el = el.nextElementSibling; seen++;
+  }
+})();
+</script>
 </body>
 </html>

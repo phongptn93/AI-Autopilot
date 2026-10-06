@@ -38,7 +38,7 @@
 </style>
 
 <div class="page-header">
-  <h2>🧭 Planning workbench</h2>
+  <h2 class="page-title">{{ page_title("planning") }}</h2>
   <p>Load work — yours, a few colleagues', or the whole team — let AI group &amp; check conflicts, then start now or schedule a run.</p>
 </div>
 
@@ -125,7 +125,7 @@
     </div>
     {% else %}
     <div class="empty-state">
-      No work items for {% if assignee %}<b>{{ assignee }}</b>{% else %}<b>toàn bộ team</b>{% endif %}{% if state_filter!='all' %} · state “{{ state_filter }}”{% endif %}{% if type_filter!='all' %} · type “{{ type_filter }}”{% endif %}.
+      Không có work item nào cho {% if assignee %}<b>{{ assignee }}</b>{% else %}<b>toàn bộ team</b>{% endif %}{% if state_filter!='all' %} · state “{{ state_filter }}”{% endif %}{% if type_filter!='all' %} · type “{{ type_filter }}”{% endif %}.
       {% if assignee %}<div class="dim" style="margin-top:6px">Xoá trống ô Assignee rồi bấm <b>Load</b> để xem việc của mọi người.</div>{% endif %}
     </div>
     {% endif %}

@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .main { max-width: 1180px; }
   .ws-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:12px;
              margin-bottom:14px; overflow:hidden; }
   .ws-card.is-default { border-color:var(--accent,#6366f1); }
@@ -81,7 +80,7 @@
 </style>
 
 <div class="page-header">
-  <h2>🗂 Workspaces</h2>
+  <h2 class="page-title">{{ page_title("workspaces") }}</h2>
   <p>Mỗi workspace là <b>một thư mục chứa <code>.claude</code> và các repo</b>, gắn với
      <b>một hoặc nhiều project Azure DevOps</b>, chạy trên <b>base branch riêng</b>.</p>
 </div>

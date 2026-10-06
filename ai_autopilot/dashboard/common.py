@@ -69,6 +69,24 @@ _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 from ai_autopilot.dashboard import nav as _nav  # noqa: E402
 
 _TEMPLATES.env.globals["nav_groups"] = _nav.groups
+_TEMPLATES.env.globals["page_title"] = _nav.page_title
+_TEMPLATES.env.globals["page_hint"] = _nav.page_hint
+_TEMPLATES.env.globals["page_group"] = _nav.group_of
+
+
+def _human_error(text: object) -> str:
+    """A tracker error in words a user can act on — never env-var names."""
+    raw = str(text or "")
+    if "No PAT and no OAuth" in raw:
+        return "chưa có thông tin đăng nhập Azure DevOps — hoàn tất bước Kết nối ở Cài đặt nhanh."
+    if "401" in raw or "Unauthorized" in raw:
+        return "Azure DevOps từ chối thông tin đăng nhập (401) — PAT sai hoặc đã hết hạn."
+    if "403" in raw:
+        return "PAT không đủ quyền cho thao tác này (403)."
+    return raw
+
+
+_TEMPLATES.env.filters["human_error"] = _human_error
 
 # ── Flash messages ────────────────────────────────────────────────────────────
 # The outcome of a POST used to travel in the query string of the redirect that follows

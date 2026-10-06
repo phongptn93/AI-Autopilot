@@ -245,7 +245,7 @@
 </style>
 
 <div class="set-head">
-  <h2>🛠️ Settings</h2>
+  <h2 class="page-title">{{ page_title("settings") }}</h2>
   <div class="set-actions">
     <form method="post" action="/dashboard/settings/reload">
       <button type="submit" class="btn-ghost">↻ Reload from file</button>
@@ -258,46 +258,6 @@
 </div>
 <p class="subnote">Saved to <code>{{ config_path }}</code> and applied live.</p>
 
-{# 205 fields in 24 sections: finding one by scrolling is the slow part of every
-   visit. Filters on label, key and help text; a matching section opens its hidden
-   fields so a hit is never filtered away twice. #}
-<div class="set-search">
-  <input type="search" id="set-q" placeholder="🔎 Tìm thiết lập — tên, khoá (vd fleet_token) hoặc mô tả…"
-         autocomplete="off" aria-label="Tìm thiết lập">
-  <span id="set-q-n" class="form-help" style="margin:0"></span>
-</div>
-<style>
-  .set-search{position:sticky;top:0;z-index:5;display:flex;gap:12px;align-items:center;
-    padding:10px 0;margin-bottom:6px;background:var(--bg-sticky,var(--bg));backdrop-filter:blur(8px)}
-  .set-search input{flex:1;max-width:560px;background:var(--bg-input,var(--bg));color:var(--text);
-    border:1px solid var(--border);border-radius:9px;padding:9px 12px;font-size:13.5px;font-family:inherit}
-  .set-search input:focus{outline:none;border-color:var(--accent)}
-  .field.q-miss,.card.q-miss{display:none !important}
-  .field.q-hit{display:flex !important}
-</style>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  var q = document.getElementById('set-q'), n = document.getElementById('set-q-n');
-  if (!q) return;
-  var fields = Array.prototype.slice.call(document.querySelectorAll('.field[data-k]'));
-  function norm(t) { return (t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
-  var text = fields.map(function (f) { return norm(f.dataset.k + ' ' + f.textContent); });
-  q.addEventListener('input', function () {
-    var want = norm(q.value.trim()), hits = 0;
-    fields.forEach(function (f, i) {
-      var ok = !want || text[i].indexOf(want) !== -1;
-      f.classList.toggle('q-miss', !ok);
-      f.classList.toggle('q-hit', !!want && ok);
-      if (ok && want) hits++;
-    });
-    document.querySelectorAll('.card[id^="sec-"]').forEach(function (card) {
-      var any = card.querySelector('.field[data-k]:not(.q-miss)');
-      card.classList.toggle('q-miss', !!want && card.querySelector('.field[data-k]') && !any);
-    });
-    n.textContent = want ? hits + ' thiết lập khớp' : '';
-  });
-});
-</script>
 
 <!-- Two transfer modes with very different consequences. They used to sit as four
      look-alike buttons in the header with the caveats in a paragraph below, so the one

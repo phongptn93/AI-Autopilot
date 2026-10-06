@@ -413,9 +413,9 @@ def test_planning_schedule_creates_a_run(tmp_path):
 def test_overview_shows_efficiency_cards(client: TestClient):
     resp = client.get("/dashboard")
     assert resp.status_code == 200
-    assert "Merge Rate" in resp.text
-    assert "Tokens / Merged PR" in resp.text
-    assert "Runs / Item" in resp.text
+    assert "Tỉ lệ merge" in resp.text
+    assert "Token / PR merge" in resp.text
+    assert "Run / item" in resp.text
 
 
 def test_health_reports_checks(client: TestClient):

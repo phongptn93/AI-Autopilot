@@ -2,7 +2,7 @@
 {% block content %}
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
     <div>
-        <h2>PR Reviews</h2>
+        <h2 class="page-title">{{ page_title("reviews") }}</h2>
         <p>Reviewer status of every active PR — grouped by the branch it merges into.
            {% if scanned and summary.total != scanned %}<b>{{ summary.total }}</b> of {{ scanned }} shown.{% endif %}</p>
     </div>

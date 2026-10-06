@@ -432,13 +432,13 @@ def test_cards_are_only_draggable_where_a_drop_rule_exists(tmp_path):
         client.app.state.container.ado = _FakeAdo()
         page = client.get("/dashboard/board").text
         assert 'draggable="false"' in page
-        assert "drag &amp; drop off" in page
+        assert "kéo-thả đang tắt" in page
 
     with _client(tmp_path, board_drop_map=["Done => autopilot-done"]) as client:
         client.app.state.container.ado = _FakeAdo()
         page = client.get("/dashboard/board").text
         assert 'draggable="true"' in page
-        assert "drag &amp; drop off" not in page
+        assert "kéo-thả đang tắt" not in page
         # Only the lane whose target column has a rule accepts a drop.
         assert page.count('data-column="Done"') == 1
         assert 'data-column="Queued"' not in page

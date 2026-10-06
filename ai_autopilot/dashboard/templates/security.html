@@ -100,7 +100,7 @@
 </style>
 
 <div class="sc-top">
-  <h2>🔐 Security</h2>
+  <h2 class="page-title">{{ page_title("security") }}</h2>
   <div class="sc-links">
     {% if repo %}
     <a class="btn-ghost" href="/dashboard/security/export?repo={{ repo|urlencode }}&fmt=sarif&status={{ status }}">⬇ SARIF</a>

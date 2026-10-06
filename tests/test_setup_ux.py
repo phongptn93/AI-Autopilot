@@ -74,5 +74,7 @@ def test_the_last_step_says_how_to_try_one_item(client):
     assert client.app.state.container.config.trigger_tag in html
 
 
-def test_settings_has_a_search_box(client):
-    assert 'id="set-q"' in client.get("/dashboard/settings").text
+def test_settings_has_exactly_one_search_box(client):
+    # One search only: the page already had "Find a setting"; a second box was noise.
+    html = client.get("/dashboard/settings").text
+    assert 'id="set-find"' in html and 'id="set-q"' not in html

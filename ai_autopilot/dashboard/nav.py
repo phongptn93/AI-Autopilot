@@ -123,3 +123,26 @@ def find(active: str) -> NavItem | None:
             if item.key == active:
                 return item
     return None
+
+
+def page_title(active: str) -> str:
+    """A page's heading — the menu's own icon and label, so the two can never disagree.
+
+    Every page used to type its own: "Overview", "Execution history", "What can AI
+    Autopilot do?" under a Vietnamese menu, in h1 on some pages and h2 on others.
+    """
+    item = find(active)
+    return f"{item.icon} {item.label}" if item else ""
+
+
+def group_of(active: str) -> str:
+    """The menu group a page sits in — the first half of its breadcrumb."""
+    for group in GROUPS:
+        if any(item.key == active for item in group.items):
+            return group.label
+    return ""
+
+
+def page_hint(active: str) -> str:
+    item = find(active)
+    return item.hint if item else ""

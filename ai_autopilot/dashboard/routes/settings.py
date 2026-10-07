@@ -24,7 +24,12 @@ from ai_autopilot.dashboard.common import (
 from ai_autopilot.dashboard.routes._shared import _ctx, _setup_flow, _setup_role, _setup_source
 from ai_autopilot.execution import sdlc_plan
 from ai_autopilot.logging_config import describe_exc
-from ai_autopilot.skills_catalog import discover_skills
+from ai_autopilot.skills_catalog import (
+    discover_agents,
+    discover_commands,
+    discover_rules,
+    discover_skills,
+)
 from ai_autopilot.workspace import discover_repos
 
 
@@ -363,14 +368,23 @@ def create_router() -> APIRouter:
     @router.get("/capabilities", response_class=HTMLResponse)
     async def capabilities(request: Request):
         c: Container = request.app.state.container
-        skills = discover_skills(c.config.workspace_directory)
+        workspace = c.config.workspace_directory
+        skills = discover_skills(workspace)
+        agents = discover_agents(workspace, [s.name for s in skills])
+        # The reverse map: which agents lean on each skill — read from the agents' own
+        # instructions, so the two views can never disagree.
+        used_by: dict[str, list[str]] = {}
+        for a in agents:
+            for name in a.skills:
+                used_by.setdefault(name, []).append(a.name)
         return _TEMPLATES.TemplateResponse(
             request,
             "capabilities.html",
             _ctx(
                 request,
                 "capabilities",
-                skills=skills,
+                skills=skills, agents=agents, used_by=used_by,
+                commands=discover_commands(workspace), rules=discover_rules(workspace),
                 workspace=c.config.workspace_directory,
                 ai_native=bool(c.config.workspace_directory),
             ),

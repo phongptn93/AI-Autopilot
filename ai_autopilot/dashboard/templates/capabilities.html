@@ -7,12 +7,150 @@
      3×2, 2×3 or 1×6 — never a straggler. */
   .cap-grid { grid-template-columns: repeat(auto-fit, minmax(max(210px, calc((100% - 28px) / 3)), 1fr)); }
   .cap-none { color: var(--text-dim); font-style: italic; }
+  /* ── inventory: what this workspace gives the agent ── */
+  .inv-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 900px) { .inv-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .inv-kpis .stat-card { cursor: pointer; text-align: left; font: inherit; color: inherit; }
+  .inv-kpis .stat-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .inv-kpis .stat-card small { display: block; font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .inv-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 14px; }
+  .inv-bar input { flex: 1; min-width: 220px; max-width: 520px; height: 38px; padding: 0 12px; border-radius: 9px;
+    background: var(--bg-input, var(--bg)); color: var(--text); border: 1px solid var(--border); font: inherit; font-size: 13.5px; }
+  .inv-bar input:focus { outline: none; border-color: var(--accent); }
+  .inv-bar .count { font-size: 12.5px; color: var(--text-dim); }
+  .inv-panel[hidden] { display: none; }
+  .ag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .ag-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .ag-card:target, .sk-row:target { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .ag-hd { display: flex; align-items: center; gap: 8px; }
+  .ag-hd b { font-size: 14px; font-family: var(--mono, monospace); font-weight: 650; }
+  .ag-hd .sp { flex: 1; }
+  .ag-desc { font-size: 13px; color: var(--text-muted); line-height: 1.55; }
+  .ag-sec { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); }
+  .chipset { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip-sk { font-family: var(--mono, monospace); font-size: 11.5px; padding: 2px 8px; border-radius: 6px;
+    background: var(--accent-bg, rgba(99,102,241,.12)); color: var(--accent-hover); text-decoration: none; }
+  .chip-sk:hover { background: rgba(99,102,241,.22); }
+  .chip-ag { font-family: var(--mono, monospace); font-size: 11px; padding: 1px 7px; border-radius: 6px;
+    border: 1px solid var(--border); color: var(--text-muted); text-decoration: none; }
+  .chip-ag:hover { border-color: var(--accent); color: var(--text); }
+  .badge-model { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+    background: rgba(125,125,140,.14); color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+  .badge-model.opus { background: rgba(188,140,255,.16); color: #bc8cff; }
+  .badge-model.sonnet { background: rgba(99,102,241,.16); color: var(--accent-hover); }
+  .badge-model.haiku { background: rgba(46,160,67,.16); color: #3fb950; }
+  .sk-table td { vertical-align: top; }
+  .sk-used { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; font-size: 11.5px; color: var(--text-dim); }
+  .doc-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 10px; }
+  .doc-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px; min-width: 0; }
+  .doc-item b { font-family: var(--mono, monospace); font-size: 13px; }
+  .doc-item p { margin: 4px 0 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+  .inv-empty { padding: 26px; text-align: center; color: var(--text-muted); font-size: 13px; }
 </style>
 <div class="page-header">
     <h2 class="page-title">{{ page_title("capabilities") }}</h2>
     <p>Kỹ sư tự hành biến work item trên Azure DevOps thành pull request đã được review</p>
 </div>
 
+{% set has_ws = workspace %}
+<div class="stats-grid inv-kpis" role="tablist" aria-label="Kho năng lực">
+  <button class="stat-card on" data-tab="agents" role="tab" type="button">
+    <div class="stat-card-header"><span class="stat-card-label">Subagent</span><div class="stat-card-icon">🤖</div></div>
+    <div class="stat-card-value">{{ agents|length }}</div><small>Chuyên gia agent giao việc con</small></button>
+  <button class="stat-card" data-tab="skills" role="tab" type="button">
+    <div class="stat-card-header"><span class="stat-card-label">Skill</span><div class="stat-card-icon">🧰</div></div>
+    <div class="stat-card-value">{{ skills|length }}</div><small>Quy trình agent tự chọn để làm</small></button>
+  <button class="stat-card" data-tab="commands" role="tab" type="button">
+    <div class="stat-card-header"><span class="stat-card-label">Lệnh /</span><div class="stat-card-icon">⌨️</div></div>
+    <div class="stat-card-value">{{ commands|length }}</div><small>Gọi trực tiếp trong Claude Code</small></button>
+  <button class="stat-card" data-tab="rules" role="tab" type="button">
+    <div class="stat-card-header"><span class="stat-card-label">Rule</span><div class="stat-card-icon">📏</div></div>
+    <div class="stat-card-value">{{ rules|length }}</div><small>Luôn nạp vào mọi run</small></button>
+</div>
+
+<div class="inv-bar">
+  <input type="search" id="inv-q" placeholder="🔎 Lọc theo tên hoặc mô tả — subagent, skill, lệnh, rule…" autocomplete="off">
+  <span class="count" id="inv-count"></span>
+  {% if has_ws %}<span class="count mono" title="Đọc trực tiếp từ thư mục này">{{ workspace }}\.claude</span>{% endif %}
+</div>
+
+{# ── Subagents: the specialists the agent delegates to ── #}
+<section class="inv-panel" data-panel="agents">
+  {% if agents %}
+  <div class="ag-grid">
+    {% for a in agents %}
+    <article class="ag-card inv-item" id="agent-{{ a.name }}" data-q="{{ (a.name ~ ' ' ~ a.description ~ ' ' ~ a.skills|join(' '))|lower }}">
+      <div class="ag-hd"><span>🤖</span><b>{{ a.name }}</b><span class="sp"></span>
+        {% set m = (a.model or 'inherit')|lower %}
+        <span class="badge-model {{ 'opus' if 'opus' in m else ('sonnet' if 'sonnet' in m else ('haiku' if 'haiku' in m else '')) }}"
+              title="{{ 'Dùng cùng model với phiên gọi nó' if m == 'inherit' else 'Model riêng của subagent' }}">{{ m }}</span></div>
+      <div class="ag-desc">{% if a.description %}{{ a.description }}{% else %}<span class="cap-none">chưa có mô tả</span>{% endif %}</div>
+      {% if a.skills %}
+      <div class="ag-sec">Dùng skill ({{ a.skills|length }})</div>
+      <div class="chipset">{% for sk in a.skills %}<a class="chip-sk" href="#skill-{{ sk }}" data-jump="skills">{{ sk }}</a>{% endfor %}</div>
+      {% endif %}
+      {% if a.tools %}
+      <div class="ag-sec">Công cụ được phép</div>
+      <div class="chipset">{% for t in a.tools %}<span class="chip-ag">{{ t }}</span>{% endfor %}</div>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card"><div class="inv-empty">Chưa có subagent nào trong <span class="mono">.claude/agents</span>.
+    Mỗi file <span class="mono">*.md</span> có frontmatter <span class="mono">name / description / model</span> là một subagent.</div></div>
+  {% endif %}
+</section>
+
+{# ── Skills ── #}
+<section class="inv-panel" data-panel="skills" hidden>
+  <div class="card"><div class="card-body" style="padding:0">
+    {% if skills %}
+    <table class="sk-table">
+      <thead><tr><th style="width:240px">Skill</th><th>Chức năng</th></tr></thead>
+      <tbody>
+        {% for s in skills %}
+        <tr class="inv-item sk-row" id="skill-{{ s.name }}" data-q="{{ (s.name ~ ' ' ~ s.description ~ ' ' ~ (used_by.get(s.name) or [])|join(' '))|lower }}">
+          <td class="mono">{{ s.name }}</td>
+          <td style="color:var(--text-muted);font-size:13px">
+            {% if s.description %}{{ s.description }}{% else %}<span class="cap-none">chưa có mô tả</span>{% endif %}
+            {% if used_by.get(s.name) %}
+            <div class="sk-used">Được dùng bởi:
+              {% for an in used_by.get(s.name) %}<a class="chip-ag" href="#agent-{{ an }}" data-jump="agents">🤖 {{ an }}</a>{% endfor %}</div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="inv-empty">Chưa tìm thấy skill nào. Đặt thư mục workspace (trong Thiết lập) trỏ tới thư mục có
+      <span class="mono">.claude/skills</span>.</div>
+    {% endif %}
+  </div></div>
+</section>
+
+{# ── Slash commands and rules ── #}
+{% for key, items, icon, empty in [('commands', commands, '⌨️ /', 'Chưa có lệnh nào trong .claude/commands.'),
+                                    ('rules', rules, '📏', 'Chưa có rule nào trong .claude/rules.')] %}
+<section class="inv-panel" data-panel="{{ key }}" hidden>
+  {% if items %}
+  <div class="doc-list">
+    {% for d in items %}
+    <div class="doc-item inv-item" data-q="{{ (d.name ~ ' ' ~ d.description)|lower }}">
+      <b>{{ icon }}{{ d.name }}</b>
+      <p>{% if d.description %}{{ d.description }}{% else %}<span class="cap-none">chưa có mô tả</span>{% endif %}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card"><div class="inv-empty">{{ empty }}</div></div>
+  {% endif %}
+</section>
+{% endfor %}
+
+<h3 style="margin:28px 0 12px">⚙️ Cách autopilot dùng kho này</h3>
 <div class="card">
     <div class="card-header"><h3>🔄 Pipeline đầu-cuối</h3></div>
     <div class="card-body" style="padding:18px 22px">
@@ -52,30 +190,36 @@
         <p style="font-size:13px;color:var(--text-muted)">Poll theo lịch, kèm webhook Service Hook của ADO để nhận việc tức thì.</p></div>
 </div>
 
-<div class="card">
-    <div class="card-header">
-        <h3>🧰 Skill hiện có</h3>
-        <span style="font-size:13px;color:var(--text-muted)">Tìm thấy {{ skills|length }} skill{% if workspace %} trong <span class="mono">{{ workspace }}\.claude\skills</span>{% endif %}</span>
-    </div>
-    <div class="card-body">
-        {% if skills %}
-        <table>
-            <thead><tr><th style="width:220px">Skill</th><th>Chức năng</th></tr></thead>
-            <tbody>
-                {% for s in skills %}
-                <tr>
-                    <td class="mono">{{ s.name }}</td>
-                    <td style="color:var(--text-muted);font-size:13px">{% if s.description %}{{ s.description }}{% else %}<span class="cap-none">chưa có mô tả</span>{% endif %}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <div class="empty-state">
-            <p>Chưa tìm thấy skill nào. Hãy đặt thư mục workspace (trong Cài đặt) trỏ tới thư mục
-            có <span class="mono">.claude/skills</span> chứa các skill của agent.</p>
-        </div>
-        {% endif %}
-    </div>
-</div>
+
+<script>
+// Tabs from the KPI cards, one search over the visible tab, and chip links that jump
+// across tabs (an agent's skill → the skill row; a skill's agent → the agent card).
+(function () {
+  var tabs = document.querySelectorAll('.inv-kpis [data-tab]');
+  var panels = document.querySelectorAll('.inv-panel');
+  var q = document.getElementById('inv-q'), count = document.getElementById('inv-count');
+  function norm(t) { return (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+  function current() { var on = document.querySelector('.inv-kpis .on'); return on ? on.dataset.tab : 'agents'; }
+  function filter() {
+    var want = norm(q.value.trim()), panel = document.querySelector('.inv-panel[data-panel="' + current() + '"]');
+    var items = panel ? panel.querySelectorAll('.inv-item') : [], shown = 0;
+    items.forEach(function (el) { var ok = !want || norm(el.dataset.q).indexOf(want) !== -1;
+      el.style.display = ok ? '' : 'none'; if (ok) shown++; });
+    count.textContent = want ? shown + ' / ' + items.length + ' khớp' : items.length + ' mục';
+  }
+  function show(tab) {
+    tabs.forEach(function (t) { var on = t.dataset.tab === tab; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
+    panels.forEach(function (p) { p.hidden = p.dataset.panel !== tab; });
+    filter();
+  }
+  tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.tab); }); });
+  q.addEventListener('input', filter);
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('[data-jump]'); if (!a) return;
+    q.value = ''; show(a.dataset.jump);
+  });
+  var h = location.hash.slice(1);
+  show(h.indexOf('skill-') === 0 ? 'skills' : 'agents');
+})();
+</script>
 {% endblock %}

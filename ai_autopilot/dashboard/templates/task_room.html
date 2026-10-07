@@ -36,6 +36,22 @@
   .tr-list { list-style:none; padding:0; margin:0; }
   .tr-list li { padding:8px 0; border-bottom:1px solid var(--border,#23232b); }
   .tr-when { color:var(--text-dim); font-size:12px; }
+  /* story timeline */
+  .tl { list-style:none; margin:0; padding:0 0 0 6px; position:relative; }
+  .tl::before { content:""; position:absolute; left:17px; top:6px; bottom:6px; width:2px; background:var(--border,#23232b); }
+  .tl li { display:grid; grid-template-columns:24px 1fr; gap:10px; padding:7px 0; position:relative; }
+  .tl-dot { width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+            font-size:13px; background:var(--bg-card); border:2px solid var(--border,#23232b); z-index:1; }
+  .tl-dot.ok { border-color:#065f46; } .tl-dot.warn { border-color:#78350f; } .tl-dot.bad { border-color:#7f1d1d; }
+  .tl-title { font-weight:600; font-size:14px; }
+  .tl-day { color:var(--text-dim); font-size:11px; text-transform:uppercase; letter-spacing:.05em; margin:10px 0 2px 34px; }
+  .tl-links a { font-size:12px; margin-right:10px; }
+  .why-grid { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:12px; }
+  @media (max-width: 900px) { .why-grid { grid-template-columns:1fr; } }
+  .why-dev { border-left:3px solid #78350f; padding:6px 10px; margin:8px 0; }
+  .why-dev .lbl { color:var(--text-dim); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+  .score-big { font-size:30px; font-weight:750; }
+  .vote-btns { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
 </style>
 
 {% set item = room.item %}
@@ -67,8 +83,9 @@
 </div>
 
 {% set tabs = [
+     ('story', '🎬 Diễn biến', room.story | length),
      ('overview', '📋 Tổng quan', room.timeline | length),
-     ('conversation', '💬 Diễn biến', room.comments | length),
+     ('conversation', '💬 Nhật ký & bình luận', room.comments | length),
      ('plan', '🧭 Brief', 0),
      ('drift', '📐 Lệch spec', room.open_drifts | length),
      ('code', '🔀 Code', room.prs | length),
@@ -82,7 +99,82 @@
   {% endfor %}
 </div>
 
-{% if tab == 'overview' %}
+{% if tab == 'story' %}
+  {% set why = room.why %}
+  <div class="why-grid">
+    <div class="tr-card">
+      <h4>🤔 Vì sao agent quyết như vậy</h4>
+      {% if why.empty %}
+        <div class="tr-empty">Chưa có run nào hoàn tất — chưa có lời giải thích để hiển thị.</div>
+      {% else %}
+        {% if why.run_id %}<div class="tr-when">Run #{{ why.run_id }} ·
+          <span class="pill {{ 'pill-ok' if why.run_status == 'Success' else 'pill-warn' }}">{{ why.run_status }}</span></div>{% endif %}
+        {% if why.summary %}
+          <p class="tr-when" style="margin:8px 0 4px">Agent tự tóm tắt việc đã làm:</p>
+          <pre class="tr-log" style="max-height:260px">{{ why.summary }}{% if why.truncated %}…{% endif %}</pre>
+        {% endif %}
+        {% if why.error %}<div style="margin-top:8px"><span class="pill pill-warn">Lỗi</span>
+          <span class="tr-when">{{ why.error | striptags | truncate(400) }}</span></div>{% endif %}
+        {% if why.deviations %}
+          <p style="margin:12px 0 4px"><b>📐 Chỗ agent tự quyết vì spec không nói rõ ({{ why.deviations | length }})</b></p>
+          {% for d in why.deviations %}
+            <div class="why-dev">
+              <div>{% if d.where %}<code>{{ d.where }}</code> {% endif %}{{ d.summary }}
+                {% if d.decided %}<span class="pill pill-ok">{{ d.decided }}</span>{% else %}<span class="pill pill-warn">chờ chốt</span>{% endif %}</div>
+              {% if d.spec_says %}<div><span class="lbl">Spec nói</span> · {{ d.spec_says }}</div>{% endif %}
+              {% if d.code_does %}<div><span class="lbl">Code làm</span> · {{ d.code_does }}</div>{% endif %}
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endif %}
+    </div>
+    <div>
+      <div class="tr-card">
+        <h4>🎯 Điểm run</h4>
+        {% if why.score is not none %}
+          <div class="score-big {{ 'success-val' if why.gate == 'auto' else ('failed-val' if why.gate == 'escalate' else '') }}">{{ why.score }}<span class="tr-when">/100 · {{ why.grade }}</span></div>
+          <div class="tr-when" title="Điểm gốc chỉ được đăng lên ADO dưới dạng badge, không lưu lại. Số này tính lại từ dữ liệu run đã lưu — thiếu kết quả auto-review và CI nên có thể thấp hơn badge.">tính lại từ dữ liệu run đã lưu ⓘ</div>
+          {% if why.score_reasons %}<ul class="tr-when" style="margin:6px 0 0 16px">{% for r in why.score_reasons %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+        {% else %}<div class="tr-empty" style="padding:6px 0">—</div>
+          <div class="tr-when">Chỉ chấm điểm run hoàn tất.</div>{% endif %}
+      </div>
+      {% if why.run_id %}
+      <div class="tr-card">
+        <h4>🗳️ Đánh giá của người review</h4>
+        {% if why.vote > 0 %}<span class="pill pill-ok">👍 Tốt</span>
+        {% elif why.vote < 0 %}<span class="pill pill-warn">👎 Chưa tốt</span>
+        {% else %}<span class="tr-when">Chưa ai đánh giá run này.</span>{% endif %}
+        {% if why.vote_reason %}<div class="tr-when" style="margin-top:4px">{{ why.vote_reason }}</div>{% endif %}
+        <div class="vote-btns">
+          <a class="btn-ghost" href="/dashboard/feedback/{{ why.run_id }}?v=up">👍 Tốt</a>
+          <a class="btn-ghost" href="/dashboard/feedback/{{ why.run_id }}?v=down">👎 Chưa tốt</a>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="tr-card">
+    <h4>🎬 Diễn biến theo thời gian</h4>
+    {% if room.story %}
+      <ul class="tl">
+        {% set ns = namespace(day='') %}
+        {% for ev in room.story %}
+          {% set day = ev.at.strftime('%d/%m/%Y') %}
+          {% if day != ns.day %}{% set ns.day = day %}<li style="display:block;padding:0"><div class="tl-day">{{ day }}</div></li>{% endif %}
+          <li>
+            <span class="tl-dot {{ ev.tone }}">{{ ev.icon }}</span>
+            <div>
+              <div><span class="tr-when">{{ ev.at.strftime('%H:%M') }} UTC</span> · <span class="tl-title">{{ ev.title }}</span></div>
+              {% if ev.detail %}<div class="tr-when">{{ ev.detail }}</div>{% endif %}
+              {% if ev.links %}<div class="tl-links">{% for label, url in ev.links %}<a href="{{ url }}"{% if url.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ label }}</a>{% endfor %}</div>{% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}<div class="tr-empty">Chưa ghi nhận sự kiện nào cho item này.</div>{% endif %}
+  </div>
+
+{% elif tab == 'overview' %}
   <div class="tr-card">
     <h4>Trạng thái đã đi qua</h4>
     {% if room.timeline %}

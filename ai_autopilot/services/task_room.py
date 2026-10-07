@@ -24,7 +24,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ai_autopilot import activity
+from ai_autopilot import activity, run_timeline
 from ai_autopilot.container import Container
 from ai_autopilot.diffs import Diff, parse_unified_diff
 from ai_autopilot.logging_config import describe_exc, get_logger
@@ -76,6 +76,9 @@ class TaskRoom:
     audit: list = field(default_factory=list)
     prs: list[PrView] = field(default_factory=list)
     artifacts: list[Artifact] = field(default_factory=list)
+    # The merged, time-ordered story (run_timeline.TimelineEvent) and the "why" panel.
+    story: list = field(default_factory=list)
+    why: run_timeline.Rationale = field(default_factory=run_timeline.Rationale)
 
     @property
     def open_drifts(self) -> list:
@@ -184,7 +187,49 @@ class TaskRoomService:
             self._c.ado.get_work_item_comments(work_item_id), [], "comments"
         )
         room.prs = await self._pull_requests(room, scoped, with_diff=with_diff)
+        await self._story(room)
         return room
+
+    async def _story(self, room: TaskRoom) -> None:
+        """The 🎬 tab: everything recorded about the item, merged by time.
+
+        Sources the other tabs do not already hold are read here — quality events, audit
+        rows that name the item as ``#id``, PR conflicts, fleet dispatches. Each is
+        best-effort for the same reason as every other section: one unreadable table
+        costs its lines, not the story.
+        """
+        c = self._c
+        wid = room.work_item_id
+        quality = []
+        quality_repo = getattr(c, "quality_events", None)
+        if quality_repo is not None:
+            quality = await _safe_async(
+                quality_repo.recent(limit=500, work_item_id=wid), [], "quality"
+            )
+        audit = await _safe_async(c.audit_repo.mentioning(wid), [], "audit mentions")
+        pr_ids = [p.pr_id for p in room.prs if p.pr_id]
+        conflicts = []
+        conflict_repo = getattr(c, "pr_conflict_repo", None)
+        if conflict_repo is not None:
+            conflicts = await _safe_async(conflict_repo.for_item(wid, pr_ids), [], "conflicts")
+        commands = []
+        # Dispatches exist only on a fleet central; elsewhere the table is empty and
+        # the read is skipped rather than paid for nothing.
+        command_repo = getattr(c, "fleet_command_repo", None)
+        on_central = (getattr(self._config, "fleet_role", "") or "") == "central"
+        if command_repo is not None and on_central:
+            commands = await _safe_async(command_repo.recent(limit=300), [], "fleet")
+        room.story = _safe(lambda: run_timeline.build_timeline(
+            wid, executions=room.runs, quality=quality, drifts=room.drifts, audit=audit,
+            conflicts=conflicts, commands=commands,
+            history_url=f"/dashboard/history?q={wid}",
+        ), [])
+        cfg = self._config
+        room.why = _safe(lambda: run_timeline.rationale(
+            room.runs, room.drifts, quality,
+            auto_min=int(getattr(cfg, "pr_score_auto_min", 85) or 85),
+            review_min=int(getattr(cfg, "pr_score_review_min", 60) or 60),
+        ), run_timeline.Rationale())
 
     async def _pull_requests(self, room: TaskRoom, scoped, *, with_diff: bool) -> list[PrView]:
         """Every PR this item produced, newest run first, each with its diff."""

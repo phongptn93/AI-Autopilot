@@ -43,7 +43,7 @@ def create_router() -> APIRouter:
     router = APIRouter(tags=["dashboard"])
 
     @router.get("/task/{work_item_id}", response_class=HTMLResponse)
-    async def task_room(request: Request, work_item_id: int, tab: str = "overview"):
+    async def task_room(request: Request, work_item_id: int, tab: str = ""):
         """One task, one page: what it is, what the agent decided, what it changed.
 
         The diff is the expensive part (a fetch + a diff per repo), so it is gathered
@@ -52,6 +52,10 @@ def create_router() -> APIRouter:
         """
         c: Container = request.app.state.container
         room = await TaskRoomService(c).gather(work_item_id, with_diff=(tab == "code"))
+        # With runs, the story is what a reader opens the room for; without any, there
+        # is no story yet and the overview (state, deferred cases) is the useful page.
+        if not tab:
+            tab = "story" if room.runs else "overview"
         org = (c.config.ado_organization or "").rstrip("/")
         return _TEMPLATES.TemplateResponse(
             request, "task_room.html",

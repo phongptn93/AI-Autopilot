@@ -129,9 +129,27 @@ class AdoNotifier:
 
         await self._broadcast(
             NotificationMessage(
-                work_item=item, type=NotificationType.COMPLETED, result=result
+                work_item=item, type=NotificationType.COMPLETED, result=result,
+                actions=self._feedback_actions(item, result),
             )
         )
+
+    def _feedback_actions(
+        self, item: WorkItemInfo, result: ExecutionResult
+    ) -> list[tuple[str, str]]:
+        """👍 / 👎 buttons that open the 1-tap feedback page for this run.
+
+        Only when the dashboard has a public URL: a link to ``localhost`` on a phone in
+        Teams is a button that does nothing. The notice knows the item, not the run row,
+        so the link carries the completion time and the page resolves the run that
+        finished closest to it — not merely the newest, which may be a later one.
+        """
+        base = (getattr(self._config, "dashboard_public_url", "") or "").rstrip("/")
+        if not base or not getattr(item, "id", 0):
+            return []
+        at = int(result.completed_at.timestamp()) if result.completed_at else 0
+        url = f"{base}/dashboard/feedback/item/{item.id}?at={at}&v="
+        return [("👍 Tốt", url + "up"), ("👎 Chưa tốt", url + "down")]
 
     async def notify_error(self, item: WorkItemInfo, error: str) -> None:
         comment = f"<div><b>⚠️ Gặp lỗi khi xử lý</b><br/><p>{error}</p></div>"

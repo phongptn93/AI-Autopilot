@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import contextlib
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -31,9 +32,10 @@ def create_router() -> APIRouter:
             projects=scope_of(request, c.config)[1], limit=5000,
         )
         report = compute_analytics(records, days=days, now=now)
+        north = await _north_star(c, records, days=days)
         return _TEMPLATES.TemplateResponse(
             request, "analytics.html",
-            _ctx(request, "analytics", report=report, days=days, tag=tag),
+            _ctx(request, "analytics", report=report, days=days, tag=tag, north=north),
         )
 
     @router.get("/delivery", response_class=HTMLResponse)
@@ -73,3 +75,35 @@ def create_router() -> APIRouter:
         )
 
     return router
+
+
+async def _north_star(c: Container, records: list, *, days: int) -> list:
+    """The ⭐ cards for the same period and scope as the rest of the page.
+
+    Quality events carry no project, so they are narrowed to the items the scoped run
+    list contains — otherwise a workspace filter would show another team's reviews.
+    Every read is best-effort: a KPI that cannot be read shows "—", it does not take
+    the page down with it.
+    """
+    from ai_autopilot.data.entities import PipelineState
+    from ai_autopilot.north_star import compute_north_star
+
+    items = {r.work_item_id for r in records}
+    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    quality: list = []
+    held: set[int] = set()
+    merged: set[int] | None = None
+    with contextlib.suppress(Exception):
+        quality = [q for q in await c.quality_events.recent(limit=5000, since=since)
+                   if q.work_item_id in items]
+    with contextlib.suppress(Exception):
+        held = {s.work_item_id for s in await c.state_repo.all()
+                if s.state == PipelineState.NEEDS_HUMAN}
+    # Merges are only recorded when state sync is on; without it "merged" is unknowable
+    # and the KPI falls back to "PR opened", saying so in its tooltip.
+    if getattr(c.config, "auto_transition_enabled", False):
+        with contextlib.suppress(Exception):
+            merged = await c.sync_repo.seen_merged_prs()
+    return compute_north_star(
+        records, quality, needs_human_items=held & items, merged_pr_ids=merged,
+    ).kpis()

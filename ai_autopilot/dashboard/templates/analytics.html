@@ -8,6 +8,7 @@
   .cat-table { width:100%; border-collapse:collapse; font-size:13px; }
   .cat-table th, .cat-table td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border,#23232b); }
   .cat-table td.num, .cat-table th.num { text-align:right; }
+  .ns-warn { color: var(--amber); }
 </style>
 
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
@@ -21,6 +22,18 @@
       <option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày qua</option>
     {% endfor %}
   </select>
+</div>
+
+<div style="font-weight:650;margin:4px 0 10px">⭐ Chỉ số đích
+  <span style="color:var(--text-dim);font-weight:400;font-size:12.5px">— công việc tự hành đến đích, không phải số lượt chạy. Rê chuột lên ⓘ để xem cách tính.</span></div>
+<div class="stats-grid ns-grid">
+  {% for k in north %}
+  <div class="stat-card" title="{{ k.hint }}">
+    <div class="stat-card-header"><span class="stat-card-label">{{ k.label }} <span style="opacity:.6">ⓘ</span></span><div class="stat-card-icon">{{ k.icon }}</div></div>
+    <div class="stat-card-value {{ 'success-val' if k.tone == 'good' else ('ns-warn' if k.tone == 'warn' else ('failed-val' if k.tone == 'bad' else '')) }}">{{ k.value }}</div>
+    <div style="color:var(--text-muted);font-size:12px;margin-top:4px">{{ k.sub if k.has_data else ('chưa đo được' if k.key == 'human_minutes' else 'chưa có dữ liệu trong khoảng này') }}</div>
+  </div>
+  {% endfor %}
 </div>
 
 <div class="stats-grid">

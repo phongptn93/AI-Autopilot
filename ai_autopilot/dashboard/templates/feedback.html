@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .fb-wrap { max-width:620px; }
+  .fb-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:10px; padding:18px 20px; margin-bottom:14px; }
+  .fb-meta { color:var(--text-dim); font-size:13px; margin-top:4px; }
+  .fb-votes { display:flex; gap:10px; margin:14px 0; }
+  .fb-vote { flex:1; }
+  .fb-vote input { display:none; }
+  .fb-vote span { display:block; text-align:center; padding:14px; border-radius:10px; border:1px solid var(--border,#23232b);
+                  font-size:16px; font-weight:650; cursor:pointer; }
+  .fb-vote input:checked + span.up { border-color:var(--green); background:var(--green-bg); color:var(--green); }
+  .fb-vote input:checked + span.down { border-color:var(--red); background:rgba(240,82,106,.13); color:var(--red); }
+  .fb-chips { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 12px; }
+  .fb-chip input { display:none; }
+  .fb-chip span { display:inline-block; padding:5px 12px; border-radius:999px; border:1px solid var(--border,#23232b);
+                  font-size:13px; cursor:pointer; color:var(--text-dim); }
+  .fb-chip input:checked + span { border-color:var(--amber); color:var(--amber); background:var(--amber-bg); }
+  .fb-text { width:100%; min-height:80px; background:var(--bg-card); color:var(--text); border:1px solid var(--border,#23232b);
+             border-radius:8px; padding:8px 10px; font:inherit; }
+  .fb-down-only { display:none; }
+  .fb-form:has(input[name="v"][value="down"]:checked) .fb-down-only { display:block; }
+  .fb-flash { padding:10px 14px; border-radius:8px; margin-bottom:12px; border:1px solid rgba(46,204,113,.4); color:var(--green); }
+</style>
+
+<div class="fb-wrap">
+  <div class="page-header">
+    <h2 class="page-title">🗳️ Đánh giá kết quả của agent</h2>
+    <p>Một chạm là đủ — lý do là tuỳ chọn, nhưng 👎 kèm lý do sẽ thành bài học cho lần chạy sau.</p>
+  </div>
+
+  {% if flash %}<div class="fb-flash">{{ flash[1] | safe }}</div>{% endif %}
+
+  <div class="fb-card">
+    <div><b><a href="/dashboard/task/{{ run.work_item_id }}">#{{ run.work_item_id }}</a></b> — {{ run.title or '(không có tiêu đề)' }}</div>
+    <div class="fb-meta">
+      Run #{{ run.id }} · {{ status }}
+      {% if run.completed_at %} · {{ run.completed_at.strftime('%d/%m %H:%M') }}{% endif %}
+      {% if run.pr_url %} · <a href="{{ run.pr_url }}" target="_blank" rel="noopener">Mở PR</a>{% endif %}
+    </div>
+    {% if current %}
+      <div class="fb-meta" style="margin-top:8px">Đánh giá hiện tại:
+        <b>{{ '👍 Tốt' if current.value > 0 else '👎 Chưa tốt' }}</b>{% if current.detail %} — {{ current.detail }}{% endif %}
+        · gửi lại sẽ thay đánh giá này.</div>
+    {% endif %}
+  </div>
+
+  <form method="post" action="/dashboard/feedback/{{ run.id }}" class="fb-card fb-form">
+    <div class="fb-votes">
+      <label class="fb-vote"><input type="radio" name="v" value="up" {{ 'checked' if vote > 0 else '' }}><span class="up">👍 Tốt</span></label>
+      <label class="fb-vote"><input type="radio" name="v" value="down" {{ 'checked' if vote < 0 else '' }}><span class="down">👎 Chưa tốt</span></label>
+    </div>
+    <div class="fb-down-only">
+      <div class="fb-meta">Chưa tốt ở chỗ nào?</div>
+      <div class="fb-chips">
+        {% for r in reasons %}
+          <label class="fb-chip"><input type="checkbox" name="chip" value="{{ r }}"><span>{{ r }}</span></label>
+        {% endfor %}
+      </div>
+    </div>
+    <textarea class="fb-text" name="reason" maxlength="600" placeholder="Lý do (tuỳ chọn)"></textarea>
+    <div style="margin-top:12px"><button type="submit" class="btn">Gửi đánh giá</button>
+      <a class="btn-ghost" href="/dashboard/task/{{ run.work_item_id }}">Mở task</a></div>
+  </form>
+</div>
+{% endblock %}

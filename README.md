@@ -280,12 +280,12 @@ unresolved review comments and feed them back to Claude to revise (bounded by
 
 ---
 
-## 🎚️ Trust you can see — the decision inbox and earned autonomy
+## ⚖️ Trust you can see — the decision inbox and earned autonomy
 
 | Feature | Where | What it gives you |
 |---|---|---|
 | **🎯 Decision inbox** | Tổng quan → Hộp quyết định (first in the menu, red badge) | Every pending human decision in one list — held items, spec-drift points, PR conflicts, fleet machines, knowledge to approve, critical/high security findings — tiered 🔴 today / 🟡 this week / 🟢 FYI, each with its action inline (approve a plan, decide a drift point, resume a machine, promote a lesson…). |
-| **🎚️ Trust ladder** (`trust_ladder_enabled`, opt-in) | Thiết lập → 🎚️ Tự chủ & an toàn | Autonomy is earned per (project, work type): plan → draft PR → ready-for-review PR → unattended, promoted after `trust_min_runs` clean merges at `trust_promote_rate`, demoted after two bad runs in a row. `autonomy_level` is the ceiling. |
+| **⚖️ Trust ladder** (`trust_ladder_enabled`, opt-in) | Thiết lập → ⚖️ Tự chủ & an toàn | Autonomy is earned per (project, work type): plan → draft PR → ready-for-review PR → unattended, promoted after `trust_min_runs` clean merges at `trust_promote_rate`, demoted after two bad runs in a row. `autonomy_level` is the ceiling. |
 | **🧨 Risk gate** (on) | same | A run touching migrations, auth/permission, deploy/infra or dependency manifests — or more than `risk_max_files` files — is held for a person instead of being handed on, whatever the autonomy. |
 | **📋 Plan first** | tag `plan-first` | The agent posts an implementation plan as a comment and waits; **✅ Duyệt kế hoạch** in the inbox (tag `plan-approved`) lets it build exactly that plan. |
 | **💸 Budget & circuit breaker** | same | `item_budget_tokens` holds an item that has spent its budget instead of retrying; `circuit_breaker_failures` (5) pauses the machine after N failed runs in a row and puts a resume button in the inbox. |

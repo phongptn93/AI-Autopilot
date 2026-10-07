@@ -272,6 +272,10 @@
   .fleet-col b{font-size:12px}
   .fleet-col ul{margin:5px 0 0;padding-left:18px;font-size:12px;color:var(--text-muted);line-height:1.6}
   .fleet-col code{font-family:var(--mono,monospace);font-size:11px}
+  .more-states { margin-top: 6px; }
+  .more-states > summary { cursor: pointer; font-size: 12px; color: var(--accent-hover); list-style: none; }
+  .more-states > summary::-webkit-details-marker { display: none; }
+  .more-states[open] > summary { margin-bottom: 6px; }
 </style>
 
 <div class="set-head">
@@ -715,6 +719,7 @@
 
     <div class="field-grid">
       {% for f in fields %}
+      {% if not (hide_when_empty is defined and f.key in hide_when_empty and not current.get(f.key)) %}
       {% set wide = f.kind in ('list','map','stateset') %}
       {# A field that does nothing on THIS machine. Empty → hidden; already configured
          → dimmed with the reason, because a value somebody set must not vanish from
@@ -811,7 +816,18 @@
                 <input type="checkbox" name="{{ f.key }}__{{ s }}" {% if s in selected %}checked{% endif %} class="chk"> {{ s }}
               </label>{% endif %}{% endfor %}
             </div>{% endif %}
-            <textarea name="{{ f.key }}__manual" rows="1" placeholder="Thêm state khác (phẩy hoặc xuống dòng)" style="margin-top:8px"></textarea>
+            {# Typing a state by hand is for when the list could not be loaded, or for a
+               state the project has not created yet. With the real states on screen as
+               chips, a full-width empty box under every picker is clutter — so it folds
+               into a link; offline it stays open, because then it is the only way in. #}
+            {% if candidates %}
+            <details class="more-states">
+              <summary>＋ Thêm state khác</summary>
+              <textarea name="{{ f.key }}__manual" rows="1" placeholder="Gõ tên state, cách nhau bằng dấu phẩy"></textarea>
+            </details>
+            {% else %}
+            <textarea name="{{ f.key }}__manual" rows="1" placeholder="Chưa tải được state ADO — gõ tên state, cách nhau bằng dấu phẩy" style="margin-top:8px"></textarea>
+            {% endif %}
           {% elif f.kind == 'stateone' %}
             {% set cur = current.get(f.key) %}
             {% set opts = (ado_states or []) + ([cur] if cur and cur not in (ado_states or []) else []) %}
@@ -832,6 +848,7 @@
         </div>
         {% if managed %}</fieldset>{% endif %}
       </div>
+      {% endif %}
       {% endfor %}
     </div>
   </div>

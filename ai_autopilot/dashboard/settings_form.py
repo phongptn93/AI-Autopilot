@@ -893,51 +893,51 @@ _BASE_FIELDS: tuple[Field, ...] = (
     Field("config_export_password", "Mật khẩu export đầy đủ", "password", "🔐 Web & bảo mật",
           "Mã hoá bản export cấu hình đầy đủ (bản tải về CÓ KÈM secret). Cần đúng mật khẩu này để "
           "giải mã file đã export. Để trống = giữ mật khẩu hiện tại."),
-    # ── 🎚️ Tự chủ & an toàn ── (appended last so every #sec-N anchor before it stays put)
-    Field("trust_ladder_enabled", "Tự chủ theo uy tín", "bool", "🎚️ Tự chủ & an toàn",
+    # ── ⚖️ Tự chủ & an toàn ── (appended last so every #sec-N anchor before it stays put)
+    Field("trust_ladder_enabled", "Tự chủ theo uy tín", "bool", "⚖️ Tự chủ & an toàn",
           "Mỗi (project, loại việc) tự lên/xuống mức tự chủ theo kết quả thật: merge sạch "
           "nhiều thì được nới, bị trả lại liên tiếp thì bị siết. autonomy_level là trần."),
-    Field("trust_min_runs", "↳ Số lần chạy tối thiểu để lên mức", "int", "🎚️ Tự chủ & an toàn",
+    Field("trust_min_runs", "↳ Số lần chạy tối thiểu để lên mức", "int", "⚖️ Tự chủ & an toàn",
           "Cần đủ số lần chạy đã có kết quả kể từ lần đổi mức gần nhất mới xét lên mức."),
-    Field("trust_promote_rate", "↳ Tỉ lệ merge sạch để lên mức", "float", "🎚️ Tự chủ & an toàn",
+    Field("trust_promote_rate", "↳ Tỉ lệ merge sạch để lên mức", "float", "⚖️ Tự chủ & an toàn",
           "Tỉ lệ lần chạy merge mà không bị sửa / trả lại / mở lại phải đạt ngưỡng này (0–1)."),
-    Field("trust_max_level", "↳ Mức tối đa", "int", "🎚️ Tự chủ & an toàn",
+    Field("trust_max_level", "↳ Mức tối đa", "int", "⚖️ Tự chủ & an toàn",
           "0 chỉ lập kế hoạch · 1 PR nháp · 2 PR sẵn sàng review · 3 tự động hoàn toàn "
           "(chỉ khi nâng lên 3)."),
-    Field("risk_gate_enabled", "Chặn thay đổi rủi ro cao", "bool", "🎚️ Tự chủ & an toàn",
+    Field("risk_gate_enabled", "Chặn thay đổi rủi ro cao", "bool", "⚖️ Tự chủ & an toàn",
           "Run đụng migration DB, auth/permission, hạ tầng deploy, manifest phụ thuộc — hoặc "
           "sửa quá nhiều file — sẽ chờ người duyệt thay vì chuyển tiếp."),
-    Field("risk_patterns", "↳ Mẫu file rủi ro", "list", "🎚️ Tự chủ & an toàn",
+    Field("risk_patterns", "↳ Mẫu file rủi ro", "list", "⚖️ Tự chủ & an toàn",
           "Mỗi dòng một glob; ** đi qua nhiều thư mục; mẫu không có / khớp tên file ở mọi nơi."),
-    Field("risk_max_files", "↳ Ngưỡng số file", "int", "🎚️ Tự chủ & an toàn",
+    Field("risk_max_files", "↳ Ngưỡng số file", "int", "⚖️ Tự chủ & an toàn",
           "Một run sửa nhiều hơn số file này được coi là rủi ro. 0 = tắt."),
-    Field("risk_gate_tag", "↳ Tag chờ duyệt rủi ro", "text", "🎚️ Tự chủ & an toàn",
+    Field("risk_gate_tag", "↳ Tag chờ duyệt rủi ro", "text", "⚖️ Tự chủ & an toàn",
           "Gắn lên item bị giữ để lọc trên board."),
-    Field("plan_first_tag", "Tag \"lập kế hoạch trước\"", "text", "🎚️ Tự chủ & an toàn",
+    Field("plan_first_tag", "Tag \"lập kế hoạch trước\"", "text", "⚖️ Tự chủ & an toàn",
           "Item mang tag này chỉ được lập kế hoạch (comment), chờ duyệt rồi mới code. Duyệt "
           "ngay trong Hộp quyết định."),
-    Field("plan_approved_tag", "↳ Tag duyệt kế hoạch", "text", "🎚️ Tự chủ & an toàn",
+    Field("plan_approved_tag", "↳ Tag duyệt kế hoạch", "text", "⚖️ Tự chủ & an toàn",
           "Gắn tag này (hoặc bấm Duyệt kế hoạch trong Hộp quyết định) để autopilot triển khai."),
-    Field("plan_pending_tag", "↳ Tag chờ duyệt kế hoạch", "text", "🎚️ Tự chủ & an toàn",
+    Field("plan_pending_tag", "↳ Tag chờ duyệt kế hoạch", "text", "⚖️ Tự chủ & an toàn",
           "Tự gắn sau khi đăng kế hoạch; tự gỡ khi bắt đầu chạy bản đã duyệt."),
-    Field("plan_first_min_points", "↳ Story points tối thiểu", "float", "🎚️ Tự chủ & an toàn",
+    Field("plan_first_min_points", "↳ Story points tối thiểu", "float", "⚖️ Tự chủ & an toàn",
           "Item có story points ≥ N cũng phải lập kế hoạch trước. 0 = chỉ theo tag."),
-    Field("item_budget_tokens", "Ngân sách token mỗi item", "int", "🎚️ Tự chủ & an toàn",
+    Field("item_budget_tokens", "Ngân sách token mỗi item", "int", "⚖️ Tự chủ & an toàn",
           "Tổng token qua mọi lần chạy của một item vượt mức này thì giữ item chờ người, không "
           "tự chạy lại. 0 = tắt."),
-    Field("circuit_breaker_failures", "Ngắt mạch sau N lỗi liên tiếp", "int", "🎚️ Tự chủ & an toàn",
+    Field("circuit_breaker_failures", "Ngắt mạch sau N lỗi liên tiếp", "int", "⚖️ Tự chủ & an toàn",
           "N run lỗi liên tiếp → máy tự tạm dừng nhận việc và báo một lần; tiếp tục bằng một "
           "nút trong Hộp quyết định. 0 = tắt."),
-    Field("run_now_lease", "Khoá chạy-ngay giữa các máy", "select", "🎚️ Tự chủ & an toàn",
+    Field("run_now_lease", "Khoá chạy-ngay giữa các máy", "select", "⚖️ Tự chủ & an toàn",
           "auto = chỉ khi máy thuộc fleet; on / off = ép bật / tắt. Nhiều máy cùng thấy tag "
           "chạy-ngay thì chỉ máy nhận việc trước mới chạy.", ("auto", "on", "off"),
           show_when_key="fleet_role", show_when_values=("central", "worker")),
-    Field("run_now_claim_settle_seconds", "↳ Chờ trước khi chốt máy chạy (giây)", "int", "🎚️ Tự chủ & an toàn",
+    Field("run_now_claim_settle_seconds", "↳ Chờ trước khi chốt máy chạy (giây)", "int", "⚖️ Tự chủ & an toàn",
           "Chờ comment nhận việc của máy khác đến rồi mới xem máy nào chạy.",
           show_when_key="fleet_role", show_when_values=("central", "worker")),
-    Field("pr_session_watch_seconds", "Kiểm tra phiên giải conflict mỗi (giây)", "int", "🎚️ Tự chủ & an toàn",
+    Field("pr_session_watch_seconds", "Kiểm tra phiên giải conflict mỗi (giây)", "int", "⚖️ Tự chủ & an toàn",
           "Phiên interactive giải conflict xong được kiểm tra và push trong vòng chừng này giây."),
-    Field("pr_conflict_claim_settle_seconds", "Chờ chốt máy giải PR conflict (giây)", "int", "🎚️ Tự chủ & an toàn",
+    Field("pr_conflict_claim_settle_seconds", "Chờ chốt máy giải PR conflict (giây)", "int", "⚖️ Tự chủ & an toàn",
           "Nhiều máy cùng thấy một PR conflict: chờ chừng này giây rồi comment nhận việc "
           "sớm nhất thắng — một PR chỉ một phiên.",
           show_when_key="fleet_role", show_when_values=("central", "worker")),
@@ -1759,6 +1759,14 @@ def reload_from_file(config: Any) -> list[str]:
 # save path, the fleet ownership rules and the search all see nothing new. A question
 # whose field is removed simply drops out (the route filters against FIELDS), and a test
 # fails on it so it gets deleted rather than silently counted.
+
+
+# Legacy fallbacks that have a better home elsewhere. Shown on Settings ONLY when this
+# machine already has a value — so it can still be read and cleared — and otherwise
+# left off the page: an empty box for a setting nobody should start using is noise.
+# ``parent_rollup_map`` is the flat roll-up from before per-type flows; roll-up is now
+# set per type on /dashboard/flow, which also displays this legacy list.
+HIDE_WHEN_EMPTY: frozenset[str] = frozenset({"parent_rollup_map"})
 
 
 @dataclass(frozen=True)

@@ -83,7 +83,7 @@ ngay tại chỗ. Bấm `Ctrl+K` để nhảy tới bất kỳ trang hay task n�
 
 An toàn mặc định đã bật: **chặn thay đổi rủi ro cao** (migration, auth, hạ tầng) và **ngắt mạch**
 sau 5 run lỗi liên tiếp. Muốn autopilot tự kiếm quyền tự chủ theo kết quả thật: bật **Tự chủ theo uy tín**
-ở Thiết lập → 🎚️ Tự chủ & an toàn. Việc lớn: gắn tag `plan-first` để agent lập kế hoạch trước.
+ở Thiết lập → ⚖️ Tự chủ & an toàn. Việc lớn: gắn tag `plan-first` để agent lập kế hoạch trước.
 
 ## 4b. Luồng làm việc cho BA
 

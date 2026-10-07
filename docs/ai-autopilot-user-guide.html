@@ -1192,7 +1192,7 @@ assignee_trigger_user: <span class="s">phong.pham@nois.vn</span>   <span class="
 <p><b>Hộp quyết định</b> là trang làm việc hằng ngày: mọi việc cần người được xếp 🔴 hôm nay / 🟡 trong tuần / 🟢 để biết, mỗi dòng có nút xử lý tại chỗ (duyệt kế hoạch, chốt điểm lệch spec, cho máy tiếp tục, nâng bài học thành quy tắc…). Số đỏ cạnh menu là số việc 🔴.</p>
 <table>
 <tr><th>Cơ chế</th><th>Mặc định</th><th>Tác dụng</th></tr>
-<tr><td>🎚️ Tự chủ theo uy tín <code>trust_ladder_enabled</code></td><td class="def">tắt</td><td>Mỗi (project, loại việc) đi từ PR nháp lên PR sẵn sàng review (tối đa <code>trust_max_level</code>) khi merge sạch đủ nhiều; hai lần hỏng liên tiếp thì hạ. <code>autonomy_level</code> là trần.</td></tr>
+<tr><td>⚖️ Tự chủ theo uy tín <code>trust_ladder_enabled</code></td><td class="def">tắt</td><td>Mỗi (project, loại việc) đi từ PR nháp lên PR sẵn sàng review (tối đa <code>trust_max_level</code>) khi merge sạch đủ nhiều; hai lần hỏng liên tiếp thì hạ. <code>autonomy_level</code> là trần.</td></tr>
 <tr><td>🧨 Chặn rủi ro cao <code>risk_gate_enabled</code></td><td class="def">bật</td><td>Đụng migration/auth/hạ tầng/manifest hoặc quá <code>risk_max_files</code> file → giữ chờ người, gắn tag <code>autopilot-risk-review</code>.</td></tr>
 <tr><td>📋 Lập kế hoạch trước</td><td class="def">tag <code>plan-first</code></td><td>Agent chỉ đăng kế hoạch; duyệt trong Hộp quyết định (tag <code>plan-approved</code>) rồi mới code.</td></tr>
 <tr><td>💸 Ngân sách item <code>item_budget_tokens</code></td><td class="def">0 (tắt)</td><td>Vượt ngân sách → giữ item, không tự chạy lại.</td></tr>

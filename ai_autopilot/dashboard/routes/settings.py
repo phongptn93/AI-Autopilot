@@ -557,6 +557,7 @@ def create_router() -> APIRouter:
                 # encodes. Filtered against FIELDS so a question whose field was removed
                 # drops out instead of counting a box the page cannot show.
                 policy_keys=[q.key for q in settings_form.POLICY_QUESTIONS if q.key in by_key],
+                hide_when_empty=settings_form.HIDE_WHEN_EMPTY,
                 policy_questions={q.key: q for q in settings_form.POLICY_QUESTIONS},
                 setup_todo=setup_todo,
                 changed_keys=[

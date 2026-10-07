@@ -67,7 +67,7 @@ def check_ado(config: Settings) -> list[Finding]:
         return [Finding(
             ERROR, "Azure DevOps connection incomplete",
             "Missing: " + ", ".join(missing),
-            "Fill these in on /dashboard/settings → Azure DevOps Connection. "
+            "Fill these in on /dashboard/settings → 🔌 Kết nối Azure DevOps. "
             "Nothing will be polled until all three are set.",
         )]
     return [Finding(OK, "Azure DevOps connection configured")]
@@ -79,7 +79,7 @@ def check_trigger(config: Settings) -> list[Finding]:
             ERROR, "Nothing can ever be picked up",
             "Both the trigger tag(s) and trigger states are empty, so no work item "
             "matches the poller's candidate rule.",
-            "Set a trigger tag (Tags & Trigger) or tick at least one trigger state.",
+            "Set a trigger tag (🏷️ Tag & điều kiện nhận việc) or tick at least one trigger state.",
         )]
     return [Finding(OK, "Trigger configured")]
 
@@ -119,7 +119,7 @@ def check_trigger_state_roles(config: Settings) -> list[Finding]:
             "The autopilot starts work on items in this state, but it is also where "
             "a person parks work that has moved on — so anything finished and waiting "
             "there gets reworked, and putting it back starts it again.",
-            "Untick it under Tags & Trigger → Trigger states. Leaving it on the board "
+            "Untick it under 🏷️ Tag & điều kiện nhận việc → Trigger states. Leaving it on the board "
             "column is fine: that only decides where the card is drawn.",
         )
         for name, also in sorted(roles.items())
@@ -651,7 +651,7 @@ def check_deploy_stage(config: Settings) -> list[Finding]:
             WARN, "Deploy stage watches every pipeline on the branch",
             "deploy_pipeline_id is unset, so any successful build counts — a PR "
             "validation or nightly build marks items deployed that nothing shipped.",
-            "Set the deploy pipeline's id under Auto transitions.",
+            "Set the deploy pipeline's id under 🔀 Tự chuyển state.",
         ))
     branch = (config.deploy_branch or config.base_branch or "").strip()
     if not branch:
@@ -784,7 +784,7 @@ def check_workspaces(config: Settings) -> list[Finding]:
         if unknown:  # defensive — effective_ado_projects folds these in, so this is a bug net
             out.append(Finding(
                 WARN, f"Workspace '{_name(ws)}' names unpolled project(s)",
-                ", ".join(unknown), "Add them under Azure DevOps Connection → More projects.",
+                ", ".join(unknown), "Add them under 🔌 Kết nối Azure DevOps → More projects.",
             ))
     if not out:
         out.append(Finding(
@@ -823,7 +823,7 @@ def check_delivery(config: Settings) -> list[Finding]:
             "No work-item state transitions are being recorded.",
             "Lead time, cycle time and the flow chart stay empty — and the period spent "
             "switched off can never be reconstructed, because ADO's ChangedDate is bumped "
-            "by any edit. Enable it under Settings → Delivery.",
+            "by any edit. Enable it under Thiết lập → 🚚 Bàn giao (góc nhìn PM).",
         )]
     if config.delivery_history_interval_minutes > 60:
         return [Finding(
@@ -887,7 +887,7 @@ def check_test_gate_per_repo(config: Settings) -> list[Finding]:
             + ". Whatever single command is set, it is the wrong runner for all but one "
               "of them, and auto-detection is what the per-repo setting exists to avoid "
               "having to trust.",
-            "Add a line per repo under Quality gates → Test command per repo, e.g. "
+            "Add a line per repo under 🧪 Cổng chất lượng → Test command per repo, e.g. "
             "'Backend-Fresh = dotnet test --nologo'.",
         )]
     missing = [r for r in repos if str(r).strip().lower() not in configured]

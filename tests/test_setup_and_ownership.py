@@ -311,7 +311,7 @@ def test_reset_lists_only_what_actually_differs():
 
 def test_reset_can_be_scoped_to_one_section():
     changed = Settings(max_concurrent=9, base_branch="develop")
-    plan = sf.reset_plan(changed, "Workspace & Repository")
+    plan = sf.reset_plan(changed, "📁 Workspace & repo")
     assert "base_branch" in plan and "max_concurrent" not in plan
 
 
@@ -330,7 +330,7 @@ def test_reset_previews_before_it_changes_anything(tmp_path, own_config):
     with TestClient(create_app(cfg)) as client:
         page = client.get("/dashboard/settings/reset")
         assert page.status_code == 200
-        assert "Max concurrent" in page.text
+        assert "Số task chạy song song" in page.text
         # A GET must not have moved anything.
         assert client.app.state.container.config.max_concurrent == 9
         client.post("/dashboard/settings/reset", data={"section": ""})
@@ -510,7 +510,7 @@ def test_the_workspace_section_belongs_entirely_to_the_machine():
     path by which a central could contradict a machine about its own repo.
     """
     worker = Settings(fleet_role="worker", fleet_central_url="http://c", fleet_token="t")
-    section = [f for f in sf.FIELDS if f.section == "Workspace & Repository"]
+    section = [f for f in sf.FIELDS if f.section == "📁 Workspace & repo"]
     assert section, "the section was renamed — update this test, do not delete it"
     central = [f.key for f in section if sf.owner_of(f.key, worker) == sf.OWNER_CENTRAL]
     assert not central, f"a central still overwrites this machine's own checkout: {central}"
@@ -683,7 +683,7 @@ def test_a_genuinely_missing_essential_is_still_named(tmp_path):
     with TestClient(create_app(settings)) as client:
         body = client.get("/dashboard/settings").text
     assert "chưa chạy được" in body
-    assert "Workspace directory" in body       # named, not just counted
+    assert "Thư mục workspace" in body       # named, not just counted
 
 
 # ── The wizard has to ask for everything a machine needs to pick work up ─────

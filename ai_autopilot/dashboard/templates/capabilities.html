@@ -1,72 +1,79 @@
 {% extends "base.html" %}
 {% block content %}
-<style>.main { max-width: none; }</style>
+<style>
+  .main { max-width: none; }
+  /* Six cards on a full-width page: plain auto-fit landed on five columns and left the
+     sixth alone on its own row. Capping the track count at three keeps the grid at
+     3×2, 2×3 or 1×6 — never a straggler. */
+  .cap-grid { grid-template-columns: repeat(auto-fit, minmax(max(210px, calc((100% - 28px) / 3)), 1fr)); }
+  .cap-none { color: var(--text-dim); font-style: italic; }
+</style>
 <div class="page-header">
     <h2 class="page-title">{{ page_title("capabilities") }}</h2>
-    <p>An autonomous engineer that turns Azure DevOps work items into reviewed pull requests</p>
+    <p>Kỹ sư tự hành biến work item trên Azure DevOps thành pull request đã được review</p>
 </div>
 
 <div class="card">
-    <div class="card-header"><h3>🔄 End-to-end pipeline</h3></div>
+    <div class="card-header"><h3>🔄 Pipeline đầu-cuối</h3></div>
     <div class="card-body" style="padding:18px 22px">
         {% if ai_native %}
         <p style="color:var(--text-muted);font-size:14px">
-            <strong>Poll</strong> the ADO board for tagged items →
-            <strong>hand each to the agent</strong> (Claude runs from the workspace with all the
-            skills below) → the agent <strong>reasons, plans, picks the right skill(s),
-            implements, self-reviews and opens a PR</strong> → it reports back a structured result →
-            the control plane <strong>tracks, tags and notifies</strong>, or escalates to a human.
+            <strong>Poll</strong> board ADO lấy các item có tag →
+            <strong>giao từng item cho agent</strong> (Claude chạy từ workspace với toàn bộ skill
+            bên dưới) → agent <strong>suy luận, lập kế hoạch, chọn skill phù hợp, implement, tự
+            review và mở PR</strong> → trả về kết quả có cấu trúc →
+            control plane <strong>theo dõi, gắn tag và thông báo</strong>, hoặc chuyển cho người.
         </p>
         <p style="color:var(--text-dim);font-size:13px;margin-top:8px">
-            The platform decides <em>whether / when / how safely</em>; the agent decides <em>how</em>.
-            Skill selection is no longer hardcoded — it is chosen by the agent from the catalogue below.
+            Nền tảng quyết định <em>có làm không / khi nào / an toàn ra sao</em>; agent quyết định
+            <em>làm thế nào</em>. Việc chọn skill không còn hardcode — agent tự chọn từ danh mục bên dưới.
         </p>
         {% else %}
         <p style="color:var(--text-muted);font-size:14px">
-            Legacy mode: items are classified by title/type and routed to a fixed skill.
-            Set <span class="mono">workspace_directory</span> to enable the AI-native flow.
+            Chế độ cũ: item được phân loại theo tiêu đề/loại rồi chuyển tới một skill cố định.
+            Đặt thư mục workspace trong Cài đặt để bật luồng AI-native.
         </p>
         {% endif %}
     </div>
 </div>
 
-<div class="stats-grid">
-    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Reasoning</span><div class="stat-card-icon">🧠</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">The agent chooses skills and plans per task — no hardcoded routing.</p></div>
-    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Safety</span><div class="stat-card-icon">🛡️</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">Autonomy levels (report / draft PR / auto PR), RBAC, schedule windows, human escalation.</p></div>
-    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Resilience</span><div class="stat-card-icon">🔁</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">Structured result contract, backoff retries, dry-run, full history in SQLite.</p></div>
-    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Observability</span><div class="stat-card-icon">📈</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">Prometheus metrics, structured logs, health checks and token/cost tracking.</p></div>
-    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Scale</span><div class="stat-card-icon">🏢</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">Multi-repo, multi-tenant, and a Python plugin system for custom pre/post hooks.</p></div>
-    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Triggers</span><div class="stat-card-icon">⚡</div></div>
-        <p style="font-size:13px;color:var(--text-muted)">Scheduled polling plus an ADO Service Hook webhook for instant pickup.</p></div>
+<div class="stats-grid cap-grid">
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Suy luận</span><div class="stat-card-icon">🧠</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Agent tự chọn skill và lập kế hoạch cho từng task — không định tuyến cứng.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">An toàn</span><div class="stat-card-icon">🛡️</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Các mức tự chủ (report / PR nháp / PR tự động), RBAC, khung giờ chạy, chuyển cho người khi cần.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Bền bỉ</span><div class="stat-card-icon">🔁</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Hợp đồng kết quả có cấu trúc, retry có backoff, dry-run, lưu toàn bộ lịch sử trong SQLite.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Quan sát</span><div class="stat-card-icon">📈</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Metric Prometheus, log có cấu trúc, health check và theo dõi token/chi phí.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Mở rộng</span><div class="stat-card-icon">🏢</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Nhiều repo, nhiều tenant, và hệ plugin Python cho hook trước/sau tuỳ biến.</p></div>
+    <div class="stat-card"><div class="stat-card-header"><span class="stat-card-label">Kích hoạt</span><div class="stat-card-icon">⚡</div></div>
+        <p style="font-size:13px;color:var(--text-muted)">Poll theo lịch, kèm webhook Service Hook của ADO để nhận việc tức thì.</p></div>
 </div>
 
 <div class="card">
     <div class="card-header">
-        <h3>🧰 Available skills</h3>
-        <span style="font-size:13px;color:var(--text-muted)">{{ skills|length }} discovered{% if workspace %} in <span class="mono">{{ workspace }}\.claude\skills</span>{% endif %}</span>
+        <h3>🧰 Skill hiện có</h3>
+        <span style="font-size:13px;color:var(--text-muted)">Tìm thấy {{ skills|length }} skill{% if workspace %} trong <span class="mono">{{ workspace }}\.claude\skills</span>{% endif %}</span>
     </div>
     <div class="card-body">
         {% if skills %}
         <table>
-            <thead><tr><th style="width:220px">Skill</th><th>What it does</th></tr></thead>
+            <thead><tr><th style="width:220px">Skill</th><th>Chức năng</th></tr></thead>
             <tbody>
                 {% for s in skills %}
                 <tr>
                     <td class="mono">{{ s.name }}</td>
-                    <td style="color:var(--text-muted);font-size:13px">{{ s.description or '—' }}</td>
+                    <td style="color:var(--text-muted);font-size:13px">{% if s.description %}{{ s.description }}{% else %}<span class="cap-none">chưa có mô tả</span>{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
         {% else %}
         <div class="empty-state">
-            <p>No skills discovered. Set <span class="mono">workspace_directory</span> to a folder
-            whose <span class="mono">.claude/skills</span> holds the agent's skills.</p>
+            <p>Chưa tìm thấy skill nào. Hãy đặt thư mục workspace (trong Cài đặt) trỏ tới thư mục
+            có <span class="mono">.claude/skills</span> chứa các skill của agent.</p>
         </div>
         {% endif %}
     </div>

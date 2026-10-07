@@ -31,6 +31,15 @@ from ai_autopilot.dashboard.routes._shared import _ctx
 _CAT_ORDER = {"proposed": 0, "inprogress": 1, "resolved": 2, "completed": 3,
               "removed": 4}
 
+# Section headings of the editor, in the dashboard's language. Mapped here rather than
+# in ``flows.STAGE_GROUPS`` because that tuple is engine data other code reads; only this
+# page shows the words. An unknown heading falls through unchanged.
+_GROUP_TITLES = {
+    "While working": "Trong lúc làm",
+    "Outcome": "Kết quả",
+    "After the PR lands": "Sau khi PR vào",
+}
+
 
 def _by_workflow(states: set[str], categories: dict[str, str],
                  states_by_type: dict[str, list[str]]) -> list[str]:
@@ -149,7 +158,8 @@ async def _flow_context(request: Request, flows: list | None = None) -> dict:
         "child_states": child_states,
         "rollup_rows": rollup_rows,
         "stages": flows_mod.STAGES,
-        "stage_groups": flows_mod.STAGE_GROUPS,
+        "stage_groups": [(_GROUP_TITLES.get(title, title), keys)
+                         for title, keys in flows_mod.STAGE_GROUPS],
         "stage_labels": flows_mod.STAGE_LABELS,
         "uncovered": flows_mod.uncovered_types(groups, states_by_type),
         "enabled": cfg.auto_transition_enabled,

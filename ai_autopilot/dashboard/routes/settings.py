@@ -452,19 +452,20 @@ def create_router() -> APIRouter:
         # Read-only overview of every ADO tag the autopilot writes/reads — so the
         # whole tag vocabulary is visible in one place (not scattered across fields).
         tag_overview = [
-            {"label": "Trigger", "cls": "chip-accent",
-             "tags": cfg.effective_trigger_tags, "hint": "items with these get processed"},
-            {"label": "Review", "cls": "chip-amber",
-             "tags": [cfg.review_tag], "hint": "draft PR opened, awaiting review"},
-            {"label": "Done", "cls": "chip-green",
-             "tags": [cfg.processed_tag], "hint": "handled (also report/failed unless overridden)"},
-            {"label": "Needs human", "cls": "chip-red",
-             "tags": [cfg.escalation_tag], "hint": "escalated & held"},
-            {"label": "Live", "cls": "chip-blue",
-             "tags": [cfg.live_tag], "hint": "interactive session running"},
-            {"label": "Failed", "cls": "chip",
-             "tags": [cfg.failed_tag or f"{cfg.processed_tag} (Done tag)"],
-             "hint": "gave up after retries"},
+            {"label": "Kích hoạt", "cls": "chip-accent",
+             "tags": cfg.effective_trigger_tags, "hint": "item có tag này sẽ được xử lý"},
+            {"label": "Chờ review", "cls": "chip-amber",
+             "tags": [cfg.review_tag], "hint": "đã mở draft PR, chờ review"},
+            {"label": "Xong", "cls": "chip-green",
+             "tags": [cfg.processed_tag],
+             "hint": "đã xử lý (cũng dùng cho report/failed nếu không đặt riêng)"},
+            {"label": "Cần người", "cls": "chip-red",
+             "tags": [cfg.escalation_tag], "hint": "đã chuyển cho người & giữ lại"},
+            {"label": "Đang chạy", "cls": "chip-blue",
+             "tags": [cfg.live_tag], "hint": "phiên tương tác đang chạy"},
+            {"label": "Thất bại", "cls": "chip",
+             "tags": [cfg.failed_tag or f"{cfg.processed_tag} (tag Xong)"],
+             "hint": "bỏ cuộc sau khi thử lại"},
         ]
         discovered = discover_repos(c.config.workspace_directory)
         allowed = {r.lower() for r in c.config.allowed_repos}

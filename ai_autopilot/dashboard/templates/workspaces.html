@@ -38,10 +38,6 @@
   .errors { border:1px solid var(--red,#e5484d); border-radius:10px; padding:12px 16px; margin-bottom:14px;
             background:rgba(229,72,77,.08); }
   .errors li { margin:3px 0; font-size:13px; }
-  .actions { display:flex; gap:10px; align-items:center; margin-top:6px; }
-  .btn-primary { background:var(--accent,#6366f1); color:#fff; border:none; border-radius:8px;
-                 padding:9px 18px; font-size:13px; font-weight:600; cursor:pointer; }
-  .btn-primary:hover { background:var(--accent-hover,#818cf8); }
   .note { font-size:12px; color:var(--text-muted); background:var(--bg,#0d0d12);
           border:1px solid var(--border,#23232b); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
 
@@ -74,15 +70,14 @@
   .ws-card.is-off .ws-state { color:var(--amber,#f5a623); background:rgba(245,166,35,.12); }
 
   /* The button used to sit past seven fields per workspace — off-screen exactly
-     when you had finished editing. */
-  .actions { position:sticky; bottom:0; z-index:5; padding:12px 0 16px;
-     background:var(--bg-sticky,rgba(10,11,15,.85)); backdrop-filter:blur(8px); }
+     when you had finished editing. Now the shared sticky .savebar from base.html. */
+  .savebar .hint b { color:var(--text-muted); }
 </style>
 
 <div class="page-header">
   <h2 class="page-title">{{ page_title("workspaces") }}</h2>
   <p>Mỗi workspace là <b>một thư mục chứa <code>.claude</code> và các repo</b>, gắn với
-     <b>một hoặc nhiều project Azure DevOps</b>, chạy trên <b>base branch riêng</b>.</p>
+     <b>một hoặc nhiều project Azure DevOps</b>, chạy trên <b>branch gốc riêng</b>.</p>
 </div>
 
 {% if flash %}
@@ -98,7 +93,7 @@
 
 <div class="note">
   Chọn workspace để theo dõi ở <b>thanh bên trái</b> — thao tác đó chỉ đổi <b>góc nhìn</b>
-  (Board, Overview, Delivery…). Autopilot vẫn poll và chạy <b>tất cả</b> workspace ở nền.
+  (Board, Tổng quan, Bàn giao…). Autopilot vẫn poll và chạy <b>tất cả</b> workspace ở nền.
   Muốn tạm dừng xử lý một workspace thì tắt công tắc <b>Đang bật</b> của chính nó bên dưới.
 </div>
 
@@ -125,7 +120,7 @@
            Jira item carries its JIRA key — so on a Jira workspace the two must be the
            same string or the lookup misses and the item gets answered on Azure DevOps
            instead. The label now asks for the one it actually wants. #}
-        <label><span data-lbl-ado>ADO project (work items)</span><span data-lbl-jira hidden>Jira project key (định tuyến)</span> <span class="req" title="Bắt buộc">*</span></label>
+        <label><span data-lbl-ado>Project ADO (work item)</span><span data-lbl-jira hidden>Jira project key (định tuyến)</span> <span class="req" title="Bắt buộc">*</span></label>
         <textarea class="ws-area" name="ws{{ loop.index0 }}_projects"
                   placeholder="Mỗi dòng một project">{{ ws.projects | join('\n') }}</textarea>
         <span class="hint">Work item của các project này sẽ build trong workspace này.
@@ -141,14 +136,14 @@
       </div>
 
       <div class="ws-field">
-        <label>Base branch <span class="opt">tuỳ chọn</span></label>
+        <label>Branch gốc <span class="opt">tuỳ chọn</span></label>
         <input class="ws-input" name="ws{{ loop.index0 }}_base_branch" value="{{ ws.base_branch }}"
                placeholder="{{ 'development' if ws.is_default else 'để trống = kế thừa mặc định' }}"/>
         <span class="hint">Nhánh mà branch tính năng được cắt ra.</span>
       </div>
 
       <div class="ws-field">
-        <label>Code project (repo/PR) <span class="opt">tuỳ chọn</span></label>
+        <label>Project chứa code (repo/PR) <span class="opt">tuỳ chọn</span></label>
         <input class="ws-input" name="ws{{ loop.index0 }}_code_project" value="{{ ws.code_project }}"
                placeholder="để trống = cùng project work item"/>
         <span class="hint">Chỉ điền khi repo và PR nằm ở project khác với work item.</span>
@@ -162,7 +157,7 @@
       </div>
 
       <div class="ws-field">
-        <label>Trigger tag riêng <span class="opt">tuỳ chọn</span></label>
+        <label>Tag kích hoạt riêng <span class="opt">tuỳ chọn</span></label>
         <input class="ws-input" name="ws{{ loop.index0 }}_trigger_tag" value="{{ ws.trigger_tag }}"
                placeholder="để trống = dùng tag chung"/>
         <span class="hint">Tag này được gộp vào truy vấn poll chung, không thay thế tag gốc.</span>
@@ -210,7 +205,7 @@
                   placeholder="Backend-Fresh = .NET API&#10;Micro-Frontend = Angular">{{ ws.repo_descriptions | join('\n') }}</textarea>
       </div>
 
-      {# Tuỳ chọn. Mặc định mọi repo trong workspace cắt từ cùng một Base branch;
+      {# Tuỳ chọn. Mặc định mọi repo trong workspace cắt từ cùng một Branch gốc;
          ô này dành cho trường hợp BE/FE nằm trên hai nhánh khác nhau. #}
       <div class="ws-field wide">
         <label class="ws-check">
@@ -218,12 +213,12 @@
                  onchange="this.closest('.ws-field').querySelector('.ws-branches').hidden = !this.checked"
                  {{ 'checked' if ws.repo_branches }}/>
           Repos khác nhánh
-          <span class="ws-hint">— mặc định tất cả dùng <b>Base branch</b> ở trên</span>
+          <span class="ws-hint">— mặc định tất cả dùng <b>Branch gốc</b> ở trên</span>
         </label>
         <div class="ws-branches" {{ '' if ws.repo_branches else 'hidden' }}>
           <textarea class="ws-area" name="ws{{ loop.index0 }}_repo_branches"
                     placeholder="Backend-Fresh = development&#10;Micro-Frontend = main">{{ ws.repo_branches | join('\n') }}</textarea>
-          <span class="ws-hint">Repo không khai ở đây vẫn cắt từ <b>Base branch</b>.</span>
+          <span class="ws-hint">Repo không khai ở đây vẫn cắt từ <b>Branch gốc</b>.</span>
         </div>
       </div>
 
@@ -258,7 +253,7 @@
       {% else %}
         <label><input type="checkbox" name="ws{{ loop.index0 }}_enabled" data-enable
                       {{ 'checked' if ws.enabled }}/> Đang bật</label>
-        <span>id: <code>{{ ws.id }}</code></span>
+        <span class="ws-repos" title="Mã định danh workspace">id: {{ ws.id }}</span>
         <label class="ws-danger"><input type="checkbox" name="ws{{ loop.index0 }}_delete"
                                         data-doom/> 🗑 Xoá workspace này</label>
       {% endif %}
@@ -284,7 +279,7 @@
     </div>
     <div class="ws-body">
       <div class="ws-field">
-        <label>ADO project (work items)</label>
+        <label>Project ADO (work item)</label>
         <textarea class="ws-area" name="ws{{ views | length }}_projects" placeholder="Mỗi dòng một project"></textarea>
       </div>
       <div class="ws-field">
@@ -292,11 +287,11 @@
         <input class="ws-input" name="ws{{ views | length }}_directory" placeholder="D:\ws\cmms"/>
       </div>
       <div class="ws-field">
-        <label>Base branch</label>
+        <label>Branch gốc</label>
         <input class="ws-input" name="ws{{ views | length }}_base_branch" placeholder="để trống = kế thừa mặc định"/>
       </div>
       <div class="ws-field">
-        <label>Code project (repo/PR)</label>
+        <label>Project chứa code (repo/PR)</label>
         <input class="ws-input" name="ws{{ views | length }}_code_project" placeholder="để trống = cùng project work item"/>
       </div>
     </div>
@@ -306,12 +301,10 @@
     </div>
   </div>
 
-  <div class="actions">
-    <button type="submit" class="btn-primary" id="ws-save">💾 Lưu workspaces</button>
-    <span style="font-size:12px;color:var(--text-dim)">
-      Áp dụng ngay, không cần khởi động lại. Project đang được poll:
-      <b>{{ projects | join(', ') if projects else '(chưa có)' }}</b>
-    </span>
+  <div class="savebar">
+    <span class="hint">Áp dụng ngay, không cần khởi động lại · Project đang được poll:
+      <b>{{ projects | join(', ') if projects else '(chưa có)' }}</b></span>
+    <button type="submit" class="btn-save" id="ws-save">💾 Lưu workspaces</button>
   </div>
 </form>
 
@@ -344,13 +337,8 @@
       doomed.push((name && name.value.trim()) || '(chưa đặt tên)');
     });
     if (doomed.length && !confirm(
-      'Xoá ' + doomed.length + ' workspace?
-
-• ' + doomed.join('
-• ') +
-      '
-
-Cấu hình của chúng sẽ bị gỡ khỏi config. Thư mục và repo trên đĩa KHÔNG bị đụng tới.'
+      'Xoá ' + doomed.length + ' workspace?\n\n• ' + doomed.join('\n• ') +
+      '\n\nCấu hình của chúng sẽ bị gỡ khỏi config. Thư mục và repo trên đĩa KHÔNG bị đụng tới.'
     )) { e.preventDefault(); }
   });
 

@@ -1,32 +1,34 @@
 <!-- Live schedule card (read-only). Rendered both inside planning.html and by the
      /planning/live-partial endpoint for JS auto-refresh (planning_live_refresh_seconds). -->
 <div class="card">
-  <div class="card-header"><h3>📡 Live schedule</h3>
-    <span class="dim" style="font-size:12px">dependency scheduler decision each poll</span></div>
+  <div class="card-header"><h3>📡 Lịch chạy trực tiếp</h3>
+    <span class="dim" style="font-size:12px">quyết định của bộ xếp lịch theo phụ thuộc ở mỗi lượt poll</span></div>
   <div class="card-body">
     {% if not enabled %}
-      <div class="empty-state">Dependency scheduling is off. Enable it in Settings to order work by the ADO link graph.</div>
+      <div class="empty-state">Xếp lịch theo phụ thuộc đang tắt nên chưa có quyết định nào.
+        Bật ở <a class="table-link" href="/dashboard/settings">Settings</a> để autopilot chạy việc theo thứ tự link trên ADO.</div>
     {% elif not view %}
-      <div class="empty-state">No cycle yet — a decision is published every {{ poll_interval }}s when tagged items are pending.</div>
+      <div class="empty-state">Chưa có lượt xếp lịch nào — mỗi {{ poll_interval }} giây có một quyết định khi còn item gắn tag đang chờ.
+        Chọn việc ở bảng phía trên hoặc gắn tag trên <a class="table-link" href="/dashboard/board">Board</a>.</div>
     {% else %}
-      <div class="grp-line"><span class="k">Dispatched</span>
-        {% for r in view.ready %}{% if not loop.first %}, {% endif %}<span class="id-col">#{{ r.id }}</span>{% endfor %}{% if not view.ready %}<span class="dim">none</span>{% endif %}</div>
+      <div class="grp-line"><span class="k">Đã giao chạy</span>
+        {% for r in view.ready %}{% if not loop.first %}, {% endif %}<span class="id-col">#{{ r.id }}</span>{% endfor %}{% if not view.ready %}<span class="dim">không có</span>{% endif %}</div>
       {% for d in view.deferred %}
-        <div class="grp-line"><span class="k">Waiting</span> <span class="id-col">#{{ d.id }}</span> {{ d.title }}
+        <div class="grp-line"><span class="k">Đang chờ</span> <span class="id-col">#{{ d.id }}</span> {{ d.title }}
           <span style="color:var(--amber)">— {{ d.reason }}</span></div>
       {% endfor %}
-      <div class="grp-line dim">Computed {{ view.at.strftime('%H:%M:%S') if view.at else '—' }} · {{ view.candidates }} candidate(s)</div>
+      <div class="grp-line dim">Tính lúc {{ view.at.strftime('%H:%M:%S') if view.at else '—' }} · {{ view.candidates }} ứng viên</div>
     {% endif %}
 
     {% if sched_history %}
-    <div class="grp-line" style="margin-top:6px"><span class="k">History</span>
-      <span class="dim">recent cycles that held work back</span></div>
+    <div class="grp-line" style="margin-top:6px"><span class="k">Lịch sử</span>
+      <span class="dim">các lượt gần đây có giữ việc lại</span></div>
     {% for h in sched_history %}
       <div class="grp-line">
         <span class="chip chip-amber">{{ h.at.strftime('%m-%d %H:%M:%S') if h.at else '—' }}</span>
-        <span class="dim">{{ h.candidates }} cand ·</span>
-        <span class="sel-count">{{ h.ready|length }}</span> ran ·
-        <span style="color:var(--amber)">{{ h.deferred|length }}</span> held
+        <span class="dim">{{ h.candidates }} ứng viên ·</span>
+        <span class="sel-count">{{ h.ready|length }}</span> đã chạy ·
+        <span style="color:var(--amber)">{{ h.deferred|length }}</span> bị giữ
         {% if h.deferred %}<span class="dim"> —
           {% for d in h.deferred %}{% if not loop.first %}, {% endif %}<span class="id-col">#{{ d.id }}</span>{% endfor %}
         </span>{% endif %}

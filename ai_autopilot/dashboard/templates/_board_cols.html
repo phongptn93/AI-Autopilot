@@ -11,7 +11,7 @@
         <header class="board-col-head">
             <span class="board-col-name" title="{{ lane.columns | join(' + ') }}">
                 {{ lane.name }}
-                {% if lane.mine and view.key != 'pipeline' %}<span class="lane-turn">your turn</span>{% endif %}
+                {% if lane.mine and view.key != 'pipeline' %}<span class="lane-turn">tới lượt</span>{% endif %}
             </span>
             <span class="board-col-count">{{ row.total }}</span>
             {% if lane.hint %}<span class="board-col-hint">{{ lane.hint }}</span>{% endif %}
@@ -29,20 +29,20 @@
                     {% if card.category %}<span class="cat-badge {{ css }}">{{ label }}</span>{% endif %}
                     {% set card_url = card.url or (ado_item_base ~ '/' ~ card.id if ado_item_base else '') %}
                     {% if card_url %}
-                    <a class="board-card-id" href="{{ card_url }}" target="_blank" rel="noopener" title="Open #{{ card.id }}{% if card.project %} ({{ card.project }}){% endif %} in Azure DevOps">#{{ card.id }} ↗</a>
+                    <a class="board-card-id" href="{{ card_url }}" target="_blank" rel="noopener" title="Mở #{{ card.id }}{% if card.project %} ({{ card.project }}){% endif %} trên Azure DevOps">#{{ card.id }} ↗</a>
                     {% else %}
                     <span class="board-card-id">#{{ card.id }}</span>
                     {% endif %}
                     {% if projects and projects | length > 1 and card.project %}
                     <span class="board-card-proj" title="Project">{{ card.project }}</span>
                     {% endif %}
-                    <span class="board-card-state" title="Azure DevOps state">{{ card.ado_state }}</span>
+                    <span class="board-card-state" title="State trên Azure DevOps">{{ card.ado_state }}</span>
                 </div>
                 <div class="board-card-title">{{ card.title }}</div>
                 {% set roles = role_chips.get(card.id) if role_chips else [] %}
                 {% if roles %}
                 <div class="board-card-roles">
-                    {% for r in roles %}<span class="role-chip" title="Tagged for the {{ r }} process">{{ r }}</span>{% endfor %}
+                    {% for r in roles %}<span class="role-chip" title="Đã gắn tag cho quy trình {{ r }}">{{ r }}</span>{% endfor %}
                 </div>
                 {% endif %}
                 <div class="board-card-foot">
@@ -51,12 +51,12 @@
                        has to look and press Run. #}
                     {% if can_run and lane.mine and card.column != 'In progress' %}
                     <button type="button" class="board-run" data-run="{{ card.id }}"
-                            title="Hand this to the autopilot for {{ view.label }}{% if view.profile %} ({{ view.profile }} stages){% endif %}. Nothing runs until you press this.">
+                            title="Giao item này cho autopilot chạy phần {{ view.label }}{% if view.profile %} (các stage của {{ view.profile }}){% endif %}. Chưa bấm thì chưa có gì chạy.">
                         ▶ Run
                     </button>
                     {% endif %}
                     <a class="board-card-act" href="/dashboard/task/{{ card.id }}">📋 task</a>
-                    <a class="board-card-act" href="/dashboard/activity/{{ card.id }}">👁 activity</a>
+                    <a class="board-card-act" href="/dashboard/activity/{{ card.id }}">👁 hoạt động</a>
                     {% if card.pr_urls %}
                     <span class="board-card-pr">
                         {% if card.pr_urls|length == 1 %}
@@ -82,7 +82,7 @@
             <div class="board-col-empty">Trống</div>
             {% endif %}
             {% if row.hidden %}
-            <a class="board-more" href="{{ more_url }}">＋ Load more ({{ row.hidden }} of {{ row.total }})</a>
+            <a class="board-more" href="{{ more_url }}">＋ Xem thêm ({{ row.hidden }} / {{ row.total }})</a>
             {% endif %}
         </div>
     </section>

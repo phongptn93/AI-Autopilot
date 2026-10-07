@@ -5,7 +5,6 @@
    backup of. Nothing here changes anything until the form below is submitted. #}
 <style>
   .main{max-width:1000px}
-  .rs-head h2{font-size:21px;font-weight:750;letter-spacing:-.02em}
   .rs-sub{color:var(--text-muted);font-size:13px;margin:4px 0 16px}
   .rs-card{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
            margin-bottom:12px;overflow:hidden}
@@ -38,7 +37,7 @@
                 padding:1px 6px;border-radius:5px}
 </style>
 
-<div class="rs-head"><h2>↩ Đặt lại thiết lập</h2></div>
+<h2 class="page-title">{{ page_title("settings") }} <span class="page-sub">— ↩ đặt lại về mặc định</span></h2>
 <p class="rs-sub">Đưa các thiết lập về <b>giá trị mặc định</b>. Trang này chỉ <b>xem trước</b> —
   không có gì thay đổi cho tới khi bạn bấm nút ở cuối.</p>
 
@@ -87,11 +86,11 @@
   <div class="rs-empty">Không có gì để đặt lại — phần này đang ở đúng giá trị mặc định.</div>
   {% endif %}
   <div class="rs-foot">
-    <a class="btn-ghost" style="text-decoration:none" href="/dashboard/settings">← Quay lại Settings</a>
+    <a class="btn-ghost" style="text-decoration:none" href="/dashboard/settings">← Quay lại Thiết lập</a>
     <span class="rs-spacer"></span>
     {% if rows %}
     <form method="post" action="/dashboard/settings/reset" style="margin:0"
-          onsubmit="return confirm('Đặt lại {{ rows|length }} thiết lập về mặc định? Giá trị hiện tại không khôi phục được — tải bản sao lưu ở Settings → Chuyển cấu hình nếu cần.')">
+          onsubmit="return confirm('Đặt lại {{ rows|length }} thiết lập về mặc định? Giá trị hiện tại không khôi phục được — tải bản sao lưu ở Thiết lập → Xuất / Nhập nếu cần.')">
       <input type="hidden" name="section" value="{{ section }}">
       <button type="submit" class="rs-go">↩ Đặt lại {{ rows|length }} thiết lập</button>
     </form>

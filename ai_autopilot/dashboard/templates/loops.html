@@ -84,21 +84,35 @@
   .lp-preset button { align-self:flex-start; }
 
   .lp-row-actions { display:flex; gap:8px; margin-left:auto; }
-  .savebar { position:sticky; bottom:0; display:flex; justify-content:space-between;
-    align-items:center; gap:14px; padding:12px 0 18px; background:var(--bg-sticky);
-    backdrop-filter:blur(8px); }
-  .savebar .note { color:var(--text-dim); font-size:12px; }
+  /* The rule behind the page, folded: the lede says what a loop is, this says how. */
+  .lp-why { margin:-6px 0 14px; max-width:112ch; }
+  .lp-why > summary { cursor:pointer; list-style:none; color:var(--text-muted); font-size:12.5px;
+    font-weight:600; padding:2px 0; }
+  .lp-why > summary::-webkit-details-marker { display:none; }
+  .lp-why > summary::before { content:"▸ "; color:var(--text-dim); }
+  .lp-why[open] > summary::before { content:"▾ "; }
+  .lp-why p { color:var(--text-muted); font-size:12.5px; line-height:1.6; margin:6px 0 0; }
+  .lp-why a { color:var(--accent-hover); }
+  .lp-why code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input);
+    padding:1px 6px; border-radius:5px; }
+  /* Mode is a short word plus a gloss; the select must show both, not "report — inspect, chan…". */
+  select.lp-in { min-width:180px; }
 </style>
 
 <div class="lp-top"><h2 class="page-title">{{ page_title("loops") }}</h2></div>
 <p class="lp-lede">
-  Agents that run on a clock instead of on a work item. A <b>report</b> loop inspects and
-  writes findings — read-only, no branch, no PR — and lands on
-  <a href="/dashboard/reports">Reports</a>. A <b>PR</b> loop changes files and opens a pull
-  request, and is judged by that diff. Pick the sub-agents each loop delegates to; they come
-  from your workspace's <code>.claude/agents</code>. Saved to <code>scheduled_loops</code>,
-  rescheduled live.
+  Agent chạy theo lịch thay vì theo work item. Loop <b>report</b> chỉ đọc và ghi kết quả vào
+  <a href="/dashboard/reports">Báo cáo</a>; loop <b>pr</b> sửa code và mở pull request.
 </p>
+<details class="lp-why">
+  <summary>Chi tiết</summary>
+  <p>Loop <b>report</b> không tạo branch, không mở PR — chỉ lưu những gì nó tìm thấy. Loop
+    <b>scan</b> chạy các công cụ quét bảo mật (có thể kèm AI) và đổ kết quả vào
+    <a href="/dashboard/security">Bảo mật</a>. Loop <b>pr</b> sửa file, mở pull request và được
+    đánh giá qua chính diff đó.</p>
+  <p>Mỗi loop có thể giao việc cho các sub-agent trong <code>.claude/agents</code> của workspace.
+    Lưu vào <code>scheduled_loops</code>, lịch được cập nhật ngay.</p>
+</details>
 
 {% if flash %}
 <div class="lp-flash {{ 'ok' if flash[0] == 'green' else 'bad' }}">{{ flash[1]|safe }}</div>
@@ -106,23 +120,23 @@
 
 {% if not scheduler_live %}
 <div class="lp-flash bad">
-  The scheduler is not running in this process — edits are saved, but nothing will fire
-  until the service restarts.
+  Bộ lập lịch không chạy trong tiến trình này — thay đổi vẫn được lưu, nhưng sẽ không loop nào
+  chạy cho tới khi service khởi động lại.
 </div>
 {% endif %}
 
 {% if not known_agents %}
 <div class="lp-flash bad">
-  No sub-agents found in <code>&lt;workspace&gt;/.claude/agents</code>. A loop can still run,
-  but it will do the whole job itself rather than delegating.
+  Không tìm thấy sub-agent nào trong <code>&lt;workspace&gt;/.claude/agents</code>. Loop vẫn
+  chạy được, nhưng sẽ tự làm toàn bộ thay vì giao việc.
 </div>
 {% endif %}
 
 <form method="post" action="/dashboard/loops">
   <div class="lp-card">
     <div class="lp-hd">
-      <h3>Loops</h3>
-      <span>Clear the <b>name</b> to drop a loop on save. A disabled loop keeps its settings and never fires.</span>
+      <h3>Các loop</h3>
+      <span>Xoá <b>tên</b> để bỏ loop khi lưu. Loop đã tắt vẫn giữ cấu hình nhưng không bao giờ chạy.</span>
     </div>
 
     {# `row` is captured HERE because Jinja's `loop` always names the INNERMOST loop:
@@ -134,16 +148,16 @@
       <div class="lp-loop-hd">
         <b>{{ r.name }}</b>
         <span class="lp-pill {{ 'ok' if r.mode in ('report', 'scan') else 'mute' }}">{{ r.mode }}</span>
-        {% if r.running %}<span class="lp-pill ok">running now</span>
-        {% elif not r.enabled %}<span class="lp-pill mute">disabled</span>
+        {% if r.running %}<span class="lp-pill ok">đang chạy</span>
+        {% elif not r.enabled %}<span class="lp-pill mute">đã tắt</span>
         {% elif r.blockers %}<span class="lp-pill bad">⛔ chưa chạy được</span>
-        {% elif r.next_run %}<span class="lp-pill">next {{ r.next_run }}</span>
-        {% else %}<span class="lp-pill mute">not scheduled</span>{% endif %}
+        {% elif r.next_run %}<span class="lp-pill">lần tới {{ r.next_run }}</span>
+        {% else %}<span class="lp-pill mute">chưa lên lịch</span>{% endif %}
         <span class="lp-row-actions">
           <a class="btn-ghost" href="/dashboard/activity/{{ r.feed }}">👁 Xem trực tiếp</a>
-          <button type="submit" form="run-{{ loop.index0 }}" class="btn-ghost">▶ Run now</button>
+          <button type="submit" form="run-{{ loop.index0 }}" class="btn-ghost">▶ Chạy ngay</button>
           <button type="submit" form="del-{{ loop.index0 }}" class="btn-ghost"
-                  onclick="return confirm('Delete the loop “{{ r.name }}”?')">🗑 Delete</button>
+                  onclick="return confirm('Xoá loop “{{ r.name }}”?')">🗑 Xoá</button>
         </span>
       </div>
 
@@ -160,63 +174,63 @@
 
       <div class="lp-fields">
         <div class="lp-f">
-          <label>Name</label>
+          <label>Tên</label>
           <input type="text" class="lp-in mono" name="loop_{{ row }}_name" value="{{ r.name }}">
-          <span class="lp-hint">Also the job id — must be unique. Blank on save = delete.</span>
+          <span class="lp-hint">Cũng là mã job — không được trùng. Để trống khi lưu = xoá.</span>
         </div>
 
         <div class="lp-f">
-          <label>What it does</label>
+          <label>Làm gì</label>
           <select class="lp-in" name="loop_{{ row }}_mode">
-            <option value="report" {% if r.mode == 'report' %}selected{% endif %}>report — inspect, change nothing</option>
-            <option value="scan" {% if r.mode == 'scan' %}selected{% endif %}>scan — security scanners (+ optional AI)</option>
-            <option value="pr" {% if r.mode not in ('report', 'scan') %}selected{% endif %}>pr — change files, open a PR</option>
+            <option value="report" {% if r.mode == 'report' %}selected{% endif %} title="Kiểm tra, ghi kết quả — không sửa gì">report — chỉ đọc</option>
+            <option value="scan" {% if r.mode == 'scan' %}selected{% endif %} title="Chạy công cụ quét bảo mật, có thể kèm AI">scan — quét bảo mật</option>
+            <option value="pr" {% if r.mode not in ('report', 'scan') %}selected{% endif %} title="Sửa file và mở pull request">pr — sửa code, mở PR</option>
           </select>
-          <span class="lp-hint">A report run with the file tools switched off; findings are stored, not committed.</span>
+          <span class="lp-hint">report chạy với công cụ ghi file bị tắt; kết quả được lưu lại, không commit.</span>
         </div>
         <div class="lp-f">
-          <label>Scan (scan mode only)</label>
+          <label>Quét (chỉ chế độ scan)</label>
           <input type="text" class="lp-in mono" name="loop_{{ row }}_scan_tools"
                  value="{{ r.scan_tools|join(', ') }}" placeholder="builtin, gitleaks, semgrep, sca">
           <select class="lp-in" name="loop_{{ row }}_scan_ai">
-            <option value="" {% if not r.scan_ai_mode %}selected{% endif %}>AI: config default</option>
-            <option value="off" {% if r.scan_ai_mode == 'off' %}selected{% endif %}>AI: off</option>
-            <option value="fast" {% if r.scan_ai_mode == 'fast' %}selected{% endif %}>AI: fast</option>
-            <option value="deep" {% if r.scan_ai_mode == 'deep' %}selected{% endif %}>AI: deep</option>
+            <option value="" {% if not r.scan_ai_mode %}selected{% endif %}>AI: theo cấu hình</option>
+            <option value="off" {% if r.scan_ai_mode == 'off' %}selected{% endif %}>AI: tắt</option>
+            <option value="fast" {% if r.scan_ai_mode == 'fast' %}selected{% endif %}>AI: nhanh</option>
+            <option value="deep" {% if r.scan_ai_mode == 'deep' %}selected{% endif %}>AI: kỹ</option>
           </select>
           <select class="lp-in" name="loop_{{ row }}_scan_scope">
-            <option value="full" {% if r.scan_scope != 'diff' %}selected{% endif %}>scope: full repo</option>
-            <option value="diff" {% if r.scan_scope == 'diff' %}selected{% endif %}>scope: diff vs base</option>
+            <option value="full" {% if r.scan_scope != 'diff' %}selected{% endif %}>phạm vi: cả repo</option>
+            <option value="diff" {% if r.scan_scope == 'diff' %}selected{% endif %}>phạm vi: diff so với base</option>
           </select>
-          <span class="lp-hint">Empty tools = <code>security_scan.tools</code>. Results land on <a href="/dashboard/security">Security</a>.</span>
+          <span class="lp-hint">Để trống công cụ = dùng bộ mặc định trong Cài đặt. Kết quả ở <a href="/dashboard/security">Bảo mật</a>.</span>
         </div>
 
         <div class="lp-f">
           <label>Cron</label>
           <input type="text" class="lp-in mono" name="loop_{{ row }}_cron"
                  value="{{ r.cron }}" placeholder="7 18 * * 1-5">
-          <span class="lp-hint">5-field cron, server time. Avoid :00 — that is when everything else fires.</span>
+          <span class="lp-hint">Cron 5 trường, theo giờ server. Tránh phút :00 — mọi thứ khác đều chạy vào lúc đó.</span>
         </div>
 
         <div class="lp-f">
-          <label>…or every N minutes</label>
+          <label>…hoặc mỗi N phút</label>
           <input type="number" min="0" class="lp-in" name="loop_{{ row }}_interval"
-                 value="{{ r.interval_minutes or '' }}" placeholder="0 = off">
-          <span class="lp-hint">Used only when cron is blank. Neither one set = the loop never runs.</span>
+                 value="{{ r.interval_minutes or '' }}" placeholder="0 = tắt">
+          <span class="lp-hint">Chỉ dùng khi để trống cron. Không đặt cả hai = loop không bao giờ chạy.</span>
         </div>
 
         <div class="lp-f">
           <label>Project (workspace)</label>
           <input type="text" class="lp-in" name="loop_{{ row }}_project"
-                 value="{{ r.project }}" list="lp-projects" placeholder="blank = root workspace">
-          <span class="lp-hint">Picks the workspace, and with it the default repo and base branch.</span>
+                 value="{{ r.project }}" list="lp-projects" placeholder="trống = workspace gốc">
+          <span class="lp-hint">Chọn workspace, kéo theo repo và base branch mặc định.</span>
         </div>
 
         <div class="lp-f">
-          <label>Repo path</label>
+          <label>Đường dẫn repo</label>
           <input type="text" class="lp-in mono" name="loop_{{ row }}_repo"
                  value="{{ r.repo_path }}" list="lp-repos-{{ row }}"
-                 placeholder="{{ 'blank = ' ~ r.repos[0] if r.repos|length == 1 else 'tên repo trong workspace' }}">
+                 placeholder="{{ 'trống = ' ~ r.repos[0] if r.repos|length == 1 else 'tên repo trong workspace' }}">
           {# The names come from THIS loop's workspace, so a loop bound to another
              project is never offered a repo it cannot reach. #}
           <datalist id="lp-repos-{{ row }}">
@@ -231,28 +245,28 @@
         <div class="lp-f">
           <label>Base branch</label>
           <input type="text" class="lp-in mono" name="loop_{{ row }}_base"
-                 value="{{ r.base_branch }}" placeholder="blank = workspace's base">
-          <span class="lp-hint">Fetched before an audit so the agent diffs against the real base.</span>
+                 value="{{ r.base_branch }}" placeholder="trống = base của workspace">
+          <span class="lp-hint">Được fetch trước khi chạy để agent diff với đúng base thật.</span>
         </div>
 
         <div class="lp-f">
-          <label>Options</label>
+          <label>Tuỳ chọn</label>
           <div style="display:flex;flex-wrap:wrap;gap:6px">
             <label class="lp-toggle {{ 'on' if r.enabled else '' }}">
               <input type="checkbox" name="loop_{{ row }}_enabled"
-                     {% if r.enabled %}checked{% endif %}>enabled</label>
+                     {% if r.enabled %}checked{% endif %}>bật</label>
             <label class="lp-toggle {{ 'on' if r.report_html else '' }}">
               <input type="checkbox" name="loop_{{ row }}_html"
-                     {% if r.report_html %}checked{% endif %}>html file</label>
+                     {% if r.report_html %}checked{% endif %}>file html</label>
             <label class="lp-toggle {{ 'on' if r.draft_pr else '' }}">
               <input type="checkbox" name="loop_{{ row }}_draft"
-                     {% if r.draft_pr %}checked{% endif %}>draft pr</label>
+                     {% if r.draft_pr %}checked{% endif %}>PR nháp</label>
           </div>
-          <span class="lp-hint">“html file” writes the report under <code>&lt;workspace&gt;/reports</code>. “draft pr” applies to pr mode only.</span>
+          <span class="lp-hint">“file html” ghi báo cáo vào <code>&lt;workspace&gt;/reports</code>. “PR nháp” chỉ áp dụng cho chế độ pr.</span>
         </div>
 
         <div class="lp-f wide">
-          <label>Sub-agents it delegates to</label>
+          <label>Sub-agent được giao việc</label>
           <div class="lp-agents">
             {% for a in known_agents %}
             <label class="lp-ag {{ 'on' if a in r.agents else '' }}">
@@ -262,19 +276,19 @@
             {% endfor %}
           </div>
           {% for a in r.agents if a not in known_agents %}
-          <span class="lp-hint bad">⚠ <b>{{ a }}</b> is not in this workspace's .claude/agents — it will not be found.</span>
+          <span class="lp-hint bad">⚠ <b>{{ a }}</b> không có trong .claude/agents của workspace này — sẽ không tìm thấy.</span>
           {% endfor %}
           {% if not r.agents %}
-          <span class="lp-hint">None picked — the agent does the whole job itself.</span>
+          <span class="lp-hint">Chưa chọn — agent tự làm toàn bộ.</span>
           {% endif %}
         </div>
 
         <div class="lp-f wide">
           <label>Prompt</label>
           <textarea class="lp-in" name="loop_{{ row }}_prompt"
-                    placeholder="What this agent should look at, and what counts as a finding.">{{ r.prompt }}</textarea>
-          <span class="lp-hint">A report loop's prompt is wrapped with its sub-agent list and the findings
-            format before it runs — write the ask, not the scaffolding.</span>
+                    placeholder="Agent cần xem gì, và thế nào thì tính là một phát hiện.">{{ r.prompt }}</textarea>
+          <span class="lp-hint">Prompt của loop report được bọc thêm danh sách sub-agent và định dạng kết quả
+            trước khi chạy — chỉ cần viết yêu cầu, không cần khung.</span>
         </div>
       </div>
     </div>
@@ -283,32 +297,32 @@
     {# One blank row, always: adding a loop should not need a button that adds a button. #}
     {% set blank = rows|length %}
     <div class="lp-loop">
-      <div class="lp-loop-hd"><b>+ new loop</b><span class="lp-pill mute">unsaved</span></div>
+      <div class="lp-loop-hd"><b>+ loop mới</b><span class="lp-pill mute">chưa lưu</span></div>
       <div class="lp-fields">
         <div class="lp-f">
-          <label>Name</label>
+          <label>Tên</label>
           <input type="text" class="lp-in mono" name="loop_{{ blank }}_name" placeholder="nightly-audit">
         </div>
         <div class="lp-f">
-          <label>What it does</label>
+          <label>Làm gì</label>
           <select class="lp-in" name="loop_{{ blank }}_mode">
-            <option value="report" selected>report — inspect, change nothing</option>
-            <option value="scan">scan — security scanners (+ optional AI)</option>
-            <option value="pr">pr — change files, open a PR</option>
+            <option value="report" selected title="Kiểm tra, ghi kết quả — không sửa gì">report — chỉ đọc</option>
+            <option value="scan" title="Chạy công cụ quét bảo mật, có thể kèm AI">scan — quét bảo mật</option>
+            <option value="pr" title="Sửa file và mở pull request">pr — sửa code, mở PR</option>
           </select>
         </div>
         <div class="lp-f">
-          <label>Scan (scan mode only)</label>
+          <label>Quét (chỉ chế độ scan)</label>
           <input type="text" class="lp-in mono" name="loop_{{ blank }}_scan_tools" placeholder="builtin, gitleaks, semgrep, sca">
           <select class="lp-in" name="loop_{{ blank }}_scan_ai">
-            <option value="" selected>AI: config default</option>
-            <option value="off">AI: off</option>
-            <option value="fast">AI: fast</option>
-            <option value="deep">AI: deep</option>
+            <option value="" selected>AI: theo cấu hình</option>
+            <option value="off">AI: tắt</option>
+            <option value="fast">AI: nhanh</option>
+            <option value="deep">AI: kỹ</option>
           </select>
           <select class="lp-in" name="loop_{{ blank }}_scan_scope">
-            <option value="full" selected>scope: full repo</option>
-            <option value="diff">scope: diff vs base</option>
+            <option value="full" selected>phạm vi: cả repo</option>
+            <option value="diff">phạm vi: diff so với base</option>
           </select>
         </div>
         <div class="lp-f">
@@ -316,17 +330,17 @@
           <input type="text" class="lp-in mono" name="loop_{{ blank }}_cron" placeholder="7 18 * * 1-5">
         </div>
         <div class="lp-f">
-          <label>…or every N minutes</label>
-          <input type="number" min="0" class="lp-in" name="loop_{{ blank }}_interval" placeholder="0 = off">
+          <label>…hoặc mỗi N phút</label>
+          <input type="number" min="0" class="lp-in" name="loop_{{ blank }}_interval" placeholder="0 = tắt">
         </div>
         <div class="lp-f">
           <label>Project (workspace)</label>
           <input type="text" class="lp-in" name="loop_{{ blank }}_project" list="lp-projects">
         </div>
         <div class="lp-f">
-          <label>Repo path</label>
+          <label>Đường dẫn repo</label>
           <input type="text" class="lp-in mono" name="loop_{{ blank }}_repo" list="lp-repos-new"
-                 placeholder="{{ 'blank = ' ~ root_repos[0] if root_repos|length == 1 else 'tên repo' }}">
+                 placeholder="{{ 'trống = ' ~ root_repos[0] if root_repos|length == 1 else 'tên repo' }}">
           <datalist id="lp-repos-new">
             {% for name in root_repos %}<option value="{{ name }}">{% endfor %}
           </datalist>
@@ -336,15 +350,15 @@
           <input type="text" class="lp-in mono" name="loop_{{ blank }}_base">
         </div>
         <div class="lp-f">
-          <label>Options</label>
+          <label>Tuỳ chọn</label>
           <div style="display:flex;flex-wrap:wrap;gap:6px">
-            <label class="lp-toggle on"><input type="checkbox" name="loop_{{ blank }}_enabled" checked>enabled</label>
-            <label class="lp-toggle on"><input type="checkbox" name="loop_{{ blank }}_html" checked>html file</label>
-            <label class="lp-toggle"><input type="checkbox" name="loop_{{ blank }}_draft">draft pr</label>
+            <label class="lp-toggle on"><input type="checkbox" name="loop_{{ blank }}_enabled" checked>bật</label>
+            <label class="lp-toggle on"><input type="checkbox" name="loop_{{ blank }}_html" checked>file html</label>
+            <label class="lp-toggle"><input type="checkbox" name="loop_{{ blank }}_draft">PR nháp</label>
           </div>
         </div>
         <div class="lp-f wide">
-          <label>Sub-agents it delegates to</label>
+          <label>Sub-agent được giao việc</label>
           <div class="lp-agents">
             {% for a in known_agents %}
             <label class="lp-ag"><input type="checkbox" name="loop_{{ blank }}_agents" value="{{ a }}">{{ a }}</label>
@@ -364,15 +378,15 @@
   </div>
 
   <div class="savebar">
-    <span class="note">Rescheduled live — no restart. A loop with no valid cadence is refused rather than saved silently.</span>
-    <button type="submit" class="btn-save">💾 Save loops</button>
+    <span class="hint">Lịch cập nhật ngay, không cần khởi động lại. Loop không có lịch chạy hợp lệ sẽ bị từ chối, không lưu âm thầm.</span>
+    <button type="submit" class="btn-save">💾 Lưu loop</button>
   </div>
 </form>
 
 <div class="lp-card">
   <div class="lp-hd">
-    <h3>Presets</h3>
-    <span>Fills the blank row above — review the prompt, then save. Nothing is scheduled until you do.</span>
+    <h3>Mẫu có sẵn</h3>
+    <span>Điền vào dòng trống ở trên — đọc lại prompt rồi lưu. Chưa lưu thì chưa có gì được lên lịch.</span>
   </div>
   <div class="lp-presets">
     {% for p in presets %}
@@ -381,7 +395,7 @@
       <b>{{ p.label }}</b>
       <span class="why">{{ p.why }}</span>
       <span class="meta">{{ p.loop.cron }} · {{ p.loop.agents|join(' + ') }}</span>
-      <button type="button" class="btn-ghost lp-use">Use this</button>
+      <button type="button" class="btn-ghost lp-use">Dùng mẫu này</button>
     </div>
     {% endfor %}
   </div>

@@ -85,22 +85,23 @@ def _readiness(cfg) -> list[dict]:
         ok = adapters[name].available()
         rows.append({
             "name": name, "ok": ok, "on": name in sec.tools,
-            "note": ("always available" if name == "builtin" else
-                     ("installed" if ok else "not installed — skipped")),
+            "note": ("luôn sẵn có" if name == "builtin" else
+                     ("đã cài" if ok else "chưa cài — sẽ bỏ qua")),
         })
     key_ok = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
     rows.append({"name": "ai", "ok": key_ok or sec.ai_mode == "off", "on": sec.ai_mode != "off",
-                 "note": (f"mode {sec.ai_mode}" + ("" if key_ok else " — no ANTHROPIC_API_KEY"))
-                 if sec.ai_mode != "off" else "off"})
+                 "note": (f"chế độ {sec.ai_mode}"
+                          + ("" if key_ok else " — thiếu ANTHROPIC_API_KEY"))
+                 if sec.ai_mode != "off" else "tắt"})
     rows.append({"name": "verify", "ok": cfg.use_worktrees and key_ok, "on": sec.verify_enabled,
-                 "note": ("worktrees + key ok" if (cfg.use_worktrees and key_ok)
-                          else "needs use_worktrees and an API key")})
+                 "note": ("worktree + key đã sẵn sàng" if (cfg.use_worktrees and key_ok)
+                          else "cần use_worktrees và API key")})
     rows.append({"name": "ado bugs", "ok": bool(cfg.ado_pat) and cfg.autonomy_level != "report",
                  "on": sec.file_bugs,
-                 "note": ("ready" if cfg.ado_pat and cfg.autonomy_level != "report"
-                          else "needs ADO PAT and autonomy ≠ report")})
+                 "note": ("sẵn sàng" if cfg.ado_pat and cfg.autonomy_level != "report"
+                          else "cần ADO PAT và autonomy ≠ report")})
     rows.append({"name": "git", "ok": bool(shutil.which("git")), "on": True,
-                 "note": "for --scope diff and gitleaks history"})
+                 "note": "cho --scope diff và lịch sử gitleaks"})
     return rows
 
 
@@ -178,7 +179,7 @@ def create_router() -> APIRouter:
             _ctx(request, "security", flash=flash,
                  rows=rows, repos=repos, repo=repo, status=status or "open",
                  severity=severity, tool=tool, tools=tools, q=q, new_only=bool(new),
-                 repo_label=(Path(repo).name if repo else "all repos"),
+                 repo_label=(Path(repo).name if repo else "mọi repo"),
                  open_counts=open_counts, sev_counts=sev_counts,
                  status_counts={k: sum(v.values()) for k, v in counts.items()},
                  severities=reports_mod.SEVERITIES, scans=scans, trend=trend,

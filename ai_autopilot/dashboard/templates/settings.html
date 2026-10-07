@@ -7,21 +7,46 @@
   .set-head h2{font-size:22px;font-weight:750;letter-spacing:-.02em}
   .set-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
   .set-actions form{margin:0}
-  .file-mini{font-size:12px;color:var(--text-muted);max-width:190px}
+  .file-mini{font-family:var(--mono);font-size:11px;color:var(--text-dim);word-break:break-all}
+  .subnote{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+  .tech{font-size:11.5px;color:var(--text-dim)}
+  .tech summary{cursor:pointer;list-style:none;text-decoration:underline dotted}
+  .tech summary::-webkit-details-marker{display:none}
+  .tech[open]{flex-basis:100%}
   .subnote{color:var(--text-muted);font-size:12.5px;margin:2px 0 16px}
   .subnote code{font-family:var(--mono);font-size:11.5px;background:var(--bg-input);padding:1px 6px;border-radius:5px}
 
-  /* sticky section nav + save */
-  .set-nav{position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;gap:6px;
-    background:var(--bg-sticky);backdrop-filter:blur(8px);border-bottom:1px solid var(--border-soft);
-    padding:10px 2px;margin:0 -2px 18px}
-  .set-tab{white-space:nowrap;font-size:12.5px;font-weight:600;color:var(--text-muted);text-decoration:none;
-    padding:6px 12px;border-radius:20px;border:1px solid var(--border);transition:.12s}
-  .set-tab:hover{color:var(--text);border-color:var(--accent);background:var(--accent-bg)}
-  /* Which section am I in? Twenty identical pills answered "somewhere". */
-  .set-tab.on{color:var(--accent-hover);border-color:rgba(99,102,241,.5);background:var(--accent-bg)}
-  /* Anchor jumps land BELOW the sticky tab bar instead of under it. */
-  .card[id^="sec-"]{scroll-margin-top:84px}
+  /* Section navigation. Twenty-odd sections as wrapping pills took four rows above the
+     form and still did not say where you were; a sticky side list reads top-to-bottom
+     like the page it mirrors and has room to highlight the section on screen. Narrow
+     screens collapse it to one search box plus a jump <select>. */
+  .set-layout{display:grid;grid-template-columns:232px minmax(0,1fr);gap:24px;align-items:start}
+  .set-nav{position:sticky;top:12px;z-index:20;display:flex;flex-direction:column;gap:10px;
+    max-height:calc(100vh - 24px)}
+  .set-toc{display:flex;flex-direction:column;gap:1px;overflow-y:auto;min-height:0;
+    border-left:1px solid var(--border-soft);padding:2px 4px 2px 0}
+  .set-tab{display:block;font-size:12.5px;color:var(--text-muted);text-decoration:none;
+    padding:5px 10px;margin-left:-1px;border-left:2px solid transparent;border-radius:0 6px 6px 0;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:.12s}
+  .set-tab:hover{color:var(--text);background:var(--bg-hover)}
+  /* Which section am I in? */
+  .set-tab.on{color:var(--accent-hover);border-left-color:var(--accent);background:var(--accent-bg);font-weight:600}
+  /* A section the current search/scope emptied stays listed (the list must not jump
+     around under the cursor) but reads as "nothing here right now". */
+  .set-tab.dim{opacity:.35}
+  .set-jump{display:none}
+  /* Anchor jumps land with the section heading visible, not flush against the top. */
+  .card[id^="sec-"],.sec-alias{scroll-margin-top:16px}
+  .sec-alias{display:block;height:0}
+  @media (max-width:1000px){
+    .set-layout{grid-template-columns:minmax(0,1fr);gap:0}
+    .set-nav{top:0;flex-direction:row;flex-wrap:wrap;align-items:center;max-height:none;
+      background:var(--bg-sticky);backdrop-filter:blur(8px);border-bottom:1px solid var(--border-soft);
+      padding:8px 2px;margin:0 -2px 16px}
+    .set-toc{display:none}
+    .set-jump{display:block;flex:1 1 180px;min-width:0}
+    .card[id^="sec-"],.sec-alias{scroll-margin-top:68px}
+  }
   .up-panel{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:stretch}
   .up-cell{display:flex;flex-direction:column;gap:3px;min-width:150px;padding:9px 13px;border:1px solid var(--border);
     border-radius:9px;background:var(--bg-input)}
@@ -32,13 +57,14 @@
   .up-ok{color:var(--green);border:1px solid rgba(46,204,113,.45);background:var(--green-bg)}
   .up-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto}
   .up-actions .btn-ghost:disabled{opacity:.45;cursor:not-allowed}
-  /* ~100 settings across 20 sections: scrolling for one is the slowest way to find it. */
-  .set-find{margin-left:auto;display:flex;align-items:center;gap:8px}
+  /* ~200 settings across 24 sections: scrolling for one is the slowest way to find it. */
+  .set-find{display:flex;flex-direction:column;gap:3px}
   .set-find input{background:var(--bg-input);color:var(--text);border:1px solid var(--border);
-    border-radius:20px;padding:6px 13px;font-size:12.5px;font-family:inherit;width:210px}
-  .set-find input:focus{outline:none;border-color:var(--accent);width:260px}
-  .set-find .n{font-size:11.5px;color:var(--text-dim);white-space:nowrap;min-width:64px}
-  .set-nav.searching .set-tab{display:none}
+    border-radius:8px;padding:7px 11px;font-size:12.5px;font-family:inherit;width:100%}
+  .set-find input:focus{outline:none;border-color:var(--accent)}
+  .set-find .n{font-size:11.5px;color:var(--text-dim);white-space:nowrap;min-height:1em}
+  .set-find .n:empty{display:none}
+  @media (max-width:1000px){ .set-find{flex:1 1 200px;flex-direction:row;align-items:center;gap:8px} }
   .field.hide,.card.hide{display:none}
   .own-split{border:1px solid var(--border);border-left:3px solid var(--accent);
     border-radius:10px;padding:11px 15px;margin:0 0 16px;font-size:13px;
@@ -228,10 +254,6 @@
   .na-toggle:hover{border-color:var(--accent);color:var(--text)}
   .na-toggle[hidden]{display:none}
   .card-header{flex-wrap:wrap}
-  /* The section nav is sticky, so jumping to a section parked its heading UNDER the
-     nav — you landed on a card whose title (and now its "show what I hid" button) was
-     behind the bar you had just clicked. */
-  .card[id^="sec-"]{scroll-margin-top:64px}
   .pw-wrap{display:flex;align-items:center;gap:6px}
   .pw-wrap input{flex:1;min-width:0}
   .pw-btn{flex:none;background:var(--bg);border:1px solid var(--border);border-radius:7px;
@@ -248,15 +270,19 @@
   <h2 class="page-title">{{ page_title("settings") }}</h2>
   <div class="set-actions">
     <form method="post" action="/dashboard/settings/reload">
-      <button type="submit" class="btn-ghost">↻ Reload from file</button>
+      <button type="submit" class="btn-ghost" title="Đọc lại cấu hình từ tệp trên đĩa, bỏ các thay đổi chưa lưu">↻ Nạp lại từ tệp</button>
     </form>
     <button type="button" class="btn-ghost" id="xfer-toggle"
-            aria-expanded="false" aria-controls="xfer">⇅ Export / Import</button>
+            aria-expanded="false" aria-controls="xfer">⇅ Xuất / Nhập</button>
     {# A link, not a button: it opens the preview. Nothing on this page resets anything. #}
     <a class="btn-ghost" style="text-decoration:none" href="/dashboard/settings/reset">↩ Đặt lại</a>
   </div>
 </div>
-<p class="subnote">Saved to <code>{{ config_path }}</code> and applied live.</p>
+{# The path is for whoever is debugging this host, not for the person changing a
+   setting — so it is there, but small and quiet. #}
+<div class="subnote">Lưu là áp dụng ngay (trừ mục có nhãn <span class="restart-badge">restart</span>)
+  <details class="tech"><summary>Kỹ thuật</summary>
+    Tệp cấu hình: <span class="file-mini">{{ config_path }}</span></details></div>
 
 
 <!-- Two transfer modes with very different consequences. They used to sit as four
@@ -299,7 +325,7 @@
         <li class="yes">Full-export password đã đặt</li>
         {% else %}
         <li class="warn">Chưa đặt Full-export password — <b>không export được</b>.
-          Đặt <code>config_export_password</code> ở mục <b>Web / Security</b> bên dưới.</li>
+          Đặt <code>config_export_password</code> ở mục <b>🔐 Web &amp; bảo mật</b> bên dưới.</li>
         {% endif %}
         <li class="no">Không kèm mật khẩu dashboard — máy đích giữ mật khẩu của chính nó,
           nên máy mới sẽ <b>chưa bị khoá</b> cho tới khi bạn đặt.</li>
@@ -335,16 +361,16 @@
 
 <!-- ── Active tags overview (read-only) ── -->
 <div class="card">
-  <div class="card-header"><h3>🏷️ Active tags</h3>
-    <span class="form-help" style="margin:0">The full tag vocabulary the autopilot writes/reads — edit values in the sections below.</span></div>
+  <div class="card-header"><h3>🏷️ Tag đang dùng</h3>
+    <span class="form-help" style="margin:0">Toàn bộ tag autopilot ghi / đọc — sửa giá trị ở các mục bên dưới.</span></div>
   <div class="tagbar">
     {% for row in tag_overview %}
     <div class="tagrow">
       <span class="k">{{ row.label }}</span>
       <div class="chips">
         {% for t in row.tags %}
-          {% if t %}<span class="chip {{ row.cls }}">{{ t }}</span>{% else %}<span class="chip chip-empty">— none —</span>{% endif %}
-        {% else %}<span class="chip chip-empty">— none —</span>{% endfor %}
+          {% if t %}<span class="chip {{ row.cls }}">{{ t }}</span>{% else %}<span class="chip chip-empty">— trống —</span>{% endif %}
+        {% else %}<span class="chip chip-empty">— trống —</span>{% endfor %}
       </div>
       <span class="h">{{ row.hint }}</span>
     </div>
@@ -375,16 +401,25 @@
 {% endif %}
 
 <form method="post" action="/dashboard/settings">
-  <!-- section quick-nav (navigation only; Save lives in the sticky bar below) -->
-  <div class="set-nav">
-    <a class="set-tab" href="#sec-repos">Repos</a>
-    {% for section, fields in sections %}<a class="set-tab" href="#sec-{{ loop.index }}">{{ section }}</a>{% endfor %}
+  <div class="set-layout">
+  {# Navigation only; Save lives in the sticky bar below. Every anchor (#sec-N,
+     #sec-repos) is unchanged — other pages deep-link into them. #}
+  <nav class="set-nav" aria-label="Các mục thiết lập">
     <label class="set-find">
-      <input type="search" id="set-find" placeholder="🔍 Find a setting…"
-             aria-label="Filter settings" autocomplete="off">
+      <input type="search" id="set-find" placeholder="🔍 Tìm thiết lập…"
+             aria-label="Lọc thiết lập" autocomplete="off">
       <span class="n" id="set-find-n"></span>
     </label>
-  </div>
+    <select class="set-jump" id="set-jump" aria-label="Đi tới mục">
+      <option value="sec-repos">📁 Repo được phép sửa</option>
+      {% for section, fields in sections %}<option value="sec-{{ loop.index }}">{{ section }}</option>{% endfor %}
+    </select>
+    <div class="set-toc">
+      <a class="set-tab" href="#sec-repos" title="📁 Repo được phép sửa">📁 Repo được phép sửa</a>
+      {% for section, fields in sections %}<a class="set-tab" href="#sec-{{ loop.index }}" title="{{ section }}">{{ section }}</a>{% endfor %}
+    </div>
+  </nav>
+  <div class="set-body">
 
   {# Which slice of 180 to open on. Same control, same wording as the Configuration page,
      because it answers the same question there. "Thiết yếu" is the wizard's own key list
@@ -404,12 +439,12 @@
       start: {{ ('need' if setup_todo else 'changed')|tojson }}
     };
   </script>
-  <div class="card set-empty hide" id="set-none">No setting matches that.</div>
+  <div class="card set-empty hide" id="set-none">Không có thiết lập nào khớp.</div>
 
   <!-- Allowed repositories -->
   <div class="card" id="sec-repos">
-    <div class="card-header"><h3>📁 Allowed repositories</h3>
-      <span class="form-help" style="margin:0">Repos the agent may edit (auto-discovered). None ticked = all allowed.</span></div>
+    <div class="card-header"><h3>📁 Repo được phép sửa</h3>
+      <span class="form-help" style="margin:0">Các repo agent được sửa (tự dò). Không tick repo nào = cho phép tất cả.</span></div>
     <div style="padding:16px 20px">
       <input type="hidden" name="_all_repos" value="{{ repos|join(',') }}">
       {% if repos %}
@@ -419,21 +454,28 @@
           <input type="checkbox" name="repo__{{ r }}" {% if on %}checked{% endif %} class="chk"> {{ r }}
         </label>{% endfor %}
       </div>
-      {% else %}<div class="form-help" style="margin:0">No git repos found. Set the Workspace directory first.</div>{% endif %}
+      {% else %}<div class="form-help" style="margin:0">Chưa thấy git repo nào. Đặt <b>Thư mục workspace</b> trước.</div>{% endif %}
     </div>
   </div>
 
+  {# Stable names for the sections other pages link to. #sec-N shifts whenever a
+     section is added above it; these do not. The board's "not draggable" hint has
+     always pointed at #board-columns, which no element carried. #}
+  {% set section_alias = {'🗂️ Cột trên Board': 'board-columns',
+                          '🔀 Tự chuyển state': 'auto-transitions',
+                          '🛰 Fleet': 'fleet'} %}
   {% for section, fields in sections %}
   <div class="card" id="sec-{{ loop.index }}">
+    {% if section_alias.get(section) %}<span class="sec-alias" id="{{ section_alias[section] }}"></span>{% endif %}
     <div class="card-header"><h3>{{ section }}</h3>
-      {% if section == 'Outcomes → tag + state' %}
-      <span class="form-help" style="margin:0">Per outcome: the ADO tag + state. Blank = skip.
-        These apply to work-item types no flow covers — per type, use
-        <a href="/dashboard/flow" style="color:var(--accent-hover)">🔀 State flow</a>.</span>
-      {% elif section == 'Auto transitions' %}
-      <span class="form-help" style="margin:0">The switch and the fallbacks live here; the
-        per-type states, actions and roll-up live on
-        <a href="/dashboard/flow" style="color:var(--accent-hover)">🔀 State flow</a>.</span>
+      {% if section == '🎯 Kết quả → tag + state' %}
+      <span class="form-help" style="margin:0">Mỗi kết quả: tag + state ADO. Trống = bỏ qua.
+        Chỉ áp dụng cho loại work item chưa có luồng riêng — theo từng loại thì dùng
+        <a href="/dashboard/flow" style="color:var(--accent-hover)">🔀 Luồng trạng thái</a>.</span>
+      {% elif section == '🔀 Tự chuyển state' %}
+      <span class="form-help" style="margin:0">Ở đây là công tắc và giá trị dự phòng; state,
+        hành động và roll-up theo từng loại nằm ở
+        <a href="/dashboard/flow" style="color:var(--accent-hover)">🔀 Luồng trạng thái</a>.</span>
       {% endif %}
       {# Filled in by script: how many fields this section is holding back, and the one
          click that shows them. Starts hidden, so a section that hides nothing — the
@@ -481,7 +523,7 @@
 
     {# What this connection is FOR. Someone configuring Jira comes looking here first —
        it is the page that says "Azure DevOps" — and the answer is on another page. #}
-    {% if section == 'Azure DevOps Connection' %}
+    {% if section == '🔌 Kết nối Azure DevOps' %}
     <div class="fleet-block">
       <div class="wh-title">
         <b>🔌 Kết nối này dùng cho</b>
@@ -564,33 +606,33 @@
        It used to be a card of its own near the top of the page while a single "MS Teams
        webhook URL" field stayed down here — two controls for one setting, in two places,
        with nothing to say which applied. #}
-    {% if section == 'Notifications' %}
+    {% if section == '📣 Kênh thông báo' %}
     <div class="wh-block">
       <div class="wh-title">
-        <b>📣 Channels</b>
-        <span class="form-help" style="margin:0">Every notice posts to all ACTIVE channels.
-          {{ webhook_active_count }} active{% if muted_channels %} ·
-          {{ muted_channels|length }} muted ({{ muted_channels|join(', ') }}){% endif %}.</span>
+        <b>📣 Kênh Teams</b>
+        <span class="form-help" style="margin:0">Mọi thông báo gửi tới tất cả kênh ĐANG BẬT.
+          {{ webhook_active_count }} đang bật{% if muted_channels %} ·
+          {{ muted_channels|length }} đã tắt ({{ muted_channels|join(', ') }}){% endif %}.</span>
       </div>
       <input type="hidden" name="wh_count" value="{{ webhook_channels|length + 1 }}">
-      <div class="wh-head"><span>Name</span><span>Webhook URL</span><span>Active</span><span></span></div>
+      <div class="wh-head"><span>Tên</span><span>Webhook URL</span><span>Bật</span><span></span></div>
       {# Existing rows, then ONE blank row — adding a channel needs no round trip, and a
          blank row is dropped on save rather than reported as an error. #}
       {% for i in range(webhook_channels|length + 1) %}
       {% set ch = webhook_channels[i] if i < webhook_channels|length else none %}
       <div class="wh-row">
         <input type="text" name="wh{{ i }}_name" value="{{ ch.name if ch else '' }}"
-               placeholder="{{ '#dev' if ch else 'name this channel' }}" autocomplete="off">
+               placeholder="{{ '#dev' if ch else 'đặt tên kênh' }}" autocomplete="off">
         <input type="text" name="wh{{ i }}_url" value="{{ ch.url if ch else '' }}"
                placeholder="https://…/workflows/…" autocomplete="off" spellcheck="false">
-        <label class="wh-tog" title="off = keep the URL, stop notifying">
+        <label class="wh-tog" title="Tắt = giữ URL, ngừng gửi">
           <input type="checkbox" name="wh{{ i }}_active" class="chk"
                  {% if ch is none or ch.active %}checked{% endif %}>
         </label>
         {% if ch %}
-        <label class="wh-tog" title="remove this channel — the Workflows URL cannot be recovered">
+        <label class="wh-tog" title="Xoá kênh này — không lấy lại được URL Workflows">
           <input type="checkbox" name="wh{{ i }}_delete" class="chk chk-red">
-          <span class="wh-del">del</span>
+          <span class="wh-del">xoá</span>
         </label>
         {% else %}<span></span>{% endif %}
       </div>
@@ -619,9 +661,9 @@
            off" explains silence exactly as well as a dead webhook does. #}
         <div class="wh-probe-note">
           Card <b>✅ Hoàn tất</b>: {{ 'sẽ được gửi' if notify_probe.completed_allowed
-            else 'ĐANG BỊ TẮT trong Alert events' }} ·
+            else 'ĐANG BỊ TẮT trong “Gửi cảnh báo cho sự kiện nào”' }} ·
           Card <b>▶️ Bắt đầu</b>: {{ 'sẽ được gửi' if notify_probe.started_allowed
-            else 'ĐANG TẮT (mặc định) — thêm "started" vào Alert events nếu muốn' }}
+            else 'ĐANG TẮT (mặc định) — thêm "started" vào “Gửi cảnh báo cho sự kiện nào” nếu muốn' }}
           {%- if notify_probe.quiet_now %} · ⏸ <b>Đang trong giờ im lặng</b> — thông báo
           thật sẽ bị giữ lại và gửi gộp khi mở cửa sổ{% endif %}.
         </div>
@@ -653,10 +695,10 @@
 
       <div class="form-help" style="margin-top:10px">
         Teams Workflows → <i>"Post to a channel when a webhook request is received"</i>.
-        Unticking <b>Active</b> mutes a channel but keeps its URL — a Workflows URL cannot be
-        recovered once the flow is deleted, so deleting a row is the destructive option.
-        A channel listed twice is only notified once.
-        ⚠️ The URL carries a token that authorises posting — treat it like a password.
+        Bỏ tick <b>Bật</b> để tắt kênh mà vẫn giữ URL — xoá flow rồi thì không lấy lại được
+        URL Workflows, nên xoá dòng là thao tác không hoàn tác được.
+        Một kênh khai hai lần chỉ nhận một lần.
+        ⚠️ URL chứa token cho phép đăng tin — giữ như mật khẩu.
       </div>
     </div>
     {% endif %}
@@ -719,14 +761,14 @@
             <input type="checkbox" id="{{ f.key }}" name="{{ f.key }}" {% if current.get(f.key) %}checked{% endif %} />
           {% elif f.kind == 'select' %}
             <select id="{{ f.key }}" name="{{ f.key }}">
-              {% for opt in f.options %}<option value="{{ opt }}" {% if current.get(f.key) == opt %}selected{% endif %}>{{ opt if opt else '— blank (fall through to default) —' }}</option>{% endfor %}
+              {% for opt in f.options %}<option value="{{ opt }}" {% if current.get(f.key) == opt %}selected{% endif %}>{{ opt if opt else '— trống (dùng mặc định) —' }}</option>{% endfor %}
             </select>
           {% elif f.kind == 'password' %}
             {# A secret you cannot read back is a secret you cannot verify you typed
                right, and one nobody should be inventing by hand gets a generator. #}
             <span class="pw-wrap">
               <input type="password" id="{{ f.key }}" name="{{ f.key }}"
-                     placeholder="{{ '•••••• set — leave blank to keep' if secrets_set.get(f.key) else 'not set' }}" autocomplete="off" />
+                     placeholder="{{ '•••••• đã đặt — để trống để giữ' if secrets_set.get(f.key) else 'chưa đặt' }}" autocomplete="off" />
               <button type="button" class="pw-btn" data-pw-toggle="{{ f.key }}"
                       {% if f.reveal %}data-pw-reveal="{{ f.key }}"{% endif %}
                       title="{{ 'Hiện giá trị đang lưu (để copy sang máy khác)' if f.reveal else 'Hiện / ẩn' }}">👁</button>
@@ -758,18 +800,18 @@
                 <input type="checkbox" name="{{ f.key }}__{{ s }}" {% if s in selected %}checked{% endif %} class="chk"> {{ s }}
               </label>{% endif %}{% endfor %}
             </div>{% endif %}
-            <textarea name="{{ f.key }}__manual" rows="1" placeholder="Add custom states (comma or newline)" style="margin-top:8px"></textarea>
+            <textarea name="{{ f.key }}__manual" rows="1" placeholder="Thêm state khác (phẩy hoặc xuống dòng)" style="margin-top:8px"></textarea>
           {% elif f.kind == 'stateone' %}
             {% set cur = current.get(f.key) %}
             {% set opts = (ado_states or []) + ([cur] if cur and cur not in (ado_states or []) else []) %}
             {% if opts %}
             <select id="{{ f.key }}" name="{{ f.key }}">
-              <option value="" {% if not cur %}selected{% endif %}>(leave unchanged)</option>
+              <option value="" {% if not cur %}selected{% endif %}>(giữ nguyên)</option>
               {% for opt in opts %}<option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>{% endfor %}
             </select>
             {% else %}
             <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ cur }}"
-                   placeholder="No ADO states loaded — type the state name (blank = unchanged)" />
+                   placeholder="Chưa tải được state ADO — gõ tên state (trống = giữ nguyên)" />
             {% endif %}
           {% else %}
             <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
@@ -783,10 +825,13 @@
   </div>
   {% endfor %}
 
+  </div>{# /.set-body #}
+  </div>{# /.set-layout #}
+
   <div class="savebar">
-    <span class="hint">Changes apply live · fields marked <span class="restart-badge">restart</span> need a restart</span>
-    <a href="#" class="btn-ghost" style="text-decoration:none">↑ Top</a>
-    <button type="submit" class="btn-save">💾 Save settings</button>
+    <span class="hint">Áp dụng ngay khi lưu · mục có nhãn <span class="restart-badge">restart</span> cần khởi động lại</span>
+    <a href="#" class="btn-ghost" style="text-decoration:none">↑ Lên đầu</a>
+    <button type="submit" class="btn-save">💾 Lưu thiết lập</button>
   </div>
 </form>
 
@@ -968,6 +1013,10 @@
     var scopeBtns = Array.prototype.slice.call(document.querySelectorAll('.scope-seg button'));
     var why = document.getElementById('scope-why');
     var scope = scopes.start || 'all';
+    // A deep link from another page (#board-columns, #update-panel, #sec-7) asks for one
+    // particular section; opening on a scope that hides it would land on nothing.
+    var linked = location.hash && document.getElementById(location.hash.slice(1));
+    if (linked && linked.closest && linked.closest('form .card[id^="sec-"]')) scope = 'all';
     var WHY = {
       need: 'Những thiết lập máy không chạy được nếu thiếu — lấy từ chính các bước Cài đặt nhanh.',
       changed: 'Những thiết lập máy này đang khác mặc định.',
@@ -981,7 +1030,6 @@
 
     function apply() {
       var q = box.value.trim().toLowerCase();
-      nav.classList.toggle('searching', !!q);
       // A search is an explicit request for a field, so it overrides the scope: being
       // told a setting "does not exist" because it happens to sit at its default is the
       // page failing at the one thing a search is for.
@@ -995,12 +1043,19 @@
       cards.forEach(function (c) {
         // `.off` is a field this machine has no use for: it is not a search result
         // either, so a section whose only matches are hidden must not claim one.
-        c.classList.toggle('hide', !c.querySelector('.field[data-k]:not(.hide):not(.off)'));
+        // A card with no fields at all (the repo picker) has nothing for a scope to
+        // narrow, so only a search puts it away.
+        var hasFields = !!c.querySelector('.field[data-k]');
+        c.classList.toggle('hide', hasFields
+          ? !c.querySelector('.field[data-k]:not(.hide):not(.off)')
+          : !!q);
+        var tab = nav.querySelector('.set-tab[href="#' + c.id + '"]');
+        if (tab) tab.classList.toggle('dim', c.classList.contains('hide'));
       });
       scopeBtns.forEach(function (b) { b.classList.toggle('on', b.dataset.scope === scope); });
       why.textContent = q ? '' : (WHY[scope] || '');
       empty.classList.toggle('hide', hits > 0 || (!q && scope === 'all'));
-      count.textContent = q ? hits + (hits === 1 ? ' match' : ' matches') : '';
+      count.textContent = q ? hits + ' kết quả' : '';
     }
 
     scopeBtns.forEach(function (b) {
@@ -1017,9 +1072,9 @@
     var tabs = Array.prototype.slice.call(document.querySelectorAll('.set-tab'));
     var byId = {};
     tabs.forEach(function (t) { byId[t.getAttribute('href').slice(1)] = t; });
-    var watched = cards.concat(
-      document.getElementById('sec-repos') ? [document.getElementById('sec-repos')] : []
-    );
+    // `cards` already holds #sec-repos, in page order. Appending it a second time put
+    // the TOP section last, so it out-ranked every section below it.
+    var watched = cards;
     if (!watched.length) return;
     // Two rules the old observer missed, which made the LAST sections unselectable:
     //  1. A clicked tab stays selected. The page may be unable to scroll a short last
@@ -1029,15 +1084,28 @@
     //  2. At the bottom of the page the last section is the one being read, whether or
     //     not it ever reached the reading line.
     var pinned = null;
+    var jump = document.getElementById('set-jump');
     function mark(id) {
-      tabs.forEach(function (t) { t.classList.toggle('on', t.getAttribute('href') === '#' + id); });
+      tabs.forEach(function (t) {
+        var on = t.getAttribute('href') === '#' + id;
+        t.classList.toggle('on', on);
+        // Keep the highlighted entry in view when the side list itself scrolls.
+        if (on && t.parentElement.scrollHeight > t.parentElement.clientHeight) {
+          t.scrollIntoView({ block: 'nearest' });
+        }
+      });
+      if (jump && jump.value !== id) jump.value = id;
     }
     function current() {
       var visible = watched.filter(function (c) { return c.offsetParent !== null; });
       if (!visible.length) return null;
       var atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
       if (atBottom) return visible[visible.length - 1].id;
-      var line = 96, active = visible[0].id;   // just under the sticky tab bar
+      // The reading line: near the top on wide screens (the nav is a side column),
+      // just under the bar when the nav collapses into one across the top.
+      var navBox = nav.getBoundingClientRect();
+      var line = (navBox.width < window.innerWidth / 2 ? 0 : navBox.bottom) + 40;
+      var active = visible[0].id;
       visible.forEach(function (c) { if (c.getBoundingClientRect().top <= line) active = c.id; });
       return active;
     }
@@ -1056,7 +1124,22 @@
     tabs.forEach(function (t) {
       t.addEventListener('click', function () { pinned = t.getAttribute('href').slice(1); mark(pinned); });
     });
+    if (jump) {
+      jump.addEventListener('change', function () {
+        var el = document.getElementById(jump.value);
+        if (!el) return;
+        pinned = jump.value;
+        mark(pinned);
+        el.scrollIntoView({ block: 'start' });
+        history.replaceState(null, '', '#' + jump.value);
+      });
+    }
     var start = (location.hash || '').slice(1);
+    // A deep link to something INSIDE a section (#update-panel, #board-columns)
+    // highlights the section that holds it.
+    var startEl = start && document.getElementById(start);
+    var holder = startEl && startEl.closest && startEl.closest('.card[id^="sec-"]');
+    if (holder && byId[holder.id]) start = holder.id;
     if (start && byId[start]) { pinned = start; mark(start); }
     else { var id0 = current(); if (id0) mark(id0); }
   })();

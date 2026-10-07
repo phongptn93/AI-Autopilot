@@ -376,7 +376,7 @@ def test_relay_hands_the_item_along_without_re_tagging(tmp_path):
         def waiting(view: str) -> int:
             """How many items that board says are waiting on it right now."""
             page = client.get(f"/dashboard/board?view={view}").text
-            found = re.search(r"<b>(\d+)</b>\s*waiting on", page)
+            found = re.search(r"<b>(\d+)</b>\s*item đang chờ", page)
             return int(found.group(1)) if found else 0
 
         # Queued → BA's turn, and every board still SEES the item (relay, not silos).
@@ -411,14 +411,14 @@ def test_editor_reports_waiting_counts_and_shared_turns(tmp_path):
     with _client(tmp_path, trigger_tag="vm-autopilot") as client:
         client.app.state.container.ado = _FakeAdo()
         editor = client.get("/dashboard/board-views").text
-        assert "1 waiting · sees 2/2" in editor        # BA holds the queued one
+        assert "1 đang chờ · thấy 2/2" in editor        # BA holds the queued one
         assert 'data-tag="vm-autopilot"' in editor     # tags really on the board
         # Every process has a real queue out of the box — QC's is the review tag,
         # which needs no ADO change — so neither diagnostic fires. An escalation
         # shared by BA and Dev is NOT flagged: work that stopped legitimately needs
         # more than one role.
-        assert "no stage of its own" not in editor
-        assert "claim the same hand-off" not in editor
+        assert "chưa có stage nào là lượt của mình" not in editor
+        assert "cùng nhận một điểm bàn giao" not in editor
 
 
 def test_cards_are_only_draggable_where_a_drop_rule_exists(tmp_path):
@@ -474,8 +474,8 @@ def test_only_ambiguous_handoffs_are_flagged(tmp_path):
                  board_deploy_state="Ready for Deploy") as client:
         client.app.state.container.ado = _FakeAdo()
         page = client.get("/dashboard/board-views").text
-        assert "claim the same hand-off" not in page
-        assert "no stage of its own" not in page
+        assert "cùng nhận một điểm bàn giao" not in page
+        assert "chưa có stage nào là lượt của mình" not in page
 
     # Two processes both claiming a FLOW column is the real ambiguity → flagged.
     stage = [{"name": "s", "columns": ["In progress"], "mine": True}]
@@ -486,7 +486,7 @@ def test_only_ambiguous_handoffs_are_flagged(tmp_path):
     with _client(tmp_path, board_lenses=clash) as client:
         client.app.state.container.ado = _FakeAdo()
         page = client.get("/dashboard/board-views").text
-        assert "claim the same hand-off" in page and "In progress" in page
+        assert "cùng nhận một điểm bàn giao" in page and "In progress" in page
 
 
 def test_run_button_is_the_hand_off_trigger(tmp_path):
@@ -817,7 +817,7 @@ def test_profile_resolution_order_is_stated_where_it_is_chosen():
 
     pinned = next(f for f in FIELDS if f.key == "sdlc_profile")
     assert "sdlc:" in pinned.help and "type map" in pinned.help and "default" in pinned.help
-    order = [f.key for f in FIELDS if f.section.startswith("Closed-loop SDLC")]
+    order = [f.key for f in FIELDS if "Vòng SDLC khép kín" in f.section]
     assert order.index("sdlc_profile") < order.index("sdlc_type_profiles")
     assert order.index("sdlc_type_profiles") < order.index("sdlc_default_profile")
 

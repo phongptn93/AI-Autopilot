@@ -434,7 +434,7 @@ class StateSyncService:
                 self._log.info(
                     "deploy stage found no successful build", branch=branch,
                     pipeline=cfg.deploy_pipeline_id or "any",
-                    hint="check the deploy branch and pipeline id under Auto transitions",
+                    hint="check the deploy branch and pipeline id under 🔀 Tự chuyển state",
                 )
             return
         self._warned_no_builds.discard(key)

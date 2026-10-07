@@ -20,12 +20,7 @@
   .nw-flash { padding:11px 16px; margin-bottom:14px; border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-card); font-size:12.5px; }
   .nw-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); } .nw-flash.warn { border-color:rgba(245,166,35,.45); color:var(--amber); }
 
-  .nw-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
-  .kpi { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:13px 15px; }
-  .kpi .v { font-size:24px; font-weight:750; letter-spacing:-.02em; font-variant-numeric:tabular-nums; line-height:1.1; }
-  .kpi .l { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); margin-top:6px; }
-  .kpi .h { font-size:11.5px; color:var(--text-muted); margin-top:3px; }
-  .kpi.live .v { color:var(--accent-hover); } .kpi.bad .v { color:var(--red); } .kpi.good .v { color:var(--green); }
+  .stat-cap { font-size:12px; color:var(--text-muted); }
 
   .nw-sec { display:flex; align-items:baseline; gap:10px; margin:6px 0 10px; }
   .nw-sec h3 { font-size:14px; font-weight:700; }
@@ -83,24 +78,43 @@
 
 <div class="nw-top">
   <h2 class="page-title">{{ page_title("now") }}</h2>
-  <div class="nw-live" id="nw-live"><span class="dot"></span><span id="nw-live-t">cập nhật {{ refreshed }} · tự làm mới 15s</span>
+  <div class="nw-live" id="nw-live"><span class="dot"></span><span id="nw-live-t">cập nhật {{ refreshed }} · tự làm mới mỗi 15 giây</span>
     <button type="button" class="btn-ghost" id="nw-pause">Tạm dừng</button></div>
 </div>
-<p class="nw-lede">Việc autopilot đang làm ngay lúc này. Cột <b>im lặng</b> trả lời “có bị treo không”:
-  còn sinh sự kiện là đang làm việc; im lặng quá {{ quiet_warn_seconds // 60 }} phút là đáng xem, quá
-  {{ quiet_stuck_seconds // 60 }} phút là nên nhìn trước tiên.</p>
+<p class="nw-lede">Việc autopilot đang làm ngay lúc này. Chỉ số <b>Im lặng</b> cho biết có bị treo không:
+  quá {{ quiet_warn_seconds // 60 }} phút là đáng xem, quá {{ quiet_stuck_seconds // 60 }} phút là nên xem trước tiên.</p>
+{# Run statuses are enum values (they drive the badge colour); the label is for people. #}
+{% set run_status = {'Success': 'Thành công', 'Failed': 'Lỗi', 'Running': 'Đang chạy', 'Retrying': 'Đang retry', 'Pending': 'Chờ'} %}
 
 {% if flash %}<div class="nw-flash {{ 'ok' if flash[0] == 'green' else 'warn' }}">{{ flash[1]|safe }}</div>{% endif %}
 
-<div class="nw-kpis">
-  <div class="kpi {{ 'live' if runs else '' }}"><div class="v">{{ runs|length }}</div><div class="l">Đang chạy</div>
-    <div class="h">{% set stuck_n = runs|selectattr('level', 'equalto', 'stuck')|list|length %}{% if stuck_n %}<span class="q-stuck">{{ stuck_n }} im lặng lâu</span>{% else %}không có lượt nào im lặng lâu{% endif %}</div></div>
-  <div class="kpi {{ 'live' if sessions else '' }}"><div class="v">{{ sessions|length }}</div><div class="l">Phiên PR interactive</div><div class="h">conflict · /ai</div></div>
-  <div class="kpi"><div class="v">{{ queued_total }}</div><div class="l">Sắp chạy</div><div class="h">đang chờ trong hàng đợi</div></div>
-  <div class="kpi"><div class="v">{{ today.total }}</div><div class="l">Lượt hôm nay</div>
-    <div class="h"><span class="q-ok">{{ today.Success }} xong</span>{% if today.Failed %} · <span class="q-stuck">{{ today.Failed }} lỗi</span>{% endif %}</div></div>
-  <div class="kpi"><div class="v">{% if spend and spend.cost_usd is not none %}{% if spend.unpriced %}≥{% endif %}${{ '%.2f'|format(spend.cost_usd) }}{% else %}—{% endif %}</div>
-    <div class="l">Chi phí hôm nay</div><div class="h">{% if spend and spend.unpriced %}{{ spend.unpriced }} lượt không đo được (interactive){% elif spend and spend.runs %}{{ '{:,}'.format(spend.tokens) }} token{% else %}chưa có lượt chạy{% endif %}</div></div>
+{% set stuck_n = runs|selectattr('level', 'equalto', 'stuck')|list|length %}
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Đang chạy</span><div class="stat-card-icon">⚙️</div></div>
+    <div class="stat-card-value">{{ runs|length }}</div>
+    <div class="stat-cap">{% if stuck_n %}<span class="q-stuck">{{ stuck_n }} im lặng lâu</span>{% else %}không có lượt nào im lặng lâu{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Phiên PR interactive</span><div class="stat-card-icon">🧑‍💻</div></div>
+    <div class="stat-card-value">{{ sessions|length }}</div>
+    <div class="stat-cap">giải conflict · lệnh /ai</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Sắp chạy</span><div class="stat-card-icon">⏭</div></div>
+    <div class="stat-card-value">{{ queued_total }}</div>
+    <div class="stat-cap">đang chờ trong hàng đợi</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Lượt hôm nay</span><div class="stat-card-icon">📊</div></div>
+    <div class="stat-card-value">{{ today.total }}</div>
+    <div class="stat-cap">{% if today.total %}<span class="{{ 'q-ok' if today.Success }}">{{ today.Success }} xong</span>{% if today.Failed %} · <span class="q-stuck">{{ today.Failed }} lỗi</span>{% endif %}{% else %}chưa có lượt nào hôm nay{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Chi phí hôm nay</span><div class="stat-card-icon">💰</div></div>
+    <div class="stat-card-value">{% if spend and spend.cost_usd is not none %}{% if spend.unpriced %}≥{% endif %}${{ '%.2f'|format(spend.cost_usd) }}{% else %}—{% endif %}</div>
+    <div class="stat-cap">{% if spend and spend.unpriced %}{{ spend.unpriced }} lượt không đo được (interactive){% elif spend and spend.runs %}{{ '{:,}'.format(spend.tokens) }} token{% else %}chưa có lượt chạy{% endif %}</div>
+  </div>
 </div>
 
 <div class="nw-sec"><h3>Lượt chạy</h3><span>{{ runs|length }} đang diễn ra · im lặng lâu nhất trước</span></div>
@@ -110,7 +124,7 @@
   <div class="run {{ r.level }}">
     <div class="run-hd">
       {% if r.url %}<a class="id" href="{{ r.url }}" target="_blank" rel="noopener">#{{ r.id }}</a>{% else %}<a class="id" href="/dashboard/task/{{ r.id }}">#{{ r.id }}</a>{% endif %}
-      {% if r.session %}<span class="sess-tag" title="Phiên Remote-Control — attach qua claude.ai → Claude Code">🧑‍💻 {{ r.session }}</span>{% endif %}
+      {% if r.session %}<span class="sess-tag" title="Phiên Remote Control — attach qua claude.ai → Claude Code">🧑‍💻 {{ r.session }}</span>{% endif %}
       {% if r.project %}<span class="proj">{{ r.project }}</span>{% endif %}
     </div>
     <div class="run-title" title="{{ r.title }}">{{ r.title }}</div>
@@ -157,7 +171,7 @@
     </li>
     {% endfor %}
   </ul>
-  {% else %}<div class="empty-row">Không có phiên nào đang mở.</div>{% endif %}
+  {% else %}<div class="empty-row">Không có phiên nào đang mở — phiên mở khi bạn bấm Giải xung đột ở chế độ interactive hoặc comment <code>/ai</code> trên PR.</div>{% endif %}
 </div>
 
 <div class="nw-grid">
@@ -170,20 +184,20 @@
         <span class="m">{{ q.since.strftime('%m-%d %H:%M') if q.since else '' }}</span></li>
       {% endfor %}
     </ul>
-    {% else %}<div class="empty-row">Hàng đợi trống.</div>{% endif %}
+    {% else %}<div class="empty-row">Hàng đợi trống — gắn tag cho việc cần làm trên <a class="table-link" href="/dashboard/board">Board</a> để autopilot nhận.</div>{% endif %}
   </div>
   <div class="panel">
     <div class="panel-hd"><h3>✅ Vừa xong</h3><span>tối đa 6 lượt gần nhất</span><a href="/dashboard/history">Lịch sử chạy →</a></div>
     {% if recent %}
     <ul class="rows">
       {% for e in recent %}
-      <li><span class="badge {{ status_class(e.status.value) }}" style="min-width:74px"><span class="badge-dot"></span>{{ e.status.value }}</span>
+      <li><span class="badge {{ status_class(e.status.value) }}" style="min-width:74px" title="{{ e.status.value }}"><span class="badge-dot"></span>{{ run_status.get(e.status.value, e.status.value) }}</span>
         {% if e.work_item_id %}<a class="id" href="/dashboard/task/{{ e.work_item_id }}">#{{ e.work_item_id }}</a>{% else %}<span class="id">loop</span>{% endif %}
         <span class="t" title="{{ e.error if e.error and e.status.value == 'Failed' else e.title }}">{{ e.title }}</span>
         <span class="m">{{ mmss(e.duration_seconds) }} · {{ e.started_at.strftime('%H:%M') }}</span></li>
       {% endfor %}
     </ul>
-    {% else %}<div class="empty-row">Chưa có lượt nào xong.</div>{% endif %}
+    {% else %}<div class="empty-row">Chưa có lượt nào xong — lượt chạy hoàn tất sẽ hiện ở đây và trong <a class="table-link" href="/dashboard/history">Lịch sử chạy</a>.</div>{% endif %}
   </div>
 </div>
 

@@ -198,13 +198,13 @@ def test_an_agent_the_workspace_does_not_define_is_flagged_on_the_page(tmp_path)
     ) as client:
         page = client.get("/dashboard/loops").text
         assert "agent-that-left" in page
-        assert "not in this workspace" in page
+        assert "không có trong .claude/agents của workspace này" in page
 
 
 def test_the_reports_page_says_where_to_start_when_empty(tmp_path):
     with _client(tmp_path) as client:
         page = client.get("/dashboard/reports").text
-        assert "No audits yet" in page
+        assert "Chưa có báo cáo nào" in page
         assert "/dashboard/loops" in page
 
 
@@ -230,7 +230,7 @@ def test_a_stored_report_renders_on_both_the_list_and_the_detail_page(tmp_path):
         listing = client.get("/dashboard/reports").text
         assert "code-review-daily" in listing
         assert "one critical" in listing
-        assert "critical 1" in listing
+        assert "Nghiêm trọng 1" in listing
 
         detail = client.get(f"/dashboard/reports/{report_id}").text
         assert "Missing auth check" in detail
@@ -339,7 +339,7 @@ def test_sub_agents_survive_a_save_and_come_back_ticked(tmp_path, monkeypatch):
         page = client.get("/dashboard/loops").text
         assert _checked_agents(page, 0) == [
             "agent-pr-reviewer", "agent-security-reviewer"]
-        assert "None picked" not in page.split('name="loop_1_name"')[0]
+        assert "Chưa chọn — agent tự làm" not in page.split('name="loop_1_name"')[0]
 
 
 def test_the_in_flight_page_names_the_role_a_run_is_for(tmp_path):
@@ -446,4 +446,4 @@ def test_each_row_offers_the_repos_of_its_own_workspace(tmp_path):
     ) as client:
         page = client.get("/dashboard/loops").text
     assert "OtherRepo" in page          # its own workspace's repo is offered…
-    assert "blank = OtherRepo" in page  # …and a single repo means the field can stay blank
+    assert "trống = OtherRepo" in page  # …and a single repo means the field can stay blank

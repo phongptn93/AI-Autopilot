@@ -148,22 +148,22 @@
             <span class="mono">{{ projects | join(', ') if projects else project }}</span> — <b>{{ total }}</b> item
             {% else %}
             <b>{{ view.label }}</b> — <b>{{ in_view }}</b> / {{ total }} item
-            {% if view.tags %}tagged <span class="mono">{{ view.tags | join(', ') }}</span>{% else %}(no tag filter){% endif %}
+            {% if view.tags %}có tag <span class="mono">{{ view.tags | join(', ') }}</span>{% else %}(không lọc tag){% endif %}
             {% endif %}
         </p>
     </div>
     <form method="get" action="/dashboard/board" class="board-filters">
         {% if view.key != 'pipeline' %}<input type="hidden" name="view" value="{{ view.key }}"/>{% endif %}
-        <input type="text" name="q" value="{{ q }}" placeholder="🔍 id or title" class="bf-input" style="width:160px"/>
+        <input type="text" name="q" value="{{ q }}" placeholder="🔍 id hoặc tiêu đề" class="bf-input" style="width:170px"/>
         <select name="cat" class="bf-input">
             {% for v, lbl in [('all','Mọi loại'),('BE','BE'),('FE','FE'),('DB','DB'),('QC','QC')] %}
             <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
         </select>
-        <input type="date" name="from" value="{{ date_from }}" class="bf-input" title="Changed from"/>
-        <input type="date" name="to" value="{{ date_to }}" class="bf-input" title="Changed to"/>
+        <input type="date" name="from" value="{{ date_from }}" class="bf-input" title="Cập nhật từ ngày"/>
+        <input type="date" name="to" value="{{ date_to }}" class="bf-input" title="Cập nhật đến ngày"/>
         {% if projects and projects | length > 1 %}
-        <select name="project" class="bf-input" onchange="this.form.submit()" title="Work-item project">
-            <option value="all" {% if selected_project == 'all' %}selected{% endif %}>All projects</option>
+        <select name="project" class="bf-input" onchange="this.form.submit()" title="Project của work item">
+            <option value="all" {% if selected_project == 'all' %}selected{% endif %}>Mọi project</option>
             {% for p in projects %}<option value="{{ p }}" {% if selected_project == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
         </select>
         {% endif %}
@@ -175,7 +175,7 @@
         {% endif %}
         <button type="submit" class="btn-ghost">Lọc</button>
         {% if q or (cat and cat != 'all') or date_from or date_to or selected_tag != 'all' or selected_project != 'all' %}
-        <a href="/dashboard/board{% if view.key != 'pipeline' %}?view={{ view.key }}{% endif %}" class="btn-ghost" style="text-decoration:none">Reset</a>{% endif %}
+        <a href="/dashboard/board{% if view.key != 'pipeline' %}?view={{ view.key }}{% endif %}" class="btn-ghost" style="text-decoration:none">Bỏ lọc</a>{% endif %}
     </form>
 </div>
 
@@ -183,7 +183,7 @@
     <nav class="bd-lens" aria-label="Board view">
         {% for v in views %}
         <a href="{{ lens_urls[v.key] }}" class="{{ 'on' if v.key == view.key else '' }}"
-           title="{{ v.hint }}{% if turn_counts.get(v.key) %} · {{ turn_counts[v.key] }} waiting on {{ v.label }}{% endif %}">
+           title="{{ v.hint }}{% if turn_counts.get(v.key) %} · {{ turn_counts[v.key] }} item đang chờ {{ v.label }}{% endif %}">
             {% if v.icon %}<span class="ic">{{ v.icon }}</span>{% endif %}{{ v.label }}
             {% if turn_counts.get(v.key) %}<span class="tab-n">{{ turn_counts[v.key] }}</span>{% endif %}
         </a>
@@ -192,22 +192,22 @@
     <span class="bd-why">
         {{ view.hint }}
         {% if view.key != 'pipeline' %}
-        · <b>{{ my_turn }}</b> waiting on {{ view.label }}
-        {% if view.tags %}· only {% for t in view.tags %}<code>{{ t }}</code>{% if not loop.last %} {% endif %}{% endfor %}{% endif %}
+        · <b>{{ my_turn }}</b> item đang chờ {{ view.label }}
+        {% if view.tags %}· chỉ {% for t in view.tags %}<code>{{ t }}</code>{% if not loop.last %} {% endif %}{% endfor %}{% endif %}
         {% endif %}
     </span>
     {% if view.key != 'pipeline' %}
     <a class="bd-toggle {{ 'on' if only_mine else '' }}" href="{{ mine_url }}"
-       title="Show only the lanes where the ball is in {{ view.label }}'s court">
+       title="Chỉ hiện các lane đang tới lượt {{ view.label }} xử lý">
         {{ '✓ ' if only_mine else '' }}Chỉ lượt của vai này
     </a>
     {% endif %}
     <span class="bd-cfg">
         {% if not drop_targets %}
-        <a href="/dashboard/settings#board-columns" title="No column has a drag rule, so cards are not draggable. Set 'Drag &amp; drop (column => tag/state)' in Settings → Board columns.">🔒 kéo-thả đang tắt</a>
+        <a href="/dashboard/settings#board-columns" title="Chưa cột nào có quy tắc kéo-thả nên không kéo được card. Đặt 'Drag &amp; drop (column => tag/state)' trong Cài đặt → Board columns.">🔒 kéo-thả đang tắt</a>
         {% endif %}
         <a href="/dashboard/board-views">⚙ Cấu hình quy trình board</a>
-        <span class="board-live"><span class="board-live-dot"></span><span id="board-updated">auto 15s</span></span>
+        <span class="board-live"><span class="board-live-dot"></span><span id="board-updated">tự làm mới 15s</span></span>
     </span>
 </div>
 
@@ -222,10 +222,10 @@
 {% if view.key != 'pipeline' and view.tags and not in_view and total %}
 <div class="card" style="margin-bottom:12px">
     <div class="card-body" style="padding:13px 20px;font-size:13px;color:var(--text-muted)">
-        None of the {{ total }} item(s) on this board carry a <b>{{ view.label }}</b> tag
+        Không item nào trong {{ total }} item trên board mang tag <b>{{ view.label }}</b>
         ({% for t in view.tags %}<code class="mono">{{ t }}</code>{% if not loop.last %}, {% endif %}{% endfor %}).
-        Tag the work items in Azure DevOps, or
-        <a href="/dashboard/board-views" style="color:var(--accent-hover)">change which tags this process owns</a>.
+        Gắn tag cho work item trên Azure DevOps, hoặc
+        <a href="/dashboard/board-views" style="color:var(--accent-hover)">đổi tag mà quy trình này sở hữu</a>.
     </div>
 </div>
 {% endif %}
@@ -246,7 +246,7 @@
       try {
         const r = await fetch(partialUrl, { headers: { 'X-Requested-With': 'fetch' } });
         // autopilot:ignore[ts-innerhtml-dynamic] same-origin partial, rendered by Jinja with autoescape
-        if (r.ok) { mount.innerHTML = await r.text(); stamp.textContent = 'updated just now'; }
+        if (r.ok) { mount.innerHTML = await r.text(); stamp.textContent = 'vừa cập nhật'; }
       } catch (e) { /* keep last view */ }
       finally { busy = false; }
     }
@@ -261,8 +261,8 @@
       const btn = e.target.closest('[data-run]');
       if (!btn) return;
       const id = btn.dataset.run;
-      if (!confirm('Start the ' + {{ view.label|tojson }} + ' stage(s) on #' + id + '?')) return;
-      btn.disabled = true; btn.textContent = '… starting';
+      if (!confirm('Chạy các stage của ' + {{ view.label|tojson }} + ' cho #' + id + '?')) return;
+      btn.disabled = true; btn.textContent = '… đang chạy';
       try {
         await fetch('/dashboard/board/run', {
           method: 'POST',

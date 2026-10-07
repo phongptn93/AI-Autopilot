@@ -42,9 +42,9 @@ def test_the_page_shows_each_role_with_its_stages_door_and_dial(tmp_path):
         # Every field of a role is on its own row — including the way out.
         assert "role_dev_done" in page and "role_dev_stages" in page
         # The chain is asserted, not implied: dev hands to a door qc actually waits in.
-        assert "Hands to" in page
+        assert "Chuyển cho" in page
         # The derived pickup set is shown, so the dial's effect is visible where it is set.
-        assert "Poller starts from" in page
+        assert "Poller nhận việc từ" in page
 
 
 def test_a_hand_off_nobody_waits_in_is_called_a_dead_end(tmp_path):
@@ -59,7 +59,7 @@ def test_a_hand_off_nobody_waits_in_is_called_a_dead_end(tmp_path):
         },
     ) as client:
         page = client.get("/dashboard/roles").text
-        assert "nobody waits here" in page or "No role waits in" in page
+        assert "không ai chờ ở đây" in page or "Không vai nào chờ ở" in page
 
 
 def test_two_roles_behind_one_door_is_shown_and_refused(tmp_path):
@@ -75,7 +75,7 @@ def test_two_roles_behind_one_door_is_shown_and_refused(tmp_path):
 
     with _client(tmp_path, sdlc_roles=cfg.sdlc_roles) as client:
         page = client.get("/dashboard/roles").text
-        assert "two roles wait in this state" in page
+        assert "hai vai cùng chờ ở state này" in page
 
 
 def test_saving_writes_the_roles_and_applies_them_live(tmp_path, monkeypatch):
@@ -198,7 +198,7 @@ def test_a_non_auto_door_that_is_a_trigger_state_is_warned_about_on_its_own_row(
         sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Active", auto=False)},
     ) as client:
         page = client.get("/dashboard/roles").text
-        assert "removes it from the poll query" in page
+        assert "gỡ nó khỏi truy vấn poll" in page
         assert "Trigger state" in page
 
 
@@ -210,8 +210,8 @@ def test_an_auto_door_on_a_trigger_state_is_stated_without_alarm(tmp_path):
         sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Active", auto=True)},
     ) as client:
         page = client.get("/dashboard/roles").text
-        assert "this role owns it either way" in page
-        assert "removes it from the poll query" not in page
+        assert "vai này vẫn sở hữu nó" in page
+        assert "gỡ nó khỏi truy vấn poll" not in page
 
 
 def test_a_door_of_its_own_gets_no_trigger_warning(tmp_path):
@@ -224,8 +224,8 @@ def test_a_door_of_its_own_gets_no_trigger_warning(tmp_path):
         page = client.get("/dashboard/roles").text
         # Neither half of the per-row notice fires. Asserted on the exact wording, not
         # on "Trigger state": the page explains that phrase in its static help text.
-        assert "removes it from the poll query" not in page
-        assert "this role owns it either way" not in page
+        assert "gỡ nó khỏi truy vấn poll" not in page
+        assert "vai này vẫn sở hữu nó" not in page
 
 
 def test_the_when_done_placeholder_names_the_state_a_blank_field_really_sets(tmp_path):
@@ -241,8 +241,8 @@ def test_the_when_done_placeholder_names_the_state_a_blank_field_really_sets(tmp
         # Short enough to survive the column width — the input clipped the sentence
         # mid-word ("blank = stop and wait f"), which is worse than no placeholder.
         assert 'placeholder="↳ Resolved"' in page
-        assert "Blank falls back to Resolved." in page          # the full text, on hover
-        assert "stop and wait for a person" not in page
+        assert "Để trống sẽ dùng Resolved." in page          # the full text, on hover
+        assert "dừng và chờ người" not in page
 
 
 def test_it_says_stop_only_when_there_really_is_no_fallback(tmp_path):
@@ -251,8 +251,8 @@ def test_it_says_stop_only_when_there_really_is_no_fallback(tmp_path):
         sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
     ) as client:
         page = client.get("/dashboard/roles").text
-        assert 'placeholder="blank = stops here"' in page
-        assert "stop and wait for a person" in page             # the full text, on hover
+        assert 'placeholder="trống = dừng ở đây"' in page
+        assert "dừng và chờ người" in page             # the full text, on hover
 
 
 def test_the_page_says_where_the_shared_run_now_tag_is_changed(tmp_path):
@@ -265,8 +265,8 @@ def test_the_page_says_where_the_shared_run_now_tag_is_changed(tmp_path):
     ) as client:
         page = client.get("/dashboard/roles").text
         assert 'placeholder="↳ autopilot-run"' in page
-        assert "Blank falls back to autopilot-run" in page      # the full text, on hover
-        assert "/dashboard/settings" in page and "shared" in page
+        assert "Để trống sẽ dùng autopilot-run" in page      # the full text, on hover
+        assert "/dashboard/settings" in page and "tag chung" in page
 
 
 def test_it_does_not_promise_a_shared_fallback_that_is_not_set(tmp_path):
@@ -275,8 +275,8 @@ def test_it_does_not_promise_a_shared_fallback_that_is_not_set(tmp_path):
         sdlc_roles={"dev": SdlcRole(stages=["implement"], waits_in="Ready for Dev")},
     ) as client:
         page = client.get("/dashboard/roles").text
-        assert "No shared fallback is set" in page
-        assert 'placeholder="↳ nothing"' in page
+        assert "Chưa đặt tag chung dự phòng" in page
+        assert 'placeholder="↳ không có"' in page
 
 
 def test_a_role_run_now_tag_equal_to_the_trigger_tag_is_refused(tmp_path, monkeypatch):
@@ -364,8 +364,8 @@ def test_the_pr_dial_is_on_the_row_and_says_what_the_stages_already_answer(tmp_p
         page = client.get("/dashboard/roles").text
         assert "role_dev_pr" in page and "role_qc_pr" in page
         # The derived answer is shown per role, not just the three choices.
-        assert "Its stages include one that produces a PR" in page
-        assert "No stage of it produces a PR" in page
+        assert "Trong các stage có một stage tạo ra PR" in page
+        assert "Không stage nào tạo PR" in page
 
 
 def test_an_explicit_pr_override_survives_a_save_of_the_roles_page(tmp_path, monkeypatch):
@@ -380,7 +380,7 @@ def test_an_explicit_pr_override_survives_a_save_of_the_roles_page(tmp_path, mon
                                     waits_in="Ready for Development", opens_pr=False)},
     ) as client:
         page = client.get("/dashboard/roles").text
-        assert '<option value="no" selected>Never open one</option>' in page
+        assert '<option value="no" selected>Không bao giờ mở</option>' in page
 
         client.post("/dashboard/roles", data={
             "role_dev_stages": ["implement", "pr"],
@@ -423,4 +423,4 @@ def test_forcing_a_pr_on_a_role_whose_stages_produce_none_is_flagged_as_an_overr
                  sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing",
                                             opens_pr=True)}) as client:
         page = client.get("/dashboard/roles").text
-        assert "overrides</b> its stages, which produce none" in page
+        assert "ghi đè</b> các stage, vốn không tạo PR nào" in page

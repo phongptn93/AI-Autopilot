@@ -154,7 +154,7 @@ def test_the_page_says_the_fleet_token_is_set(client: TestClient):
     sentence that sends someone rotating a working secret across the fleet."""
     html = client.get("/dashboard/settings").text
     start = html.index('data-k="fleet_token"')
-    assert "set — leave blank to keep" in html[start:start + 900]
+    assert "đã đặt — để trống để giữ" in html[start:start + 900]
 
 
 def test_a_default_value_is_not_treated_as_a_decision():

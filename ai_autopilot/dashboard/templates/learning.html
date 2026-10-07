@@ -122,9 +122,8 @@
 
 <div class="page-header">
   <h2 class="page-title">{{ page_title("learning") }}</h2>
-  <p>Tri thức <b>bạn nạp vào</b> cộng với bài học <b>máy tự rút</b> từ review và rework
-    của các run trước — ghi thành một rule trong workspace để <b>Claude tự nạp</b> khi task
-    có liên quan, thay vì nhồi vào mọi brief.</p>
+  <p>Tri thức <b>bạn nạp vào</b> và bài học <b>máy tự rút</b> từ review/rework — ghi vào
+    workspace để <b>Claude tự nạp</b> khi task có liên quan, thay vì nhồi vào mọi brief.</p>
 </div>
 
 {% if flash %}
@@ -135,7 +134,7 @@
 {% if not enabled %}
 <div class="off-note">
   ⚠️ <b>Learning loop đang TẮT.</b> Không có gì được ghi và brief không nhồi bài học nào.
-  Bật ở <a class="table-link" href="/dashboard/settings">Settings → 🧪 Quality gates → 🧠 Learning loop</a>.
+  Bật ở <a class="table-link" href="/dashboard/settings">Thiết lập → 🧪 Cổng chất lượng → 🧠 Vòng học hỏi</a>.
 </div>
 {% elif not workspace %}
 <div class="off-note">
@@ -149,14 +148,14 @@
    hỏi "thế agent có thật sự nhận không?". #}
 <div class="stats-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Bạn nạp vào</span></div>
+    <div class="stat-card-header"><span class="stat-card-label">Bạn nạp vào</span><div class="stat-card-icon">✍️</div></div>
     <div class="stat-card-value">{{ authored }}</div>
     <div class="stat-sub">
       {% if authored %}luôn được xếp trước{% else %}chưa có — dùng hộp bên dưới{% endif %}
     </div>
   </div>
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Máy tự học</span></div>
+    <div class="stat-card-header"><span class="stat-card-label">Máy tự học</span><div class="stat-card-icon">🤖</div></div>
     <div class="stat-card-value">{{ total - authored }}</div>
     <div class="stat-sub">
       {% if occurrences > (total - authored) %}gộp từ {{ occurrences }} lần xảy ra
@@ -164,7 +163,7 @@
     </div>
   </div>
   <div class="stat-card">
-    <div class="stat-card-header"><span class="stat-card-label">Agent đọc được</span></div>
+    <div class="stat-card-header"><span class="stat-card-label">Agent đọc được</span><div class="stat-card-icon">📖</div></div>
     <div class="stat-card-value">{{ total if memory_live else 0 }}</div>
     <div class="stat-sub">
       {% if memory_live %}qua memory của workspace{% if max_injected %} · cộng {{ max_injected }} dòng ép vào brief{% endif %}
@@ -401,7 +400,7 @@
   <div class="card-body" style="padding:15px 20px 18px">
     <div class="chart">
       {% for day, n in series %}
-      <div class="col {{ 'zero' if not n else '' }}" title="{{ day }} · {{ n }} new lesson(s)">
+      <div class="col {{ 'zero' if not n else '' }}" title="{{ day }} · {{ n }} bài học mới">
         <span class="n">{{ n }}</span>
         <div class="bar" style="height:{{ (n / peak * 100) if peak and n else 0 }}%"></div>
       </div>
@@ -416,16 +415,36 @@
 
 {% if health and health.total %}
 {# The store in five numbers. "Lặp lại" is the one to act on: a guess the skill
-   already carried that keeps biting — the skill is not preventing it, a rule would. #}
-<div class="card kh-card">
-  <div class="kh-grid">
-    <div class="kh"><b>{{ health.total }}</b><span>tri thức</span></div>
-    <div class="kh"><b>{{ health.rules }}</b><span>quy tắc (luôn nạp)</span></div>
-    <div class="kh"><b>{{ health.learned }}</b><span>máy tự rút (skill)</span></div>
-    <div class="kh {{ 'warn' if health.recurring }}"><b>{{ health.recurring }}</b><span>lặp lại ≥{{ recurring_at }} lần</span></div>
-    <div class="kh {{ 'mute' if health.stale }}"><b>{{ health.stale }}</b><span>cũ &gt; {{ stale_days }} ngày</span></div>
+   already carried that keeps biting — the skill is not preventing it, a rule would.
+   Same shared stat-card tiles as the rest of the dashboard; colour only when non-zero. #}
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Tri thức</span><div class="stat-card-icon">🧠</div></div>
+    <div class="stat-card-value">{{ health.total }}</div>
   </div>
-  {% if health.recurring or health.stale %}
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Quy tắc</span><div class="stat-card-icon">📌</div></div>
+    <div class="stat-card-value">{{ health.rules }}</div>
+    <div class="stat-sub">luôn nạp</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Máy tự rút</span><div class="stat-card-icon">🤖</div></div>
+    <div class="stat-card-value">{{ health.learned }}</div>
+    <div class="stat-sub">nằm trong skill</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Lặp lại</span><div class="stat-card-icon">🔁</div></div>
+    <div class="stat-card-value" {% if health.recurring %}style="color:var(--amber)"{% endif %}>{{ health.recurring }}</div>
+    <div class="stat-sub">lặp lại ≥{{ recurring_at }} lần</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Bài học cũ</span><div class="stat-card-icon">🧹</div></div>
+    <div class="stat-card-value" {% if health.stale %}style="color:var(--text-dim)"{% endif %}>{{ health.stale }}</div>
+    <div class="stat-sub">cũ &gt; {{ stale_days }} ngày</div>
+  </div>
+</div>
+{% if health.recurring or health.stale %}
+<div class="card kh-card">
   <div class="kh-advice">
     {% if health.recurring %}<div>⚠️ <b>{{ health.recurring }}</b> bài học vẫn <b>lặp lại</b> dù đã có trong skill —
       skill không ngăn được. Bấm <b>📌 Nâng thành quy tắc</b> ở dòng đó để nó vào file rule mà mọi run đều nạp.</div>{% endif %}
@@ -435,16 +454,11 @@
             onsubmit="return confirm('Xoá hẳn các bài học cũ chỉ gặp một lần?');">
         <button class="btn-ghost" type="submit">Dọn bài học cũ</button></form></div>{% endif %}
   </div>
-  {% endif %}
 </div>
+{% endif %}
 <style>
   .kh-card { padding:14px 16px; }
-  .kh-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
-  .kh { border:1px solid var(--border); border-radius:10px; padding:9px 12px; }
-  .kh b { display:block; font-size:20px; }
-  .kh span { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
-  .kh.warn b { color:#d29922; } .kh.mute b { color:var(--text-dim); }
-  .kh-advice { margin-top:12px; display:flex; flex-direction:column; gap:8px; font-size:13px; line-height:1.55; }
+  .kh-advice { display:flex; flex-direction:column; gap:8px; font-size:13px; line-height:1.55; }
   .krow.stale { opacity:.55; }
   .rep.hot { background:rgba(210,153,34,.18); color:#d29922; }
   .promote-btn { font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid #d29922; color:#d29922;

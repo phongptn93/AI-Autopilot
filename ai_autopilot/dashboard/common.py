@@ -301,7 +301,7 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "err_no_export_password": (
         "red",
         "⚠️ Chưa đặt <b>Full-export password</b> — file sẽ không được bảo vệ. Đặt "
-        "<code>config_export_password</code> ở mục <b>Web / Security</b> rồi export lại.",
+        "<code>config_export_password</code> ở mục <b>🔐 Web &amp; bảo mật</b> rồi export lại.",
     ),
 }
 

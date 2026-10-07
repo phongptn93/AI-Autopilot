@@ -39,37 +39,37 @@
 
 <div class="page-header">
   <h2 class="page-title">{{ page_title("planning") }}</h2>
-  <p>Load work — yours, a few colleagues', or the whole team — let AI group &amp; check conflicts, then start now or schedule a run.</p>
+  <p>Tải việc của bạn, vài đồng nghiệp hoặc cả team; để AI nhóm và kiểm tra xung đột, rồi chạy ngay hoặc hẹn giờ.</p>
 </div>
 
-{% if started %}<div class="flash flash-ok">▶️ Started {{ started }} item(s) — now in the pipeline.</div>{% endif %}
-{% if scheduled_n %}<div class="flash flash-info">🕒 Scheduled {{ scheduled_n }} item(s) to run at the chosen time.</div>{% endif %}
+{% if started %}<div class="flash flash-ok">▶️ Đã bắt đầu {{ started }} item — đang trong pipeline.</div>{% endif %}
+{% if scheduled_n %}<div class="flash flash-info">🕒 Đã hẹn {{ scheduled_n }} item chạy vào thời điểm đã chọn.</div>{% endif %}
 
 <!-- ── Filter / load ── -->
 <div class="card">
-  <div class="card-header"><h3>🔎 Filter</h3></div>
+  <div class="card-header"><h3>🔎 Bộ lọc</h3></div>
   <form method="get" action="/dashboard/planning">
     <div class="pf-toolbar">
       <div class="pf-field" style="flex:1; min-width:240px">
-        <span>Assignee <span class="dim" style="font-weight:400">— để trống = tất cả mọi người</span></span>
+        <span>Người được giao <span class="dim" style="font-weight:400">— để trống = cả team</span></span>
         <input class="pf-input" name="assignee" value="{{ assignee }}"
-               placeholder="để trống = cả team · nhiều người: a@x.com, b@x.com"/>
+               placeholder="vd: a@x.com, b@x.com"/>
       </div>
       <div class="pf-field" style="min-width:150px">
         <span>State</span>
         <select class="pf-input" name="state">
-          <option value="all" {% if state_filter=='all' %}selected{% endif %}>All states</option>
+          <option value="all" {% if state_filter=='all' %}selected{% endif %}>Mọi state</option>
           {% for s in states %}<option value="{{ s }}" {% if state_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
         </select>
       </div>
       <div class="pf-field" style="min-width:150px">
-        <span>Work item type</span>
+        <span>Loại work item</span>
         <select class="pf-input" name="type">
-          <option value="all" {% if type_filter=='all' %}selected{% endif %}>All types</option>
+          <option value="all" {% if type_filter=='all' %}selected{% endif %}>Mọi loại</option>
           {% for t in wtypes %}<option value="{{ t }}" {% if type_filter==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
         </select>
       </div>
-      <button class="btn-primary" type="submit">Load</button>
+      <button class="btn-primary" type="submit">Tải</button>
     </div>
   </form>
 </div>
@@ -82,16 +82,16 @@
   <div class="card">
     <div class="card-header">
       <h3>📋 Work items</h3>
-      {% if loaded %}<span class="dim" style="font-size:12.5px">{{ loaded|length }} loaded ·
-        <span class="sel-count" id="selcount">0</span> selected</span>{% endif %}
+      {% if loaded %}<span class="dim" style="font-size:12.5px">đã tải {{ loaded|length }} ·
+        đã chọn <span class="sel-count" id="selcount">0</span></span>{% endif %}
     </div>
     {% if loaded %}
     <div class="card-body">
       <table>
         <thead><tr>
-          <th style="width:40px"><input class="cell-chk" type="checkbox"
+          <th style="width:40px"><input class="cell-chk" type="checkbox" aria-label="Chọn tất cả"
             onclick="document.querySelectorAll('.wbchk').forEach(c=>c.checked=this.checked);_sel()"></th>
-          <th>Item</th><th style="width:160px">Assignee</th><th style="width:120px">Type</th><th style="width:150px">State</th><th style="width:120px">In pipeline</th>
+          <th>Item</th><th style="width:160px">Người được giao</th><th style="width:120px">Loại</th><th style="width:150px">State</th><th style="width:120px">Trong pipeline</th>
         </tr></thead>
         <tbody>
           {% for it in loaded %}
@@ -106,7 +106,7 @@
             <td class="muted">{{ it.state }}</td>
             <td>
               {% set intag = it.tags | map('lower') | select('in', trigger_tags) | list %}
-              {% if intag %}<span class="chip chip-accent">⚑ queued</span>{% else %}<span class="dim">—</span>{% endif %}
+              {% if intag %}<span class="chip chip-accent">⚑ đang chờ chạy</span>{% else %}<span class="dim">—</span>{% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -114,19 +114,20 @@
       </table>
     </div>
     <div class="actionbar">
-      <button class="btn-ghost" type="submit" formaction="/dashboard/planning/analyze">🔬 Analyze &amp; group</button>
+      <button class="btn-ghost" type="submit" formaction="/dashboard/planning/analyze">🔬 Phân tích &amp; nhóm</button>
       <span style="flex:1"></span>
       <div class="seg">
-        <label id="lbl-now" class="on"><input type="radio" name="mode" value="now" checked onchange="_mode()"> Start now</label>
-        <label id="lbl-sch"><input type="radio" name="mode" value="schedule" onchange="_mode()"> Schedule</label>
+        <label id="lbl-now" class="on"><input type="radio" name="mode" value="now" checked onchange="_mode()"> Chạy ngay</label>
+        <label id="lbl-sch"><input type="radio" name="mode" value="schedule" onchange="_mode()"> Hẹn giờ</label>
       </div>
-      <input class="pf-input" id="whenat" type="datetime-local" name="when_at" value="{{ default_when }}" disabled/>
-      <button class="btn-go" type="submit" formaction="/dashboard/planning/start">▶ Start</button>
+      <input class="pf-input" id="whenat" type="datetime-local" name="when_at" value="{{ default_when }}" disabled aria-label="Thời điểm chạy" style="min-width:200px"/>
+      <button class="btn-go" type="submit" formaction="/dashboard/planning/start">▶ Bắt đầu</button>
     </div>
     {% else %}
     <div class="empty-state">
-      Không có work item nào cho {% if assignee %}<b>{{ assignee }}</b>{% else %}<b>toàn bộ team</b>{% endif %}{% if state_filter!='all' %} · state “{{ state_filter }}”{% endif %}{% if type_filter!='all' %} · type “{{ type_filter }}”{% endif %}.
-      {% if assignee %}<div class="dim" style="margin-top:6px">Xoá trống ô Assignee rồi bấm <b>Load</b> để xem việc của mọi người.</div>{% endif %}
+      Không có work item nào cho {% if assignee %}<b>{{ assignee }}</b>{% else %}<b>cả team</b>{% endif %}{% if state_filter!='all' %} · state “{{ state_filter }}”{% endif %}{% if type_filter!='all' %} · type “{{ type_filter }}”{% endif %}.
+      {% if assignee %}<div class="dim" style="margin-top:6px">Xoá trống ô Người được giao rồi bấm <b>Tải</b> để xem việc của cả team.</div>
+      {% else %}<div class="dim" style="margin-top:6px">Đổi state / loại ở bộ lọc phía trên, hoặc xem toàn bộ việc trên <a class="table-link" href="/dashboard/board">Board</a>.</div>{% endif %}
     </div>
     {% endif %}
   </div>
@@ -151,37 +152,37 @@
 <!-- ── Analysis ── -->
 {% if analysis %}
 <div class="card">
-  <div class="card-header"><h3>🔬 Analysis — {{ analysis.items|length }} selected</h3></div>
+  <div class="card-header"><h3>🔬 Kết quả phân tích — {{ analysis.items|length }} item đã chọn</h3></div>
   <div class="card-body">
     {% for chain in analysis.groups.serial %}
-      <div class="grp-line"><span class="k">Serial</span>
+      <div class="grp-line"><span class="k">Tuần tự</span>
         {% for id in chain %}{% if not loop.first %} <span class="dim">→</span> {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}
-        <span class="dim">— Predecessor, run in order</span></div>
+        <span class="dim">— có quan hệ Predecessor, chạy theo thứ tự</span></div>
     {% endfor %}
     {% for cl in analysis.groups.conflicts %}
-      <div class="grp-line"><span class="k">Conflict</span>
+      <div class="grp-line"><span class="k">Xung đột</span>
         {% for id in cl %}{% if not loop.first %} <span class="dim">~</span> {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}
-        <span class="dim">— Related, don't run together</span></div>
+        <span class="dim">— có quan hệ Related, không chạy cùng lúc</span></div>
     {% endfor %}
     {% if analysis.groups.parallel %}
-      <div class="grp-line"><span class="k">Parallel</span>
+      <div class="grp-line"><span class="k">Song song</span>
         {% for id in analysis.groups.parallel %}{% if not loop.first %}, {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}
-        <span class="dim">— independent</span></div>
+        <span class="dim">— độc lập</span></div>
     {% endif %}
-    <div class="grp-line"><span class="k">Wave</span>
-      run now: {% for id in analysis.wave.ready %}{% if not loop.first %}, {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}{% if not analysis.wave.ready %}<span class="dim">none</span>{% endif %}
-      {% if analysis.wave.deferred %}<span class="dim"> · defer:</span> {% for id in analysis.wave.deferred %}<span class="id-col">#{{ id }}</span> {% endfor %}{% endif %}</div>
+    <div class="grp-line"><span class="k">Đợt chạy</span>
+      chạy ngay: {% for id in analysis.wave.ready %}{% if not loop.first %}, {% endif %}<span class="id-col">#{{ id }}</span>{% endfor %}{% if not analysis.wave.ready %}<span class="dim">không có</span>{% endif %}
+      {% if analysis.wave.deferred %}<span class="dim"> · hoãn:</span> {% for id in analysis.wave.deferred %}<span class="id-col">#{{ id }}</span> {% endfor %}{% endif %}</div>
 
     {% if analysis.ai %}
       {% for f in analysis.ai %}
         <div class="ai-card">🤖 <span class="ai-score">{{ f.score }}</span>/100 ·
           <span class="id-col">#{{ f.a }}</span> ↔ <span class="id-col">#{{ f.b }}</span>
-          {% if f.modules %}· <span class="muted">modules:</span> {{ f.modules|join(', ') }}{% endif %}
+          {% if f.modules %}· <span class="muted">module:</span> {{ f.modules|join(', ') }}{% endif %}
           <div class="dim" style="margin-top:3px">{{ f.reason }}</div>
         </div>
       {% endfor %}
     {% else %}
-      <div class="grp-line dim">🤖 No hidden conflicts flagged by AI (or AI analysis is off).</div>
+      <div class="grp-line dim">🤖 AI không phát hiện xung đột ẩn nào (hoặc phân tích AI đang tắt).</div>
     {% endif %}
   </div>
 </div>
@@ -190,7 +191,7 @@
 <!-- ── Scheduled runs ── -->
 {% if scheduled %}
 <div class="card">
-  <div class="card-header"><h3>🕒 Scheduled runs</h3></div>
+  <div class="card-header"><h3>🕒 Lượt chạy đã hẹn giờ</h3></div>
   <div class="card-body">
     {% for run in scheduled %}
     <div class="sched-row">
@@ -202,7 +203,7 @@
         <input type="hidden" name="assignee" value="{{ assignee }}"/>
         <input type="hidden" name="state" value="{{ state_filter }}"/>
         <input type="hidden" name="type" value="{{ type_filter }}"/>
-        <button class="btn-ghost" type="submit">Cancel</button>
+        <button class="btn-ghost" type="submit">Huỷ</button>
       </form>
     </div>
     {% endfor %}

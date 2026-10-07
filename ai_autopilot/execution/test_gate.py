@@ -280,7 +280,7 @@ class TestGate:
             # number allowed — and the reader cannot tell them apart without this.
             self._log.warning("test gate timed out", dir=work_dir, repo=repo, cmd=cmd,
                               timeout=timeout,
-                              hint="raise it for this repo under Quality gates → "
+                              hint="raise it for this repo under 🧪 Cổng chất lượng → "
                                    "test_timeouts, or fix a runner that never exits")
             return TestResult(
                 passed=False, ran=True,

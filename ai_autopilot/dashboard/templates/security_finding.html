@@ -42,17 +42,26 @@
   .md > :first-child { margin-top:0; } .md > :last-child { margin-bottom:0; }
   .md pre { margin:8px 0; padding:10px 12px; border-radius:8px; background:rgba(127,127,127,.12); border:1px solid var(--border); overflow-x:auto; font-family:var(--mono); font-size:12px; }
   .md p { margin:6px 0; } .md blockquote { margin:8px 0; padding:2px 12px; border-left:3px solid var(--text-dim); color:var(--text-dim); }
+  .sf-actions input[type=text] { min-width:0; }
 </style>
 
-<div class="sf-crumb"><a href="/dashboard/security?repo={{ f.repo|urlencode }}">🔐 Security</a> › {{ repo_name }} › finding #{{ f.id }}</div>
+{# Severity / status values stay the data (CSS classes); only the visible word is
+   Vietnamese, with the raw key kept in title="". #}
+{% set SEV_VI = {'critical': 'Nghiêm trọng', 'high': 'Cao', 'medium': 'Trung bình',
+                 'low': 'Thấp', 'info': 'Thông tin'} %}
+{% set STATUS_VI = {'open': 'Đang mở', 'suppressed': 'Đã bỏ qua', 'false_positive': 'Báo nhầm',
+                    'accepted_risk': 'Chấp nhận rủi ro', 'fixed': 'Đã sửa'} %}
+{% set SCOPE_VI = {'full': 'toàn bộ', 'diff': 'diff'} %}
+
+<div class="sf-crumb"><a href="/dashboard/security?repo={{ f.repo|urlencode }}">🔐 Bảo mật</a> › {{ repo_name }} › phát hiện #{{ f.id }}</div>
 <div class="sf-top">
-  <span class="sev {{ f.severity }}">{{ f.severity }}</span>
+  <span class="sev {{ f.severity }}" title="{{ f.severity }}">{{ SEV_VI.get(f.severity, f.severity) }}</span>
   <h2>{{ f.title }}</h2>
-  {% if f.status != 'open' %}<span class="sev info">{{ f.status }}</span>{% endif %}
-  {% if f.verified %}<span class="sev pass" title="PoC verified">verified</span>{% elif f.verified is sameas false %}<span class="sev info">unconfirmed</span>{% endif %}
-  {% if verifying %}<span class="sev info">verifying…</span>{% endif %}
+  {% if f.status != 'open' %}<span class="sev info" title="{{ f.status }}">{{ STATUS_VI.get(f.status, f.status) }}</span>{% endif %}
+  {% if f.verified %}<span class="sev pass" title="Đã dựng PoC tái hiện được">đã kiểm chứng</span>{% elif f.verified is sameas false %}<span class="sev info" title="PoC không tái hiện được">chưa xác nhận</span>{% endif %}
+  {% if verifying %}<span class="sev info">đang kiểm chứng…</span>{% endif %}
   {% if f.kev %}<span class="sev critical" title="CISA Known Exploited Vulnerabilities">KEV</span>{% endif %}
-  {% if f.ado_bug_id %}{% if item_link %}<a class="sf-tag" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener" title="the ADO work item tracking this finding">🐞 Bug #{{ f.ado_bug_id }} ↗</a>{% else %}<span class="sf-tag">🐞 Bug #{{ f.ado_bug_id }}</span>{% endif %}{% endif %}
+  {% if f.ado_bug_id %}{% if item_link %}<a class="sf-tag" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener" title="Work item trên ADO đang theo dõi phát hiện này">🐞 Bug #{{ f.ado_bug_id }} ↗</a>{% else %}<span class="sf-tag">🐞 Bug #{{ f.ado_bug_id }}</span>{% endif %}{% endif %}
 </div>
 
 {% if flash %}<div class="sf-flash {{ 'ok' if flash[0] == 'green' else ('warn' if flash[0] == 'amber' else 'bad') }}">{{ flash[1]|safe }}</div>{% endif %}
@@ -60,25 +69,25 @@
 <div class="sf-grid">
   <div>
     <div class="sf-card">
-      <div class="sf-hd"><h3>Where &amp; what</h3><span>{{ f.tool or 'ai' }}{% if f.rule_id %} · {{ f.rule_id }}{% endif %}</span></div>
+      <div class="sf-hd"><h3>Ở đâu &amp; là gì</h3><span>{{ f.tool or 'ai' }}{% if f.rule_id %} · {{ f.rule_id }}{% endif %}</span></div>
       <div class="sf-body">
         <dl class="sf-kv">
-          <dt>Location</dt><dd><code>{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}</code></dd>
-          <dt>Classification</dt><dd>
-            {% if f.cwe %}<a class="sf-tag" href="{{ cwe_link }}" target="_blank" rel="noopener" title="open CWE definition">{{ f.cwe }} ↗</a>{% endif %}
+          <dt>Vị trí</dt><dd><code>{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}</code></dd>
+          <dt>Phân loại</dt><dd>
+            {% if f.cwe %}<a class="sf-tag" href="{{ cwe_link }}" target="_blank" rel="noopener" title="Mở định nghĩa CWE">{{ f.cwe }} ↗</a>{% endif %}
             {% if f.owasp %}<a class="sf-tag" href="{{ owasp_link }}" target="_blank" rel="noopener">{{ f.owasp }} ↗</a>{% endif %}
-            {% if not f.cwe and not f.owasp %}<span class="sf-tag">unclassified</span>{% endif %}
+            {% if not f.cwe and not f.owasp %}<span class="sf-tag">chưa phân loại</span>{% endif %}
           </dd>
-          <dt>Confidence</dt><dd>{{ f.confidence or '—' }}{% if f.verified %} · <b>PoC verified</b>{% elif f.verified is sameas false %} · could not reproduce{% endif %}</dd>
-          {% if f.cve %}<dt>Threat intel</dt><dd>
+          <dt>Độ tin cậy</dt><dd>{{ f.confidence or '—' }}{% if f.verified %} · <b>PoC đã tái hiện</b>{% elif f.verified is sameas false %} · không tái hiện được{% endif %}</dd>
+          {% if f.cve %}<dt>Tình báo mối đe doạ</dt><dd>
             <a class="sf-tag" href="https://nvd.nist.gov/vuln/detail/{{ f.cve }}" target="_blank" rel="noopener">{{ f.cve }} ↗</a>
-            {% if f.kev %}<span class="sf-tag" style="background:var(--red,#c0392b);color:#fff" title="CISA Known Exploited Vulnerabilities">KEV{% if f.kev_due %} · due {{ f.kev_due }}{% endif %}</span>{% endif %}
-            {% if f.kev_ransomware %}<span class="sf-tag">ransomware use</span>{% endif %}
-            {% if f.epss is not none %}<span class="sf-tag" title="EPSS — probability of exploitation within 30 days">EPSS {{ '%.2f'|format(f.epss) }}{% if f.epss_percentile is not none %} · top {{ '%.0f'|format((1 - f.epss_percentile) * 100) }}%{% endif %}</span>{% endif %}
+            {% if f.kev %}<span class="sf-tag" style="background:var(--red,#c0392b);color:#fff" title="CISA Known Exploited Vulnerabilities">KEV{% if f.kev_due %} · hạn {{ f.kev_due }}{% endif %}</span>{% endif %}
+            {% if f.kev_ransomware %}<span class="sf-tag">ransomware đã khai thác</span>{% endif %}
+            {% if f.epss is not none %}<span class="sf-tag" title="EPSS — xác suất bị khai thác trong 30 ngày tới">EPSS {{ '%.2f'|format(f.epss) }}{% if f.epss_percentile is not none %} · top {{ '%.0f'|format((1 - f.epss_percentile) * 100) }}%{% endif %}</span>{% endif %}
           </dd>{% endif %}
           <dt>Repository</dt><dd><code>{{ f.repo }}</code></dd>
-          <dt>Fingerprint</dt><dd><code>{{ f.fingerprint }}</code> <small style="color:var(--text-dim)">— stable across runs; use in <code>.autopilot/security-suppressions.yaml</code></small></dd>
-          {% if f.agent %}<dt>Found by</dt><dd>{{ f.agent }}</dd>{% endif %}
+          <dt>Fingerprint</dt><dd><code>{{ f.fingerprint }}</code> <small style="color:var(--text-dim)">— không đổi giữa các lượt quét; dùng trong <code>.autopilot/security-suppressions.yaml</code></small></dd>
+          {% if f.agent %}<dt>Phát hiện bởi</dt><dd>{{ f.agent }}</dd>{% endif %}
         </dl>
         {% if f.detail %}<p style="margin:12px 0 8px">{{ f.detail }}</p>{% endif %}
         {% if f.snippet %}<pre class="sf-snip">{{ f.snippet }}</pre>{% endif %}
@@ -87,22 +96,22 @@
 
     {% if poc_html %}
     <div class="sf-card">
-      <div class="sf-hd"><h3>🧪 Proof of concept</h3><span>{{ 'reproduced' if f.verified else 'not reproduced' }}</span></div>
+      <div class="sf-hd"><h3>🧪 Proof of concept</h3><span>{{ 'đã tái hiện' if f.verified else 'không tái hiện được' }}</span></div>
       <div class="sf-body md">{{ poc_html|safe }}</div>
     </div>
     {% endif %}
 
     <div class="sf-card">
-      <div class="sf-hd"><h3>History</h3><span>seen {{ f.times_seen }}×</span></div>
+      <div class="sf-hd"><h3>Lịch sử</h3><span>đã gặp {{ f.times_seen }}×</span></div>
       <div class="sf-body">
         <table class="sf-hist">
-          <tr><td>first seen</td><td>{{ f.first_seen.strftime('%Y-%m-%d %H:%M') if f.first_seen else '' }}</td></tr>
-          <tr><td>last seen</td><td>{{ f.last_seen.strftime('%Y-%m-%d %H:%M') if f.last_seen else '' }}</td></tr>
-          {% if f.fixed_at %}<tr><td>fixed</td><td>{{ f.fixed_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>{% endif %}
-          {% if f.suppress_reason %}<tr><td>{{ f.status }}</td><td>{{ f.suppress_reason }}{% if f.suppressed_by %} — {{ f.suppressed_by }}{% endif %}{% if f.suppress_until %} · until {{ f.suppress_until.strftime('%Y-%m-%d') }}{% endif %}</td></tr>{% endif %}
+          <tr><td>gặp lần đầu</td><td>{{ f.first_seen.strftime('%Y-%m-%d %H:%M') if f.first_seen else '' }}</td></tr>
+          <tr><td>gặp gần nhất</td><td>{{ f.last_seen.strftime('%Y-%m-%d %H:%M') if f.last_seen else '' }}</td></tr>
+          {% if f.fixed_at %}<tr><td>đã sửa</td><td>{{ f.fixed_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>{% endif %}
+          {% if f.suppress_reason %}<tr><td title="{{ f.status }}">{{ STATUS_VI.get(f.status, f.status) }}</td><td>{{ f.suppress_reason }}{% if f.suppressed_by %} — {{ f.suppressed_by }}{% endif %}{% if f.suppress_until %} · đến {{ f.suppress_until.strftime('%Y-%m-%d') }}{% endif %}</td></tr>{% endif %}
           {% if f.ado_bug_id %}<tr><td>ADO</td><td>{% if item_link %}<a class="table-link" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener">Bug #{{ f.ado_bug_id }}</a>{% else %}Bug #{{ f.ado_bug_id }}{% endif %}</td></tr>{% endif %}
           {% for s in seen_in %}
-          <tr><td><a class="table-link" href="/dashboard/security/scans/{{ s.id }}">scan #{{ s.id }}</a></td><td>{{ s.started_at.strftime('%Y-%m-%d %H:%M') if s.started_at else '' }} · {{ s.trigger }} · {{ s.scope }} · AI {{ s.ai_mode }}{% if s.report_id %} · <a class="table-link" href="/dashboard/reports/{{ s.report_id }}">report</a>{% endif %}</td></tr>
+          <tr><td><a class="table-link" href="/dashboard/security/scans/{{ s.id }}">lượt quét #{{ s.id }}</a></td><td>{{ s.started_at.strftime('%Y-%m-%d %H:%M') if s.started_at else '' }} · {{ s.trigger }} · {{ SCOPE_VI.get(s.scope, s.scope) }} · AI {{ s.ai_mode }}{% if s.report_id %} · <a class="table-link" href="/dashboard/reports/{{ s.report_id }}">báo cáo</a>{% endif %}</td></tr>
           {% endfor %}
         </table>
       </div>
@@ -111,55 +120,55 @@
 
   <div>
     <div class="sf-card">
-      <div class="sf-hd"><h3>Decide</h3></div>
+      <div class="sf-hd"><h3>Quyết định</h3></div>
       <div class="sf-body sf-actions">
         {% if f.status == 'open' %}
         {% if can_verify and not verifying %}
         <form method="post" action="/dashboard/security/{{ f.id }}/verify">
-          <b>🧪 Verify with a PoC</b>
-          <small>The model builds and runs the smallest proof in a throwaway git worktree — nothing is committed. Confirmed → confidence <b>high</b>; not reproduced → badged <i>unconfirmed</i> with the reason.</small>
-          <div class="row"><button class="btn-save" type="submit">{{ 'Re-verify' if f.verified is not none else 'Verify' }}</button></div>
+          <b>🧪 Kiểm chứng bằng PoC</b>
+          <small>Model dựng và chạy bằng chứng nhỏ nhất trong một git worktree dùng xong bỏ — không commit gì. Tái hiện được → độ tin cậy <b>high</b>; không tái hiện → gắn nhãn <i>chưa xác nhận</i> kèm lý do.</small>
+          <div class="row"><button class="btn-save" type="submit">{{ 'Kiểm chứng lại' if f.verified is not none else 'Kiểm chứng' }}</button></div>
         </form>
         {% endif %}
         {% if f.ado_bug_id %}
         {# Already tracked: say so where the decision is made — the File Bug form hides
            itself once a Bug exists, and an empty spot read as "no Bug was filed". #}
         <div>
-          <b>🐞 Tracked on ADO</b>
-          <small>This finding is Bug {% if item_link %}<a class="table-link" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener">#{{ f.ado_bug_id }} ↗</a>{% else %}#{{ f.ado_bug_id }}{% endif %}. One Bug per fingerprint — a later full scan that stops seeing it comments "no longer detected" there; closing it stays a person's call.</small>
+          <b>🐞 Đang theo dõi trên ADO</b>
+          <small>Phát hiện này là Bug {% if item_link %}<a class="table-link" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener">#{{ f.ado_bug_id }} ↗</a>{% else %}#{{ f.ado_bug_id }}{% endif %}. Mỗi fingerprint một Bug — lượt quét toàn bộ sau này không còn thấy nó sẽ comment "no longer detected" lên Bug; đóng Bug vẫn là việc của người.</small>
         </div>
         {% elif can_file %}
         <form method="post" action="/dashboard/security/{{ f.id }}/file">
-          <b>🐞 File a Bug on ADO</b>
-          <small>Title <code>[Security][{{ f.severity }}]{{ ('[' ~ f.cwe ~ ']') if f.cwe else '' }} …</code>, tags <code>security, autopilot-security</code>. One Bug per fingerprint; a later scan that stops seeing it comments on the Bug.</small>
-          <div class="row"><button class="btn-save" type="submit">File Bug</button></div>
+          <b>🐞 Tạo Bug trên ADO</b>
+          <small>Tiêu đề <code>[Security][{{ f.severity }}]{{ ('[' ~ f.cwe ~ ']') if f.cwe else '' }} …</code>, tag <code>security, autopilot-security</code>. Mỗi fingerprint một Bug; lượt quét sau không còn thấy nó sẽ comment lên Bug.</small>
+          <div class="row"><button class="btn-save" type="submit">Tạo Bug</button></div>
         </form>
         {% endif %}
         <form method="post" action="/dashboard/security/{{ f.id }}/suppress">
-          <b>🔕 Suppress / accept risk</b>
-          <small>Requires a reason. Written to <code>.autopilot/security-suppressions.yaml</code> in the workspace so the CLI in CI honours it. An expiry brings it back — and the run says so.</small>
-          <input type="text" name="reason" placeholder="reason (required) — e.g. test fixture, tracked in #1234" required>
-          <input type="date" name="until" title="expires (optional)">
-          <div class="row"><button class="btn-save" type="submit">Suppress</button><button class="btn-ghost" type="submit" name="kind" value="false_positive">Mark false positive</button></div>
+          <b>🔕 Bỏ qua / chấp nhận rủi ro</b>
+          <small>Bắt buộc có lý do. Ghi vào <code>.autopilot/security-suppressions.yaml</code> trong workspace để CLI chạy trong CI cũng tuân theo. Hết hạn thì phát hiện quay lại — và lượt quét sẽ báo.</small>
+          <input type="text" name="reason" placeholder="lý do (bắt buộc) — vd. dữ liệu test, theo dõi ở #1234" required>
+          <input type="date" name="until" title="hết hạn (tuỳ chọn)">
+          <div class="row"><button class="btn-save" type="submit">Bỏ qua</button><button class="btn-ghost" type="submit" name="kind" value="false_positive">Đánh dấu báo nhầm</button></div>
         </form>
         {% else %}
         <form method="post" action="/dashboard/security/{{ f.id }}/reopen">
-          <b>↩ Reopen</b>
-          <small>Removes the suppression from the workspace file too.</small>
-          <div class="row"><button class="btn-save" type="submit">Reopen</button></div>
+          <b>↩ Mở lại</b>
+          <small>Đồng thời gỡ mục bỏ qua khỏi file trong workspace.</small>
+          <div class="row"><button class="btn-save" type="submit">Mở lại</button></div>
         </form>
         {% endif %}
       </div>
     </div>
     <div class="sf-card">
-      <div class="sf-hd"><h3>Fix it</h3></div>
+      <div class="sf-hd"><h3>Sửa lỗi</h3></div>
       <div class="sf-body" style="font-size:12.5px">
-        Open a terminal in the repo and ask the agent with the finding attached:
+        Mở terminal trong repo và nhờ agent sửa, kèm phát hiện này:
         <pre class="sf-snip">claude "Fix the {{ f.severity }} security finding {{ f.cwe or f.rule_id }} at {{ f.file }}{% if f.line %}:{{ f.line }}{% endif %} — {{ f.title }}. Keep the change minimal and add a regression test."</pre>
         {% if f.ado_bug_id %}
-        <small style="color:var(--text-dim)">Or add the autopilot's normal tag to Bug #{{ f.ado_bug_id }} and let it pick the fix up — the pre-PR gate re-scans the diff, so the fix is verified on the way in.</small>
+        <small style="color:var(--text-dim)">Hoặc gắn tag thường dùng của autopilot cho Bug #{{ f.ado_bug_id }} để nó tự nhận việc sửa — gate trước PR quét lại diff nên bản sửa được kiểm chứng ngay khi vào.</small>
         {% else %}
-        <small style="color:var(--text-dim)">Or create a Bug above and let the autopilot pick it up with its normal tag — the pre-PR gate re-scans the diff, so the fix is verified on the way in.</small>
+        <small style="color:var(--text-dim)">Hoặc tạo Bug ở trên rồi để autopilot nhận qua tag thường dùng — gate trước PR quét lại diff nên bản sửa được kiểm chứng ngay khi vào.</small>
         {% endif %}
       </div>
     </div>

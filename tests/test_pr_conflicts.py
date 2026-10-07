@@ -315,10 +315,10 @@ def test_conflicts_page_lists_tracked_conflicts(tmp_path):
         assert "!42" in page and "Add filter config" in page and "Plugins/A.cs" in page
         assert "feature/x" in page and "development" in page
         # Default execution_mode is interactive: the button opens a session.
-        assert "🧑‍💻 Resolve" in page and "interactive — opens a Remote-Control session" in page
+        assert "🧑‍💻 Giải xung đột" in page and "interactive — mở phiên Remote Control" in page
         assert 'href="/dashboard/conflicts"' in page             # nav link
         # What a red target does is stated on the page, not only in config.yaml.
-        assert "Target already red" in page and "⏸ escalate" in page
+        assert "Branch đích đã đỏ sẵn" in page and "⏸ chuyển người xử lý" in page
 
 
 # ── test gate vs. a target that was already red ─────────────────────────────

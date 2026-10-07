@@ -68,194 +68,198 @@ class Field:
 # argument through nine hundred lines.
 _BASE_FIELDS: tuple[Field, ...] = (
     # ── Workspace & Repository ──
-    Field("workspace_directory", "Workspace directory", "text", "Workspace & Repository",
+    Field("workspace_directory", "Thư mục workspace", "text", "📁 Workspace & repo",
           "Folder holding the shared .claude (skills/rules/MCP). Claude runs HERE and the agent "
           "picks which repo subfolder to edit. Blank = legacy mode (run inside one repo). "
           "This is the DEFAULT workspace — to run several, use the Workspaces page, which edits "
           "this same field as its first entry."),
-    Field("base_branch", "Base branch", "text", "Workspace & Repository",
-          "Branch new feature branches are cut from."),
-    Field("repo_descriptions", "Repo descriptions", "list", "Workspace & Repository",
+    Field("base_branch", "Branch gốc", "text", "📁 Workspace & repo",
+          "Branch để cắt các feature branch mới."),
+    Field("repo_descriptions", "Mô tả repo", "list", "📁 Workspace & repo",
           "What each repo is, so the agent picks the right one. One 'RepoName = description' per "
           "line, e.g. 'Backend-Fresh = .NET API', 'Dxfac-gitops = deploy manifests, don't edit'."),
     # ── Azure DevOps Connection ──
-    Field("ado_organization", "Organization URL", "text", "Azure DevOps Connection",
-          "e.g. https://dev.azure.com/your-org"),
-    Field("ado_project", "Project (work items)", "text", "Azure DevOps Connection",
+    Field("ado_organization", "URL organization", "text", "🔌 Kết nối Azure DevOps",
+          "vd https://dev.azure.com/your-org"),
+    Field("ado_project", "Project (work item)", "text", "🔌 Kết nối Azure DevOps",
           "The DEFAULT work-item project — where new items are created and where anything "
           "without a project of its own is assumed to live. This page configures the ADO "
           "connection only; a workspace whose work items live in JIRA declares that on the "
           "Workspaces page, per workspace — pull requests stay on this connection either way."),
-    Field("ado_projects", "↳ More projects (work items)", "list", "Azure DevOps Connection",
+    Field("ado_projects", "↳ Thêm project (work item)", "list", "🔌 Kết nối Azure DevOps",
           "Additional work-item projects polled on this SAME connection (one per line). All of "
           "them are covered by a single query, so adding projects costs no extra polling. Use "
           "'Extra workspaces' above to give a project its own folder/repos; without one it uses "
           "the workspace configured here."),
-    Field("code_project", "Code project (repos/PRs)", "text", "Azure DevOps Connection",
+    Field("code_project", "Project chứa code (repo/PR)", "text", "🔌 Kết nối Azure DevOps",
           "Project where the git repos, PRs and build pipelines live, if different from the "
           "work-item project. Blank = same. (Cross-project setup.)"),
-    Field("ado_pat", "Personal Access Token", "password", "Azure DevOps Connection",
-          "Leave blank to keep the current token."),
+    Field("ado_pat", "Personal Access Token (PAT)", "password", "🔌 Kết nối Azure DevOps",
+          "Để trống = giữ token hiện tại."),
     # ── Tags & Trigger ──
-    Field("trigger_tag", "Trigger tag", "text", "Tags & Trigger",
-          "Work items with this tag get processed."),
-    Field("assignee_trigger_tag", "Assignee trigger tag", "text", "Tags & Trigger",
+    Field("trigger_tag", "Tag kích hoạt", "text", "🏷️ Tag & điều kiện nhận việc",
+          "Work item có tag này sẽ được xử lý."),
+    Field("assignee_trigger_tag", "Tag kích hoạt theo người được giao", "text",
+          "🏷️ Tag & điều kiện nhận việc",
           "Also process items with THIS shared tag, but only those assigned to the user below "
           "(e.g. 'ai-autopilot' shared across a team). Blank = off."),
-    Field("assignee_trigger_user", "↳ handled by (assignee)", "text", "Tags & Trigger",
+    Field("assignee_trigger_user", "↳ do ai xử lý (assignee)", "text",
+          "🏷️ Tag & điều kiện nhận việc",
           "Assignee (name/email) this machine claims for the shared tag above. "
           "Blank = use the auto-transition assignee. This is also the OWNER: the account "
           "whose /commands and @mentions this machine obeys by default."),
-    Field("command_users", "↳ others allowed to command", "list", "Tags & Trigger",
+    Field("command_users", "↳ người khác được ra lệnh", "list", "🏷️ Tag & điều kiện nhận việc",
           "Extra accounts (email or full name, one per line) that may issue /commands and "
           "@mentions on a PR — a teammate reviewing your PR can ask for a fix without it "
           "being refused. Does NOT change whose work items get picked up. Owner blank AND "
           "this list empty = anyone may command. Use a full email; a lone first name matches "
           "nobody (see doctor)."),
-    Field("commands_from_anyone", "↳ let ANYONE command", "bool", "Tags & Trigger",
+    Field("commands_from_anyone", "↳ cho BẤT KỲ AI ra lệnh", "bool", "🏷️ Tag & điều kiện nhận việc",
           "Accept /commands and @mentions from every account, without listing them above. "
           "Only opens the command gate — which work items this machine picks up is still "
           "scoped to the owner. Turn off to go back to the roster."),
-    Field("trigger_states", "Trigger states", "stateset", "Tags & Trigger",
-          "ADO states eligible for processing — tick from your board, or add custom ones below."),
-    Field("reprocess_on_reopen", "Reprocess when reopened", "bool", "Tags & Trigger",
+    Field("trigger_states", "State kích hoạt", "stateset", "🏷️ Tag & điều kiện nhận việc",
+          "Các state ADO được phép xử lý — tick từ board, hoặc thêm state riêng bên dưới."),
+    Field("reprocess_on_reopen", "Chạy lại khi bị mở lại", "bool", "🏷️ Tag & điều kiện nhận việc",
           "When a handled item is dragged back to a trigger state, clear its autopilot "
           "tags so it runs again. (Only trigger states the autopilot doesn't set itself.)"),
-    Field("restart_tag", "♻️ Restart tag (force clean re-run)", "text", "Tags & Trigger",
+    Field("restart_tag", "♻️ Tag chạy lại từ đầu", "text", "🏷️ Tag & điều kiện nhận việc",
           "Tag an item with this to WIPE its SDLC progress and reprocess from scratch, "
           "from any state, using your latest comments. Reopen resumes mid-loop; restart "
           "redoes from stage 0. Blank = off."),
-    Field("stage_entry_tag", "▶ Run-now tag (shared fallback)", "text", "Tags & Trigger",
+    Field("stage_entry_tag", "▶ Tag chạy ngay (dùng chung)", "text", "🏷️ Tag & điều kiện nhận việc",
           "Tag an item with this to start the role its CURRENT state names, right where "
           "it stands — the way to run a role whose door is deliberately not in the poll "
           "query. Consumed on pickup. It names no role itself, so on a state NO role "
           "waits in it falls through to the default profile — often the whole pipeline. "
           "To start one named role from any state, give that role its own run-now tag on "
           "the Roles page. Blank = no shared tag (per-role tags still work)."),
-    Field("poll_interval_seconds", "Poll interval (seconds)", "int", "Tags & Trigger"),
+    Field("poll_interval_seconds", "Chu kỳ quét (giây)", "int", "🏷️ Tag & điều kiện nhận việc"),
     # ── Outcomes → tag + state ──
     # The policy table: for each outcome, the ADO tag to add and the ADO state to
     # set. Blank = skip. This is the single source of truth for tagging + state.
-    Field("state_in_progress", "⏳ In progress — ADO state", "stateone", "Outcomes → tag + state",
-          "State when the autopilot starts working an item (no tag)."),
-    Field("review_tag", "🔍 Review — tag", "text", "Outcomes → tag + state",
-          "Tag added when a draft PR opens (awaiting review); item is held."),
-    Field("state_in_review", "🔍 Review — ADO state", "stateone", "Outcomes → tag + state",
-          "State when a draft PR opens (awaiting human review)."),
-    Field("processed_tag", "✅ Done — tag", "text", "Outcomes → tag + state",
-          "Tag added when an item is handled (also used for report / failed unless overridden)."),
-    Field("resolved_state", "✅ Done — ADO state", "stateone", "Outcomes → tag + state",
-          "State when an item is resolved with a PR (Resolved / Closed / Done)."),
-    Field("state_report", "📝 Report — ADO state", "stateone", "Outcomes → tag + state",
-          "State when a plan is commented in report mode (tag = Done tag)."),
-    Field("escalation_tag", "🙋 Needs human — tag", "text", "Outcomes → tag + state",
-          "Tag added when the agent escalates; held items are skipped."),
-    Field("state_needs_human", "🙋 Needs human — ADO state", "stateone", "Outcomes → tag + state",
-          "State when the agent escalates and holds the item for a human."),
-    Field("failed_tag", "⛔ Failed — tag", "text", "Outcomes → tag + state",
-          "Tag added when the autopilot gives up after retries. Blank = use the Done tag."),
-    Field("state_failed", "⛔ Failed — ADO state", "stateone", "Outcomes → tag + state",
-          "State when the autopilot gives up after exhausting retries."),
+    Field("state_in_progress", "⏳ Đang làm — state ADO", "stateone", "🎯 Kết quả → tag + state",
+          "State khi autopilot bắt đầu làm một item (không gắn tag)."),
+    Field("review_tag", "🔍 Chờ review — tag", "text", "🎯 Kết quả → tag + state",
+          "Tag gắn khi mở draft PR (chờ review); item bị giữ lại."),
+    Field("state_in_review", "🔍 Chờ review — state ADO", "stateone", "🎯 Kết quả → tag + state",
+          "State khi mở draft PR (chờ người review)."),
+    Field("processed_tag", "✅ Xong — tag", "text", "🎯 Kết quả → tag + state",
+          "Tag gắn khi item đã xử lý xong (cũng dùng cho report / failed nếu không đặt riêng)."),
+    Field("resolved_state", "✅ Xong — state ADO", "stateone", "🎯 Kết quả → tag + state",
+          "State khi item được resolve kèm PR (Resolved / Closed / Done)."),
+    Field("state_report", "📝 Báo cáo — state ADO", "stateone", "🎯 Kết quả → tag + state",
+          "State khi kế hoạch được comment ở chế độ report (tag = tag Xong)."),
+    Field("escalation_tag", "🙋 Cần người — tag", "text", "🎯 Kết quả → tag + state",
+          "Tag gắn khi agent chuyển cho người; item đang bị giữ sẽ được bỏ qua."),
+    Field("state_needs_human", "🙋 Cần người — state ADO", "stateone", "🎯 Kết quả → tag + state",
+          "State khi agent chuyển cho người và giữ item lại."),
+    Field("failed_tag", "⛔ Thất bại — tag", "text", "🎯 Kết quả → tag + state",
+          "Tag gắn khi autopilot bỏ cuộc sau khi đã thử lại. Để trống = dùng tag Xong."),
+    Field("state_failed", "⛔ Thất bại — state ADO", "stateone", "🎯 Kết quả → tag + state",
+          "State khi autopilot bỏ cuộc sau khi hết lượt thử lại."),
     # ── Board columns ──
-    Field("board_review_state", "Column: Ready for review", "stateset", "Board columns",
+    Field("board_review_state", "Cột: Ready for review", "stateset", "🗂️ Cột trên Board",
           "ADO states that show in a 'Ready for review' board column. Blank = no column. "
           "Use states the autopilot doesn't set. Several are allowed — a column holds a "
           "whole leg of the ladder, not one state."),
     # Listed in board order (review → deploy → testing): the build goes onto the test
     # environment before QC can verify it, and a settings page that lists them in a
     # different order than the board teaches the wrong sequence.
-    Field("board_deploy_state", "Column: Ready for deploy", "stateset", "Board columns",
+    Field("board_deploy_state", "Cột: Ready for deploy", "stateset", "🗂️ Cột trên Board",
           "ADO states that show in a 'Ready for deploy' board column — approved, waiting to "
           "go onto the test environment. Blank = no column. E.g. Ready for Deploy."),
-    Field("board_testing_state", "Column: Ready for testing", "stateset", "Board columns",
+    Field("board_testing_state", "Cột: Ready for testing", "stateset", "🗂️ Cột trên Board",
           "ADO states that show in a 'Ready for testing' board column, right after Ready for "
           "deploy — it is on the test environment and QC can verify it. List every state of "
           "QC's leg here (e.g. Ready for Testing, In Testing, Ready for UAT, In UAT) so they "
           "fold into one column instead of each earning its own. Blank = no column."),
-    Field("done_states", "Done states (→ Done column)", "stateset", "Board columns",
+    Field("done_states", "State coi là Done (→ cột Done)", "stateset", "🗂️ Cột trên Board",
           "ADO states that count as Done on the board (e.g. Ready to Testing, Closed). "
           "Items a human moved to any of these show in the Done column."),
-    Field("board_max_per_column", "Max cards / column", "int", "Board columns",
-          "Show at most this many cards per column, then a 'Load more'. 0 = show all."),
-    Field("board_drop_map", "Drag & drop (column => tag/state)", "list", "Board columns",
+    Field("board_max_per_column", "Số thẻ tối đa / cột", "int", "🗂️ Cột trên Board",
+          "Mỗi cột hiện tối đa bấy nhiêu thẻ, rồi có nút 'Tải thêm'. 0 = hiện hết."),
+    Field("board_drop_map", "Kéo thả (cột => tag/state)", "list", "🗂️ Cột trên Board",
           "Enable dragging cards: one 'Column => value' per line. Value is a tag, or an ADO state "
           "if prefixed with @. E.g. 'In review => autopilot-review', 'Ready for deploy => @Ready for Deploy'. "
           "Empty = cards are not draggable (the board says so rather than pretending). "
           "Who reads which columns, and whose turn each one is, is configured separately at "
           "/dashboard/board-views (Board processes)."),
     # ── 🚚 Delivery (PM view) ──
-    Field("delivery_history_enabled", "Record state history", "bool", "🚚 Delivery (PM view)",
+    Field("delivery_history_enabled", "Ghi lịch sử state", "bool", "🚚 Bàn giao (góc nhìn PM)",
           "Log every work-item state change so the Delivery page can measure lead time, "
           "cycle time and the flow chart. Turning this OFF stops the clock — the history "
           "for that period CANNOT be recovered later."),
-    Field("delivery_history_interval_minutes", "↳ Check every (minutes)", "int",
-          "🚚 Delivery (PM view)",
+    Field("delivery_history_interval_minutes", "↳ Kiểm tra mỗi (phút)", "int",
+          "🚚 Bàn giao (góc nhìn PM)",
           "How often to look for state changes. Two API calls per check regardless of how "
           "many items there are; a cycle where nothing moved writes nothing."),
-    Field("delivery_history_retention_days", "↳ Keep history (days)", "int",
-          "🚚 Delivery (PM view)",
+    Field("delivery_history_retention_days", "↳ Giữ lịch sử (ngày)", "int",
+          "🚚 Bàn giao (góc nhìn PM)",
           "Older transitions are dropped. This also caps how far back any trend on the "
           "page can look. 0 = keep forever."),
-    Field("delivery_window_days", "Default window (days)", "int", "🚚 Delivery (PM view)",
+    Field("delivery_window_days", "Kỳ báo cáo mặc định (ngày)", "int", "🚚 Bàn giao (góc nhìn PM)",
           "Reporting period the Delivery page opens on. Each figure is compared against "
           "the window immediately before it."),
 
 
 
-    Field("delivery_max_items", "Work items read per check", "int", "🚚 Delivery (PM view)",
+    Field("delivery_max_items", "Số work item đọc mỗi lần", "int", "🚚 Bàn giao (góc nhìn PM)",
           "Most-recently-changed first. An item that has not changed cannot have changed "
           "state, so this only bounds cost."),
-    Field("dashboard_public_url", "🔗 Public dashboard URL", "text", "🚚 Delivery (PM view)",
+    Field("dashboard_public_url", "🔗 URL công khai của dashboard", "text",
+          "🚚 Bàn giao (góc nhìn PM)",
           "Where this dashboard is reachable FROM A READER'S BROWSER, e.g. "
           "https://autopilot.example.com. The Teams digest links back to the Delivery "
           "page with it. Blank = no link is offered — a digest is read on a phone, and a "
           "URL built from the bind address (0.0.0.0) resolves for nobody."),
     # ── Auto transitions ──
-    Field("auto_transition_enabled", "Enable auto transitions", "bool", "Auto transitions",
+    Field("auto_transition_enabled", "Bật tự chuyển state", "bool", "🔀 Tự chuyển state",
           "Move the work item when its PR is merged, mark it deployed when a deploy build "
           "succeeds, and roll a parent forward as its children progress. Which state each "
           "step sets is configured PER WORK-ITEM TYPE on the State flow page."),
-    Field("auto_transition_assignee", "Only for assignee (auto transitions)", "text", "Auto transitions",
+    Field("auto_transition_assignee", "Chỉ áp dụng cho assignee", "text", "🔀 Tự chuyển state",
           "Restrict auto transitions to work items assigned to this person (name/email substring). "
           "Blank = any assignee. Does not affect normal task processing."),
-    Field("on_publish_state", "On PR published (draft → ready) → state (fallback)",
-          "stateone", "Auto transitions",
+    Field("on_publish_state", "Khi PR publish (draft → ready) → state (dự phòng)",
+          "stateone", "🔀 Tự chuyển state",
           "State to set when the author takes a PR OUT of draft — the moment somebody is "
           "actually being asked to look. Without it the review stage has to stand for "
           "both, so an item reads 'ready for review' while its PRs are still drafts. "
           "Blank = the publish stage does nothing. Per type at /dashboard/flow."),
-    Field("on_merge_state", "On PR merged → state (fallback)", "stateone", "Auto transitions",
+    Field("on_merge_state", "Khi PR merge → state (dự phòng)", "stateone", "🔀 Tự chuyển state",
           "State to set when a PR the autopilot opened is merged (also marks it done). Used only "
           "for types NO flow covers — an ADO state belongs to a type, so one value here is "
           "rejected for every type that lacks it. Configure per type at /dashboard/flow."),
-    Field("parent_rollup_map", "Parent roll-up (child = parent, fallback)", "list",
-          "Auto transitions",
+    Field("parent_rollup_map", "Cha theo con (con = cha, dự phòng)", "list",
+          "🔀 Tự chuyển state",
           "One 'Child state = Parent state' per line, in progression order, e.g. "
           "'Ready to Testing = Implement Done'. The parent follows its least-advanced child, and "
           "is HELD unless every child state has a line — so a one-line map never fires. Per-type "
           "roll-up lives on the parent's flow at /dashboard/flow."),
-    Field("on_deploy_state", "On deploy success → state (fallback)", "stateone",
-          "Auto transitions",
+    Field("on_deploy_state", "Khi deploy thành công → state (dự phòng)", "stateone",
+          "🔀 Tự chuyển state",
           "When a deploy pipeline build succeeds, move items sitting in their merge state to "
           "this state. Blank = deploy monitor off. Per-type values at /dashboard/flow."),
-    Field("deploy_pipeline_id", "Deploy pipeline id", "int", "Auto transitions",
-          "ADO build definition id of the deploy pipeline. 0 = watch any successful build on the branch."),
-    Field("deploy_branch", "Deploy branch", "text", "Auto transitions",
-          "Branch the deploy builds run on (blank = base branch)."),
+    Field("deploy_pipeline_id", "ID pipeline deploy", "int", "🔀 Tự chuyển state",
+          "ID build definition ADO của pipeline deploy. 0 = theo dõi mọi build thành công trên "
+          "branch."),
+    Field("deploy_branch", "Branch deploy", "text", "🔀 Tự chuyển state",
+          "Branch mà build deploy chạy trên đó (trống = branch gốc)."),
     # ── Execution & Autonomy ──
-    Field("execution_mode", "Execution mode", "select", "Execution & Autonomy",
-          "interactive = launch a Remote-Control Claude session per task you can /rc into and steer; "
-          "headless = autonomous SDK run (no human attach).",
+    Field("execution_mode", "Chế độ chạy", "select", "⚙️ Thực thi & mức tự chủ",
+          "interactive = mở một phiên Claude Remote-Control cho mỗi task, bạn có thể /rc vào để "
+          "lái; headless = chạy SDK tự động (không ai gắn vào).",
           ("interactive", "headless")),
-    Field("interactive_close_on", "↳ Close the console when", "select", "Execution & Autonomy",
+    Field("interactive_close_on", "↳ Đóng console khi", "select", "⚙️ Thực thi & mức tự chủ",
           "The CLI is a REPL: it writes its result and then sits idle forever, so nothing "
           "closes the window on its own. pr_closed = keep it (and its scratch worktree) alive "
           "while the PR is open, so review feedback is worked in the SAME session, then close "
           "on merge/abandon. result = close as soon as the task finishes. never = leave every "
           "console open (they pile up).",
           ("pr_closed", "result", "never")),
-    Field("interactive_idle_timeout_minutes", "↳ Give up on a silent session after (minutes)",
-          "int", "Execution & Autonomy",
+    Field("interactive_idle_timeout_minutes", "↳ Bỏ phiên im lặng sau (phút)",
+          "int", "⚙️ Thực thi & mức tự chủ",
           "A live session that has produced nothing for this long is closed and its item "
           "released back to the board with the reason. Without it a wedged session (an MCP "
           "call that never returns, a console that died) holds the item forever — the "
@@ -263,236 +267,247 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "SILENCE, not runtime, so long work is safe; keep it generous if you steer "
           "sessions by hand. The scratch worktree is kept, so pressing ▶ Run resumes. "
           "0 = no ceiling (not recommended)."),
-    Field("interactive_resume_on_rework", "↳ Resume the session on rework", "bool",
-          "Execution & Autonomy",
+    Field("interactive_resume_on_rework", "↳ Tiếp tục phiên cũ khi làm lại", "bool",
+          "⚙️ Thực thi & mức tự chủ",
           "PR feedback runs in that session's own worktree and RESUMES its conversation, "
           "instead of a fresh worktree and a fresh read of the codebase. Claude Code keys "
           "transcripts by folder, so running anywhere else throws the context away."),
-    Field("interactive_bypass_permissions", "↳ ⚠️ Skip permission prompts (bypassPermissions)",
-          "bool", "Execution & Autonomy",
+    Field("interactive_bypass_permissions", "↳ ⚠️ Bỏ qua hỏi quyền (bypassPermissions)",
+          "bool", "⚙️ Thực thi & mức tự chủ",
           "The session never stops to ask before a Bash/MCP call, so it proceeds while "
           "nobody is attached. The cost: its brief is built from work-item text, so a "
           "prompt injection in a ticket runs any command on THIS machine, unasked. Off = "
           "the session uses the Permission mode like any run, and waits for whoever "
           "attaches."),
-    Field("autonomy_level", "Autonomy level", "select", "Execution & Autonomy",
-          "report = comment only, assisted = draft PR, unattended = auto PR.",
+    Field("autonomy_level", "Mức tự chủ", "select", "⚙️ Thực thi & mức tự chủ",
+          "report = chỉ comment, assisted = draft PR, unattended = tự mở PR.",
           ("report", "assisted", "unattended")),
-    Field("claude_model", "Claude model", "select", "Execution & Autonomy",
+    Field("claude_model", "Model Claude", "select", "⚙️ Thực thi & mức tự chủ",
           "Model the CLI runs each task with. Blank = the bundled CLI's own default — NOT "
           "guaranteed to stay the same across CLI updates. Pick one explicitly for "
           "predictable cost/speed/quality.",
           ("", "sonnet", "opus", "fable", "haiku")),
-    Field("use_worktrees", "Isolate tasks (git worktree)", "bool", "Execution & Autonomy",
+    Field("use_worktrees", "Tách riêng từng task (git worktree)", "bool",
+          "⚙️ Thực thi & mức tự chủ",
           "Run each task in its own git worktree so concurrent tasks never touch your main "
           "checkout. Turn off to run in-place in the shared workspace."),
-    Field("max_concurrent", "Max concurrent", "int", "Execution & Autonomy",
-          "Restart required to take effect."),
-    Field("task_timeout_minutes", "Task timeout (minutes)", "int", "Execution & Autonomy"),
-    Field("claude_effort_task", "⚡ Effort — task runs", "select", "Execution & Autonomy",
+    Field("max_concurrent", "Số task chạy song song", "int", "⚙️ Thực thi & mức tự chủ",
+          "Cần khởi động lại mới có hiệu lực."),
+    Field("task_timeout_minutes", "Thời gian tối đa / task (phút)", "int",
+          "⚙️ Thực thi & mức tự chủ"),
+    Field("claude_effort_task", "⚡ Effort — chạy task", "select", "⚙️ Thực thi & mức tự chủ",
           "How hard the model reasons on real code work. Blank = the model's default. "
           "Raise to xhigh/max for demanding refactors; only LOWER it after checking quality "
           "on your own work, since this is the path that writes code.",
           ("", "low", "medium", "high", "xhigh", "max")),
-    Field("claude_effort_agentic", "⚡ Effort — agentic chat", "select", "Execution & Autonomy",
+    Field("claude_effort_agentic", "⚡ Effort — chat agentic", "select", "⚙️ Thực thi & mức tự chủ",
           "The Teams agent turn: real ADO lookups, but a chat reply rather than an edit. "
           "medium keeps quality at a fraction of the latency someone is waiting through.",
           ("", "low", "medium", "high", "xhigh", "max")),
-    Field("claude_effort_chat", "⚡ Effort — short chat calls", "select", "Execution & Autonomy",
+    Field("claude_effort_chat", "⚡ Effort — chat ngắn", "select", "⚙️ Thực thi & mức tự chủ",
           "Classify an intent, reword a looked-up list, write one persona message, pick a "
           "command for an @mention. These choose or rephrase — they never reason about code — "
           "so low is nearly free of risk and noticeably faster.",
           ("", "low", "medium", "high", "xhigh", "max")),
-    Field("use_specialized_agents", "🧩 Route commands to specialist agents", "bool",
-          "Execution & Autonomy",
+    Field("use_specialized_agents", "🧩 Chuyển lệnh cho agent chuyên trách", "bool",
+          "⚙️ Thực thi & mức tự chủ",
           "Send /spec /qc /security /review /test /impact to their purpose-built subagents "
           "(.claude/agents) for expert results. Degrades to the generic skill if missing."),
-    Field("reuse_claude_session", "🧠 Reuse Claude session / branch", "bool",
-          "Execution & Autonomy",
+    Field("reuse_claude_session", "🧠 Dùng lại phiên Claude theo branch", "bool",
+          "⚙️ Thực thi & mức tự chủ",
           "Resume the agent's conversation per branch across revise rounds — follow-ups keep "
           "prior context (cheaper, more consistent). Falls back to fresh if resume fails."),
-    Field("claude_session_ttl_hours", "↳ Session reuse TTL (hours)", "int",
-          "Execution & Autonomy",
-          "Only resume a session this fresh; older → start clean. Default 24."),
-    Field("dry_run", "Dry run", "bool", "Execution & Autonomy",
-          "Log only — never execute or write to ADO."),
+    Field("claude_session_ttl_hours", "↳ Thời hạn dùng lại phiên (giờ)", "int",
+          "⚙️ Thực thi & mức tự chủ",
+          "Chỉ dùng lại phiên còn mới hơn mức này; cũ hơn → bắt đầu mới. Mặc định 24."),
+    Field("dry_run", "Chạy thử (dry run)", "bool", "⚙️ Thực thi & mức tự chủ",
+          "Chỉ ghi log — không bao giờ chạy hay ghi lên ADO."),
     # ── 🛡️ Guardrails & policy ──
-    Field("policy_protected_paths", "🛡️ Protected paths (never modify)", "list",
-          "🛡️ Guardrails & policy",
+    Field("policy_protected_paths", "🛡️ Đường dẫn được bảo vệ (không bao giờ sửa)", "list",
+          "🛡️ Rào chắn & chính sách",
           "Glob patterns the autopilot must NEVER change — one per line, e.g. 'k8s/*', "
           "'.github/*', '*.env', 'Dockerfile'. A run touching any of these is blocked "
           "before a PR opens. Empty = off."),
-    Field("policy_max_files_changed", "🛡️ Max files changed / run", "int",
-          "🛡️ Guardrails & policy",
+    Field("policy_max_files_changed", "🛡️ Số file sửa tối đa / lần chạy", "int",
+          "🛡️ Rào chắn & chính sách",
           "Blast-radius cap: block a run that changes more files than this (a 'small "
           "fix' rewriting half the repo needs a human). 0 = off."),
     # ── 🧪 Quality gates ──
-    Field("auto_review_enabled", "Auto security review", "bool", "🧪 Quality gates"),
-    Field("learning_loop_enabled", "🧠 Learning loop", "bool", "🧪 Quality gates",
+    Field("auto_review_enabled", "Tự review bảo mật", "bool", "🧪 Cổng chất lượng"),
+    Field("learning_loop_enabled", "🧠 Vòng học hỏi", "bool", "🧪 Cổng chất lượng",
           "Remember what auto-review flagged per repo and inject recent lessons into the "
           "next run's brief, so the agent stops repeating them. Off = brief unchanged. "
           "See what it has learned on the Learning page."),
-    Field("lessons_max_injected", "↳ Lessons injected / run", "int", "🧪 Quality gates",
-          "How many of the most recent lessons go into a brief. Default 8. "
-          "0 = keep recording but stop injecting."),
-    Field("test_gate_enabled", "🧪 Auto-test-gate", "bool", "🧪 Quality gates",
+    Field("lessons_max_injected", "↳ Số bài học đưa vào / lần chạy", "int", "🧪 Cổng chất lượng",
+          "Bao nhiêu bài học gần nhất được đưa vào brief. Mặc định 8. 0 = vẫn ghi nhận nhưng "
+          "không đưa vào."),
+    Field("test_gate_enabled", "🧪 Cổng test tự động", "bool", "🧪 Cổng chất lượng",
           "Run the repo's test suite in the worktree before opening a PR; a red run blocks "
           "the PR and lowers the run score. Off = no test run."),
-    Field("test_gate_block_when_not_run", "↳ Block the PR when tests could not run",
-          "bool", "🧪 Quality gates",
+    Field("test_gate_block_when_not_run", "↳ Chặn PR khi không chạy được test",
+          "bool", "🧪 Cổng chất lượng",
           "A runner that cannot start (missing tool, environment not ready) says nothing "
           "about the change. Off = the PR goes through, marked 'tests not run'. On = it is "
           "blocked like a red run."),
-    Field("test_commands", "↳ Test command per repo", "list", "🧪 Quality gates",
+    Field("test_commands", "↳ Lệnh test theo từng repo", "list", "🧪 Cổng chất lượng",
           "One line per repo, <code>Repo = command</code>. A project with more than one "
           "stack cannot be served by a single command — set dotnet test and every "
           "frontend change is checked by the wrong runner, set npm test and every "
           "backend one is. A repo with no line here falls back to the command below, "
           "then to auto-detection.",
           placeholder="Backend-Fresh = dotnet test --nologo"),
-    Field("test_timeouts", "↳ Test timeout per repo (seconds)", "list", "🧪 Quality gates",
+    Field("test_timeouts", "↳ Timeout test theo từng repo (giây)", "list", "🧪 Cổng chất lượng",
           "One line per repo, <code>Repo = seconds</code>. A .NET solution restoring and "
           "building from a fresh worktree takes several times what a frontend unit run "
           "does; one number for both means either the backend times out or the frontend "
           "hangs for a quarter of an hour before anyone is told. A timeout BLOCKS the PR.",
           placeholder="Backend-Fresh = 1800"),
-    Field("test_command", "↳ Test command (fallback for every repo)", "text", "🧪 Quality gates",
+    Field("test_command", "↳ Lệnh test (dự phòng cho mọi repo)", "text", "🧪 Cổng chất lượng",
           "Command to run the tests (in the repo worktree). Blank = auto-detect "
           "(pytest / dotnet test / npm test); no runner found = skipped, never blocks."),
-    Field("test_timeout_seconds", "↳ Test timeout (seconds)", "int", "🧪 Quality gates",
-          "Kill the test run after this long and treat it as failed. Default 600."),
-    Field("test_install_dependencies", "↳ Install Node dependencies first", "bool",
-          "🧪 Quality gates",
+    Field("test_timeout_seconds", "↳ Timeout test (giây)", "int", "🧪 Cổng chất lượng",
+          "Dừng test sau khoảng này và coi là thất bại. Mặc định 600."),
+    Field("test_install_dependencies", "↳ Cài dependency Node trước", "bool",
+          "🧪 Cổng chất lượng",
           "A fresh worktree has no node_modules, so a detected `npm test` cannot find `ng` "
           "/ `jest`. On = `npm ci` (then `npm install` if the lock is out of sync) before the "
           "suite, ~2 min on a large monorepo. Cannot install = skipped with the reason — "
           "a machine that cannot run tests is never reported as failing tests."),
-    Field("pr_scoring_enabled", "Score each run (0–100)", "bool", "🧪 Quality gates",
-          "Grade each run from objective signals; below the review threshold → hold for human."),
-    Field("pr_score_auto_min", "Score ≥ this → auto-resolve", "int", "🧪 Quality gates",
-          "Only at unattended autonomy. Default 85."),
-    Field("pr_score_review_min", "Score < this → escalate", "int", "🧪 Quality gates",
-          "Below this the run is held for a human instead of review/done. Default 60."),
+    Field("pr_scoring_enabled", "Chấm điểm mỗi lần chạy (0–100)", "bool", "🧪 Cổng chất lượng",
+          "Chấm điểm mỗi lần chạy từ tín hiệu khách quan; dưới ngưỡng review → giữ chờ người."),
+    Field("pr_score_auto_min", "Điểm ≥ mức này → tự resolve", "int", "🧪 Cổng chất lượng",
+          "Chỉ áp dụng ở mức tự chủ unattended. Mặc định 85."),
+    Field("pr_score_review_min", "Điểm < mức này → chuyển người", "int", "🧪 Cổng chất lượng",
+          "Dưới mức này lần chạy bị giữ chờ người thay vì review/xong. Mặc định 60."),
     # ── 🔁 PR review & feedback ──
-    Field("feedback_loop_enabled", "🔁 PR feedback loop", "bool", "🔁 PR review & feedback",
+    Field("feedback_loop_enabled", "🔁 Vòng phản hồi PR", "bool", "🔁 Review PR & phản hồi",
           "Watch open autopilot PRs for new human review comments and auto-revise the branch to "
           "address them. Restart required to take effect."),
-    Field("max_revisions", "↳ Max PR revisions / item", "int", "🔁 PR review & feedback",
-          "Cap auto-revisions per work item so a review back-and-forth can't run away. Default 3."),
-    Field("pr_add_assignee_as_reviewer", "🧑‍⚖️ Add assignee as PR reviewer", "bool",
-          "🔁 PR review & feedback",
+    Field("max_revisions", "↳ Số lần sửa PR tối đa / item", "int", "🔁 Review PR & phản hồi",
+          "Giới hạn số lần tự sửa mỗi work item để vòng review qua lại không chạy mãi. Mặc định "
+          "3."),
+    Field("pr_add_assignee_as_reviewer", "🧑‍⚖️ Thêm assignee làm reviewer PR", "bool",
+          "🔁 Review PR & phản hồi",
           "When the autopilot opens a PR for a work item, add that item's ASSIGNEE as a "
           "reviewer (ADO notifies them). Best-effort — never fails the run."),
-    Field("pr_extra_reviewer_ids", "↳ Extra reviewers (identity IDs)", "list",
-          "🔁 PR review & feedback",
+    Field("pr_extra_reviewer_ids", "↳ Reviewer thêm (identity ID)", "list",
+          "🔁 Review PR & phản hồi",
           "Added to every PR on top of the assignee. ADO identity GUIDs, one per line — the "
           "reviewers API is keyed on the id, not the email."),
-    Field("pr_reviewers_required", "↳ Mark them required", "bool",
-          "🔁 PR review & feedback",
-          "Required reviewers block completing the PR until they vote. Off = optional "
-          "(notified only)."),
-    Field("pr_reviewer_tracking_enabled", "👀 Track PR reviewers", "bool",
-          "🔁 PR review & feedback",
+    Field("pr_reviewers_required", "↳ Đánh dấu là bắt buộc", "bool",
+          "🔁 Review PR & phản hồi",
+          "Reviewer bắt buộc chặn hoàn tất PR tới khi họ vote. Tắt = tuỳ chọn (chỉ được thông "
+          "báo)."),
+    Field("pr_reviewer_tracking_enabled", "👀 Theo dõi reviewer PR", "bool",
+          "🔁 Review PR & phản hồi",
           "Watch reviewer lists on ALL active PRs: dashboard status, auto-review when the bot "
           "is added as reviewer, polite overdue reminders. Restart required."),
-    Field("pr_auto_review_on_added", "↳ Auto-review when bot added", "bool",
-          "🔁 PR review & feedback",
-          "Bot added as PR reviewer → structured AI review + vote. Re-arms on new commits."),
+    Field("pr_auto_review_on_added", "↳ Tự review khi bot được thêm", "bool",
+          "🔁 Review PR & phản hồi",
+          "Bot được thêm làm reviewer PR → AI review có cấu trúc + vote. Tự bật lại khi có "
+          "commit mới."),
 
 
-    Field("pr_conflict_tracking_enabled", "⚔️ Track PR merge conflicts", "bool",
-          "🔁 PR review & feedback",
+    Field("pr_conflict_tracking_enabled", "⚔️ Theo dõi conflict merge PR", "bool",
+          "🔁 Review PR & phản hồi",
           "Detect active PRs ADO reports as conflicted: one PR comment + one notification per "
           "episode, the Conflicts page, and a delivery-report row. Read-only. Restart required."),
-    Field("pr_conflict_autoresolve", "↳ Auto-resolve on autopilot PRs", "bool",
-          "🔁 PR review & feedback",
+    Field("pr_conflict_autoresolve", "↳ Tự gỡ conflict trên PR của autopilot", "bool",
+          "🔁 Review PR & phản hồi",
           "On PRs from the bot's branches: merge the target in (never rebase / force-push), "
           "let the agent settle the hunks, and push ONLY if no marker is left, no other file "
           "was touched, and tests + the security gate pass. Otherwise abort and ask a person."),
-    Field("pr_conflict_command", "↳ Resolve command", "text", "🔁 PR review & feedback",
-          "PR comment that asks for a resolution on ANY PR (allowlisted users). Blank = off."),
-    Field("pr_conflict_max_files", "↳ Max conflicted files", "int", "🔁 PR review & feedback",
-          "Above this many conflicted files it is a structural collision — escalate without "
-          "spending a token."),
-    Field("pr_conflict_max_attempts", "↳ Attempts per target commit", "int",
-          "🔁 PR review & feedback",
+    Field("pr_conflict_command", "↳ Lệnh yêu cầu gỡ conflict", "text", "🔁 Review PR & phản hồi",
+          "Comment trên PR để yêu cầu gỡ conflict trên BẤT KỲ PR nào (người trong danh sách). "
+          "Trống = tắt."),
+    Field("pr_conflict_max_files", "↳ Số file conflict tối đa", "int", "🔁 Review PR & phản hồi",
+          "Nhiều file conflict hơn mức này là va chạm cấu trúc — chuyển người mà không tốn "
+          "token nào."),
+    Field("pr_conflict_max_attempts", "↳ Số lần thử / commit đích", "int",
+          "🔁 Review PR & phản hồi",
           "Automatic attempts against the SAME target commit (same inputs → same conflict). "
           "A new push to the target, or a person asking, allows another."),
-    Field("pr_conflict_allow_preexisting_failures", "↳ Push when the target is already red",
-          "bool", "🔁 PR review & feedback",
+    Field("pr_conflict_allow_preexisting_failures", "↳ Vẫn push khi branch đích đã đỏ",
+          "bool", "🔁 Review PR & phản hồi",
           "Red tests after a resolution → the target branch is tested alone and the failures "
           "compared. On = push when the resolution adds NO failure of its own (the PR "
           "inherits the target's red either way). Off = escalate, naming the target as the "
           "cause. Failures the resolution ADDS always block."),
-    Field("pr_conflict_poll_minutes", "↳ Scan every (minutes)", "int", "🔁 PR review & feedback",
-          "How often active PRs are checked for conflicts."),
-    Field("pr_session_hours", "Interactive PR session limit (hours)", "int",
-          "🔁 PR review & feedback",
+    Field("pr_conflict_poll_minutes", "↳ Quét mỗi (phút)", "int", "🔁 Review PR & phản hồi",
+          "Bao lâu kiểm tra conflict trên các PR đang mở một lần."),
+    Field("pr_session_hours", "Giới hạn phiên PR tương tác (giờ)", "int",
+          "🔁 Review PR & phản hồi",
           "Under execution_mode interactive, a conflict resolution and an /ai action on a PR "
           "open a Remote-Control session you can attach to. With no result after this long it "
           "is closed (branch untouched) and a person is told."),
-    Field("pr_advisory_max_per_commit", "↳ Max advisory reviews / commit", "int",
-          "🔁 PR review & feedback",
+    Field("pr_advisory_max_per_commit", "↳ Số lần review góp ý tối đa / commit", "int",
+          "🔁 Review PR & phản hồi",
           "How often /review (and other comment-only commands) may run against the SAME "
           "commit. Re-reviewing unchanged code repeats itself; push a commit to reset. "
           "0 = unlimited."),
-    Field("pr_auto_review_max_per_pr", "↳ Max auto-reviews / PR", "int",
-          "🔁 PR review & feedback",
+    Field("pr_auto_review_max_per_pr", "↳ Số lần tự review tối đa / PR", "int",
+          "🔁 Review PR & phản hồi",
           "Lifetime ceiling on auto-reviews for one PR. Auto-review re-arms on every new "
           "commit, so a push-heavy PR can otherwise be reviewed many times. 0 = unlimited."),
-    Field("pr_review_max_concurrent", "↳ Max parallel PR reviews", "int",
-          "🔁 PR review & feedback",
+    Field("pr_review_max_concurrent", "↳ Số review PR song song tối đa", "int",
+          "🔁 Review PR & phản hồi",
           "Concurrency cap for PR review work, separate from Max concurrent so a batch of "
           "PRs cannot starve task execution. 0 = share Max concurrent."),
-    Field("pr_bot_identity", "↳ Bot identity override", "text", "🔁 PR review & feedback",
-          "Email / uniqueName of the bot reviewer account. Blank = auto-detect the PAT's own "
-          "identity via connectionData."),
-    Field("pr_reviewer_target_branches", "↳ Only these target branches", "list",
-          "🔁 PR review & feedback",
+    Field("pr_bot_identity", "↳ Ghi đè identity của bot", "text", "🔁 Review PR & phản hồi",
+          "Email / uniqueName của tài khoản bot reviewer. Trống = tự nhận identity của PAT qua "
+          "connectionData."),
+    Field("pr_reviewer_target_branches", "↳ Chỉ các branch đích này", "list",
+          "🔁 Review PR & phản hồi",
           "One branch per line (e.g. dxfac/development). Only PRs merging INTO these branches "
           "are tracked / reviewed / shown. Empty = all targets."),
-    Field("comment_reprocess_enabled", "💬 React to WI comments", "bool", "🔁 PR review & feedback",
-          "A new human comment on an autopilot-owned item (held / in review / done) re-runs it "
-          "with your comment as top-priority guidance — no restart tag needed."),
-    Field("max_comment_rounds", "↳ Max comment rounds / item", "int", "🔁 PR review & feedback",
-          "Cap human↔bot comment rounds per item so a back-and-forth can't run away. Default 5."),
-    Field("pr_commands_on_any_pr", "↳ …even where the bot is not a reviewer", "bool",
-          "🔁 PR review & feedback",
+    Field("comment_reprocess_enabled", "💬 Phản hồi comment trên work item", "bool",
+          "🔁 Review PR & phản hồi",
+          "Comment mới của người trên item autopilot đang giữ (held / in review / done) sẽ chạy "
+          "lại item với comment đó là chỉ dẫn ưu tiên cao nhất — không cần tag restart."),
+    Field("max_comment_rounds", "↳ Số vòng comment tối đa / item", "int", "🔁 Review PR & phản hồi",
+          "Giới hạn số vòng comment người↔bot mỗi item để không qua lại mãi. Mặc định 5."),
+    Field("pr_commands_on_any_pr", "↳ …kể cả khi bot không phải reviewer", "bool",
+          "🔁 Review PR & phản hồi",
           "On a PR the autopilot did not open, it normally answers only where it was ADDED "
           "AS A REVIEWER — that invitation is the consent. Turn this on to accept being "
           "named in a comment as the consent instead, so nobody has to add the bot first. "
           "Only the people on the command roster can still command it. Costs API calls: "
           "every active PR in scope is read each cycle, not just the ones the bot sits on."),
-    Field("comment_mention_enabled", "↳ Answer an @mention on a PR", "bool", "🔁 PR review & feedback",
+    Field("comment_mention_enabled", "↳ Trả lời @mention trên PR", "bool",
+          "🔁 Review PR & phản hồi",
           "Treat an @mention of the bot on a pull request as addressing it, with no /command "
           "needed — how a human naturally asks a teammate. The intent is inferred into one of "
           "the /commands and defaults to ADVISORY, so an ambiguous mention never becomes a "
           "code change and push."),
     # ── Dependency scheduling ──
-    Field("dependency_scheduling_enabled", "Order by link graph", "bool",
-          "Dependency scheduling",
-          "Wait on Predecessor links, never run Related items together (0 tokens). "
-          "Off = plain priority order."),
-    Field("sibling_conflict_scheduling", "Sibling soft-conflict", "bool",
-          "Dependency scheduling",
-          "Treat same-Parent + same-category siblings as a soft conflict even without a link."),
-    Field("scheduler_max_dispatch", "Max dispatch / cycle", "int", "Dependency scheduling",
-          "Cap items marked ready per poll cycle. 0 = no cap (max_concurrent still throttles)."),
-    Field("scheduler_use_ai_conflicts", "Use AI-found conflicts", "bool", "Dependency scheduling",
-          "Feed hidden conflicts the Planning Analyze confirmed back into scheduling as "
-          "soft-conflicts, so the poller won't run those items concurrently."),
-    Field("scheduler_ai_conflict_min_score", "AI conflict min score", "int", "Dependency scheduling",
-          "Only AI conflicts scoring at least this (0–100) affect scheduling. Default 60."),
-    Field("scheduler_history_limit", "History to keep", "int", "Dependency scheduling",
+    Field("dependency_scheduling_enabled", "Xếp thứ tự theo link", "bool",
+          "🔗 Xếp lịch theo phụ thuộc",
+          "Chờ link Predecessor, không bao giờ chạy cùng lúc các item Related (0 token). Tắt = "
+          "theo thứ tự ưu tiên."),
+    Field("sibling_conflict_scheduling", "Coi item anh em là xung đột mềm", "bool",
+          "🔗 Xếp lịch theo phụ thuộc",
+          "Coi các item cùng Parent + cùng loại là xung đột mềm dù không có link."),
+    Field("scheduler_max_dispatch", "Số item phát tối đa / chu kỳ", "int",
+          "🔗 Xếp lịch theo phụ thuộc",
+          "Giới hạn số item đánh dấu sẵn sàng mỗi chu kỳ quét. 0 = không giới hạn "
+          "(max_concurrent vẫn điều tiết)."),
+    Field("scheduler_use_ai_conflicts", "Dùng xung đột do AI tìm ra", "bool",
+          "🔗 Xếp lịch theo phụ thuộc",
+          "Đưa các xung đột ẩn mà Phân tích (Lập kế hoạch) đã xác nhận vào xếp lịch như xung "
+          "đột mềm, để poller không chạy các item đó cùng lúc."),
+    Field("scheduler_ai_conflict_min_score", "Điểm tối thiểu của xung đột AI", "int",
+          "🔗 Xếp lịch theo phụ thuộc",
+          "Chỉ xung đột AI có điểm từ mức này (0–100) mới ảnh hưởng xếp lịch. Mặc định 60."),
+    Field("scheduler_history_limit", "Số quyết định giữ lại", "int", "🔗 Xếp lịch theo phụ thuộc",
           "How many recent scheduling decisions (that held work back) to keep for the "
           "Planning history panel. 0 = keep only the live view."),
-    Field("batch_related_enabled", "Batch linked items", "bool", "Dependency scheduling",
+    Field("batch_related_enabled", "Gộp các item có link", "bool", "🔗 Xếp lịch theo phụ thuộc",
           "Run a linked cluster (Related / Predecessor chain) as ONE agent run that opens one "
           "branch + one PR per work item, instead of serialising it into separate waves. "
           "Headless agent mode only."),
-    Field("batch_max_items", "Max items / batch", "int", "Dependency scheduling",
-          "Largest cluster to batch. Bigger clusters are dispatched item-by-item. Default 3."),
-    Field("batch_stacked_prs", "Stack the batch PRs", "bool", "Dependency scheduling",
+    Field("batch_max_items", "Số item tối đa / lô", "int", "🔗 Xếp lịch theo phụ thuộc",
+          "Cụm lớn nhất được gộp. Cụm lớn hơn sẽ phát từng item một. Mặc định 3."),
+    Field("batch_stacked_prs", "Xếp chồng PR trong lô", "bool", "🔗 Xếp lịch theo phụ thuộc",
           "Item 2 branches off item 1 and targets it (no conflicts, fixed merge order). "
           "Off = every branch cut from the base branch (any merge order, may conflict)."),
     # ── Closed-loop SDLC (v2) ──
@@ -500,34 +515,35 @@ _BASE_FIELDS: tuple[Field, ...] = (
     # is the loop on, WHICH stages run, how much rework is allowed, and WHERE the
     # item goes when they finish. The two hand-off maps sit together, under the
     # switch that decides whether a draft PR delays them.
-    Field("sdlc_loop_enabled", "Enable SDLC loop", "bool", "Closed-loop SDLC (v2)",
+    Field("sdlc_loop_enabled", "Bật vòng SDLC", "bool", "♾️ Vòng SDLC khép kín (v2)",
           "Drive items through profile-selected SDLC stages (gate + revise + escalate + handoff). "
           "Off = one-shot behaviour, unchanged. Headless only."),
     # — which stages run, most specific first (this is the resolution order) —
-    Field("sdlc_profile", "Profile: pinned to this machine", "select", "Closed-loop SDLC (v2)",
+    Field("sdlc_profile", "Profile: cố định cho máy này", "select", "♾️ Vòng SDLC khép kín (v2)",
           "The role THIS machine runs, whatever the item is. Blank = decide per item, below. "
           "Resolution order: an item's own 'sdlc:<profile>' tag (which the Board's ▶ Run "
           "sets) → this field → the type map → the default.",
           ("", "ba", "dev", "qc", "review", "design", "full")),
-    Field("sdlc_type_profiles", "↳ Profile: per work-item type", "map",
-          "Closed-loop SDLC (v2)",
+    Field("sdlc_type_profiles", "↳ Profile: theo loại work item", "map",
+          "♾️ Vòng SDLC khép kín (v2)",
           "One 'work-item type => profile' per line. This is how a Bug runs end to end while "
           "a Requirement stops for a human: 'Bug => full', 'User Story => ba'.",
           placeholder="Bug => full"),
-    Field("sdlc_default_profile", "↳ Profile: default", "select", "Closed-loop SDLC (v2)",
-          "Used when nothing above resolves — no item tag, no pinned profile, no type entry.",
+    Field("sdlc_default_profile", "↳ Profile: mặc định", "select", "♾️ Vòng SDLC khép kín (v2)",
+          "Dùng khi không có gì ở trên áp dụng — không có tag trên item, không cố định profile, "
+          "không có dòng theo loại.",
           ("full", "dev", "ba", "qc", "review", "design")),
     # — how much rework the engine may do before it asks a person —
-    Field("sdlc_interactive_gate", "Test gate after a steered session", "bool",
-          "Closed-loop SDLC (v2)",
+    Field("sdlc_interactive_gate", "Cổng test sau phiên tương tác", "bool",
+          "♾️ Vòng SDLC khép kín (v2)",
           "Interactive mode + relay on: when a session finishes, run the test gate on its "
           "branch. Red → the item is held for a person (failing tests in the comment) "
           "instead of being handed to the next role. Follows test_gate_enabled."),
-    Field("sdlc_max_iterations", "Max revise iterations", "int", "Closed-loop SDLC (v2)",
-          "Shared budget across all stages of one item before escalating to a human. Default 3."),
+    Field("sdlc_max_iterations", "Số vòng sửa tối đa", "int", "♾️ Vòng SDLC khép kín (v2)",
+          "Ngân sách chung cho mọi stage của một item trước khi chuyển người. Mặc định 3."),
     # — where the item goes when the profile finishes —
-    Field("sdlc_advance_on_draft", "Hand off even on a draft PR", "bool",
-          "Closed-loop SDLC (v2)",
+    Field("sdlc_advance_on_draft", "Chuyển tiếp cả khi PR còn draft", "bool",
+          "♾️ Vòng SDLC khép kín (v2)",
           "Apply the hand-offs below even when the PR is still a draft. Off (recommended) = a "
           "draft waits for human review before the next role is called."),
     # Hand-off used to be edited here, keyed by profile, under a heading about a loop
@@ -539,22 +555,22 @@ _BASE_FIELDS: tuple[Field, ...] = (
     # only in config.yaml, which is how the two complaints that produced them — test
     # cases scattered somewhere new every run, and "I cannot see the test cases on the
     # work item" — were unanswerable from a screen.
-    Field("qc_test_case_path", "Test cases → path under the workspace", "text",
-          "🧪 QC test cases",
+    Field("qc_test_case_path", "Test case → đường dẫn trong workspace", "text",
+          "🧾 Test case QC",
           "Where a QC run writes the test cases it wrote, relative to the WORKSPACE root — "
           "NOT inside a repo, so they never land in a pull request. '{id}' is the work item's "
           "id. The choice only helps if it is the SAME every time — blank says nothing and "
           "lets the agent pick, which is what scattered them. Default 'qc/{id}'. "
           "⚠️ Files here are outside git and live on this machine only: keep the setting "
           "below ON, or nobody but this server ever sees the cases."),
-    Field("qc_create_test_case_items", "Also file each as a Test Case work item", "bool",
-          "🧪 QC test cases",
+    Field("qc_create_test_case_items", "Tạo thêm work item Test Case cho mỗi case", "bool",
+          "🧾 Test case QC",
           "One ADO Test Case per case, linked to the item it tests, steps on the Test tab. "
           "This is what QC actually works from — and with the path above pointing outside "
           "every repo, it is the ONLY copy that leaves this machine. Off = the workspace "
           "file alone."),
-    Field("qc_create_bug_items", "File a Bug for each FAILED case", "bool",
-          "🧪 QC test cases",
+    Field("qc_create_bug_items", "Tạo Bug cho mỗi case FAIL", "bool",
+          "🧾 Test case QC",
           "One ADO Bug per failing case, linked to the item QC was running against "
           "(child link, falling back to Related where the process template refuses it). "
           "Re-running does not duplicate: a case whose Bug is already linked is skipped. "
@@ -562,83 +578,84 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "wrong test or a broken environment, and those Bugs land on a shared board. "
           "Turn it on where the process requires Requirement → TC + Bug traceability."),
     # ── Planning workbench ──
-    Field("planning_ai_analysis", "AI conflict analysis", "bool", "Planning workbench",
+    Field("planning_ai_analysis", "Phân tích xung đột bằng AI", "bool", "🧭 Lập kế hoạch",
           "The Analyze action runs bounded Claude judges over keyword-overlapping pairs "
           "(tokens). Off = link-graph grouping only (0 tokens)."),
-    Field("planning_ai_max_pairs", "AI max pairs / analyze", "int", "Planning workbench",
-          "Cap on how many suspicious pairs get an AI judge per Analyze click. Default 6."),
-    Field("planning_ai_min_score", "AI min score to flag", "int", "Planning workbench",
-          "A judge verdict must score at least this (0–100) to be shown. Default 50."),
-    Field("planning_ai_timeout_seconds", "AI judge timeout (s)", "int", "Planning workbench",
-          "Per-judge Claude timeout during Analyze. Default 120."),
-    Field("conflict_ai_min_token_len", "Keyword min length", "int", "Planning workbench",
-          "Shortest keyword the pre-filter considers when pairing items. Default 4."),
-    Field("conflict_ai_extra_stopwords", "Extra stopwords", "list", "Planning workbench",
-          "Project-specific noise words to ignore when matching keywords (comma/newline)."),
-    Field("planning_schedule_default_hour", "Schedule default hour", "int", "Planning workbench",
-          "Hour (0–23, local) pre-filled in the Schedule date-time picker. Default 21."),
-    Field("planning_load_limit", "Load limit", "int", "Planning workbench",
-          "Max work items the Load button fetches for an assignee. Default 200."),
-    Field("planning_live_refresh_seconds", "Live schedule refresh (s)", "int", "Planning workbench",
-          "Auto-refresh the read-only Live schedule panel every N seconds. 0 = off."),
-    Field("planning_start_state", "Start → state", "stateone", "Planning workbench",
+    Field("planning_ai_max_pairs", "Số cặp AI xét tối đa / lần phân tích", "int", "🧭 Lập kế hoạch",
+          "Giới hạn số cặp nghi ngờ được AI xét mỗi lần bấm Phân tích. Mặc định 6."),
+    Field("planning_ai_min_score", "Điểm AI tối thiểu để cảnh báo", "int", "🧭 Lập kế hoạch",
+          "Kết luận của AI phải đạt ít nhất mức này (0–100) mới hiện ra. Mặc định 50."),
+    Field("planning_ai_timeout_seconds", "Timeout mỗi lượt AI (giây)", "int", "🧭 Lập kế hoạch",
+          "Timeout Claude cho mỗi lượt xét khi Phân tích. Mặc định 120."),
+    Field("conflict_ai_min_token_len", "Độ dài từ khoá tối thiểu", "int", "🧭 Lập kế hoạch",
+          "Từ khoá ngắn nhất bộ lọc xét khi ghép cặp item. Mặc định 4."),
+    Field("conflict_ai_extra_stopwords", "Từ bỏ qua bổ sung", "list", "🧭 Lập kế hoạch",
+          "Từ nhiễu riêng của dự án, bỏ qua khi so khớp từ khoá (phẩy/xuống dòng)."),
+    Field("planning_schedule_default_hour", "Giờ hẹn mặc định", "int", "🧭 Lập kế hoạch",
+          "Giờ (0–23, giờ địa phương) điền sẵn trong ô hẹn giờ. Mặc định 21."),
+    Field("planning_load_limit", "Số item tải tối đa", "int", "🧭 Lập kế hoạch",
+          "Số work item tối đa nút Tải lấy về cho một assignee. Mặc định 200."),
+    Field("planning_live_refresh_seconds", "Làm mới lịch trực tiếp (giây)", "int",
+          "🧭 Lập kế hoạch",
+          "Tự làm mới khung Lịch trực tiếp (chỉ đọc) mỗi N giây. 0 = tắt."),
+    Field("planning_start_state", "Bắt đầu → state", "stateone", "🧭 Lập kế hoạch",
           "State the Start action moves an item to (so the poller picks it up) if it isn't "
           "already in a trigger state. Blank = the first trigger state."),
     # ── Working hours & quiet time ──
-    Field("timezone", "Timezone", "text", "Working hours & quiet time",
+    Field("timezone", "Múi giờ", "text", "🕘 Giờ làm việc",
           "IANA zone every time window below is read in, e.g. Asia/Ho_Chi_Minh. REQUIRED for "
           "quiet hours (they stay off without it). Do not rely on the machine clock: a server "
           "or container usually runs as UTC, so '18:00' there is 01:00 for a team in UTC+7."),
-    Field("schedule_start", "Work window — from", "text", "Working hours & quiet time",
+    Field("schedule_start", "Giờ làm việc — từ", "text", "🕘 Giờ làm việc",
           "HH:MM. When a run may START. Outside it the poller idles; work already running "
           "continues. Blank = no window (run at any hour)."),
-    Field("schedule_end", "Work window — to", "text", "Working hours & quiet time",
-          "HH:MM. An end EARLIER than the start reads as an overnight window (22:00–06:00)."),
-    Field("schedule_days", "Work window — days", "text", "Working hours & quiet time",
-          "e.g. Mon,Tue,Wed,Thu,Fri. Blank = every day."),
+    Field("schedule_end", "Giờ làm việc — đến", "text", "🕘 Giờ làm việc",
+          "HH:MM. Giờ kết thúc SỚM hơn giờ bắt đầu nghĩa là khung qua đêm (22:00–06:00)."),
+    Field("schedule_days", "Giờ làm việc — ngày", "text", "🕘 Giờ làm việc",
+          "vd Mon,Tue,Wed,Thu,Fri. Trống = mọi ngày."),
 
 
 
 
 
     # ── Spec drift & PR traceability ──
-    Field("spec_drift_enabled", "Report spec drift", "bool", "Spec drift & PR traceability",
+    Field("spec_drift_enabled", "Báo lệch spec", "bool", "📐 Lệch spec & truy vết PR",
           "The agent is told to DECIDE rather than ask, so every ambiguity it resolves is a "
           "decision taken on the team's behalf that the work item does not reflect. When on, "
           "those are filed as a ⚠️ SPEC-DRIFT comment, a tag, a PR comment, and a row on "
           "/dashboard/specs a BA ticks off."),
     Field("spec_drift_sla_days", "↳ Hạn quyết lệch spec (ngày)", "int",
-          "Spec drift & PR traceability",
+          "📐 Lệch spec & truy vết PR",
           "Điểm lệch spec chưa được BA quyết quá số ngày này hiện đỏ trên trang Lệch spec "
           "(quá nửa hạn: vàng).",
           show_when_key="spec_drift_enabled", show_when_values=("1",)),
-    Field("spec_drift_tag", "↳ Tag until the spec is updated", "text",
-          "Spec drift & PR traceability",
-          "Applied to the item until a human marks the specification back in line."),
-    Field("spec_drift_holds_item", "↳ Hold the item for a human", "bool",
-          "Spec drift & PR traceability",
+    Field("spec_drift_tag", "↳ Tag gắn tới khi spec được cập nhật", "text",
+          "📐 Lệch spec & truy vết PR",
+          "Gắn lên item tới khi có người đánh dấu spec đã khớp lại."),
+    Field("spec_drift_holds_item", "↳ Giữ item lại chờ người", "bool",
+          "📐 Lệch spec & truy vết PR",
           "Off by default: a drift is documentation debt, not a reason to stop delivery. Turn "
           "on to stop the item advancing while its spec is stale."),
-    Field("pr_require_work_item_link", "Every PR must name its work item", "bool",
-          "Spec drift & PR traceability",
+    Field("pr_require_work_item_link", "Mỗi PR phải gắn work item", "bool",
+          "📐 Lệch spec & truy vết PR",
           "Verified against ADO after the fact, and attached when missing. An instruction in "
           "the brief is advice a model can drop on a long run — and when it does, nothing "
           "notices."),
 
     # ── Process health ──
-    Field("process_health_enabled", "Process-health digest", "bool", "Process health",
+    Field("process_health_enabled", "Báo cáo sức khoẻ quy trình", "bool", "🩺 Sức khoẻ quy trình",
           "Computes the standing reviews a process doc assigns — share of capacity that went "
           "to unplanned work, escaped defects per module, stuck items, tag rot — and pushes "
           "the findings to the notification channels. Read-only: it reports, never edits."),
-    Field("process_health_interval_hours", "↳ Every (hours)", "int", "Process health",
-          "168 = weekly. 0 = compute on demand only."),
-    Field("process_health_window_days", "↳ Window (days)", "int", "Process health",
-          "How far back each run measures. 14 = one sprint."),
-    Field("process_health_blocked_days", "↳ Blocked longer than (days)", "int",
-          "Process health",
-          "Items flagged Blocked and untouched this long become the follow-up list."),
-    Field("process_health_adhoc_threshold_pct", "↳ Ad-hoc alert threshold (%)", "float",
-          "Process health",
+    Field("process_health_interval_hours", "↳ Mỗi (giờ)", "int", "🩺 Sức khoẻ quy trình",
+          "168 = hằng tuần. 0 = chỉ tính khi được yêu cầu."),
+    Field("process_health_window_days", "↳ Khoảng đo (ngày)", "int", "🩺 Sức khoẻ quy trình",
+          "Mỗi lần đo nhìn lại bao xa. 14 = một sprint."),
+    Field("process_health_blocked_days", "↳ Bị chặn lâu hơn (ngày)", "int",
+          "🩺 Sức khoẻ quy trình",
+          "Item bị gắn Blocked và không ai động tới lâu như vậy sẽ vào danh sách cần theo dõi."),
+    Field("process_health_adhoc_threshold_pct", "↳ Ngưỡng cảnh báo việc phát sinh (%)", "float",
+          "🩺 Sức khoẻ quy trình",
           "Flag when unplanned work exceeds this share. Ignored on small samples — one ad-hoc "
           "ticket in a quiet week is 100% and says nothing."),
 
@@ -665,46 +682,47 @@ _BASE_FIELDS: tuple[Field, ...] = (
     # the digest under the Teams bot, quiet hours under Working hours, reviewer
     # nudges under PR review — while "Notifications" held only credentials, so the
     # page could be read end to end without ever finding the alert settings.
-    Field("alert_events", "Gửi cảnh báo cho sự kiện nào", "text", '🔔 Cảnh báo',
+    Field("alert_events", "Gửi cảnh báo cho sự kiện nào", "text", "🔔 Cảnh báo — khi nào báo",
           "Danh sách sự kiện, cách nhau bởi dấu phẩy: started, completed, failed, error, "
           "reminder, digest. Bỏ trống = gửi tất cả. Mặc định KHÔNG có 'started' — tin "
           "'bot vừa nhận việc #123' không giúp ai quyết định gì, nhưng nhân đôi số tin."),
-    Field("alert_min_severity", "Mức tối thiểu để gửi", "select", '🔔 Cảnh báo',
+    Field("alert_min_severity", "Mức tối thiểu để gửi", "select", "🔔 Cảnh báo — khi nào báo",
           "Lọc sau danh sách sự kiện. info = gửi mọi thứ đã bật · warning = chỉ việc cần "
           "xem trong ngày (chạy lỗi, reviewer chưa vote) · critical = chỉ việc đang bị chặn.",
           ("info", "warning", "critical")),
     Field("delivery_merge_hours", "Ngưỡng: PR đã duyệt mà chưa merge (giờ)", "int",
-          '🔔 Cảnh báo',
+          "🔔 Cảnh báo — khi nào báo",
           "Flag a PR that is approved, unblocked and STILL not merged after this long. "
           "This is pure waste — the work is finished and the fix is one click."),
     Field("delivery_review_hours", "Ngưỡng: PR chưa ai review (giờ)", "int",
-          '🔔 Cảnh báo',
-          "Flag a PR nobody has voted on after this long, naming the reviewers it is "
-          "waiting on."),
+          "🔔 Cảnh báo — khi nào báo",
+          "Báo PR chưa ai vote sau khoảng này, kèm tên các reviewer đang được chờ."),
     Field("delivery_stale_days", "Ngưỡng: việc đứng im (ngày)", "int",
-          '🔔 Cảnh báo',
+          "🔔 Cảnh báo — khi nào báo",
           "Flag an in-progress item whose STATE has not changed in this long. Edits and "
           "comments do not count as movement — that is the whole point."),
     Field("delivery_max_age_days", "Ngưỡng: bỏ qua việc chờ quá lâu (ngày)", "int",
-          '🔔 Cảnh báo',
+          "🔔 Cảnh báo — khi nào báo",
           "Việc đã chờ lâu hơn bấy nhiêu ngày coi như tồn đọng, không nêu trong digest nữa "
           "— chỉ hiện số lượng đã ẩn. 0 = liệt kê hết, dù cũ tới đâu."),
-    Field("alert_dedup_enabled", "Không lặp lại cảnh báo đã báo", "bool", '🔔 Cảnh báo',
+    Field("alert_dedup_enabled", "Không lặp lại cảnh báo đã báo", "bool",
+          "🔔 Cảnh báo — khi nào báo",
           "Một việc đã báo sẽ chỉ nhắc lại khi NẶNG THÊM (thời gian chờ tăng gấp đôi) hoặc "
           "sau số giờ dưới đây. Tắt = mọi việc quá ngưỡng đều xuất hiện lại trong từng digest."),
-    Field("alert_repeat_hours", "↳ Nhắc lại sau (giờ)", "int", '🔔 Cảnh báo',
+    Field("alert_repeat_hours", "↳ Nhắc lại sau (giờ)", "int", "🔔 Cảnh báo — khi nào báo",
           "Số giờ trước khi một cảnh báo chưa ai xử lý được nêu lại. 0 = không bao giờ lặp."),
-    Field("alert_snooze_default_days", "↳ Số ngày mặc định của /snooze", "int", '🔔 Cảnh báo',
+    Field("alert_snooze_default_days", "↳ Số ngày mặc định của /snooze", "int",
+          "🔔 Cảnh báo — khi nào báo",
           "Khi gõ `/snooze <id>` mà không ghi số ngày thì ẩn bấy nhiêu ngày."),
     Field("pr_reviewer_reminder_hours", "Nhắc reviewer chưa vote sau (giờ)", "int",
-          '🔔 Cảnh báo',
-          "A reviewer with no vote after this many hours gets one polite PR reminder. 0 = off."),
+          "🔔 Cảnh báo — khi nào báo",
+          "Reviewer chưa vote sau bấy nhiêu giờ sẽ nhận một lời nhắc lịch sự trên PR. 0 = tắt."),
     Field("pr_reviewer_reminder_repeat_hours", "↳ Lặp lại lời nhắc mỗi (giờ)", "int",
-          '🔔 Cảnh báo',
+          "🔔 Cảnh báo — khi nào báo",
           "Keep nudging a reviewer who still hasn't voted, this many hours after the last "
           "reminder. 0 = nudge once then stay quiet."),
     Field("teams_agent_digest_interval_hours", "Digest định kỳ mỗi (giờ)", "int",
-          '🔔 Cảnh báo',
+          "🔔 Cảnh báo — khi nào báo",
           "Proactively post a full activity digest to every channel/chat the bot has "
           "been added to: autopilot run stats, auto-reviews + reminders sent, PRs "
           "opened/merged, /log tickets, PRs ready to merge, oldest stuck PRs, and a "
@@ -712,89 +730,92 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "messaged/added at least once so its conversation is stored (persists "
           "across restarts)."),
     Field("teams_agent_digest_at", "↳ Hoặc gửi cố định lúc (HH:MM)", "text",
-          '🔔 Cảnh báo',
+          "🔔 Cảnh báo — khi nào báo",
           "Post it at a fixed local time instead, e.g. 09:00. Wins over the interval "
           "above, which counts from process start — so a restart at 14:00 moves a 24h "
           "digest to 14:00 permanently. Blank = use the interval."),
     Field("digest_skip_when_empty", "Không gửi digest khi không có gì mới", "bool",
-          '🔔 Cảnh báo',
+          "🔔 Cảnh báo — khi nào báo",
           "Không có việc nào quá ngưỡng VÀ không có gì xong trong kỳ → im lặng. Một tin "
           "'✅ không có gì tắc' mỗi sáng dạy người đọc lướt qua digest, và rồi lướt qua "
           "luôn hôm nó có tin thật."),
     Field("digest_respect_quiet_hours", "Digest tuân theo khung giờ báo", "bool",
-          '🔔 Cảnh báo',
+          "🔔 Cảnh báo — khi nào báo",
           "Giữ digest trong cùng khung giờ với mọi thông báo khác. Trước đây digest là "
           "kênh DUY NHẤT bỏ qua giờ im lặng nên vẫn ping lúc 3h sáng."),
-    Field("notify_hours_start", "Khung giờ được phép báo — từ", "text", '🔔 Cảnh báo',
+    Field("notify_hours_start", "Khung giờ được phép báo — từ", "text", "🔔 Cảnh báo — khi nào báo",
           "HH:MM. When a human may be PINGED. Deliberately separate from the work window: a "
           "team is usually happy for the autopilot to keep working in the evening — what they "
           "do not want is a phone going off at 22:40 about something nobody can act on until "
           "morning. Blank = notify at any hour."),
-    Field("notify_hours_end", "Khung giờ được phép báo — đến", "text", '🔔 Cảnh báo',
+    Field("notify_hours_end", "Khung giờ được phép báo — đến", "text", "🔔 Cảnh báo — khi nào báo",
           "HH:MM. Notices raised outside the window are HELD (never dropped) and delivered as "
           "ONE summary when it opens. ADO comments are never held — a comment is the record on "
           "the work item, not an interruption."),
-    Field("notify_days", "Khung giờ được phép báo — ngày", "text", '🔔 Cảnh báo',
-          "e.g. Mon,Tue,Wed,Thu,Fri. Blank = every day."),
-    Field("notify_window_applies_to", "↳ Khung giờ áp dụng cho", "select", '🔔 Cảnh báo',
+    Field("notify_days", "Khung giờ được phép báo — ngày", "text", "🔔 Cảnh báo — khi nào báo",
+          "vd Mon,Tue,Wed,Thu,Fri. Trống = mọi ngày."),
+    Field("notify_window_applies_to", "↳ Khung giờ áp dụng cho", "select",
+          "🔔 Cảnh báo — khi nào báo",
           "all = mọi thông báo (ngoài giờ bị giữ, gửi gộp khi mở khung) · digest = CHỈ "
           "digest định kỳ (Delivery, sức khoẻ quy trình, cập nhật) — ngoài giờ thì bỏ; mọi "
           "thông báo về một việc (chạy xong, conflict, lỗi, nhắc) gửi NGAY mọi lúc.",
           ("all", "digest")),
-    Field("notify_quiet_max_held", "↳ Tối đa thông báo giữ lại ngoài giờ", "int", '🔔 Cảnh báo',
+    Field("notify_quiet_max_held", "↳ Tối đa thông báo giữ lại ngoài giờ", "int",
+          "🔔 Cảnh báo — khi nào báo",
           "Ceiling on the held queue so a quiet weekend cannot grow it without bound. Oldest "
           "are dropped first and the summary says how many."),
     # ── Notifications: kênh nhận (credentials) ──
-    Field("smtp_host", "SMTP host", "text", "Notifications", "Blank = email off."),
-    Field("smtp_port", "SMTP port", "int", "Notifications", "Default 587 (STARTTLS)."),
-    Field("smtp_user", "SMTP user", "text", "Notifications"),
-    Field("smtp_password", "SMTP password", "password", "Notifications"),
-    Field("email_from", "Email from", "text", "Notifications"),
-    Field("email_to", "Email to", "text", "Notifications", "Recipient address(es)."),
-    Field("zalo_oa_access_token", "Zalo OA access token", "password", "Notifications",
-          "Blank = Zalo off."),
-    Field("zalo_recipient_user_id", "Zalo recipient user id", "text", "Notifications"),
+    Field("smtp_host", "SMTP host", "text", "📣 Kênh thông báo", "Trống = tắt email."),
+    Field("smtp_port", "SMTP port", "int", "📣 Kênh thông báo", "Mặc định 587 (STARTTLS)."),
+    Field("smtp_user", "SMTP user", "text", "📣 Kênh thông báo"),
+    Field("smtp_password", "Mật khẩu SMTP", "password", "📣 Kênh thông báo"),
+    Field("email_from", "Email gửi đi (from)", "text", "📣 Kênh thông báo"),
+    Field("email_to", "Email nhận (to)", "text", "📣 Kênh thông báo", "Địa chỉ người nhận."),
+    Field("zalo_oa_access_token", "Access token Zalo OA", "password", "📣 Kênh thông báo",
+          "Trống = tắt Zalo."),
+    Field("zalo_recipient_user_id", "User id người nhận Zalo", "text", "📣 Kênh thông báo"),
     # ── 💬 Teams bot (2-way chat) ──
-    Field("teams_agent_enabled", "💬 Two-way Teams bot", "bool", "💬 Teams bot (2-way chat)",
+    Field("teams_agent_enabled", "💬 Teams bot hai chiều", "bool", "💬 Teams bot (chat 2 chiều)",
           "Reply and act on button clicks in Teams (approve/reject, chat commands) via a "
           "registered Azure Bot / Agent ID — fill in the App ID/tenant/secret fields below. "
           "Also requires `pip install .[teams-bot]`. Restart required."),
-    Field("bot_persona_name", "🎭 Bot persona name", "text", "💬 Teams bot (2-way chat)",
+    Field("bot_persona_name", "🎭 Tên hiển thị của bot", "text", "💬 Teams bot (chat 2 chiều)",
           "How the bot refers to itself in Teams replies (e.g. 'AI Autopilot'). "
           "Used when it composes ticket acknowledgements / free-text answers."),
-    Field("bot_persona_voice", "↳ Bot persona voice", "text", "💬 Teams bot (2-way chat)",
+    Field("bot_persona_voice", "↳ Giọng văn của bot", "text", "💬 Teams bot (chat 2 chiều)",
           "Tone/register guide handed to Claude so the bot's replies read like a "
           "consistent, proactive teammate. Blank = terse machine style."),
-    Field("teams_review_skill", "↳ PR review skill", "text", "💬 Teams bot (2-way chat)",
+    Field("teams_review_skill", "↳ Skill review PR", "text", "💬 Teams bot (chat 2 chiều)",
           "Skill the bot runs to review a PR from chat (real diff-vs-codebase review "
           "that posts findings on the PR). Must exist in the workspace's .claude/skills."),
-    Field("teams_agentic_enabled", "↳ Agentic free-text (Claude turn)", "bool",
-          "💬 Teams bot (2-way chat)",
-          "Route free-text through a real Claude agent turn (tools + skills) instead of "
-          "the fixed intent classifier — more natural, but a Claude run per message."),
-    Field("teams_agent_session_memory", "↳ Remember the conversation", "bool",
-          "💬 Teams bot (2-way chat)",
+    Field("teams_agentic_enabled", "↳ Chat tự do bằng agent (lượt Claude)", "bool",
+          "💬 Teams bot (chat 2 chiều)",
+          "Đưa tin nhắn tự do qua một lượt agent Claude thật (tools + skill) thay vì bộ phân "
+          "loại ý định cố định — tự nhiên hơn, nhưng mỗi tin là một lần chạy Claude."),
+    Field("teams_agent_session_memory", "↳ Nhớ mạch hội thoại", "bool",
+          "💬 Teams bot (chat 2 chiều)",
           "Each reply continues the Claude session from the previous message in the SAME "
           "thread, so a thread behaves like a conversation instead of restating which PR or "
           "item you meant every time. Bounded by the session-reuse TTL above."),
-    Field("teams_agent_max_concurrent", "↳ Max concurrent chat replies", "int",
-          "💬 Teams bot (2-way chat)",
+    Field("teams_agent_max_concurrent", "↳ Số câu trả lời chat song song tối đa", "int",
+          "💬 Teams bot (chat 2 chiều)",
           "How many chat replies may hold a Claude process at once. Separate from 'Max "
           "concurrent' (which governs 30-minute task runs) — sharing it would put the whole "
           "team's chat in single file. 0 = no cap."),
-    Field("teams_agent_nlu_enabled", "↳ Understand free-text (read-only)", "bool",
-          "💬 Teams bot (2-way chat)",
+    Field("teams_agent_nlu_enabled", "↳ Hiểu tin nhắn tự do (chỉ đọc)", "bool",
+          "💬 Teams bot (chat 2 chiều)",
           "Free-text Teams messages that don't match a /command are classified by Claude "
           "into items/prs/status/help — never an action. Costs one Claude call per "
           "unmatched message. Off = unmatched text just gets the command list."),
 
 
-    Field("teams_agent_app_id", "↳ Agent (App) ID", "text", "💬 Teams bot (2-way chat)",
-          "Azure Bot's Application (client) ID. Also requires `pip install .[teams-bot]`."),
-    Field("teams_agent_tenant_id", "↳ Tenant ID", "text", "💬 Teams bot (2-way chat)",
-          "Directory (tenant) ID the App registration lives in."),
-    Field("teams_agent_app_secret", "↳ Agent app secret", "password", "💬 Teams bot (2-way chat)",
-          "Client secret from Certificates & secrets on the App registration."),
+    Field("teams_agent_app_id", "↳ Agent (App) ID", "text", "💬 Teams bot (chat 2 chiều)",
+          "Application (client) ID của Azure Bot. Cần thêm `pip install .[teams-bot]`."),
+    Field("teams_agent_tenant_id", "↳ Tenant ID", "text", "💬 Teams bot (chat 2 chiều)",
+          "Directory (tenant) ID chứa App registration."),
+    Field("teams_agent_app_secret", "↳ App secret của agent", "password",
+          "💬 Teams bot (chat 2 chiều)",
+          "Client secret ở mục Certificates & secrets của App registration."),
     # ── Fleet ──
     Field("fleet_role", "Vai của máy này", "select", "🛰 Fleet",
           "Blank = máy độc lập (mặc định, không đổi gì). 'central' = VM trung tâm giữ cấu hình "
@@ -880,11 +901,11 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "để supervisor (systemd/Docker) dựng lại.",
           ("auto", "exec", "spawn", "exit")),
     # ── Web / Security ──
-    Field("dashboard_auth_password", "Dashboard password", "password", "Web / Security",
+    Field("dashboard_auth_password", "Mật khẩu dashboard", "password", "🔐 Web & bảo mật",
           "Password to access this dashboard (HTTP Basic — any username). Stored as a "
           "PBKDF2 hash, never plaintext. Blank = keep the current one. On first start with "
           "no password set, the CLI prompts for one."),
-    Field("config_export_password", "Full-export password", "password", "Web / Security",
+    Field("config_export_password", "Mật khẩu export đầy đủ", "password", "🔐 Web & bảo mật",
           "Encrypts the full config export (the download that INCLUDES secrets). You need "
           "this same password to decrypt the exported file. Blank = keep the current one."),
 )

@@ -205,7 +205,7 @@ def create_router() -> APIRouter:
             except ValueError:
                 run_at = None
             if run_at is not None:
-                await c.planned_run_repo.create(ids, run_at, note=f"{len(ids)} item(s)")
+                await c.planned_run_repo.create(ids, run_at, note=f"{len(ids)} item")
                 return _planning_redirect(form, scheduled=len(ids))
         n = await planning_analyzer.start_items(c, ids)
         return _planning_redirect(form, started=n)

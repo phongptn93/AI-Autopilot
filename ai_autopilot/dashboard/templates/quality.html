@@ -10,20 +10,19 @@
   .qa-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; }
   .qa-lede { color:var(--text-muted); font-size:13px; line-height:1.6; max-width:110ch; margin:0 0 16px; }
   .qa-period { display:flex; gap:4px; margin-left:auto; flex-wrap:wrap; }
-  .seg { font-size:12px; font-family:var(--mono); padding:5px 11px; border-radius:8px; border:1px solid var(--border);
+  /* Proportional, not monospace: these are words ("30 ngày qua"), not codes. */
+  .seg { font-size:12px; padding:5px 11px; border-radius:8px; border:1px solid var(--border);
     background:var(--bg-input); color:var(--text-dim); text-decoration:none; white-space:nowrap; }
   .seg:hover { color:var(--text); border-color:var(--accent); }
   .seg.on { color:var(--accent-hover); border-color:rgba(99,102,241,.55); background:var(--accent-bg); }
   .seg .n { opacity:.7; margin-left:4px; }
 
-  .qa-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:14px; }
-  .kpi { display:block; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
-    padding:14px 16px; text-decoration:none; color:inherit; position:relative; }
-  a.kpi:hover { border-color:var(--accent); }
-  .kpi .v { font-size:26px; font-weight:750; letter-spacing:-.02em; line-height:1.1; font-variant-numeric:tabular-nums; }
-  .kpi .l { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); margin-top:6px; }
-  .kpi .h { font-size:11.5px; color:var(--text-muted); margin-top:4px; line-height:1.45; }
-  .kpi.good .v { color:var(--green); } .kpi.warn .v { color:var(--amber); } .kpi.bad .v { color:var(--red); }
+  /* KPI tiles use the shared .stat-card; these rules only make the clickable ones
+     behave like links without looking different from the static ones. */
+  a.stat-card { display:block; text-decoration:none; color:inherit; }
+  a.stat-card:hover { border-color:var(--accent); }
+  .stat-cap { font-size:12px; color:var(--text-muted); margin-top:4px; line-height:1.45; }
+  .warn-val { color:var(--amber); }
 
   .qa-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; margin-bottom:16px; }
   .qa-hd { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; padding:12px 18px; border-bottom:1px solid var(--border-soft); }
@@ -43,7 +42,7 @@
   .qa-tools form { display:flex; gap:6px; margin-left:auto; }
   .qa-in { background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:var(--radius-sm);
     padding:6px 10px; font-size:12.5px; font-family:inherit; }
-  .qa-in[type=search] { width:240px; }
+  .qa-in[type=search] { width:240px; min-width:200px; }
 
   .qa-tbl { width:100%; border-collapse:collapse; font-size:12.5px; }
   .qa-tbl th { position:sticky; top:0; z-index:1; background:var(--bg-card); text-align:left; font-size:9.5px; font-weight:700;
@@ -65,7 +64,7 @@
   .b-warn { color:var(--amber); border-color:rgba(245,166,35,.5); background:rgba(245,166,35,.12); }
   .b-ok { color:var(--green); border-color:rgba(46,204,113,.45); background:var(--green-bg); }
   .b-zero { color:var(--text-dim); border-color:var(--border); background:transparent; font-weight:500; }
-  .kind { font-family:var(--mono); font-size:11.5px; white-space:nowrap; }
+  .kind { font-size:11.5px; white-space:nowrap; }
   .detail { color:var(--text-muted); max-width:70ch; line-height:1.5; }
   .detail.clip { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 
@@ -78,6 +77,7 @@
   .pager span.off { opacity:.35; border:1px solid var(--border); padding:4px 8px; border-radius:7px; }
   .pager .per { margin-left:auto; display:flex; gap:4px; align-items:center; }
   .qa-empty { padding:24px 18px; color:var(--text-dim); font-size:12.5px; line-height:1.7; }
+  .qa-lede summary { cursor:pointer; color:var(--accent-hover); font-size:12px; margin-top:4px; }
   .qa-empty code, .qa-lede code { font-family:var(--mono); font-size:11.5px; background:var(--bg-input); padding:1px 6px; border-radius:5px; }
 </style>
 
@@ -86,13 +86,13 @@
   <div class="pager">
     <span>{{ p.start + 1 }}–{{ p.end }} / {{ p.total }}</span>
     <div class="pg">
-      {% if p.page > 1 %}<a href="{{ url(anchor, **{page_key: p.page - 1}) }}" aria-label="Previous page">‹</a>{% else %}<span class="off">‹</span>{% endif %}
+      {% if p.page > 1 %}<a href="{{ url(anchor, **{page_key: p.page - 1}) }}" aria-label="Trang trước">‹</a>{% else %}<span class="off">‹</span>{% endif %}
       {% for n in p.nums %}
         {% if n is none %}<span class="gap">…</span>
         {% elif n == p.page %}<span class="cur">{{ n }}</span>
         {% else %}<a href="{{ url(anchor, **{page_key: n}) }}">{{ n }}</a>{% endif %}
       {% endfor %}
-      {% if p.page < p.pages %}<a href="{{ url(anchor, **{page_key: p.page + 1}) }}" aria-label="Next page">›</a>{% else %}<span class="off">›</span>{% endif %}
+      {% if p.page < p.pages %}<a href="{{ url(anchor, **{page_key: p.page + 1}) }}" aria-label="Trang sau">›</a>{% else %}<span class="off">›</span>{% endif %}
     </div>
     <div class="per">Mỗi trang
       {% for n in per_options %}<a href="{{ url(anchor, **{per_key: n, page_key: 1}) }}" {% if n == p.per %}style="border-color:rgba(99,102,241,.55);color:var(--accent-hover)"{% endif %}>{{ n }}</a>{% endfor %}
@@ -101,55 +101,67 @@
   {% endif %}
 {%- endmacro %}
 
+{# Event kinds are stored as plain strings (QualityKind); show a word, keep the key in title. #}
+{% set KIND_VI = {'execution_retry': 'Retry sau lỗi', 'pr_revision': 'Vòng /ai sửa PR',
+                  'sdlc_iteration': 'Vòng lặp SDLC', 'review_vote': 'Vote của reviewer',
+                  'review_finding': 'Phát hiện khi review', 'test_failed': 'Test fail',
+                  'reopened': 'Bị mở lại'} %}
+
 <div class="qa-top">
   <h2 class="page-title">{{ page_title("quality") }}</h2>
   <div class="qa-period">
-    {% for d in [7, 30, 90, 365] %}<a class="seg {{ 'on' if days == d else '' }}" href="{{ url('', days=d, page=1, epage=1) }}">{{ d }} ngày</a>{% endfor %}
+    {% for d in [7, 30, 90, 365] %}<a class="seg {{ 'on' if days == d else '' }}" href="{{ url('', days=d, page=1, epage=1) }}">{{ d }} ngày qua</a>{% endfor %}
   </div>
 </div>
-<p class="qa-lede">
-  Mỗi work item phải làm lại bao nhiêu lần, vì sao, và người review đã vote gì. Số liệu lấy
-  từ log <b>chỉ ghi thêm</b> — không bao giờ bị reset khi item xong, khác với các ngân sách retry
-  mà nó được dựng lên từ đó. Các chỉ số trên cùng tính trên <b>toàn bộ {{ days }} ngày</b>; bộ lọc
-  chỉ thu hẹp bảng.
-</p>
+{# Lede = one sentence; the "why trust these numbers" explanation is for the curious,
+   so it folds away instead of pushing the KPIs down. #}
+<div class="qa-lede">
+  Mỗi work item phải làm lại bao nhiêu lần, vì sao, và reviewer đã vote gì — chỉ số trên cùng
+  tính trên <b>toàn bộ {{ days }} ngày</b>, bộ lọc chỉ thu hẹp bảng.
+  <details><summary>Chi tiết</summary>
+    Số liệu lấy từ log <b>chỉ ghi thêm</b> — không bao giờ bị reset khi item xong, khác với các
+    ngân sách retry mà nó được dựng lên từ đó.
+  </details>
+</div>
 
 {# ── How much ── #}
-<div class="qa-kpis">
-  <div class="kpi {{ 'good' if kpis.first_pass >= 80 else ('warn' if kpis.first_pass >= 50 else 'bad') if kpis.item_count else '' }}">
-    <div class="v">{{ '%.0f' | format(kpis.first_pass) }}%</div>
-    <div class="l">Đạt ngay lần đầu</div>
-    <div class="h">{{ kpis.item_count - kpis.reworked }}/{{ kpis.item_count }} item không phải làm lại</div>
+{# Shared stat-card tiles. A value is coloured only when there is data AND it is
+   non-zero — a green "0" on an empty window read as "all good" when it meant "no data". #}
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Đạt ngay lần đầu</span><div class="stat-card-icon">🎯</div></div>
+    <div class="stat-card-value {{ ('success-val' if kpis.first_pass >= 80 else ('warn-val' if kpis.first_pass >= 50 else 'failed-val')) if kpis.item_count }}">{{ ('%.0f' | format(kpis.first_pass) ~ '%') if kpis.item_count else '—' }}</div>
+    <div class="stat-cap">{% if kpis.item_count %}{{ kpis.item_count - kpis.reworked }}/{{ kpis.item_count }} item không phải làm lại{% else %}chưa có item nào trong khoảng này{% endif %}</div>
   </div>
-  <div class="kpi {{ 'good' if kpis.per_item < 0.3 else ('warn' if kpis.per_item < 1 else 'bad') if kpis.item_count else '' }}">
-    <div class="v">{{ '%.2f' | format(kpis.per_item) }}</div>
-    <div class="l">Rework / item</div>
-    <div class="h">con số cần kéo xuống</div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Rework / item</span><div class="stat-card-icon">🔁</div></div>
+    <div class="stat-card-value {{ ('warn-val' if kpis.per_item < 1 else 'failed-val') if kpis.item_count and kpis.per_item }}">{{ '%.2f' | format(kpis.per_item) if kpis.item_count else '—' }}</div>
+    <div class="stat-cap">con số cần kéo xuống</div>
   </div>
-  <a class="kpi {{ 'warn' if kpis.reworked else '' }}" href="{{ url('#items', view='reworked', page=1) }}">
-    <div class="v">{{ kpis.rework }}</div>
-    <div class="l">Lượt làm lại</div>
-    <div class="h">trên {{ kpis.reworked }} item — bấm để lọc</div>
+  <a class="stat-card" href="{{ url('#items', view='reworked', page=1) }}">
+    <div class="stat-card-header"><span class="stat-card-label">Lượt làm lại</span><div class="stat-card-icon">♻️</div></div>
+    <div class="stat-card-value {{ 'warn-val' if kpis.rework }}">{{ kpis.rework if kpis.item_count else '—' }}</div>
+    <div class="stat-cap">trên {{ kpis.reworked }} item — bấm để lọc</div>
   </a>
-  <a class="kpi {{ ('bad' if kpis.blocked else 'good') if kpis.item_count else '' }}" href="{{ url('#items', view='blocked', page=1) }}">
-    <div class="v">{{ kpis.blocked }}</div>
-    <div class="l">Item bị reviewer chặn</div>
-    <div class="h">{{ kpis.block_votes }} vote từ chối / chờ tác giả</div>
+  <a class="stat-card" href="{{ url('#items', view='blocked', page=1) }}">
+    <div class="stat-card-header"><span class="stat-card-label">Bị reviewer chặn</span><div class="stat-card-icon">⛔</div></div>
+    <div class="stat-card-value {{ 'failed-val' if kpis.blocked }}">{{ kpis.blocked if kpis.item_count else '—' }}</div>
+    <div class="stat-cap">{{ kpis.block_votes }} vote từ chối / chờ tác giả</div>
   </a>
-  <a class="kpi {{ ('bad' if kpis.tests else 'good') if kpis.item_count else '' }}" href="{{ url('#log', kind='test_failed', epage=1) }}">
-    <div class="v">{{ kpis.tests }}</div>
-    <div class="l">Test gate fail</div>
-    <div class="h">bấm để xem log</div>
+  <a class="stat-card" href="{{ url('#log', kind='test_failed', epage=1) }}">
+    <div class="stat-card-header"><span class="stat-card-label">Test gate fail</span><div class="stat-card-icon">🧪</div></div>
+    <div class="stat-card-value {{ 'failed-val' if kpis.tests }}">{{ kpis.tests if kpis.item_count else '—' }}</div>
+    <div class="stat-cap">bấm để xem nhật ký</div>
   </a>
 </div>
 
 {# ── Why ── #}
 {% set total_c = causes.retries + causes.pr_revisions + causes.sdlc_iterations + causes.reopens %}
 <div class="qa-card">
-  <div class="qa-hd"><h3>Vì sao phải làm lại</h3><span class="sub">tỷ lệ theo nguyên nhân, {{ total_c }} lượt</span></div>
+  <div class="qa-hd"><h3>Vì sao phải làm lại</h3><span class="sub">tỉ lệ theo nguyên nhân, {{ total_c }} lượt</span></div>
   <div class="cause">
     {% if total_c %}
-    <div class="cause-bar" role="img" aria-label="rework by cause">
+    <div class="cause-bar" role="img" aria-label="Làm lại theo nguyên nhân">
       {% for key, cls in [('retries','c-retry'), ('pr_revisions','c-ai'), ('sdlc_iterations','c-sdlc'), ('reopens','c-reopen')] %}
         {% if causes[key] %}<span class="{{ cls }}" style="width:{{ (causes[key] / total_c * 100)|round(2) }}%" title="{{ causes[key] }}"></span>{% endif %}
       {% endfor %}
@@ -175,7 +187,7 @@
       {% for k, v in [('days', days), ('view', view), ('sort', sort), ('per', rp.per), ('kind', kind), ('eper', ep.per), ('item', item)] %}
         {% if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}
       {% endfor %}
-      <input class="qa-in" type="search" name="q" value="{{ q }}" placeholder="Tìm #id hoặc tiêu đề…" aria-label="Search work items">
+      <input class="qa-in" type="search" name="q" value="{{ q }}" placeholder="Tìm #id hoặc tiêu đề…" aria-label="Tìm work item">
     </form>
   </div>
   {% if rows %}
@@ -184,8 +196,8 @@
     <thead><tr>
       <th><a class="{{ 'on' if sort == 'id' }}" href="{{ url('#items', sort='id', page=1) }}">Work item{{ ' ↓' if sort == 'id' }}</a></th>
       <th class="n"><a class="{{ 'on' if sort == 'rework' }}" href="{{ url('#items', sort='rework', page=1) }}">Làm lại{{ ' ↓' if sort == 'rework' }}</a></th>
-      <th class="n">Retry</th><th class="n">/ai</th><th class="n">SDLC</th><th class="n">Reopen</th>
-      <th class="n">Findings</th><th class="n">Test fail</th>
+      <th class="n">Retry</th><th class="n">/ai</th><th class="n">SDLC</th><th class="n">Mở lại</th>
+      <th class="n">Phát hiện</th><th class="n">Test fail</th>
       <th><a class="{{ 'on' if sort == 'vote' }}" href="{{ url('#items', sort='vote', page=1) }}">Vote{{ ' ↓' if sort == 'vote' }}</a></th>
       <th><a class="{{ 'on' if sort == 'last' }}" href="{{ url('#items', sort='last', page=1) }}">Tín hiệu cuối{{ ' ↓' if sort == 'last' }}</a></th>
       <th></th>
@@ -209,11 +221,11 @@
         <td class="n {{ 'dim' if not r.reopens }}">{{ r.reopens or '·' }}</td>
         <td class="n {{ 'dim' if not r.findings }}">{{ r.findings or '·' }}</td>
         <td class="n {{ 'dim' if not r.test_failures }}">{{ r.test_failures or '·' }}</td>
-        <td>{% if r.worst_vote < 0 %}<span class="badge b-bad" title="{{ r.rejections }} vote từ chối">{{ 'rejected' if r.worst_vote <= -10 else 'waiting author' }} ({{ r.worst_vote }})</span>
-            {% elif r.approvals %}<span class="badge b-ok">approved</span>
+        <td>{% if r.worst_vote < 0 %}<span class="badge b-bad" title="{{ r.rejections }} vote từ chối · ADO {{ 'rejected' if r.worst_vote <= -10 else 'waiting for author' }}">{{ 'từ chối' if r.worst_vote <= -10 else 'chờ tác giả' }} ({{ r.worst_vote }})</span>
+            {% elif r.approvals %}<span class="badge b-ok" title="ADO approved">đã duyệt</span>
             {% else %}<span class="dim">—</span>{% endif %}</td>
         <td class="dim" style="white-space:nowrap">{{ r.last_at.strftime('%Y-%m-%d %H:%M') if r.last_at else '' }}</td>
-        <td><a class="seg" href="{{ url('#log', item=r.work_item_id, epage=1) }}" title="Chỉ xem sự kiện của item này">log →</a></td>
+        <td><a class="seg" href="{{ url('#log', item=r.work_item_id, epage=1) }}" title="Chỉ xem sự kiện của item này">nhật ký →</a></td>
       </tr>
     {% endfor %}
     </tbody>
@@ -231,23 +243,23 @@
 {# ── Evidence ── #}
 <div class="qa-card" id="log">
   <div class="qa-hd"><h3>Nhật ký sự kiện</h3>
-    <span class="sub">{{ ep.total }} sự kiện{% if item %} của <b>#{{ item }}</b>{% endif %}{% if kind %} loại <code>{{ kind }}</code>{% endif %}</span>
-    {% if item or kind %}<div class="r"><a class="seg" href="{{ url('#log', item=0, kind='', epage=1) }}">✕ Bỏ lọc log</a></div>{% endif %}
+    <span class="sub">{{ ep.total }} sự kiện{% if item %} của <b>#{{ item }}</b>{% endif %}{% if kind %} loại <b title="{{ kind }}">{{ KIND_VI.get(kind, kind) }}</b>{% endif %}</span>
+    {% if item or kind %}<div class="r"><a class="seg" href="{{ url('#log', item=0, kind='', epage=1) }}">✕ Bỏ lọc nhật ký</a></div>{% endif %}
   </div>
   <div class="qa-tools">
     <a class="seg {{ 'on' if not kind }}" href="{{ url('#log', kind='', epage=1) }}">Tất cả</a>
-    {% for k in kinds %}<a class="seg {{ 'on' if kind == k }}" href="{{ url('#log', kind=k, epage=1) }}">{{ k }}<span class="n">{{ totals.get(k, 0) }}</span></a>{% endfor %}
+    {% for k in kinds %}<a class="seg {{ 'on' if kind == k }}" href="{{ url('#log', kind=k, epage=1) }}" title="{{ k }}">{{ KIND_VI.get(k, k) }}<span class="n">{{ totals.get(k, 0) }}</span></a>{% endfor %}
   </div>
   {% if events %}
   <div style="overflow-x:auto">
   <table class="qa-tbl">
-    <thead><tr><th>Thời điểm (UTC)</th><th>Item</th><th>Loại</th><th class="n">Giá trị</th><th>Stage</th><th>Ai</th><th>Chi tiết</th></tr></thead>
+    <thead><tr><th>Thời điểm (UTC)</th><th>Item</th><th>Loại</th><th class="n">Giá trị</th><th>Giai đoạn</th><th>Người / bot</th><th>Chi tiết</th></tr></thead>
     <tbody>
     {% for e in events %}
       <tr>
         <td class="dim" style="white-space:nowrap">{{ e.at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
         <td class="it"><a href="/dashboard/task/{{ e.work_item_id }}">#{{ e.work_item_id }}</a></td>
-        <td class="kind">{% if e.kind in rework_kinds %}<span class="badge b-warn">{{ e.kind }}</span>{% elif e.kind == 'review_vote' and e.value < 0 %}<span class="badge b-bad">{{ e.kind }}</span>{% else %}{{ e.kind }}{% endif %}</td>
+        <td class="kind" title="{{ e.kind }}">{% if e.kind in rework_kinds %}<span class="badge b-warn">{{ KIND_VI.get(e.kind, e.kind) }}</span>{% elif e.kind == 'review_vote' and e.value < 0 %}<span class="badge b-bad">{{ KIND_VI.get(e.kind, e.kind) }}</span>{% else %}{{ KIND_VI.get(e.kind, e.kind) }}{% endif %}</td>
         <td class="n">{{ e.value if e.value else '' }}</td>
         <td>{{ e.stage }}</td>
         <td>{{ e.actor }}</td>
@@ -259,7 +271,8 @@
   </div>
   {{ pager(ep, 'epage', 'eper', '#log') }}
   {% else %}
-  <div class="qa-empty">Không có sự kiện nào{% if kind %} loại <code>{{ kind }}</code>{% endif %}{% if item %} cho #{{ item }}{% endif %} trong {{ days }} ngày.</div>
+  <div class="qa-empty">Không có sự kiện nào{% if kind %} loại <b title="{{ kind }}">{{ KIND_VI.get(kind, kind) }}</b>{% endif %}{% if item %} cho #{{ item }}{% endif %} trong {{ days }} ngày.
+    {% if kind or item %}<a class="table-link" href="{{ url('#log', item=0, kind='', epage=1) }}">Bỏ lọc nhật ký</a>{% else %}Thử chọn khoảng dài hơn ở góc trên.{% endif %}</div>
   {% endif %}
 </div>
 {% endblock %}

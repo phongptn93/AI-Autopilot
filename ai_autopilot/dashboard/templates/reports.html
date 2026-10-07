@@ -53,25 +53,32 @@
   .sev.failed { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
 
   .rp-empty { padding:26px 18px; color:var(--text-dim); font-size:12.5px; line-height:1.7; }
+  .rp-lede summary { cursor:pointer; color:var(--accent-hover); font-size:12px; margin-top:4px; }
 </style>
 
+{# Severity values stay the data (CSS class, filters); only the visible word is Vietnamese. #}
+{% set SEV_VI = {'critical': 'Nghiêm trọng', 'high': 'Cao', 'medium': 'Trung bình',
+                 'low': 'Thấp', 'info': 'Thông tin'} %}
+
 <div class="rp-top"><h2 class="page-title">{{ page_title("reports") }}</h2></div>
-<p class="rp-lede">
-  What the <a href="/dashboard/loops">scheduled agents</a> found. Each row is one run of a
-  <b>report</b> loop — read-only by construction, so nothing here changed the repository.
-  A run that failed is still listed: a review that did not happen looks exactly like a
-  review that found nothing, and only this page can tell you which it was.
-</p>
+<div class="rp-lede">
+  Những gì các <a href="/dashboard/loops">agent chạy theo lịch</a> tìm thấy — mỗi dòng là một
+  lượt chạy của loop <b>report</b>, chỉ đọc nên không đổi gì trong repository.
+  <details><summary>Chi tiết</summary>
+    Lượt chạy lỗi vẫn được liệt kê: một review không diễn ra trông y hệt một review không
+    tìm thấy gì, và chỉ trang này cho biết đó là trường hợp nào.
+  </details>
+</div>
 
 <div class="rp-card">
   <div class="rp-hd">
-    <h3>Runs</h3>
-    <span>{{ rows|length }} shown, newest first.</span>
+    <h3>Lượt chạy</h3>
+    <span>{{ rows|length }} lượt, mới nhất trước.</span>
   </div>
 
   {% if loops %}
   <div class="rp-filter">
-    <a href="/dashboard/reports" class="{{ '' if selected else 'on' }}">all</a>
+    <a href="/dashboard/reports" class="{{ '' if selected else 'on' }}" style="font-family:inherit">Tất cả</a>
     {% for name in loops %}
     <a href="/dashboard/reports?loop={{ name|urlencode }}"
        class="{{ 'on' if selected == name else '' }}">{{ name }}</a>
@@ -82,7 +89,7 @@
   {% if rows %}
   <table class="rp-tbl">
     <thead><tr>
-      <th>Loop</th><th>Findings</th><th>When</th><th>Took</th><th>File</th>
+      <th>Loop</th><th>Phát hiện</th><th>Thời điểm</th><th>Thời lượng</th><th>File</th>
     </tr></thead>
     <tbody>
       {% for r in rows %}
@@ -92,29 +99,28 @@
           {% if r.summary %}<div class="rp-sum">{{ r.summary }}</div>{% endif %}
         </td>
         <td>
-          {% if r.status != 'success' %}<span class="sev failed">run failed</span>{% endif %}
+          {% if r.status != 'success' %}<span class="sev failed" title="{{ r.status }}">run lỗi</span>{% endif %}
           {% set counts = {'critical': r.critical_count, 'high': r.high_count,
                            'medium': r.medium_count, 'low': r.low_count, 'info': r.info_count} %}
           {% for sev in severities if counts[sev] %}
-          <span class="sev {{ sev }}">{{ sev }} {{ counts[sev] }}</span>
+          <span class="sev {{ sev }}" title="{{ sev }}">{{ SEV_VI.get(sev, sev) }} {{ counts[sev] }}</span>
           {% endfor %}
           {% if r.status == 'success' and not (counts.values()|sum) %}
-          <span class="sev clean">clean</span>
+          <span class="sev clean">sạch</span>
           {% endif %}
         </td>
         <td class="rp-when">{{ r.started_at.strftime('%Y-%m-%d %H:%M') if r.started_at else '—' }}</td>
         <td class="rp-when">{{ '%.0fs'|format(r.duration_seconds or 0) }}</td>
-        <td class="rp-when">{{ '📄' if r.html_path else '—' }}</td>
+        <td class="rp-when">{% if r.html_path %}<span title="{{ r.html_path }}">📄</span>{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
   <div class="rp-empty">
-    No audits yet. Add a <b>report</b> loop on the
-    <a href="/dashboard/loops">Scheduled agents</a> page — the presets there cover code
-    review, security, performance and spec drift — then press <b>▶ Run now</b> rather than
-    waiting for its first cron.
+    Chưa có báo cáo nào vì chưa loop <b>report</b> nào chạy. Thêm một loop ở trang
+    <a href="/dashboard/loops">Agent chạy theo lịch</a> (có sẵn mẫu code review, bảo mật,
+    hiệu năng, spec drift) rồi bấm <b>▶ Chạy ngay</b> thay vì chờ lịch cron đầu tiên.
   </div>
   {% endif %}
 </div>

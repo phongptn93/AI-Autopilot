@@ -9,10 +9,10 @@
   <span class="to">→</span>
   <input type="hidden" name="flow{{ slot }}_rollup_key{{ index }}" value="{{ r.child }}">
   <select name="flow{{ slot }}_rollup_val{{ index }}" class="{{ '' if r.parent else 'unset' }}">
-    <option value="" {% if not r.parent %}selected{% endif %}>— not mapped —</option>
+    <option value="" {% if not r.parent %}selected{% endif %}>— chưa map —</option>
     {% for s in choices %}<option value="{{ s }}" {% if r.parent == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
     {% if r.parent and r.parent not in choices %}
-    <option value="{{ r.parent }}" selected>⚠ {{ r.parent }} — not on these types</option>
+    <option value="{{ r.parent }}" selected>⚠ {{ r.parent }} — không có trên các type này</option>
     {% endif %}
   </select>
 </div>
@@ -36,8 +36,17 @@
      empty space beside it. ~104ch still keeps a readable measure while filling the band. */
   .fl-lede{color:var(--text-muted);font-size:13px;line-height:1.6;max-width:104ch;margin:0 0 14px}
   .fl-lede a{color:var(--accent-hover)}
-  .fl-lede code{font-family:var(--mono);font-size:11.5px;background:var(--bg-input);
+  .fl-lede code,.fl-why code{font-family:var(--mono);font-size:11.5px;background:var(--bg-input);
     padding:1px 6px;border-radius:5px}
+  /* The rule behind the page, folded: the lede says what to do, this says why. */
+  .fl-why{margin:-6px 0 14px;max-width:104ch}
+  .fl-why > summary{cursor:pointer;list-style:none;color:var(--text-muted);font-size:12.5px;
+    font-weight:600;padding:2px 0}
+  .fl-why > summary::-webkit-details-marker{display:none}
+  .fl-why > summary::before{content:"▸ ";color:var(--text-dim)}
+  .fl-why[open] > summary::before{content:"▾ "}
+  .fl-why p{color:var(--text-muted);font-size:12.5px;line-height:1.6;margin:6px 0 0}
+  .fl-why a{color:var(--accent-hover)}
 
   /* One compact status strip instead of a stack of full-width alert cards. */
   .fl-status{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;
@@ -125,32 +134,37 @@
 <div class="fl-top">
   <h2 class="page-title">{{ page_title("flow") }}</h2>
   <span class="badge {{ 'badge-success' if enabled else 'badge-retrying' }}">
-    <span class="badge-dot"></span>{{ 'on' if enabled else 'off' }}</span>
+    <span class="badge-dot"></span>{{ 'bật' if enabled else 'tắt' }}</span>
 </div>
 <p class="fl-lede">
-  An ADO state belongs to a <b>work-item type</b> — <code>Ready to Deploy</code> exists on Bug
-  and Task but not on Requirement — so one state for the whole project is rejected outright by
-  every type that lacks it. Group the types that share a lifecycle; each group gets its own
-  states, and anything this project would reject is refused here rather than months later, one
-  work item at a time. Saved with the rest of the config, so
-  <a href="/dashboard/settings">Settings → ⇅ Export / Import</a> carries it too.
+  Gom các loại work item có cùng vòng đời thành một nhóm, rồi chọn state cho từng giai đoạn.
+  State nào project này sẽ từ chối thì bị chặn ngay lúc lưu.
 </p>
+<details class="fl-why">
+  <summary>Chi tiết</summary>
+  <p>State trong ADO thuộc về từng <b>loại work item</b> — <code>Ready to Deploy</code> có trên
+    Bug và Task nhưng không có trên Requirement — nên một state chung cho cả project sẽ bị mọi
+    loại thiếu nó từ chối. Mỗi nhóm có bộ state riêng, và lỗi bị chặn ở đây thay vì lộ ra vài
+    tháng sau, từng work item một.</p>
+  <p>Lưu cùng phần cấu hình còn lại, nên
+    <a href="/dashboard/settings">Cài đặt → ⇅ Export / Import</a> cũng mang theo.</p>
+</details>
 
 <div class="fl-status">
-  <span><b>{{ groups|length }}</b> group{{ '' if groups|length == 1 else 's' }}</span>
+  <span><b>{{ groups|length }}</b> nhóm</span>
   <span class="sep"></span>
-  <span><b>{{ types|length - uncovered|length }}</b> of <b>{{ types|length }}</b> types covered</span>
-  {% if assignee %}<span class="sep"></span><span>only for <b>{{ assignee }}</b></span>{% endif %}
+  <span>Đã phủ <b>{{ types|length - uncovered|length }}</b> / <b>{{ types|length }}</b> loại</span>
+  {% if assignee %}<span class="sep"></span><span>chỉ cho <b>{{ assignee }}</b></span>{% endif %}
   {% if not enabled %}
   <span class="sep"></span>
-  <span class="fl-note">⚠️ Auto transitions are <b>off</b> — nothing here runs yet
-    (<a href="/dashboard/settings#sec-6" style="color:var(--amber)">turn on in Settings</a>).
-    You can still configure it.</span>
+  <span class="fl-note">⚠️ Tự chuyển state đang <b>tắt</b> — chưa có gì ở đây chạy
+    (<a href="/dashboard/settings#auto-transitions" style="color:var(--amber)">bật trong Cài đặt</a>).
+    Vẫn cấu hình trước được.</span>
   {% endif %}
   {% if ado_down %}
   <span class="sep"></span>
-  <span class="fl-note bad">⚠️ Couldn't read the work-item types from Azure DevOps — state
-    lists are empty and a save can only be checked for structure.</span>
+  <span class="fl-note bad">⚠️ Không đọc được các loại work item từ Azure DevOps — danh sách
+    state trống, khi lưu chỉ kiểm tra được cấu trúc.</span>
   {% endif %}
 </div>
 
@@ -162,9 +176,9 @@
 
 {% if errors %}
 <div class="card" style="border-color:var(--red);margin-bottom:16px">
-  <div class="card-header"><h3 style="color:var(--red)">⛔ Not saved — {{ errors|length }}
-    problem{{ 's' if errors|length != 1 else '' }} to fix</h3>
-    <span class="form-help" style="margin:0">What you typed is kept below.</span></div>
+  <div class="card-header"><h3 style="color:var(--red)">⛔ Chưa lưu — còn {{ errors|length }}
+    lỗi cần sửa</h3>
+    <span class="form-help" style="margin:0">Những gì bạn đã nhập vẫn được giữ bên dưới.</span></div>
   <div class="fl-err"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
 </div>
 {% endif %}
@@ -183,11 +197,12 @@
   <div class="card fl-card {{ 'ghost' if new else '' }}">
     <div class="fl-hd">
       <input class="fl-name" type="text" name="flow{{ i }}_name" value="{{ g.name or '' }}"
-             placeholder="{{ 'Group name' if not new else 'Add a group — name it, tick its types' }}">
+             placeholder="{{ 'Tên nhóm' if not new else '＋ Nhóm mới' }}"
+             {% if new %}title="Thêm nhóm: đặt tên rồi tick các loại work item của nó"{% endif %}>
       <span class="grow"></span>
       {% if not new %}
-      <label class="fl-del" title="delete this group">
-        <input type="checkbox" name="flow{{ i }}_delete" class="chk-sm chk-red"> delete
+      <label class="fl-del" title="Xoá nhóm này khi lưu">
+        <input type="checkbox" name="flow{{ i }}_delete" class="chk-sm chk-red"> xoá
       </label>
       {% endif %}
     </div>
@@ -205,7 +220,7 @@
         {% endif %}
       {% endfor %}
       {% if ns.first %}
-      <span class="empty">No states set yet — this group changes nothing.</span>
+      <span class="empty">Chưa đặt state nào — nhóm này chưa đổi gì.</span>
       {% endif %}
     </div>
 
@@ -219,12 +234,12 @@
         {# Marked, not disabled: a disabled box isn't submitted, so moving a type between
            groups would need two saves. Ticking it in both is caught on save. #}
         <label class="chip {{ 'chip-accent' if mine else '' }} {{ 'dim' if taken else '' }}"
-               {% if taken %}title="currently in the &quot;{{ owner }}&quot; group — untick it there in the same save"{% endif %}>
-          <input type="checkbox" name="flow{{ i }}_type__{{ t }}" {% if mine %}checked{% endif %} class="chk-sm">{{ t }}{% if taken %}<span class="owner">in {{ owner }}</span>{% endif %}
+               {% if taken %}title="đang thuộc nhóm &quot;{{ owner }}&quot; — bỏ tick ở đó trong cùng lần lưu"{% endif %}>
+          <input type="checkbox" name="flow{{ i }}_type__{{ t }}" {% if mine %}checked{% endif %} class="chk-sm">{{ t }}{% if taken %}<span class="owner">ở {{ owner }}</span>{% endif %}
         </label>{% endfor %}
       </div>
       {% else %}
-      <div class="form-help" style="margin:0">No work-item types loaded from Azure DevOps.</div>
+      <div class="form-help" style="margin:0">Chưa tải được loại work item nào từ Azure DevOps.</div>
       {% endif %}
     </div>
 
@@ -243,15 +258,16 @@
           {% if slot_choices %}
           <select id="flow{{ i }}_state__{{ key }}" name="flow{{ i }}_state__{{ key }}"
                   class="{{ 'set' if cur else 'unset' }} {{ 'warn' if bad else '' }}">
-            <option value="" {% if not cur %}selected{% endif %}>— skip this stage —</option>
+            <option value="" {% if not cur %}selected{% endif %}>— bỏ qua giai đoạn này —</option>
             {# Only states EVERY ticked type defines: a state half the group lacks is the
                half-broken rule this page exists to prevent. #}
             {% for s in slot_choices %}<option value="{{ s }}" {% if cur == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
-            {% if bad %}<option value="{{ cur }}" selected>⚠ {{ cur }} — not on these types</option>{% endif %}
+            {% if bad %}<option value="{{ cur }}" selected>⚠ {{ cur }} — không có trên các type này</option>{% endif %}
           </select>
           {% else %}
           <input type="text" id="flow{{ i }}_state__{{ key }}" name="flow{{ i }}_state__{{ key }}"
-                 value="{{ cur }}" placeholder="tick types above to pick a state">
+                 value="{{ cur }}" placeholder="tick loại ở trên trước"
+                 title="Tick loại work item ở trên để chọn state">
           {% endif %}
         </div>
         {% endfor %}
@@ -261,8 +277,8 @@
 
     {% set tag_count = (g.tags or {})|length %}
     <details class="fl-more" {% if tag_count %}open{% endif %}>
-      <summary>Tag &amp; comment per stage
-        <span class="hint">{{ tag_count ~ ' override' ~ ('' if tag_count == 1 else 's') if tag_count else 'defaults' }}</span>
+      <summary>Tag &amp; comment theo giai đoạn
+        <span class="hint">{{ tag_count ~ ' ghi đè' if tag_count else 'mặc định' }}</span>
       </summary>
       <div class="fl-more-body">
         <div class="fl-rows">
@@ -270,10 +286,10 @@
           <div class="fl-row" style="grid-template-columns:132px 1fr 74px">
             <label>{{ label }}</label>
             <input type="text" name="flow{{ i }}_tag__{{ key }}"
-                   value="{{ (g.tags or {}).get(key, '') }}" placeholder="use the global tag">
-            <label class="fl-del" style="justify-content:flex-end" title="post a comment on the work item">
+                   value="{{ (g.tags or {}).get(key, '') }}" placeholder="dùng tag chung">
+            <label class="fl-del" style="justify-content:flex-end" title="Ghi comment lên work item">
               <input type="checkbox" name="flow{{ i }}_comment__{{ key }}"
-                     {% if (g.comment or {}).get(key, True) %}checked{% endif %} class="chk-sm"> note
+                     {% if (g.comment or {}).get(key, True) %}checked{% endif %} class="chk-sm"> ghi chú
             </label>
           </div>
           {% endfor %}
@@ -282,8 +298,8 @@
     </details>
 
     <details class="fl-more" {% if g.rollup %}open{% endif %}>
-      <summary>Parent roll-up · cha theo con chậm nhất
-        <span class="hint">{{ (g.rollup|length ~ ' rule' ~ ('' if g.rollup|length == 1 else 's')) if g.rollup else 'off' }}</span>
+      <summary>Roll-up lên cha · cha theo con chậm nhất
+        <span class="hint">{{ (g.rollup|length ~ ' quy tắc') if g.rollup else 'tắt' }}</span>
       </summary>
       <div class="fl-more-body">
         {% set rows = rollup_rows[i] %}
@@ -314,8 +330,8 @@
         {% set lead = rows|rejectattr('secondary')|list|length %}
         {% if rows|selectattr('secondary')|list %}
         <details class="fl-more" style="border-top:none;margin-top:8px">
-          <summary style="padding:9px 0">Other work-item types
-            <span class="hint">{{ rows|length - lead }} more states · rarely children</span>
+          <summary style="padding:9px 0">Các loại work item khác
+            <span class="hint">thêm {{ rows|length - lead }} state · hiếm khi là con</span>
           </summary>
           <div style="padding-bottom:4px">
             {% for r in rows if r.secondary %}
@@ -325,19 +341,18 @@
         </details>
         {% endif %}
         <div class="form-help" style="margin-top:10px">
-          Applies when an item of THIS group is a <b>parent</b>: it follows its
-          least-advanced child, and is <b>held</b> unless every child state above is mapped —
-          one <i>not mapped</i> row stops the whole roll-up. Leave them all unmapped for off.
+          Áp dụng khi item của nhóm NÀY là <b>cha</b>: nó theo con kém tiến triển nhất, và bị
+          <b>giữ nguyên</b> nếu còn state con nào ở trên chưa map — một dòng <i>chưa map</i> là
+          dừng cả roll-up. Để tất cả chưa map nghĩa là tắt.
           {% if rows|selectattr('unknown')|list %}
-          <br><span style="color:var(--red)">⚠ = that child state exists on no work-item type
-            in this project, so the line can never match. Set it to <i>not mapped</i> to drop
-            it.</span>
+          <br><span style="color:var(--red)">⚠ = state con này không có trên loại work item nào
+            của project, nên dòng này không bao giờ khớp. Đặt về <i>chưa map</i> để bỏ.</span>
           {% endif %}
         </div>
         {% else %}
         <div class="form-help" style="margin:0">
-          Tick this group's work-item types first — the child states a roll-up can key on are
-          the states of the OTHER types.
+          Tick các loại work item của nhóm này trước — roll-up dựa trên state của các loại
+          KHÁC (loại của con).
         </div>
         {% endif %}
       </div>
@@ -347,9 +362,9 @@
 
   {% if uncovered %}
   <div class="card fl-card" style="border-color:var(--amber)">
-    <div class="card-header"><h3>⚠️ {{ uncovered|length }} type{{ '' if uncovered|length == 1 else 's' }} with no group</h3>
-      <span class="form-help" style="margin:0">Listed so "configured per type" never hides a
-        type that isn't.</span></div>
+    <div class="card-header"><h3>⚠️ {{ uncovered|length }} loại chưa thuộc nhóm nào</h3>
+      <span class="form-help" style="margin:0">Liệt kê ra để không loại nào bị bỏ sót khi tưởng
+        mọi loại đã được cấu hình.</span></div>
     <div style="padding:13px 18px 16px">
       <div class="chips" style="margin-bottom:11px">
         {% for t in uncovered %}<span class="chip">{{ t }}</span>{% endfor %}
@@ -368,23 +383,22 @@
             </span>
           {% endif %}
         {% endfor %}
-        {% if ns2.first %}<span class="empty">No fallback states set — these types are never moved.</span>{% endif %}
+        {% if ns2.first %}<span class="empty">Chưa đặt state dự phòng — các loại này không bao giờ được chuyển.</span>{% endif %}
       </div>
       {% if legacy_has_dead %}
       {# Keep the phrase on one line: broken across a newline the rendered text still reads
          fine, but nothing can grep or assert on it. #}
       <div class="form-help" style="color:var(--red);margin-top:9px">
-        ✗ = that state exists on no work-item type in this project, so the transition always
-        fails. Give these types a group, or fix the value in Settings.</div>
+        ✗ = state này không có trên loại work item nào của project, nên lần chuyển luôn thất bại. Hãy cho các loại này vào một nhóm, hoặc sửa giá trị trong Cài đặt.</div>
       {% endif %}
     </div>
   </div>
   {% endif %}
 
   <div class="savebar">
-    <span class="hint">Applies live — no restart. A state this project would reject is refused.</span>
-    <a href="#" class="btn-ghost" style="text-decoration:none">↑ Top</a>
-    <button type="submit" class="btn-save">💾 Save flow</button>
+    <span class="hint">Áp dụng ngay, không cần khởi động lại. State mà project sẽ từ chối thì không được lưu.</span>
+    <a href="#" class="btn-ghost" style="text-decoration:none">↑ Lên đầu</a>
+    <button type="submit" class="btn-save">💾 Lưu luồng state</button>
   </div>
 </form>
 {% endblock %}

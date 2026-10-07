@@ -862,7 +862,7 @@ def build_digest(
         parts.append(
             f"_🗄️ {aged_out} việc tồn đọng quá "
             f"{report.thresholds.max_age_days} ngày — không nêu ở đây "
-            "(đổi ngưỡng ở Settings → Cảnh báo)._"
+            "(đổi ngưỡng ở Thiết lập → 🔔 Cảnh báo — khi nào báo)._"
         )
     if suppressed:
         # Say what was withheld. Silence a reader cannot account for is indistinguishable

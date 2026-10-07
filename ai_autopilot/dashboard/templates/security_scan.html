@@ -40,33 +40,43 @@
   .sev.pass { background:var(--green-bg); color:var(--green); border:1px solid rgba(46,204,113,.45); }
   .sev.fail { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
   .ss-empty { padding:16px 18px; color:var(--text-dim); font-size:12.5px; }
+  .ss-path { font-family:var(--mono); font-size:10.5px; color:var(--text-dim); word-break:break-all; }
 </style>
 
-<div class="ss-crumb"><a href="/dashboard/security?repo={{ s.repo|urlencode }}">🔐 Security</a> › {{ repo_name }} › scan #{{ s.id }}</div>
+{# Severity / status values stay the data (CSS classes); only the visible word is
+   Vietnamese, with the raw key kept in title="". #}
+{% set SEV_VI = {'critical': 'Nghiêm trọng', 'high': 'Cao', 'medium': 'Trung bình',
+                 'low': 'Thấp', 'info': 'Thông tin'} %}
+{% set STATUS_VI = {'open': 'Đang mở', 'suppressed': 'Đã bỏ qua', 'false_positive': 'Báo nhầm',
+                    'accepted_risk': 'Chấp nhận rủi ro', 'fixed': 'Đã sửa'} %}
+{% set SCOPE_VI = {'full': 'toàn bộ', 'diff': 'diff'} %}
+
+<div class="ss-crumb"><a href="/dashboard/security?repo={{ s.repo|urlencode }}">🔐 Bảo mật</a> › {{ repo_name }} › lượt quét #{{ s.id }}</div>
 <div class="ss-top">
-  <h2>Scan #{{ s.id }} — {{ repo_name }}</h2>
-  {% if s.status == 'running' %}<span class="sev info">running</span>{% elif s.error %}<span class="sev fail" title="{{ s.error }}">error</span>{% elif s.gate_passed %}<span class="sev pass">gate passed</span>{% else %}<span class="sev fail">gate failed</span>{% endif %}
-  {% if s.report_id %}<a class="btn-ghost" href="/dashboard/reports/{{ s.report_id }}">📄 full report</a>{% endif %}
+  <h2>Lượt quét #{{ s.id }} — {{ repo_name }}</h2>
+  {% if s.status == 'running' %}<span class="sev info">đang chạy</span>{% elif s.error %}<span class="sev fail" title="{{ s.error }}">lỗi</span>{% elif s.gate_passed %}<span class="sev pass">gate đạt</span>{% else %}<span class="sev fail">gate không đạt</span>{% endif %}
+  {% if s.report_id %}<a class="btn-ghost" href="/dashboard/reports/{{ s.report_id }}">📄 báo cáo đầy đủ</a>{% endif %}
 </div>
 
 <div class="ss-grid">
   <div class="ss-card">
-    <div class="ss-hd"><h3>Run</h3><span>{{ s.trigger }}{% if s.loop_name %} · {{ s.loop_name }}{% endif %}</span></div>
+    <div class="ss-hd"><h3>Lượt chạy</h3><span>{{ s.trigger }}{% if s.loop_name %} · {{ s.loop_name }}{% endif %}</span></div>
     <div class="ss-body">
       <dl class="ss-kv">
-        <dt>Started</dt><dd>{{ s.started_at.strftime('%Y-%m-%d %H:%M:%S') if s.started_at else '' }}{% if s.duration_seconds %} · {{ s.duration_seconds|round|int }}s{% endif %}</dd>
+        <dt>Bắt đầu</dt><dd>{{ s.started_at.strftime('%Y-%m-%d %H:%M:%S') if s.started_at else '' }}{% if s.duration_seconds %} · {{ s.duration_seconds|round|int }}s{% endif %}</dd>
         <dt>Repository</dt><dd><code>{{ s.repo }}</code></dd>
-        <dt>Scope · AI</dt><dd>{{ s.scope }} · {{ s.ai_mode }}</dd>
-        <dt>Gate</dt><dd>fail on new ≥ <b>{{ s.fail_on }}</b> → {{ 'passed' if s.gate_passed else 'FAILED' }}</dd>
-        {% if s.filtered_count %}<dt>Ignored</dt><dd>{{ s.filtered_count }} by disabled_rules / ignore_paths</dd>{% endif %}
-        {% if s.cost_tokens %}<dt>Tokens</dt><dd>{{ '{:,}'.format(s.cost_tokens) }}</dd>{% endif %}
-        {% if s.error %}<dt>Error</dt><dd style="color:var(--red)">{{ s.error }}</dd>{% endif %}
-        {% if s.html_path %}<dt>HTML</dt><dd><code>{{ s.html_path }}</code></dd>{% endif %}
+        <dt>Phạm vi · AI</dt><dd>{{ SCOPE_VI.get(s.scope, s.scope) }} · {{ s.ai_mode }}</dd>
+        <dt>Gate</dt><dd>fail khi có mới ≥ <b title="{{ s.fail_on }}">{{ SEV_VI.get(s.fail_on, s.fail_on) }}</b> → {{ 'đạt' if s.gate_passed else 'KHÔNG ĐẠT' }}</dd>
+        {% if s.filtered_count %}<dt>Đã bỏ qua</dt><dd>{{ s.filtered_count }} do <code>disabled_rules</code> / <code>ignore_paths</code></dd>{% endif %}
+        {% if s.cost_tokens %}<dt>Token</dt><dd>{{ '{:,}'.format(s.cost_tokens) }}</dd>{% endif %}
+        {% if s.error %}<dt>Lỗi</dt><dd style="color:var(--red)">{{ s.error }}</dd>{% endif %}
+        {# Local file path: only useful on this machine, so it is kept small and quiet. #}
+        {% if s.html_path %}<dt>File HTML</dt><dd class="ss-path">{{ s.html_path }}</dd>{% endif %}
       </dl>
     </div>
   </div>
   <div class="ss-card">
-    <div class="ss-hd"><h3>Tools</h3><span>0 findings from a tool that did not run is not "clean"</span></div>
+    <div class="ss-hd"><h3>Công cụ</h3><span>0 phát hiện từ một công cụ không chạy thì không phải là "sạch"</span></div>
     <div class="ss-body">
       {% if tools %}
       <table class="ss-tools">
@@ -74,39 +84,40 @@
         <tr><td><span class="dot {{ 'bad' if label.startswith('error') else ('skip' if label.startswith('skipped') else '') }}"></span>{{ name }}</td><td>{{ label }}</td></tr>
         {% endfor %}
       </table>
-      {% else %}<div class="ss-empty">no tool status recorded</div>{% endif %}
+      {% else %}<div class="ss-empty">Lượt quét này không ghi trạng thái công cụ nào — thường do bị dừng trước khi chạy; thử <a class="table-link" href="/dashboard/security?repo={{ s.repo|urlencode }}">quét lại</a>.</div>{% endif %}
     </div>
   </div>
 </div>
 
 <div class="ss-card">
-  <div class="ss-hd"><h3>Result</h3></div>
+  <div class="ss-hd"><h3>Kết quả</h3></div>
+  {# Colour only a non-zero count: a red "0" reads as an alarm that is not there. #}
   <div class="ss-tiles">
-    {% for sev in severities %}<div class="ss-tile {{ sev }}"><b>{{ s[sev ~ '_count'] }}</b><span>{{ sev }}</span></div>{% endfor %}
-    <div class="ss-tile new"><b>+{{ s.new_count }}</b><span>new</span></div>
-    <div class="ss-tile fixed"><b>−{{ s.fixed_count }}</b><span>fixed</span></div>
-    <div class="ss-tile"><b>{{ s.suppressed_count }}</b><span>suppressed</span></div>
+    {% for sev in severities %}<div class="ss-tile {{ sev if s[sev ~ '_count'] }}" title="{{ sev }}"><b>{{ s[sev ~ '_count'] }}</b><span>{{ SEV_VI.get(sev, sev) }}</span></div>{% endfor %}
+    <div class="ss-tile {{ 'new' if s.new_count }}"><b>+{{ s.new_count }}</b><span>mới</span></div>
+    <div class="ss-tile {{ 'fixed' if s.fixed_count }}"><b>−{{ s.fixed_count }}</b><span>đã sửa</span></div>
+    <div class="ss-tile"><b>{{ s.suppressed_count }}</b><span>bỏ qua</span></div>
   </div>
 </div>
 
 <div class="ss-grid">
   <div class="ss-card">
-    <div class="ss-hd"><h3>New in this scan</h3><span>{{ new_rows|length }}</span></div>
+    <div class="ss-hd"><h3>Mới trong lượt quét này</h3><span>{{ new_rows|length }}</span></div>
     {% if new_rows %}
     <table class="ss-list">{% for f in new_rows %}
-      <tr><td><span class="sev {{ f.severity }}">{{ f.severity }}</span></td>
+      <tr><td><span class="sev {{ f.severity }}" title="{{ f.severity }}">{{ SEV_VI.get(f.severity, f.severity) }}</span></td>
           <td><a href="/dashboard/security/f/{{ f.id }}">{{ f.title }}</a><div class="ss-where">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %} · {{ f.tool }}{% if f.cwe %} · {{ f.cwe }}{% endif %}</div></td></tr>
     {% endfor %}</table>
-    {% else %}<div class="ss-empty">Nothing new — every finding was already known.</div>{% endif %}
+    {% else %}<div class="ss-empty">Không có gì mới — mọi phát hiện đều đã biết từ trước.</div>{% endif %}
   </div>
   <div class="ss-card">
-    <div class="ss-hd"><h3>Fixed since the previous scan</h3><span>{{ fixed_rows|length }}</span></div>
+    <div class="ss-hd"><h3>Đã sửa so với lượt quét trước</h3><span>{{ fixed_rows|length }}</span></div>
     {% if fixed_rows %}
     <table class="ss-list">{% for f in fixed_rows %}
-      <tr><td><span class="sev {{ f.severity }}">{{ f.severity }}</span></td>
+      <tr><td><span class="sev {{ f.severity }}" title="{{ f.severity }}">{{ SEV_VI.get(f.severity, f.severity) }}</span></td>
           <td><a href="/dashboard/security/f/{{ f.id }}">{{ f.title }}</a><div class="ss-where">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %} · {{ f.tool }}</div></td></tr>
     {% endfor %}</table>
-    {% else %}<div class="ss-empty">No finding was closed by this scan.</div>{% endif %}
+    {% else %}<div class="ss-empty">Lượt quét này không đóng phát hiện nào.</div>{% endif %}
   </div>
 </div>
 {% endblock %}

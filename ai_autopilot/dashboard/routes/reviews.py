@@ -30,6 +30,16 @@ from ai_autopilot.dashboard.routes._shared import _ctx
 from ai_autopilot.logging_config import describe_exc
 from ai_autopilot.services.pr_feedback import parse_work_item_id
 
+# The page's own wording for an ADO vote. VOTE_LABELS stays English because the
+# tracker reuses it in events and notifications; this map only changes what the board shows.
+_VOTE_LABELS_VI = {
+    10: "✅ Đã duyệt",
+    5: "✅ Duyệt kèm góp ý",
+    0: "⏳ Chưa vote",
+    -5: "⏸️ Chờ tác giả",
+    -10: "❌ Từ chối",
+}
+
 
 async def _scan_reviews(c: Container) -> list[dict]:
     """Every active PR in scope with its reviewers and votes — ADO joined with the
@@ -93,7 +103,7 @@ async def _scan_reviews(c: Container) -> list[dict]:
             reviewers.append({
                 "name": r.get("displayName") or r.get("uniqueName") or "?",
                 "vote": vote,
-                "vote_label": VOTE_LABELS.get(vote, str(vote)),
+                "vote_label": _VOTE_LABELS_VI.get(vote) or VOTE_LABELS.get(vote, str(vote)),
                 "is_bot": is_bot,
                 "required": bool(r.get("isRequired")),
                 "added_at": snap.added_at if snap else None,

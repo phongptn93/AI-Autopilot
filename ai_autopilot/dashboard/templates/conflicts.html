@@ -47,68 +47,76 @@
   .cf-empty { padding:24px 18px; color:var(--text-dim); font-size:12.5px; line-height:1.7; }
   .cf-how { padding:12px 18px; font-size:12px; color:var(--text-muted); line-height:1.7; }
   .cf-how ol { margin:4px 0 0 18px; padding:0; }
+  .cf-lede details { margin-top:4px; }
+  .cf-lede summary { cursor:pointer; color:var(--accent-hover); font-size:12.5px; }
 </style>
+
+{# Status keys stay the data (CSS class, ?status= filter, title tooltip); people read these. #}
+{% set st_label = {'active': 'Đang mở', 'open': 'Chưa xử lý', 'resolving': 'Đang giải', 'in_session': 'Trong phiên',
+                   'escalated': 'Cần người xử lý', 'resolved': 'Đã giải', 'closed': 'Đã đóng', 'all': 'Tất cả'} %}
 
 <div class="cf-top">
   <h2 class="page-title">{{ page_title("conflicts") }}</h2>
-  <form method="post" action="/dashboard/conflicts/scan"><button class="btn-ghost" type="submit" {% if not service_live %}disabled{% endif %}>🔄 Scan now</button></form>
+  <form method="post" action="/dashboard/conflicts/scan"><button class="btn-ghost" type="submit" {% if not service_live %}disabled{% endif %}>🔄 Quét ngay</button></form>
 </div>
-<p class="cf-lede">
-  Pull requests ADO cannot merge because their branch conflicts with the target. A
-  conflicted PR is <b>not</b> "ready to merge" however it was voted — it leads the delivery
-  report instead. Resolution <b>merges the target into the PR branch</b> (never a rebase,
-  never a force-push, so reviewed commits and comments stay put) and pushes only after
-  objective checks pass; otherwise the merge is aborted and the branch is left exactly as it was.
-</p>
+<div class="cf-lede">
+  PR mà ADO không merge được vì branch xung đột với branch đích. Giải xung đột sẽ <b>merge branch đích vào branch của PR</b>
+  và chỉ push khi các bước kiểm tra đều đạt.
+  <details><summary>Chi tiết</summary>
+    PR đang xung đột <b>không</b> được tính là "sẵn sàng merge" dù đã được vote — nó đứng đầu báo cáo Tiến độ.
+    Không bao giờ rebase hay force-push, nên commit đã review và comment giữ nguyên; nếu kiểm tra không đạt,
+    merge bị huỷ và branch giữ nguyên như cũ.
+  </details>
+</div>
 
 {% if flash %}<div class="cf-flash {{ 'ok' if flash[0] == 'green' else ('warn' if flash[0] == 'amber' else 'bad') }}">{{ flash[1]|safe }}</div>{% endif %}
-{% if not tracking %}<div class="cf-flash bad">Tracking is off (<code>pr_conflict_tracking_enabled: false</code>) — nothing below updates.</div>
-{% elif not service_live %}<div class="cf-flash bad">The conflict service is not running in this process — restart the autopilot.</div>{% endif %}
+{% if not tracking %}<div class="cf-flash bad">Đang tắt theo dõi xung đột (<code>pr_conflict_tracking_enabled: false</code>) — danh sách dưới đây không cập nhật. Bật lại ở <a class="table-link" href="/dashboard/settings">Settings</a>.</div>
+{% elif not service_live %}<div class="cf-flash bad">Dịch vụ giải xung đột không chạy trong tiến trình này — hãy khởi động lại autopilot.</div>{% endif %}
 
 <div class="cf-card">
   <div class="cf-mode">
-    <span><b>Mode</b>: {% if interactive %}🧑‍💻 interactive — opens a Remote-Control session you can attach to{% else %}🤖 headless — one unattended run{% endif %} <span style="color:var(--text-dim)">(execution_mode)</span></span>
-    <span><b>Auto-resolve</b> on autopilot PRs: {{ '✅ on' if autoresolve else '⏸ off' }}</span>
-    <span><b>On request</b> (any PR): {% if command %}comment <code>{{ command }}</code> or press Resolve{% else %}Resolve button only{% endif %}</span>
-    <span><b>Escalates when</b> &gt; {{ max_files }} files, lock/binary files, markers left, other files touched, the resolution adds a failing test, or the security gate fails</span>
-    <span title="pr_conflict_allow_preexisting_failures"><b>Target already red</b> (resolution adds nothing): {% if allow_red_target %}✅ push{% else %}⏸ escalate{% endif %}</span>
+    <span title="execution_mode"><b>Chế độ</b>: {% if interactive %}🧑‍💻 interactive — mở phiên Remote Control để bạn attach vào{% else %}🤖 headless — một lượt chạy tự động, không cần người{% endif %}</span>
+    <span><b>Tự giải</b> trên PR của autopilot: {{ '✅ bật' if autoresolve else '⏸ tắt' }}</span>
+    <span><b>Theo yêu cầu</b> (mọi PR): {% if command %}comment <code>{{ command }}</code> hoặc bấm Giải xung đột{% else %}chỉ qua nút Giải xung đột{% endif %}</span>
+    <span><b>Chuyển người xử lý khi</b> &gt; {{ max_files }} file, có file lock/binary, còn sót marker, sửa file ngoài phạm vi, làm thêm test fail, hoặc không qua cổng bảo mật</span>
+    <span title="pr_conflict_allow_preexisting_failures"><b>Branch đích đã đỏ sẵn</b> (giải xung đột không làm tệ thêm): {% if allow_red_target %}✅ vẫn push{% else %}⏸ chuyển người xử lý{% endif %}</span>
     <span style="margin-left:auto"><a class="table-link" href="/dashboard/settings">Settings → 🔁 PR review &amp; feedback</a></span>
   </div>
   <div class="cf-filter">
-    <a href="/dashboard/conflicts?status=active" class="{{ 'on' if status == 'active' else '' }}">active<span class="n">{{ counts.open + counts.resolving + counts.in_session + counts.escalated }}</span></a>
+    <a href="/dashboard/conflicts?status=active" class="{{ 'on' if status == 'active' else '' }}" title="active">{{ st_label.active }}<span class="n">{{ counts.open + counts.resolving + counts.in_session + counts.escalated }}</span></a>
     {% for s in ('open', 'resolving', 'in_session', 'escalated', 'resolved', 'closed') %}
-    <a href="/dashboard/conflicts?status={{ s }}" class="{{ 'on' if status == s else '' }}">{{ s }}<span class="n">{{ counts[s] }}</span></a>
+    <a href="/dashboard/conflicts?status={{ s }}" class="{{ 'on' if status == s else '' }}" title="{{ s }}">{{ st_label[s] }}<span class="n">{{ counts[s] }}</span></a>
     {% endfor %}
-    <a href="/dashboard/conflicts?status=all" class="{{ 'on' if status == 'all' else '' }}">all</a>
+    <a href="/dashboard/conflicts?status=all" class="{{ 'on' if status == 'all' else '' }}" title="all">{{ st_label.all }}</a>
   </div>
 
   {% if items %}
   <div style="overflow-x:auto">
   <table class="cf-tbl">
-    <thead><tr><th>Status</th><th>Pull request</th><th>Branches</th><th>Conflicted files</th><th>For</th><th>Attempts</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Trạng thái</th><th>Pull request</th><th>Branch</th><th>File xung đột</th><th>Đã kéo dài</th><th>Số lần thử</th><th>Thao tác</th></tr></thead>
     <tbody>
     {% for it in items %}{% set r = it.row %}
     <tr>
-      <td><span class="st {{ r.status }}">{{ r.status }}</span>
-          {% if r.resolved_by %}<div class="cf-checks">by {{ r.resolved_by }}</div>{% endif %}</td>
+      <td><span class="st {{ r.status }}" title="{{ r.status }}">{{ st_label.get(r.status, r.status) }}</span>
+          {% if r.resolved_by %}<div class="cf-checks">bởi {{ r.resolved_by }}</div>{% endif %}</td>
       <td>{% if r.url %}<a class="t" href="{{ r.url }}" target="_blank" rel="noopener">!{{ r.pr_id }} {{ r.title }}</a>{% else %}<b>!{{ r.pr_id }}</b> {{ r.title }}{% endif %}
-          <div><span class="tag">{{ r.repo_name }}</span>{% if r.owned %}<span class="tag" title="branch from the autopilot">🤖 autopilot</span>{% endif %}{% if r.is_draft %}<span class="tag">draft</span>{% endif %}
+          <div><span class="tag">{{ r.repo_name }}</span>{% if r.owned %}<span class="tag" title="branch do autopilot tạo">🤖 autopilot</span>{% endif %}{% if r.is_draft %}<span class="tag">draft</span>{% endif %}
           {% if r.author %}<span class="tag">{{ r.author }}</span>{% endif %}
           {% if r.work_item_id %}{% if item_link %}<a class="tag" href="{{ item_link }}/{{ r.work_item_id }}" target="_blank" rel="noopener">#{{ r.work_item_id }}</a>{% else %}<span class="tag">#{{ r.work_item_id }}</span>{% endif %}{% endif %}</div>
           {% if r.last_error and r.status == 'escalated' %}<div class="cf-err">🙋 {{ r.last_error }}</div>{% endif %}
           {% if it.checks %}<div class="cf-checks">{% for k, v in it.checks.items() %}{{ '✅' if v == 'ok' or v.startswith(('skipped', 'already')) else '❌' }} {{ k }}{% if v != 'ok' %}: {{ v }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
-          {% if r.merge_commit %}<div class="cf-checks">merge commit <code>{{ r.merge_commit[:10] }}</code></div>{% endif %}
+          {% if r.merge_commit %}<div class="cf-checks">commit merge <code>{{ r.merge_commit[:10] }}</code></div>{% endif %}
           {% if r.status == 'in_session' %}<div class="cf-sess">🧑‍💻 Phiên <code>{{ r.session_name }}</code> — attach qua Remote Control (claude.ai → Claude Code) để theo dõi hoặc chỉ cách giải.{% if r.session_started %} Mở lúc {{ r.session_started.strftime('%H:%M %d/%m') }}; tự đóng sau {{ session_hours }} giờ nếu chưa xong.{% endif %}</div>{% endif %}</td>
       <td class="cf-br">{{ r.source_branch }}<br>→ {{ r.target_branch }}</td>
-      <td>{% if it.files %}<ul class="cf-files">{% for f in it.files[:6] %}<li>{{ f }}</li>{% endfor %}{% if it.files|length > 6 %}<li>… +{{ it.files|length - 6 }}</li>{% endif %}</ul>{% else %}<span class="cf-checks">not listed by ADO</span>{% endif %}</td>
-      <td class="cf-br" title="first seen {{ r.first_seen.strftime('%Y-%m-%d %H:%M') if r.first_seen else '' }}">{% if it.age_hours >= 48 %}{{ (it.age_hours / 24)|round|int }}d{% elif it.age_hours >= 1 %}{{ it.age_hours|round|int }}h{% else %}{{ (it.age_hours * 60)|round|int }}m{% endif %}</td>
-      <td class="cf-br">{{ r.attempts }}{% if r.cost_tokens %}<div class="cf-checks">{{ '{:,}'.format(r.cost_tokens) }} tok</div>{% endif %}</td>
+      <td>{% if it.files %}<ul class="cf-files">{% for f in it.files[:6] %}<li>{{ f }}</li>{% endfor %}{% if it.files|length > 6 %}<li>… +{{ it.files|length - 6 }}</li>{% endif %}</ul>{% else %}<span class="cf-checks">ADO không liệt kê</span>{% endif %}</td>
+      <td class="cf-br" title="phát hiện lúc {{ r.first_seen.strftime('%Y-%m-%d %H:%M') if r.first_seen else '' }}">{% if it.age_hours >= 48 %}{{ (it.age_hours / 24)|round|int }}d{% elif it.age_hours >= 1 %}{{ it.age_hours|round|int }}h{% else %}{{ (it.age_hours * 60)|round|int }}m{% endif %}</td>
+      <td class="cf-br">{{ r.attempts }}{% if r.cost_tokens %}<div class="cf-checks">{{ '{:,}'.format(r.cost_tokens) }} token</div>{% endif %}</td>
       <td class="cf-act">
         {% if r.status in ('open', 'escalated') %}
-        <form method="post" action="/dashboard/conflicts/{{ r.id }}/resolve"><button class="btn-save" type="submit" {% if not service_live %}disabled{% endif %} title="Merge {{ r.target_branch }} into {{ r.source_branch }}, settle the hunks, verify, push">{{ '🧑‍💻 Resolve' if interactive else '▶ Resolve' }}</button></form>
-        {% elif r.status == 'resolving' %}<span class="st resolving">working…</span>
+        <form method="post" action="/dashboard/conflicts/{{ r.id }}/resolve"><button class="btn-save" type="submit" {% if not service_live %}disabled{% endif %} title="Merge {{ r.target_branch }} vào {{ r.source_branch }}, giải từng đoạn xung đột, kiểm tra rồi push">{{ '🧑‍💻 Giải xung đột' if interactive else '▶ Giải xung đột' }}</button></form>
+        {% elif r.status == 'resolving' %}<span class="st resolving">đang xử lý…</span>
         {% elif r.status == 'in_session' %}
-        <form method="post" action="/dashboard/conflicts/{{ r.id }}/cancel" onsubmit="return confirm('Đóng phiên interactive? Merge sẽ bị huỷ, branch giữ nguyên.');"><button class="btn-ghost" type="submit" {% if not service_live %}disabled{% endif %}>✕ Close session</button></form>
+        <form method="post" action="/dashboard/conflicts/{{ r.id }}/cancel" onsubmit="return confirm('Đóng phiên interactive? Merge sẽ bị huỷ, branch giữ nguyên.');"><button class="btn-ghost" type="submit" {% if not service_live %}disabled{% endif %}>✕ Đóng phiên</button></form>
         {% endif %}
       </td>
     </tr>
@@ -117,16 +125,16 @@
   </table>
   </div>
   {% else %}
-  <div class="cf-empty">{% if status == 'active' %}No PR is in conflict right now. ✅{% else %}Nothing in this status.{% endif %}</div>
+  <div class="cf-empty">{% if status == 'active' %}✅ Hiện không có PR nào bị xung đột — autopilot quét lại ở mỗi lượt; bấm <b>Quét ngay</b> nếu vừa đẩy code.{% else %}Không có PR nào ở trạng thái này. <a class="table-link" href="/dashboard/conflicts?status=all">Xem tất cả</a>.{% endif %}</div>
   {% endif %}
   <div class="cf-how">
-    <b>What a resolution checks before it pushes</b>
+    <b>Giải xung đột kiểm tra gì trước khi push</b>
     <ol>
-      <li>No <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> / <code>=======</code> / <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> marker left in any conflicted file, and git reports no unmerged path.</li>
-      <li>Nothing outside the conflicted files was edited.</li>
-      <li>No security finding that <i>neither</i> side of the merge had.</li>
-      <li>The repo's tests pass (when the test gate is on).</li>
-      <li>Push without <code>--force</code> — if the branch moved meanwhile, it stops instead of overwriting.</li>
+      <li>Không còn marker <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> / <code>=======</code> / <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code> trong file xung đột, và git không báo path nào chưa merge.</li>
+      <li>Không sửa file nào ngoài các file xung đột.</li>
+      <li>Không có lỗi bảo mật mới mà <i>cả hai</i> phía merge đều chưa có.</li>
+      <li>Test của repo pass (khi bật cổng test).</li>
+      <li>Push không dùng <code>--force</code> — nếu branch đã đổi trong lúc đó thì dừng, không ghi đè.</li>
     </ol>
   </div>
 </div>

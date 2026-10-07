@@ -23,7 +23,7 @@
   .hf { background:var(--bg-input); color:var(--text); border:1px solid var(--border); border-radius:var(--radius-sm);
     padding:6px 10px; font-size:12.5px; font-family:inherit; }
   .hf[type=search] { width:190px; }
-  .hf[type=date] { width:140px; }
+  .hf[type=date] { width:150px; }
   .hs-reset { font-size:12px; color:var(--accent-hover); text-decoration:none; white-space:nowrap; }
 
   .hs-wrap { overflow-x:auto; }
@@ -71,6 +71,8 @@
 </style>
 
 <div class="hs-top"><h2 class="page-title">{{ page_title("history") }}</h2></div>
+{# Run statuses are enum values (they drive the badge colour and ?status=); the label is for people. #}
+{% set run_status = {'Success': 'Thành công', 'Failed': 'Lỗi', 'Running': 'Đang chạy', 'Retrying': 'Đang retry', 'Pending': 'Chờ'} %}
 <p class="hs-lede">Mỗi lượt autopilot chạy một work item, một lệnh trên PR, hay một loop theo lịch — mới nhất trước.</p>
 
 <div class="hs-card">
@@ -86,14 +88,14 @@
     <form method="get" action="/dashboard/history" class="hs-filters">
       {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
       {% if per != 25 %}<input type="hidden" name="per" value="{{ per }}">{% endif %}
-      <input class="hf" type="search" name="q" value="{{ q }}" placeholder="🔍 #id hoặc tiêu đề" aria-label="Search">
-      <select class="hf" name="cat" aria-label="Type" onchange="this.form.submit()">
+      <input class="hf" type="search" name="q" value="{{ q }}" placeholder="🔍 #id hoặc tiêu đề" aria-label="Tìm theo id hoặc tiêu đề">
+      <select class="hf" name="cat" aria-label="Loại" onchange="this.form.submit()">
         {% for v, lbl in [('','Mọi loại'),('BackendTask','BE'),('FrontendTask','FE'),('DatabaseTask','DB'),('TestTask','QC'),('Bug','Bug'),('Requirement','Req')] %}
         <option value="{{ v }}" {{ 'selected' if cat == v }}>{{ lbl }}</option>
         {% endfor %}
       </select>
-      <input class="hf" type="date" name="from" value="{{ date_from }}" title="Từ ngày" aria-label="From">
-      <input class="hf" type="date" name="to" value="{{ date_to }}" title="Đến ngày" aria-label="To">
+      <input class="hf" type="date" name="from" value="{{ date_from }}" title="Từ ngày" aria-label="Từ ngày">
+      <input class="hf" type="date" name="to" value="{{ date_to }}" title="Đến ngày" aria-label="Đến ngày">
       <button type="submit" class="btn-ghost" style="padding:6px 12px;font-size:12.5px">Lọc</button>
       {% if filtered %}<a class="hs-reset" href="/dashboard/history">✕ Bỏ lọc</a>{% endif %}
     </form>
@@ -113,7 +115,7 @@
       {% set skill = e.skill_used or '' %}
       {% set live = skill.startswith('interactive') or 'interactive' in skill %}
       <tr>
-        <td><span class="badge {{ status_class(e.status.value) }}"><span class="badge-dot"></span>{{ e.status.value }}</span></td>
+        <td><span class="badge {{ status_class(e.status.value) }}" title="{{ e.status.value }}"><span class="badge-dot"></span>{{ run_status.get(e.status.value, e.status.value) }}</span></td>
         <td class="id">{% if e.work_item_id %}<a href="/dashboard/task/{{ e.work_item_id }}" title="Mở phòng task">#{{ e.work_item_id }}</a>{% else %}<span class="loop-tag" title="Lượt chạy theo lịch — không gắn work item">loop</span>{% endif %}</td>
         <td class="title" title="{{ e.title }}">{{ e.title }}{% if e.lessons_injected %}<span class="lesson-badge" title="{{ e.lessons_injected }} bài học từ run trước đã được đưa vào brief">🧠 {{ e.lessons_injected }}</span>{% endif %}
             {% if e.error and e.status.value == 'Failed' %}<span class="sub" title="{{ e.error }}">⚠ {{ e.error }}</span>{% endif %}</td>
@@ -129,14 +131,14 @@
             {% if e.model_used %}<span class="model-badge" title="{{ e.model_used }}">{{ model_label(e.model_used) }}</span>{% endif %}
             {% if e.cost_tokens %}<span class="t mono">{{ '{:,}'.format(e.cost_tokens) }}{% if e.output_tokens %} <span class="s">· {{ '{:,}'.format(e.output_tokens) }} out</span>{% endif %}</span>{% endif %}
           </div>
-          {% elif live %}<span class="no-meter" title="Chạy trong phiên Remote-Control — autopilot không đo token/chi phí của phiên. Muốn có số liệu, chuyển execution_mode sang headless.">không đo</span>
+          {% elif live %}<span class="no-meter" title="Chạy trong phiên Remote Control — autopilot không đo token/chi phí của phiên. Muốn có số liệu, chuyển chế độ chạy (execution_mode) sang headless.">không đo</span>
           {% else %}<span class="dim">—</span>{% endif %}
         </td>
         <td class="r mono">{% if e.cost_usd is not none %}${{ '%.2f'|format(e.cost_usd) if e.cost_usd >= 1 else '%.4f'|format(e.cost_usd) }}{% else %}<span class="dim">—</span>{% endif %}</td>
         <td class="mono dim" title="{{ e.started_at.strftime('%Y-%m-%d %H:%M:%S') }}">{{ e.started_at.strftime('%m-%d %H:%M') }}</td>
         <td>
           <form method="post" action="/dashboard/history/{{ e.id }}/delete" onsubmit="return confirm('Xoá record #{{ e.work_item_id }}?');" style="margin:0">
-            <button type="submit" class="del" title="Xoá dòng này" aria-label="Delete">✕</button>
+            <button type="submit" class="del" title="Xoá dòng này" aria-label="Xoá dòng này">✕</button>
           </form>
         </td>
       </tr>
@@ -147,20 +149,20 @@
   <div class="pager">
     <span>{{ pager.start + 1 }}–{{ pager.end }} / {{ pager.total }}</span>
     <div class="pg">
-      {% if pager.page > 1 %}<a href="{{ url(page=pager.page - 1) }}" aria-label="Previous page">‹</a>{% else %}<span class="off">‹</span>{% endif %}
+      {% if pager.page > 1 %}<a href="{{ url(page=pager.page - 1) }}" aria-label="Trang trước">‹</a>{% else %}<span class="off">‹</span>{% endif %}
       {% for n in pager.nums %}
         {% if n is none %}<span class="gap">…</span>
         {% elif n == pager.page %}<span class="cur">{{ n }}</span>
         {% else %}<a href="{{ url(page=n) }}">{{ n }}</a>{% endif %}
       {% endfor %}
-      {% if pager.page < pager.pages %}<a href="{{ url(page=pager.page + 1) }}" aria-label="Next page">›</a>{% else %}<span class="off">›</span>{% endif %}
+      {% if pager.page < pager.pages %}<a href="{{ url(page=pager.page + 1) }}" aria-label="Trang sau">›</a>{% else %}<span class="off">›</span>{% endif %}
     </div>
     <div class="per">Mỗi trang
       {% for n in per_options %}<a href="{{ url(per=n, page=1) }}" {% if n == per %}style="border-color:rgba(99,102,241,.55);color:var(--accent-hover)"{% endif %}>{{ n }}</a>{% endfor %}
     </div>
   </div>
   {% else %}
-  <div class="hs-empty">{% if filtered %}Không có lượt chạy nào khớp bộ lọc. <a class="table-link" href="/dashboard/history">Bỏ lọc</a>{% else %}Chưa có lượt chạy nào.{% endif %}</div>
+  <div class="hs-empty">{% if filtered %}Không có lượt chạy nào khớp bộ lọc. <a class="table-link" href="/dashboard/history">Bỏ lọc</a>{% else %}Chưa có lượt chạy nào — lượt đầu tiên xuất hiện khi autopilot nhận một work item. Gắn tag cho việc cần làm trên <a class="table-link" href="/dashboard/board">Board</a>.{% endif %}</div>
   {% endif %}
 </div>
 

@@ -13,7 +13,7 @@ from starlette.testclient import TestClient
 from ai_autopilot.app import create_app
 from ai_autopilot.config import Settings
 
-SECTION = "\U0001F514 Cảnh báo"
+SECTION = "\U0001F514 Cảnh báo — khi nào báo"
 
 
 @pytest.fixture

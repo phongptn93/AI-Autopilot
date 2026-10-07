@@ -65,7 +65,7 @@ def check_switches(cfg: Settings, owned: bool) -> list[Check]:
             else Check(
                 BAD, "PR feedback loop is off",
                 "feedback_loop_enabled=false, so nothing scans this PR for commands.",
-                "Settings → 🔁 PR review & feedback → Enable PR feedback loop.",
+                "Thiết lập → 🔁 Review PR & phản hồi → Enable PR feedback loop.",
             )
         )
     else:
@@ -77,14 +77,14 @@ def check_switches(cfg: Settings, owned: bool) -> list[Check]:
                 "This PR was not opened by the autopilot, so the babysitter ignores it "
                 "and the reviewer tracker is the only loop that would answer a comment "
                 "here — pr_reviewer_tracking_enabled=false.",
-                "Settings → PR reviewer tracking → Track PR reviewers.",
+                "Thiết lập → 🔁 Review PR & phản hồi → Track PR reviewers.",
             )
         )
     if not cfg.comment_mention_enabled:
         out.append(Check(
             BAD, "@mentions are not treated as commands",
             "comment_mention_enabled=false — only a literal /command is read.",
-            "Settings → 🔁 PR review & feedback → Answer an @mention on a PR.",
+            "Thiết lập → 🔁 Review PR & phản hồi → Answer an @mention on a PR.",
         ))
     if cfg.dry_run:
         out.append(Check(
@@ -220,7 +220,7 @@ def check_comments(threads: list[dict], cfg: Settings, bot: BotIdentity | None) 
             OK if allowed else BAD,
             f"{how} by {author}: {text}",
             "" if allowed else f"This machine only obeys: {describe_users(claimed)}",
-            "" if allowed else "Add them under Tags & Trigger → others allowed to "
+            "" if allowed else "Add them under 🏷️ Tag & điều kiện nhận việc → others allowed to "
                                "command, or turn on 'let ANYONE command'.",
         ))
     return out

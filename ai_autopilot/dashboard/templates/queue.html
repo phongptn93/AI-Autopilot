@@ -8,27 +8,27 @@
 
 <div class="page-header">
   <h2 class="page-title">{{ page_title("queue") }}</h2>
-  <p>Items the autopilot escalated for a human. Resume = clear the hold and hand it back.</p>
+  <p>Item autopilot đã chuyển cho người xử lý. <b>Tiếp tục</b> = gỡ trạng thái giữ và trả item lại cho autopilot.</p>
 </div>
 
 {% if resumed %}
 <div class="card" style="border-color:var(--green)"><div style="padding:12px 18px;color:var(--green)">
-  ▶ Resumed {{ resumed }} item(s) — handed back to the autopilot.
+  ▶ Đã tiếp tục {{ resumed }} item — đã trả lại cho autopilot.
 </div></div>
 {% endif %}
 
 {% if items %}
 <form method="post" action="/dashboard/queue/resume">
   <div style="display:flex;justify-content:flex-end;margin:8px 0">
-    <button type="submit" class="btn-ghost">▶ Resume selected</button>
+    <button type="submit" class="btn-ghost">▶ Tiếp tục các item đã chọn</button>
   </div>
   <div class="card" style="padding:4px 8px">
     <table class="q-table">
-      <thead><tr><th style="width:24px"></th><th>Work item</th><th>Reason held</th><th>Updated</th></tr></thead>
+      <thead><tr><th style="width:24px"></th><th>Work item</th><th>Lý do giữ lại</th><th>Cập nhật</th></tr></thead>
       <tbody>
         {% for it in items %}
           <tr>
-            <td><input type="checkbox" name="ids" value="{{ it.id }}"></td>
+            <td><input type="checkbox" name="ids" value="{{ it.id }}" aria-label="Chọn #{{ it.id }}"></td>
             <td>
               <a href="{{ it.url }}" target="_blank" rel="noopener">#{{ it.id }}</a> — {{ it.title }}
               {% if it.pr_url %}<br/><a href="{{ it.pr_url }}" target="_blank" rel="noopener" style="font-size:12px">PR</a>{% endif %}
@@ -42,6 +42,7 @@
   </div>
 </form>
 {% else %}
-<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">✅ Nothing held — the autopilot has not escalated anything.</div></div>
+<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">✅ Không có item nào đang bị giữ — autopilot chưa chuyển việc nào cho người xử lý.
+  Theo dõi việc đang chạy ở <a class="table-link" href="/dashboard/board">Board</a>.</div></div>
 {% endif %}
 {% endblock %}

@@ -6,59 +6,59 @@
    you had to hunt through. A macro for the same reason stage_row is one. #}
 {% macro parks_at(p, states, tags) -%}
 <details class="lv-parks">
-  <summary title="ADO states and tags this lane claims on top of its columns">
-    <span class="lv-parks-k">parks at</span>
+  <summary title="State và tag ADO mà lane này nhận, ngoài các cột của nó">
+    <span class="lv-parks-k">nhận thêm</span>
     <span class="lv-parks-sum" data-parks-sum>
       {%- if states or tags -%}
         {%- for s in states %}<span class="lv-mini st">{{ s }}</span>{% endfor -%}
         {%- for t in tags %}<span class="lv-mini tg">{{ t }}</span>{% endfor -%}
       {%- else -%}
-        <span class="lv-parks-none">columns only — nothing parks here</span>
+        <span class="lv-parks-none">chỉ theo cột — không nhận state/tag nào</span>
       {%- endif -%}
     </span>
   </summary>
   <div class="lv-grp st">
     <div class="lv-grp-hd">
       <b>ADO state</b>
-      <input type="text" class="lv-filter" placeholder="filter" aria-label="Filter states">
+      <input type="text" class="lv-filter" placeholder="lọc" aria-label="Lọc state">
     </div>
     <div class="lv-pick">
       {% for opt in board_states %}
       <label class="lv-chip {{ 'on' if opt.name in states else '' }} {{ 'live' if opt.used else '' }}"
-             title="{{ opt.types }}{% if opt.used %} · {{ opt.n }} on the board now{% endif %}">
+             title="{{ opt.types }}{% if opt.used %} · {{ opt.n }} item đang ở đây{% endif %}">
         <input type="checkbox" name="{{ p }}states" value="{{ opt.name }}"
                {% if opt.name in states %}checked{% endif %}>{{ opt.name }}
       </label>
       {% endfor %}
       {% set known_states = board_states | map(attribute='name') | list %}
       <input type="text" class="lv-extra" name="{{ p }}states"
-             value="{{ states | reject('in', known_states) | join(', ') }}" placeholder="+ not listed"
-             title="A state ADO has not reported yet. Comma-separated.">
+             value="{{ states | reject('in', known_states) | join(', ') }}" placeholder="+ state khác"
+             title="State mà ADO chưa báo về. Cách nhau bằng dấu phẩy.">
     </div>
   </div>
   <div class="lv-grp tg">
     <div class="lv-grp-hd">
       <b>ADO tag</b>
-      <input type="text" class="lv-filter" placeholder="filter" aria-label="Filter tags">
+      <input type="text" class="lv-filter" placeholder="lọc" aria-label="Lọc tag">
     </div>
     <div class="lv-pick">
       {% for name, n in board_tags %}
       <label class="lv-chip tagish {{ 'on' if name in tags else '' }}"
-             title="{{ n }} item(s) carry this tag right now">
+             title="{{ n }} item đang mang tag này">
         <input type="checkbox" name="{{ p }}tags" value="{{ name }}"
                {% if name in tags %}checked{% endif %}>{{ name }}
       </label>
       {% endfor %}
       {% set known_tags = board_tags | map(attribute=0) | list %}
       <input type="text" class="lv-extra x-tag" name="{{ p }}tags"
-             value="{{ tags | reject('in', known_tags) | join(', ') }}" placeholder="+ not listed"
-             title="Tags this lane claims. ▶ Run removes them, which is what releases the item.">
+             value="{{ tags | reject('in', known_tags) | join(', ') }}" placeholder="+ tag khác"
+             title="Tag lane này nhận. ▶ Run gỡ chúng đi — đó chính là lúc item được nhả ra.">
     </div>
   </div>
   <p class="lv-parks-tip">
-    <b class="k-live">●</b> someone is in that state right now ·
-    <b class="k-on">✓</b> this lane claims it ·
-    a <b>tag</b> here is taken off by ▶ Run, so only claim one that exists <em>while parked</em>.
+    <b class="k-live">●</b> đang có item ở state đó ·
+    <b class="k-on">✓</b> lane này nhận nó ·
+    <b>tag</b> ở đây bị ▶ Run gỡ đi, nên chỉ nhận tag tồn tại <em>trong lúc item chờ</em>.
   </p>
 </details>
 {%- endmacro %}
@@ -69,11 +69,11 @@
 {% macro stage_row(i, j, st, columns) -%}
 <div class="lv-stage" data-stage>
   <span class="lv-order">
-    <button type="button" data-move="up" title="Move left on the board">▲</button>
-    <button type="button" data-move="down" title="Move right on the board">▼</button>
+    <button type="button" data-move="up" title="Dời sang trái trên board">▲</button>
+    <button type="button" data-move="down" title="Dời sang phải trên board">▼</button>
   </span>
   <input type="text" name="lens{{ i }}_stage{{ j }}_name" value="{{ st.name }}"
-         placeholder="Stage name" class="lv-in lv-name" required>
+         placeholder="Tên stage" class="lv-in lv-name" required>
   <div class="lv-cols">
     {% for col in columns %}
     <label class="lv-col {{ 'on' if col in st.columns else '' }}">
@@ -86,15 +86,17 @@
     {% for t in tones %}<option value="{{ t }}" {% if st.tone == t %}selected{% endif %}>{{ t }}</option>{% endfor %}
   </select>
   <input type="text" name="lens{{ i }}_stage{{ j }}_hint" value="{{ st.hint }}"
-         placeholder="what this stage means" class="lv-in lv-hint">
+         placeholder="stage này nghĩa là gì" class="lv-in lv-hint" title="{{ st.hint }}">
   <label class="lv-mine {{ 'on' if st.mine else '' }}"
-         title="The ball is in this role's court while a card sits in this stage">
-    <input type="checkbox" name="lens{{ i }}_stage{{ j }}_mine" {% if st.mine %}checked{% endif %}>your turn
+         title="Card nằm ở stage này nghĩa là tới lượt vai này xử lý">
+    <input type="checkbox" name="lens{{ i }}_stage{{ j }}_mine" {% if st.mine %}checked{% endif %}>tới lượt
   </label>
-  <select name="lens{{ i }}_stage{{ j }}_drop" class="lv-in lv-drop" title="Column applied when a card is dropped here">
-    {% for col in columns %}<option value="{{ col }}" {% if st.drop == col %}selected{% endif %}>drop → {{ col }}</option>{% endfor %}
+  {# The column name alone: the header already says "Khi thả vào", and the old
+     "drop → Needs human" prefix is what cut the name off at this width. #}
+  <select name="lens{{ i }}_stage{{ j }}_drop" class="lv-in lv-drop" title="Cột được áp dụng khi thả card vào đây">
+    {% for col in columns %}<option value="{{ col }}" {% if st.drop == col %}selected{% endif %}>{{ col }}</option>{% endfor %}
   </select>
-  <button type="button" class="lv-x" data-del-stage title="Remove this stage">✕</button>
+  <button type="button" class="lv-x" data-del-stage title="Bỏ stage này">✕</button>
   {{ parks_at('lens' ~ i ~ '_stage' ~ j ~ '_', st.states, st.tags) }}
 </div>
 {%- endmacro %}
@@ -148,7 +150,8 @@
   .lv-icon { width:44px; text-align:center; }
   .lv-label { font-size:14px; font-weight:650; width:170px; }
   .lv-key { width:110px; font-family:var(--mono); font-size:12px; }
-  .lv-hint-in { flex:1 1 200px; min-width:170px; }
+  /* Takes the rest of the row and wraps to its own line before it would clip the hint. */
+  .lv-hint-in { flex:1 1 320px; min-width:260px; }
   .lv-profile { width:150px; }
   .lv-del { margin-left:auto; display:inline-flex; align-items:center; gap:6px; font-size:11.5px;
     color:var(--text-dim); background:none; border:none; cursor:pointer; font-family:inherit; }
@@ -291,49 +294,46 @@
     cursor:pointer; margin-bottom:20px; }
   .lv-add:hover { border-color:var(--accent); color:var(--accent-hover); background:var(--accent-bg); }
 
-  .savebar { position:sticky; bottom:0; display:flex; justify-content:space-between; align-items:center;
-    gap:14px; padding:12px 0 18px; background:var(--bg-sticky); backdrop-filter:blur(8px); }
-  .savebar .note { color:var(--text-dim); font-size:12px; }
 </style>
 
 <div class="lv-top"><h2 class="page-title">{{ page_title("board-views") }}</h2></div>
 <p class="lv-lede">
-  Work is a <b>relay</b> — the same item passes through every process — so a process is not a label
-  stuck on an item, but <b>where the item is right now</b>. Saved to <code>config.yaml</code> →
-  <code>board_lenses</code>, applied live; the boards are at <a href="/dashboard/board">Board</a>.
+  Công việc là một cuộc <b>tiếp sức</b>: cùng một item đi qua mọi quy trình, nên quy trình là
+  <b>chỗ item đang đứng</b>, không phải nhãn dán lên item. Xem các board ở
+  <a href="/dashboard/board">Board</a>.
 </p>
 
 <div class="lv-how">
   <div class="lv-how-card">
-    <h5><span class="n">1</span> Stages</h5>
-    <p>Each lane claims one or more pipeline columns
+    <h5><span class="n">1</span> Stage</h5>
+    <p>Mỗi lane nhận một hay nhiều cột pipeline
       ({% for col in columns %}<code>{{ col }}</code>{% if not loop.last %} {% endif %}{% endfor %}),
-      and/or the ADO <b>states</b> and <b>tags</b> an item parks in. Claim order: tag → state → column.
-      Folding hides nothing — inside a lane, cards stay grouped under the column they are really in.</p>
+      và/hoặc các <b>state</b>, <b>tag</b> ADO mà item dừng chờ. Thứ tự nhận: tag → state → cột.
+      Gộp cột không giấu gì — trong lane, card vẫn được nhóm theo cột thật của nó.</p>
   </div>
   <div class="lv-how-card">
-    <h5><span class="n">2</span> Your turn</h5>
-    <p>Tick it on the stages where this role has to act. An item moving from <code>In progress</code>
-      to <code>Ready for review</code> leaves Dev's turn and enters QC's — nobody re-tags anything.
-      Lanes that are <em>not</em> your turn still show, as upstream / downstream context.</p>
+    <h5><span class="n">2</span> Tới lượt</h5>
+    <p>Tick ở những stage mà vai này phải xử lý. Item đi từ <code>In progress</code> sang
+      <code>Ready for review</code> là rời lượt Dev, sang lượt QC — không ai phải gắn lại tag.
+      Lane <em>không</em> phải lượt của bạn vẫn hiện, làm bối cảnh trước / sau.</p>
   </div>
   <div class="lv-how-card">
     <h5><span class="n">3</span> ▶ Run</h5>
-    <p>The hand-off gate. Pick the SDLC profile this process starts; its cards get a Run button in the
-      lanes that are its turn, and pressing it <b>removes that lane's parking tags</b>. Blank = no button.</p>
+    <p>Cửa bàn giao. Chọn profile SDLC mà quy trình này khởi động; card ở lane tới lượt sẽ có nút Run,
+      bấm vào sẽ <b>gỡ các tag chờ của lane đó</b>. Để trống = không có nút.</p>
   </div>
 </div>
 
 <details class="lv-more">
-  <summary>The brake, and when to use tags</summary>
-  <p>The simplest brake needs no ADO change at all: the poller already ignores anything tagged
-    <code>{{ done_tag }}</code>, <code>{{ review_tag_name }}</code> or <code>{{ hold_tag }}</code>, so a
-    finished stage stops itself — park a lane on that tag and Run is exactly "take the tag off and go".
-    Pair it with <code>sdlc_profile_tags</code> (Settings → Closed-loop SDLC) to say <em>who</em> it
-    stopped for.</p>
-  <p><b>Process tags</b> (the field under each process name) are the exception, not the rule: set them
-    only when one process owns a whole stream end to end — a QC-only backlog, say. Blank means this
-    process sees every item on the board, which is what a relay wants.</p>
+  <summary>Chi tiết — cái phanh, và khi nào dùng tag</summary>
+  <p>Cái phanh đơn giản nhất không cần đổi gì trên ADO: poller vốn bỏ qua mọi item mang tag
+    <code>{{ done_tag }}</code>, <code>{{ review_tag_name }}</code> hoặc <code>{{ hold_tag }}</code>, nên
+    stage vừa xong tự dừng — cho lane nhận tag đó, và Run chính là "gỡ tag rồi đi tiếp".
+    Kết hợp với tag theo profile (Cài đặt → Closed-loop SDLC) để biết nó dừng <em>cho ai</em>.</p>
+  <p><b>Tag của quy trình</b> (ô dưới tên mỗi quy trình) là ngoại lệ, không phải quy tắc: chỉ đặt
+    khi một quy trình sở hữu trọn một luồng từ đầu đến cuối — ví dụ backlog chỉ dành cho QC. Để trống
+    nghĩa là quy trình thấy mọi item trên board, đúng điều mà tiếp sức cần.</p>
+  <p>Lưu vào <code>config.yaml</code> → <code>board_lenses</code>, áp dụng ngay.</p>
 </details>
 
 {% if flash %}
@@ -341,35 +341,35 @@
 {% endif %}
 {% if errors %}
 <div class="lv-flash bad">
-  <b>Not saved — fix these first:</b>
+  <b>Chưa lưu — sửa các lỗi sau trước:</b>
   {% for e in errors %}<div>• {{ e }}</div>{% endfor %}
 </div>
 {% endif %}
 
 {% if no_turn %}
 <div class="lv-flash" style="border-color:rgba(245,166,35,.4);color:var(--amber);align-items:flex-start;flex-direction:column;gap:5px">
-  <b>{{ no_turn | join(', ') }} — no stage of its own</b>
-  <div style="color:var(--text-muted)">Nothing on the board ever waits on {{ 'these' if no_turn | length > 1 else 'it' }}:
-    every stage is marked as context. Tick <b>your turn</b> on the stage where that role has to act
-    {% if not review_state or not deploy_state %}— or give
+  <b>{{ no_turn | join(', ') }} — chưa có stage nào là lượt của mình</b>
+  <div style="color:var(--text-muted)">Không có gì trên board chờ {{ 'các quy trình này' if no_turn | length > 1 else 'quy trình này' }}:
+    mọi stage đều chỉ là bối cảnh. Tick <b>tới lượt</b> ở stage mà vai đó phải xử lý
+    {% if not review_state or not deploy_state %}— hoặc gán cho
     {% if not review_state %}<b>Ready for review</b>{% endif %}{% if not review_state and not deploy_state %} / {% endif %}{% if not deploy_state %}<b>Ready to deploy</b>{% endif %}
-    a real ADO state in <a href="/dashboard/settings" style="color:var(--accent-hover)">Settings → Board columns</a>,
-    which is what creates the hand-off column for it{% endif %}.</div>
+    một state ADO thật ở <a href="/dashboard/settings#board-columns" style="color:var(--accent-hover)">Thiết lập → 🗂️ Cột trên Board</a>,
+    đó là thứ tạo ra cột bàn giao cho nó{% endif %}.</div>
 </div>
 {% endif %}
 
 {% if shared_turns %}
 <div class="lv-flash" style="border-color:rgba(245,166,35,.4);color:var(--amber);align-items:flex-start;flex-direction:column;gap:5px">
-  <b>Two processes claim the same hand-off</b>
+  <b>Hai quy trình cùng nhận một điểm bàn giao</b>
   {% for col, names in shared_turns.items() %}
-  <div>• <code>{{ col }}</code> — {{ names | join(' and ') }} both treat it as their turn,
-    so an item there is either done twice or by nobody.</div>
+  <div>• <code>{{ col }}</code> — {{ names | join(' và ') }} đều coi đó là lượt của mình,
+    nên item ở đó hoặc bị làm hai lần, hoặc không ai làm.</div>
   {% endfor %}
   {% if not review_state or not deploy_state %}
-  <div style="color:var(--text-muted)">Usually this means a hand-off column is missing. Give
-    {% if not review_state %}<b>Ready for review</b>{% endif %}{% if not review_state and not deploy_state %} and {% endif %}{% if not deploy_state %}<b>Ready to deploy</b>{% endif %}
-    a real ADO state in <a href="/dashboard/settings" style="color:var(--accent-hover)">Settings → Board columns</a>
-    and the relay gets its own step for each role.</div>
+  <div style="color:var(--text-muted)">Thường là do thiếu một cột bàn giao. Hãy gán cho
+    {% if not review_state %}<b>Ready for review</b>{% endif %}{% if not review_state and not deploy_state %} và {% endif %}{% if not deploy_state %}<b>Ready to deploy</b>{% endif %}
+    một state ADO thật ở <a href="/dashboard/settings#board-columns" style="color:var(--accent-hover)">Thiết lập → 🗂️ Cột trên Board</a>
+    để mỗi vai có bước riêng trong cuộc tiếp sức.</div>
   {% endif %}
 </div>
 {% endif %}
@@ -381,49 +381,50 @@
     <section class="lv-card" data-lens>
       <div class="lv-hd">
         <input type="text" name="lens{{ i }}_icon" value="{{ lens.icon }}"
-               class="lv-in lv-icon" placeholder="🛠" title="Emoji shown on the lens tab" maxlength="4">
+               class="lv-in lv-icon" placeholder="🛠" title="Emoji hiện trên tab" maxlength="4">
         <input type="text" name="lens{{ i }}_label" value="{{ lens.label }}"
-               class="lv-in lv-label" placeholder="Dev" required title="Name on the board tab">
+               class="lv-in lv-label" placeholder="Dev" required title="Tên trên tab board">
         <input type="text" name="lens{{ i }}_key" value="{{ lens.key }}"
-               class="lv-in lv-key" placeholder="dev" title="URL key: /dashboard/board?view=…">
+               class="lv-in lv-key" placeholder="dev" title="Khoá URL: /dashboard/board?view=…">
         <input type="text" name="lens{{ i }}_hint" value="{{ lens.hint }}"
-               class="lv-in lv-hint-in" placeholder="The question this board answers">
+               class="lv-in lv-hint-in" placeholder="Board này trả lời câu hỏi gì"
+               title="{{ lens.hint or 'Board này trả lời câu hỏi gì' }}">
         <select name="lens{{ i }}_profile" class="lv-in lv-profile"
-                title="Stages the ▶ Run button starts for this process. Blank = no Run button.">
-          <option value="">▶ Run: — off —</option>
+                title="Các stage mà nút ▶ Run khởi động cho quy trình này. Để trống = không có nút Run.">
+          <option value="">▶ Run: — tắt —</option>
           {% for name in profiles %}
           <option value="{{ name }}" {% if lens.profile == name %}selected{% endif %}>▶ Run: {{ name }}</option>
           {% endfor %}
         </select>
         {% set turn_lanes = lens.stages | selectattr('mine') | map(attribute='name') | list %}
         <span class="lv-turnlist {{ 'none' if not turn_lanes else '' }}"
-              title="Lanes this process calls its turn. Read from the same saved value as the tick boxes below — if they disagree, the page is stale.">
-          {% if turn_lanes %}your turn: <b>{{ turn_lanes | join(', ') }}</b>
-          {% else %}no lane is this process's turn{% endif %}
+              title="Các lane mà quy trình này coi là lượt của mình. Đọc từ cùng giá trị đã lưu với các ô tick bên dưới — nếu hai bên lệch nhau thì trang đã cũ.">
+          {% if turn_lanes %}tới lượt: <b>{{ turn_lanes | join(', ') }}</b>
+          {% else %}chưa lane nào là lượt của quy trình này{% endif %}
         </span>
         <span class="lv-match {{ 'zero' if not lens.turn else '' }}"
-              title="Items waiting on this process right now (in a stage marked 'your turn'){% if lens.tags %}, out of {{ lens.matches }} it can see{% endif %}">
-          {{ lens.turn }} waiting · sees {{ lens.matches }}/{{ board_total }}
+              title="Số item đang chờ quy trình này (ở stage đánh dấu 'tới lượt'){% if lens.tags %}, trên tổng {{ lens.matches }} item nó thấy{% endif %}">
+          {{ lens.turn }} đang chờ · thấy {{ lens.matches }}/{{ board_total }}
         </span>
         <span class="lv-order lv-order-lens">
-          <button type="button" data-move-lens="up" title="Move this tab left">▲</button>
-          <button type="button" data-move-lens="down" title="Move this tab right">▼</button>
+          <button type="button" data-move-lens="up" title="Dời tab này sang trái">▲</button>
+          <button type="button" data-move-lens="down" title="Dời tab này sang phải">▼</button>
         </span>
-        <button type="button" class="lv-del" data-del-lens>🗑 Remove process</button>
+        <button type="button" class="lv-del" data-del-lens>🗑 Bỏ quy trình</button>
       </div>
 
       <div class="lv-sec">
-        <h4>Tags <span>— optional. Blank (recommended for a relay) = this process sees every item.
-          Set them only to carve out a stream it owns end to end.</span></h4>
+        <h4>Tag <span>— tuỳ chọn. Để trống (nên dùng cho tiếp sức) = quy trình thấy mọi item.
+          Chỉ đặt khi muốn tách riêng một luồng mà nó sở hữu trọn vẹn.</span></h4>
         <input type="text" name="lens{{ i }}_tags" value="{{ lens.tags | join(', ') }}"
-               class="lv-in lv-tags" placeholder="blank = all items · e.g. {{ lens.tag_hint }}">
+               class="lv-in lv-tags" placeholder="trống = mọi item · vd. {{ lens.tag_hint }}">
         {% if board_tags %}
         <details class="lv-suggest">
-          <summary>Tags on the board now ({{ board_tags | length }}) — click one to add it</summary>
+          <summary>Tag đang có trên board ({{ board_tags | length }}) — bấm để thêm</summary>
           <div class="lv-suggest-list">
             {% for name, n in board_tags %}
             <button type="button" class="lv-tag-add" data-tag="{{ name }}"
-                    title="Add {{ name }} to this process">{{ name }} <b>{{ n }}</b></button>
+                    title="Thêm {{ name }} vào quy trình này">{{ name }} <b>{{ n }}</b></button>
             {% endfor %}
           </div>
         </details>
@@ -431,11 +432,11 @@
       </div>
 
       <div class="lv-sec">
-        <h4>Stages <span>— left to right; a lane is one or more pipeline columns and/or the ADO
-          states it parks in; tick <b>your turn</b> where this role has to act</span></h4>
+        <h4>Stage <span>— trái sang phải; mỗi lane gồm một hay nhiều cột pipeline và/hoặc state ADO
+          mà item dừng chờ; tick <b>tới lượt</b> ở chỗ vai này phải xử lý</span></h4>
         <div class="lv-shd" aria-hidden="true">
-          <span></span><span>Stage</span><span>Pipeline columns</span><span>Colour</span>
-          <span>Meaning</span><span>Turn</span><span>On drop</span><span></span>
+          <span></span><span>Stage</span><span>Cột pipeline</span><span>Màu</span>
+          <span>Ý nghĩa</span><span>Lượt</span><span>Khi thả vào</span><span></span>
         </div>
         <div data-stages>
           {% for st in lens.stages %}{{ stage_row(i, loop.index0, st, columns) }}{% endfor %}
@@ -443,26 +444,24 @@
       </div>
       {% set gaps = lens.gaps %}
       {% if gaps %}
-      <div class="lv-gap">⚠ No stage shows {{ gaps | join(', ') }} — items sitting there will not appear on this board.</div>
+      <div class="lv-gap">⚠ Không stage nào hiện {{ gaps | join(', ') }} — item nằm ở đó sẽ không xuất hiện trên board này.</div>
       {% endif %}
       <div class="lv-foot">
-        <button type="button" class="btn-ghost" data-add-stage>＋ Add stage</button>
+        <button type="button" class="btn-ghost" data-add-stage>＋ Thêm stage</button>
       </div>
     </section>
     {% endfor %}
   </div>
 
-  <button type="button" class="lv-add" id="lv-add-lens">＋ Add a process (e.g. Design, Release, Support)</button>
+  <button type="button" class="lv-add" id="lv-add-lens">＋ Thêm quy trình (vd. Design, Release, Support)</button>
 
   <div class="savebar">
-    <span class="note">Applied live — no restart. The board's lens tabs follow this order.</span>
-    <span style="display:flex;gap:10px">
-      <button type="submit" name="reset" value="1" class="btn-ghost"
-              onclick="return confirm('Discard these processes and restore the built-in BA / Dev / QC set?')">
-        ↩ Restore defaults
-      </button>
-      <button type="submit" class="btn-save">💾 Save processes</button>
-    </span>
+    <span class="hint">Áp dụng ngay, không cần khởi động lại. Các tab trên board theo đúng thứ tự này.</span>
+    <button type="submit" name="reset" value="1" class="btn-ghost"
+            onclick="return confirm('Bỏ các quy trình này và khôi phục bộ BA / Dev / QC mặc định?')">
+      ↩ Khôi phục mặc định
+    </button>
+    <button type="submit" class="btn-save">💾 Lưu quy trình</button>
   </div>
 </form>
 
@@ -473,40 +472,40 @@
       <input type="text" name="icon" value="" class="lv-in lv-icon" placeholder="🛠" maxlength="4">
       <input type="text" name="label" value="" class="lv-in lv-label" placeholder="Design" required>
       <input type="text" name="key" value="" class="lv-in lv-key" placeholder="design">
-      <input type="text" name="hint" value="" class="lv-in lv-hint-in" placeholder="The question this board answers">
+      <input type="text" name="hint" value="" class="lv-in lv-hint-in" placeholder="Board này trả lời câu hỏi gì">
       <select name="profile" class="lv-in lv-profile">
-        <option value="">▶ Run: — off —</option>
+        <option value="">▶ Run: — tắt —</option>
         {% for name in profiles %}<option value="{{ name }}">▶ Run: {{ name }}</option>{% endfor %}
       </select>
       <span class="lv-order lv-order-lens">
-        <button type="button" data-move-lens="up" title="Move this tab left">▲</button>
-        <button type="button" data-move-lens="down" title="Move this tab right">▼</button>
+        <button type="button" data-move-lens="up" title="Dời tab này sang trái">▲</button>
+        <button type="button" data-move-lens="down" title="Dời tab này sang phải">▼</button>
       </span>
-      <button type="button" class="lv-del" data-del-lens>🗑 Remove process</button>
+      <button type="button" class="lv-del" data-del-lens>🗑 Bỏ quy trình</button>
     </div>
     <div class="lv-sec">
-      <h4>Tags <span>— items carrying any of these belong to this process</span></h4>
+      <h4>Tag <span>— item mang bất kỳ tag nào ở đây thuộc về quy trình này</span></h4>
       <input type="text" name="tags" value="" class="lv-in lv-tags" placeholder="autopilot-design, design">
     </div>
     <div class="lv-sec">
-      <h4>Stages <span>— left to right, each over one or more pipeline columns</span></h4>
+      <h4>Stage <span>— trái sang phải, mỗi stage gồm một hay nhiều cột pipeline</span></h4>
       <div class="lv-shd" aria-hidden="true">
-        <span></span><span>Stage</span><span>Pipeline columns</span><span>Colour</span>
-        <span>Meaning</span><span>Turn</span><span>On drop</span><span></span>
+        <span></span><span>Stage</span><span>Cột pipeline</span><span>Màu</span>
+        <span>Ý nghĩa</span><span>Lượt</span><span>Khi thả vào</span><span></span>
       </div>
       <div data-stages></div>
     </div>
-    <div class="lv-foot"><button type="button" class="btn-ghost" data-add-stage>＋ Add stage</button></div>
+    <div class="lv-foot"><button type="button" class="btn-ghost" data-add-stage>＋ Thêm stage</button></div>
   </section>
 </template>
 
 <template id="lv-blank-stage">
   <div class="lv-stage" data-stage>
     <span class="lv-order">
-      <button type="button" data-move="up" title="Move left on the board">▲</button>
-      <button type="button" data-move="down" title="Move right on the board">▼</button>
+      <button type="button" data-move="up" title="Dời sang trái trên board">▲</button>
+      <button type="button" data-move="down" title="Dời sang phải trên board">▼</button>
     </span>
-    <input type="text" name="name" value="" placeholder="Stage name" class="lv-in lv-name" required>
+    <input type="text" name="name" value="" placeholder="Tên stage" class="lv-in lv-name" required>
     <div class="lv-cols">
       {% for col in columns %}
       <label class="lv-col"><input type="checkbox" name="columns" value="{{ col }}">{{ col }}</label>
@@ -515,10 +514,10 @@
     <select name="tone" class="lv-in lv-tone">
       {% for t in tones %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
     </select>
-    <input type="text" name="hint" value="" placeholder="what this stage means" class="lv-in lv-hint">
-    <label class="lv-mine"><input type="checkbox" name="mine">your turn</label>
-    <select name="drop" class="lv-in lv-drop">
-      {% for col in columns %}<option value="{{ col }}">drop → {{ col }}</option>{% endfor %}
+    <input type="text" name="hint" value="" placeholder="stage này nghĩa là gì" class="lv-in lv-hint">
+    <label class="lv-mine"><input type="checkbox" name="mine">tới lượt</label>
+    <select name="drop" class="lv-in lv-drop" title="Cột được áp dụng khi thả card vào đây">
+      {% for col in columns %}<option value="{{ col }}">{{ col }}</option>{% endfor %}
     </select>
     <button type="button" class="lv-x" data-del-stage>✕</button>
     {{ parks_at('', [], []) }}
@@ -569,7 +568,7 @@
     if (!bits.length) {
       const none = document.createElement('span');
       none.className = 'lv-parks-none';
-      none.textContent = 'columns only — nothing parks here';
+      none.textContent = 'chỉ theo cột — không nhận state/tag nào';
       sum.appendChild(none);
       return;
     }
@@ -646,7 +645,7 @@
     }
     if (e.target.closest('[data-del-lens]')) {
       const card = e.target.closest('[data-lens]');
-      if (confirm('Remove this process from the board?')) { card.remove(); renumber(); }
+      if (confirm('Bỏ quy trình này khỏi board?')) { card.remove(); renumber(); }
       return;
     }
     if (e.target.id === 'lv-add-lens') {

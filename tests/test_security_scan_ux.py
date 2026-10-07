@@ -111,15 +111,15 @@ def test_security_page_has_readiness_scan_form_and_links(tmp_path):
                  repo_working_directory=str(repo)) as client:
         page = client.get("/dashboard/security").text
         # Readiness rows and the scan form are there before any scan exists.
-        assert "Readiness" in page and "builtin" in page and "always available" in page
+        assert "Mức sẵn sàng" in page and "builtin" in page and "luôn sẵn có" in page
         assert 'action="/dashboard/security/rescan"' in page and 'name="tools"' in page
-        assert "No scans yet" in page
+        assert "Chưa có lượt quét nào" in page
         f, scan_id = _seed(client, repo)
         page = client.get(f"/dashboard/security?repo={repo}").text
         assert "/dashboard/security/f/" in page
         assert f"/dashboard/security/scans/{scan_id}" in page
-        assert "As of <a" in page and f"scan #{scan_id}" in page    # list says which scan
-        assert "it never adds a copy" in page and 'id="recent-scans"' in page
+        assert "Tính đến <a" in page and f"lượt quét #{scan_id}" in page    # list says which scan
+        assert "không bao giờ thêm bản sao" in page and 'id="recent-scans"' in page
         assert "⬇ SARIF" in page
         # Search narrows.
         assert "SQL concat" in client.get(f"/dashboard/security?repo={repo}&q=OrderService").text
@@ -137,12 +137,12 @@ def test_finding_page_shows_everything_and_scan_page_lists_new(tmp_path):
         assert "SQL concat in OrderService" in page
         assert "cwe.mitre.org/data/definitions/89.html" in page       # CWE link
         assert "API8:2023" in page and "FromSqlRaw" in page             # class + snippet
-        assert f.fingerprint in page and "Suppress / accept risk" in page
+        assert f.fingerprint in page and "Bỏ qua / chấp nhận rủi ro" in page
         assert f"/dashboard/security/scans/{scan_id}" in page          # history
         scan = client.get(f"/dashboard/security/scans/{scan_id}").text
-        assert "New in this scan" in scan and "SQL concat in OrderService" in scan
+        assert "Mới trong lượt quét này" in scan and "SQL concat in OrderService" in scan
         assert "semgrep" in scan and "skipped (not installed)" in scan
-        assert "gate failed" in scan
+        assert "gate không đạt" in scan
 
 
 def test_finding_page_surfaces_its_filed_bug(tmp_path):
@@ -156,9 +156,9 @@ def test_finding_page_surfaces_its_filed_bug(tmp_path):
         row = client.portal.call(c.security_repo.by_fingerprint, str(repo), f.fingerprint)
         client.portal.call(c.security_repo.set_bug, row.id, 9494)
         page = client.get(f"/dashboard/security/f/{row.id}").text
-        assert "Tracked on ADO" in page and "#9494" in page
+        assert "Đang theo dõi trên ADO" in page and "#9494" in page
         assert "🐞 Bug #9494" in page                     # header badge
-        assert "Or create a Bug above" not in page          # Fix it no longer says "create"
+        assert "Hoặc tạo Bug ở trên" not in page          # Fix it no longer says "create"
         assert 'action="/dashboard/security/' + str(row.id) + '/file"' not in page
 
 

@@ -70,10 +70,10 @@
      ('overview', '📋 Tổng quan', room.timeline | length),
      ('conversation', '💬 Diễn biến', room.comments | length),
      ('plan', '🧭 Brief', 0),
-     ('drift', '📐 Spec drift', room.open_drifts | length),
+     ('drift', '📐 Lệch spec', room.open_drifts | length),
      ('code', '🔀 Code', room.prs | length),
-     ('preview', '👁️ Preview', room.artifacts | length),
-     ('audit', '🔎 Audit', room.audit | length),
+     ('preview', '👁️ Xem trước', room.artifacts | length),
+     ('audit', '🔎 Nhật ký thao tác', room.audit | length),
    ] %}
 <div class="tr-tabs">
   {% for key, label, count in tabs %}
@@ -273,7 +273,7 @@
             {% if ev.detail %}<div class="tr-when">{{ ev.detail }}</div>{% endif %}</li>
         {% endfor %}
       </ul>
-    {% else %}<div class="tr-empty">Chưa có sự kiện audit nào cho item này.</div>{% endif %}
+    {% else %}<div class="tr-empty">Chưa có thao tác nào được ghi lại cho item này.</div>{% endif %}
   </div>
 {% endif %}
 {% endblock %}

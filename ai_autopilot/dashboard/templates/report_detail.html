@@ -89,8 +89,14 @@
     flex:0 0 auto; }
   .rd-file-row .note { flex:1 1 220px; }
   .rd-file-row select { padding:7px 10px; border-radius:8px; border:1px solid var(--border);
-    background:var(--bg-input,var(--bg-card)); color:var(--text); font-size:13px; }
+    background:var(--bg-input,var(--bg-card)); color:var(--text); font-size:13px; min-width:120px; }
+  .rd-meta details { display:inline-block; margin-left:6px; }
+  .rd-meta summary { cursor:pointer; color:var(--text-dim); font-size:11.5px; }
 </style>
+
+{# Severity values stay the data (CSS class, filters); only the visible word is Vietnamese. #}
+{% set SEV_VI = {'critical': 'Nghiêm trọng', 'high': 'Cao', 'medium': 'Trung bình',
+                 'low': 'Thấp', 'info': 'Thông tin'} %}
 
 {% if flash %}
 <div class="rd-card" style="border-color:var(--{{ flash[0] }});margin-bottom:14px">
@@ -99,15 +105,16 @@
 {% endif %}
 
 <div class="rd-top"><h2>{{ row.loop_name }}</h2>
-  {% if row.status != 'success' %}<span class="sev failed">run failed</span>{% endif %}
+  {% if row.status != 'success' %}<span class="sev failed" title="{{ row.status }}">run lỗi</span>{% endif %}
 </div>
 <p class="rd-meta">
   {{ row.started_at.strftime('%Y-%m-%d %H:%M') if row.started_at else '—' }} ·
   {{ '%.0fs'|format(row.duration_seconds or 0) }} ·
-  {% if row.agents %}agents: {{ row.agents }} · {% endif %}
+  {% if row.agents %}agent: {{ row.agents }} · {% endif %}
   {% if row.project %}{{ row.project }} · {% endif %}
-  <a href="/dashboard/reports?loop={{ row.loop_name|urlencode }}">every run of this loop</a>
-  {% if row.html_path %}<br>Saved as <code>{{ row.html_path }}</code>{% endif %}
+  <a href="/dashboard/reports?loop={{ row.loop_name|urlencode }}">mọi lượt chạy của loop này</a>
+  {# A local path matters to whoever opens the file on this machine, nobody else. #}
+  {% if row.html_path %}<details><summary>Kỹ thuật</summary>Lưu tại <code>{{ row.html_path }}</code></details>{% endif %}
 </p>
 
 {% if row.error %}
@@ -116,14 +123,14 @@
 
 <div class="rd-card">
   <div class="rd-hd">
-    <h3>Findings</h3>
+    <h3>Phát hiện</h3>
     <span>
       {% set counts = {'critical': row.critical_count, 'high': row.high_count,
                        'medium': row.medium_count, 'low': row.low_count, 'info': row.info_count} %}
       {% for sev in severities if counts[sev] %}
-      <span class="sev {{ sev }}">{{ sev }} {{ counts[sev] }}</span>
+      <span class="sev {{ sev }}" title="{{ sev }}">{{ SEV_VI.get(sev, sev) }} {{ counts[sev] }}</span>
       {% endfor %}
-      {% if not (counts.values()|sum) %}<span class="sev clean">nothing reported</span>{% endif %}
+      {% if not (counts.values()|sum) %}<span class="sev clean">không báo gì</span>{% endif %}
     </span>
   </div>
 
@@ -134,7 +141,7 @@
   <table class="rd-tbl">
     <thead><tr>
       <th style="width:34px"><input type="checkbox" id="pickAll" title="Chọn tất cả chưa tạo"/></th>
-      <th>Severity</th><th>Finding</th><th>Where</th><th>Agent</th>
+      <th>Mức độ</th><th>Phát hiện</th><th>Vị trí</th><th>Agent</th>
     </tr></thead>
     <tbody>
       {% for f in findings %}
@@ -148,7 +155,7 @@
           <input type="checkbox" class="pick" name="finding" value="{{ loop.index0 }}"
                  {% if wi %}disabled data-filed="1"{% endif %}/>
         </td>
-        <td><span class="sev {{ f.severity }}">{{ f.severity }}</span></td>
+        <td><span class="sev {{ f.severity }}" title="{{ f.severity }}">{{ SEV_VI.get(f.severity, f.severity) }}</span></td>
         <td>
           <div class="title">{{ f.title }}</div>
           {% if f.detail %}<div class="detail">{{ f.detail }}</div>{% endif %}
@@ -277,15 +284,16 @@
   </script>
   {% else %}
   <div class="rd-empty">
-    No structured findings in this run.
-    {% if row.status == 'success' %}An empty list is a real answer — read the report below to
-    see what was checked.{% else %}The run failed, so nothing was checked.{% endif %}
+    Lượt chạy này không có phát hiện có cấu trúc nào.
+    {% if row.status == 'success' %}Danh sách trống là một câu trả lời thật — đọc báo cáo bên dưới
+    để biết đã kiểm tra những gì.{% else %}Run bị lỗi nên chưa kiểm tra gì —
+    <a href="/dashboard/loops">chạy lại loop</a> sau khi xem lỗi ở trên.{% endif %}
   </div>
   {% endif %}
 </div>
 
 <div class="rd-card">
-  <div class="rd-hd"><h3>Report</h3><span>The agent's answer, as written.</span></div>
+  <div class="rd-hd"><h3>Báo cáo</h3><span>Nguyên văn câu trả lời của agent.</span></div>
   <div class="rd-body">{{ body_html | safe if body_html else '—' }}</div>
 </div>
 {% endblock %}

@@ -376,10 +376,10 @@ def test_board_filters_and_limit(tmp_path):
 
     with TestClient(create_app(settings)) as client:
         client.app.state.container.ado = _FakeAdo()
-        # Cap: 31 BE items in one column > 20 → a Load more appears.
-        assert "Load more" in client.get("/dashboard/board").text
+        # Cap: 31 BE items in one column > 20 → a "Xem thêm" link appears.
+        assert "Xem thêm" in client.get("/dashboard/board").text
         # limit override removes it.
-        assert "Load more" not in client.get("/dashboard/board?limit=100").text
+        assert "Xem thêm" not in client.get("/dashboard/board?limit=100").text
         # Category filter keeps only FE.
         fe = client.get("/dashboard/board?cat=FE").text
         assert "special login" in fe and "task 5" not in fe
@@ -394,7 +394,7 @@ def test_planning_live_partial_renders(tmp_path):
     settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
     with TestClient(create_app(settings)) as client:
         r = client.get("/dashboard/planning/live-partial")
-        assert r.status_code == 200 and "Live schedule" in r.text
+        assert r.status_code == 200 and "Lịch chạy trực tiếp" in r.text
 
 
 def test_planning_schedule_creates_a_run(tmp_path):
@@ -407,7 +407,7 @@ def test_planning_schedule_creates_a_run(tmp_path):
         )
         assert resp.status_code == 303 and "scheduled=1" in resp.headers["location"]
         page = client.get("/dashboard/planning")
-        assert "Scheduled runs" in page.text
+        assert "Lượt chạy đã hẹn giờ" in page.text
 
 
 def test_overview_shows_efficiency_cards(client: TestClient):
@@ -702,14 +702,14 @@ def test_flow_page_names_the_types_no_flow_covers(tmp_path, monkeypatch):
         text = client.get("/dashboard/flow").text
     # Assert the CLAIM (which types are uncovered), not the heading's prose — the wording
     # changed once already in a redesign and took the test with it.
-    assert "with no group" in text
+    assert "chưa thuộc nhóm nào" in text
     assert "Requirement" in text and "Feature" in text
 
 
 def test_flow_page_flags_a_flat_state_that_exists_on_no_type(tmp_path, monkeypatch):
     with _flow_client(tmp_path, monkeypatch, on_merge_state="Ready for Testing") as client:
         text = client.get("/dashboard/flow").text
-    assert "exists on no work-item type" in text      # the ✗ legend explains itself
+    assert "không có trên loại work item nào" in text      # the ✗ legend explains itself
     assert "Ready for Testing" in text                # and names the dead value
 
 
@@ -755,10 +755,10 @@ def test_saving_a_state_the_type_lacks_is_refused_and_keeps_the_input(tmp_path, 
         assert client.app.state.container.config.work_item_flows == []   # nothing saved
 
         page = client.get("/dashboard/flow").text
-        assert "Not saved" in page
+        assert "Chưa lưu" in page
         assert "Ready to Deploy" in page and "Requirement" in page
         assert 'value="Req"' in page                     # the typed name survived
-        assert "not on these types" in page              # and the rejected value is visible
+        assert "không có trên các type này" in page              # and the rejected value is visible
 
     assert not (tmp_path / "config.yaml").exists()       # never written
 
@@ -797,7 +797,7 @@ def test_flow_page_still_renders_when_ado_is_unreachable(tmp_path, monkeypatch):
         client.app.state.container.ado.get_states_by_type = boom
         page = client.get("/dashboard/flow")
     assert page.status_code == 200
-    assert "read the work-item types from Azure DevOps" in page.text
+    assert "Không đọc được các loại work item từ Azure DevOps" in page.text
 
 
 # ── Teams channel card (name / URL / active) ──────────────────────────────────
@@ -1181,7 +1181,7 @@ def test_teams_is_configured_in_exactly_one_place(tmp_path, monkeypatch):
     assert 'name="wh0_url"' in page and _WH_A in page
     assert 'value="primary"' in page
     # The card sits inside the Notifications section, not in a card of its own elsewhere.
-    notif = page.index("Notifications")
+    notif = page.index("📣 Kênh thông báo")
     assert notif < page.index('name="wh_count"') < page.index('name="smtp_host"')
 
 
@@ -1321,7 +1321,7 @@ def test_settings_page_shows_the_time_windows_and_saves_them(tmp_path, monkeypat
     with TestClient(create_app(settings)) as client:
         page = client.get("/dashboard/settings")
         assert page.status_code == 200
-        for label in ("Timezone", "Work window", "Process-health digest"):
+        for label in ("Múi giờ", "Giờ làm việc", "Báo cáo sức khoẻ quy trình"):
             assert label in page.text, label
         # The notify window moved into the consolidated "🔔 Cảnh báo" section and was
         # relabelled with it. Anchor on the field NAMES rather than the wording: what

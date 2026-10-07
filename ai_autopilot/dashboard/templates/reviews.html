@@ -3,18 +3,18 @@
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
     <div>
         <h2 class="page-title">{{ page_title("reviews") }}</h2>
-        <p>Reviewer status of every active PR — grouped by the branch it merges into.
-           {% if scanned and summary.total != scanned %}<b>{{ summary.total }}</b> of {{ scanned }} shown.{% endif %}</p>
+        <p>Trạng thái reviewer của mọi PR đang mở, nhóm theo branch đích.
+           {% if scanned and summary.total != scanned %}Đang hiện <b>{{ summary.total }}</b>/{{ scanned }} PR.{% endif %}</p>
     </div>
     <div style="font-size:12px;color:var(--text-muted);text-align:right">
         {% if tracking_enabled %}
-            <span class="live-dot"></span> tracking on
-            {% if auto_review %} · 🤖 auto-review{% endif %}
-            {% if reminder_hours %} · ⏰ remind {{ reminder_hours }}h{% endif %}
+            <span class="live-dot"></span> đang theo dõi
+            {% if auto_review %} · 🤖 tự review{% endif %}
+            {% if reminder_hours %} · ⏰ nhắc sau {{ reminder_hours }} giờ{% endif %}
         {% else %}
-            ⚪ tracking off — enable <b>Track PR reviewers</b> in Settings
+            ⚪ chưa theo dõi — bật <b>Track PR reviewers</b> ở <a class="table-link" href="/dashboard/settings">Settings</a>
         {% endif %}
-        {% if targets %}<br/>🎯 targets: {% for t in targets %}<code>{{ t }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+        {% if targets %}<br/>🎯 branch đích: {% for t in targets %}<code>{{ t }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
     </div>
 </div>
 
@@ -34,7 +34,7 @@
      filtering happens over the cached scan — changing a dropdown costs no ADO call. */
   .rev-filters { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:14px; }
   .rf-in { background:var(--bg-input); color:var(--text); border:1px solid var(--border);
-    border-radius:var(--radius-sm); padding:7px 10px; font-size:13px; font-family:inherit; max-width:230px; }
+    border-radius:var(--radius-sm); padding:7px 10px; font-size:13px; font-family:inherit; min-width:150px; max-width:260px; }
   .rf-in:focus { outline:none; border-color:var(--accent); }
   .rf-toggle { font-size:12.5px; font-weight:600; text-decoration:none; color:var(--text-muted);
     border:1px solid var(--border); border-radius:20px; padding:5px 12px; white-space:nowrap; }
@@ -42,10 +42,6 @@
   .rf-toggle.on { background:var(--accent-bg); border-color:rgba(99,102,241,.45); color:var(--accent-hover); }
   .rf-toggle b { font-weight:800; }
   .rf-count { color:var(--text-dim); font-size:12px; }
-  .rev-stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
-  .stat { flex:1; min-width:110px; background:var(--bg-card,#101218); border:1px solid var(--border);
-    border-radius:12px; padding:12px 16px; }
-  .stat .n { font-size:22px; font-weight:700; } .stat .l { font-size:11.5px; color:var(--text-muted); }
   .rev-card { background: var(--bg-card, #101218); border: 1px solid var(--border);
     border-radius: 12px; padding: 13px 17px; margin-bottom: 11px; }
   .rev-card.blocked, .rev-card.conflicts { border-left: 3px solid #f87171; }
@@ -77,7 +73,7 @@
 </style>
 
 <details class="cmd-help">
-    <summary>💬 Commands — reply on any PR the bot reviews</summary>
+    <summary>💬 Lệnh — trả lời trên bất kỳ PR nào bot đang review</summary>
     <table class="cmd-table">
         <tr><td><code>/ai</code> &lt;yêu cầu&gt;</td><td>DEV</td><td>Sửa code theo yêu cầu → commit &amp; push</td></tr>
         <tr><td><code>/spec</code></td><td>BA</td><td>Cập nhật spec file + đồng bộ ADO work item</td></tr>
@@ -86,20 +82,20 @@
         <tr><td><code>/qc</code></td><td>QC</td><td>Phân tích test scope, đề xuất test case</td></tr>
         <tr><td><code>/security</code></td><td>SA</td><td>Rà OWASP trên diff</td></tr>
         <tr><td><code>/impact</code></td><td>BA</td><td>Phân tích ảnh hưởng / blast-radius</td></tr>
-        <tr><td><code>/summary</code></td><td>All</td><td>Tóm tắt PR dễ hiểu</td></tr>
+        <tr><td><code>/summary</code></td><td>Mọi role</td><td>Tóm tắt PR dễ hiểu</td></tr>
     </table>
 </details>
 
 <form method="get" action="/dashboard/reviews" class="rev-filters">
-    <input type="text" name="q" value="{{ f.q }}" class="rf-in" style="width:190px"
-           placeholder="🔍 PR id, title, branch or work item"/>
+    <input type="text" name="q" value="{{ f.q }}" class="rf-in" style="width:240px"
+           placeholder="🔍 Id PR, tiêu đề, branch, work item" aria-label="Tìm PR"/>
     <select name="status" class="rf-in">
-        {% for v, lbl in [('all','All status'),('awaiting','⏳ Awaiting review'),
-                          ('partial','◑ Partly voted'),('approved','✅ Approved'),
-                          ('blocked','⛔ Blocked'),('conflicts','⚠️ Conflicts'),('draft','📝 Draft')] %}
+        {% for v, lbl in [('all','Mọi trạng thái'),('awaiting','⏳ Chờ review'),
+                          ('partial','◑ Đã vote một phần'),('approved','✅ Đã duyệt'),
+                          ('blocked','⛔ Bị chặn'),('conflicts','⚠️ Xung đột'),('draft','📝 Draft')] %}
         <option value="{{ v }}" {% if f.status == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
     </select>
-    {% for key, label in [('repo','All repos'), ('author','All authors'), ('target','All targets')] %}
+    {% for key, label in [('repo','Mọi repo'), ('author','Mọi tác giả'), ('target','Mọi branch đích')] %}
     {% if facets[key] | length > 1 %}
     <select name="{{ key }}" class="rf-in" onchange="this.form.submit()">
         <option value="all" {% if f[key] == 'all' %}selected{% endif %}>{{ label }}</option>
@@ -107,26 +103,43 @@
     </select>
     {% endif %}
     {% endfor %}
-    <button type="submit" class="btn-ghost">Apply</button>
+    <button type="submit" class="btn-ghost">Áp dụng</button>
     {% if me %}
     <a class="rf-toggle {{ 'on' if f.mine else '' }}"
        href="/dashboard/reviews{{ '' if f.mine else '?mine=1' }}"
-       title="Active PRs where {{ me }} is a reviewer and has not voted yet">
-        {{ '✓ ' if f.mine else '' }}🙋 Waiting on me{% if mine_count %} <b>{{ mine_count }}</b>{% endif %}
+       title="PR đang mở có {{ me }} là reviewer và chưa vote">
+        {{ '✓ ' if f.mine else '' }}🙋 Đang chờ tôi{% if mine_count %} <b>{{ mine_count }}</b>{% endif %}
     </a>
     {% endif %}
     {% if f.q or f.status != 'all' or f.repo != 'all' or f.author != 'all' or f.target != 'all' or f.mine %}
-    <a href="/dashboard/reviews" class="btn-ghost" style="text-decoration:none">Reset</a>
-    <span class="rf-count">{{ summary.total }} of {{ scanned }} PR(s)</span>
+    <a href="/dashboard/reviews" class="btn-ghost" style="text-decoration:none">Bỏ lọc</a>
+    <span class="rf-count">{{ summary.total }}/{{ scanned }} PR</span>
     {% endif %}
 </form>
 
-<div class="rev-stats">
-    <div class="stat"><div class="n">{{ summary.total }}</div><div class="l">Active PRs</div></div>
-    <div class="stat"><div class="n" style="color:#4ade80">{{ summary.approved }}</div><div class="l">✅ Approved</div></div>
-    <div class="stat"><div class="n" style="color:#fbbf24">{{ summary.awaiting }}</div><div class="l">⏳ Awaiting review</div></div>
-    <div class="stat"><div class="n" style="color:#f87171">{{ summary.blocked }}</div><div class="l">⛔ Blocked / conflicts</div></div>
-    <div class="stat"><div class="n" style="color:var(--text-muted)">{{ summary.drafts }}</div><div class="l">📝 Drafts</div></div>
+{# A pending or failed scan has no figures yet — "—" there, not a reassuring 0. #}
+{% set no_data = scan_pending or scan_failed %}
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">PR đang mở</span><div class="stat-card-icon">🔀</div></div>
+        <div class="stat-card-value">{{ '—' if no_data else summary.total }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Đã duyệt</span><div class="stat-card-icon">✅</div></div>
+        <div class="stat-card-value {{ 'success-val' if summary.approved and not no_data }}">{{ '—' if no_data else summary.approved }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Chờ review</span><div class="stat-card-icon">⏳</div></div>
+        <div class="stat-card-value" {% if summary.awaiting and not no_data %}style="color:var(--amber)"{% endif %}>{{ '—' if no_data else summary.awaiting }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Bị chặn / xung đột</span><div class="stat-card-icon">⛔</div></div>
+        <div class="stat-card-value {{ 'failed-val' if summary.blocked and not no_data }}">{{ '—' if no_data else summary.blocked }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header"><span class="stat-card-label">Draft</span><div class="stat-card-icon">📝</div></div>
+        <div class="stat-card-value">{{ '—' if no_data else summary.drafts }}</div>
+    </div>
 </div>
 
 {# An empty board has three meanings and they are not interchangeable: nothing is
@@ -140,20 +153,21 @@
     <span style="color:var(--amber)">Không đọc được Azure DevOps — danh sách này CHƯA đầy đủ.
     Thử lại ở lần tải sau.</span>
     {% elif scanned %}
-    No PR matches this filter — {{ scanned }} active PR(s) in scope.
-    <a href="/dashboard/reviews" style="color:var(--accent-hover)">Clear the filter</a>.
+    Không PR nào khớp bộ lọc — có {{ scanned }} PR đang mở trong phạm vi.
+    <a href="/dashboard/reviews" style="color:var(--accent-hover)">Bỏ lọc</a> để xem tất cả.
     {% else %}
-    No active pull requests in scope.
+    Không có PR nào đang mở trong phạm vi theo dõi. Chỉnh branch đích được theo dõi ở
+    <a href="/dashboard/settings" style="color:var(--accent-hover)">Settings</a>.
     {% endif %}
 </div>
 {% endif %}
 
-{% set status_label = {"approved":"✅ Approved","partial":"✅ Partial","awaiting":"⏳ Awaiting review","blocked":"⛔ Blocked","conflicts":"⛔ Conflicts","draft":"📝 Draft"} %}
+{% set status_label = {"approved":"✅ Đã duyệt","partial":"✅ Duyệt một phần","awaiting":"⏳ Chờ review","blocked":"⛔ Bị chặn","conflicts":"⛔ Xung đột","draft":"📝 Draft"} %}
 
 {% for target, prs in grouped %}
 <div class="target-group">
-    <span class="target-name">🎯 merge into <code>{{ target }}</code></span>
-    <span class="target-count">{{ prs|length }} PR{{ 's' if prs|length != 1 else '' }}</span>
+    <span class="target-name">🎯 merge vào <code>{{ target }}</code></span>
+    <span class="target-count">{{ prs|length }} PR</span>
     <span class="target-line"></span>
 </div>
 {% for pr in prs %}
@@ -166,15 +180,15 @@
             </div>
             <div class="rev-meta">
                 {{ pr.repo }} · <code>{{ pr.source }}</code>
-                · by {{ pr.author }}{% if pr.age %} · {{ pr.age }} ago{% endif %}
+                · của {{ pr.author }}{% if pr.age %} · {{ pr.age }} trước{% endif %}
                 {% if pr.work_item %} · WI #{{ pr.work_item }}{% endif %}
-                · <a class="table-link" href="/dashboard/activity/pr-{{ pr.id }}">👁 review activity</a>
+                · <a class="table-link" href="/dashboard/activity/pr-{{ pr.id }}">👁 hoạt động review</a>
             </div>
         </div>
         <div class="chips">
-            <span class="chip st-{{ pr.status }}">{{ status_label.get(pr.status, pr.status) }}</span>
-            {% if pr.bot_reviewed %}<span class="chip"><span class="bot-chip">🤖</span> reviewed</span>{% endif %}
-            <span class="chip" title="approved / pending / blocked">
+            <span class="chip st-{{ pr.status }}" title="{{ pr.status }}">{{ status_label.get(pr.status, pr.status) }}</span>
+            {% if pr.bot_reviewed %}<span class="chip"><span class="bot-chip">🤖</span> đã review</span>{% endif %}
+            <span class="chip" title="đã duyệt / chưa vote / chặn">
                 ✅ {{ pr.approved }} · ⏳ {{ pr.pending }} · ⛔ {{ pr.blocked }}
             </span>
         </div>
@@ -185,19 +199,19 @@
         <tr>
             <td style="width:40%">
                 {{ r.name }}
-                {% if r.required %}<span class="req-star" title="required">★</span>{% endif %}
+                {% if r.required %}<span class="req-star" title="bắt buộc">★</span>{% endif %}
                 {% if r.is_bot %}<span class="bot-chip">🤖 bot</span>{% endif %}
             </td>
             <td style="width:30%" class="vote-{{ r.vote }}">{{ r.vote_label }}</td>
             <td class="rev-meta">
-                {% if r.added_at %}added {{ r.added_at.strftime("%d/%m %H:%M") }}{% endif %}
-                {% if r.reminded %} · 🔔 reminded{% endif %}
+                {% if r.added_at %}thêm lúc {{ r.added_at.strftime("%d/%m %H:%M") }}{% endif %}
+                {% if r.reminded %} · 🔔 đã nhắc{% endif %}
             </td>
         </tr>
         {% endfor %}
     </table>
     {% else %}
-    <div class="rev-meta" style="margin-top:8px">No reviewers added yet.</div>
+    <div class="rev-meta" style="margin-top:8px">Chưa có reviewer — thêm reviewer trên PR trong Azure DevOps.</div>
     {% endif %}
 </div>
 {% endfor %}

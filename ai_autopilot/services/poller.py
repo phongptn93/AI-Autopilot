@@ -13,7 +13,7 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 from html import escape as html_escape
 
-from ai_autopilot import metrics, test_report
+from ai_autopilot import claims, metrics, risk, test_report, trust
 from ai_autopilot.board import handoff_states
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
 from ai_autopilot.container import Container
@@ -159,6 +159,18 @@ class AdoPollerService:
         # leave a host silently idle with nobody remembering why.
         self.paused: bool = False
         self.paused_reason: str = ""
+        # What THIS run of an item was allowed to do (trust ladder / plan-first), kept
+        # from dispatch until its result is handled. An interactive session finishes
+        # polls later, and by then the scope's level may have moved — the result must be
+        # judged by the rung the run was GIVEN, not the one it would get now. Absent =
+        # the machine's configured autonomy, exactly as before the ladder existed.
+        self._run_rung: dict[int, trust.Rung] = {}
+        # Items whose current run is plan-only (no code, hold for approval afterwards).
+        self._plan_only: set[int] = set()
+        # Last trust level logged per scope, so a level CHANGE is said once, not per run.
+        self._trust_seen: dict[tuple[str, str], int] = {}
+        # Circuit breaker: FAILED runs in a row on this machine (needs-human is neutral).
+        self._consecutive_failures: int = 0
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
         self._comment_task: asyncio.Task | None = None
@@ -316,6 +328,8 @@ class AdoPollerService:
         self._pending_comment = trim_dict(self._pending_comment)
         self._comment_capped = trim_set(self._comment_capped)
         self._deferred_notified = trim_set(self._deferred_notified)
+        self._run_rung = trim_dict(self._run_rung)
+        self._plan_only = trim_set(self._plan_only)
 
     async def _poll_and_process(self) -> None:
         c, cfg = self._c, self._config
@@ -357,6 +371,9 @@ class AdoPollerService:
         # progress and dispatch immediately (from any state) — see method docstring.
         await self._reconcile_restart_requests()
         await self._reconcile_stage_entries()
+        # A plan a person approved (plan-approved tag on a held plan-pending item) starts
+        # its build run here — the approval is a tag, so it needs no other door.
+        await self._reconcile_plan_approvals()
         # Hand cases that waited for a deploy to QC, now that the build is out.
         await self._deferred.reconcile()
 
@@ -846,11 +863,24 @@ class AdoPollerService:
         except Exception as exc:  # noqa: BLE001
             self._log.warning("stage entry reconcile: fetch failed", error=describe_exc(exc))
             return
+        picks: list[tuple[WorkItemInfo, dict[str, str], str]] = []
         for item in tagged:
             held = {(t or "").strip().lower(): t for t in item.tags}
             hit = next((t for t in held if t in per_stage or (shared and t == shared)), None)
             if hit is None or item.id in self._live or item.id in self._processed:
                 continue
+            picks.append((item, held, hit))
+        # The SHARED tag is swept by every machine, so two can take the same item in the
+        # same minute. A role's own tag is not leased: it names a role, and a role lives
+        # on one machine. Claims run concurrently — each waits out the settle period, and
+        # doing them one after another would stall the poll by that much per item.
+        contested = ([i for i, _h, hit in picks if hit not in per_stage]
+                     if self._lease_active() else [])
+        if contested:
+            won = await asyncio.gather(*(self._claim_run_now(i) for i in contested))
+            lost = {i.id for i, ok in zip(contested, won, strict=True) if not ok}
+            picks = [p for p in picks if p[0].id not in lost]
+        for item, held, hit in picks:
             # one-shot: the run-now tag is consumed on pickup
             await self._provider(item.project).remove_tag(item.id, held[hit])
             item.tags = [t for t in item.tags if t != held[hit]]
@@ -893,6 +923,247 @@ class AdoPollerService:
             return
         await self._provider(item.project).add_tag(item.id, wanted)
         item.tags = [*item.tags, wanted]
+
+    # ── lease on the shared run-now tag ──────────────────────────────────────
+
+    # Work-item claims are scoped to an episode (see claims.current_episode), so the key
+    # itself does not need to vary — it only has to differ from other claim kinds.
+    _RUN_NOW_KEY = "runnow"
+
+    def _lease_active(self) -> bool:
+        """Should a shared-tag pickup be claimed first? "auto" = only in a fleet: a
+        standalone machine has nobody to race, and a claim comment there is just noise."""
+        cfg = self._config
+        mode = (getattr(cfg, "run_now_lease", "auto") or "auto").strip().lower()
+        if mode == "off":
+            return False
+        if mode == "on":
+            return True
+        return bool((getattr(cfg, "fleet_role", "") or "").strip())
+
+    async def _claim_run_now(self, item: WorkItemInfo) -> bool:
+        """Is this machine the one that starts ``item``? The same protocol as the PR
+        conflict claim — post a marked comment, wait for the others', earliest wins —
+        on the work item, since that is the only state the machines share.
+
+        Every doubt resolves to "do not act": an unreadable comment list, or our own
+        claim not showing up on re-read, means we cannot know who won, and a missed
+        pickup is retried on the next tag while a double run is two PRs for one item.
+        """
+        cfg = self._config
+        me = claims.safe_key(claims.machine_name(cfg))
+        key = self._RUN_NOW_KEY
+        provider = self._provider(item.project)
+        try:
+            existing = claims.claims_in_comments(
+                claims.current_episode(await provider.get_work_item_comments(item.id)), key)
+            if existing:
+                owner = claims.winner(existing)
+                if owner != me:
+                    self._log.info("run-now item already claimed by another machine",
+                                   id=item.id, by=owner)
+                return owner == me
+            await provider.add_comment(
+                item.id,
+                f"<div>🔒 Máy <b>{html_escape(me)}</b> nhận chạy item này — các máy "
+                f"autopilot khác sẽ bỏ qua.<br/><sub>{claims.marker(key, me)}</sub></div>",
+            )
+            settle = max(0, int(getattr(cfg, "run_now_claim_settle_seconds", 6) or 0))
+            if settle:
+                await asyncio.sleep(settle)
+            found = claims.claims_in_comments(
+                claims.current_episode(await provider.get_work_item_comments(item.id)), key)
+        except Exception as exc:  # noqa: BLE001 — cannot tell who owns it: do not act
+            self._log.warning("run-now claim failed — not acting", id=item.id,
+                              error=describe_exc(exc))
+            return False
+        if not found:
+            self._log.warning("run-now claim not visible on re-read — not acting", id=item.id)
+            return False
+        owner = claims.winner(found)
+        if owner != me:
+            self._log.info("run-now claim lost — another machine was first",
+                           id=item.id, by=owner)
+        return owner == me
+
+    # ── plan first ──────────────────────────────────────────────────────────
+
+    def _plan_mode(self, item: WorkItemInfo) -> str:
+        """"plan" (run plan-only), "approved" (build, following the approved plan) or ""
+        (not a plan-first item). Read from the tags every time rather than remembered,
+        so a restart between the plan and its approval changes nothing."""
+        cfg = self._config
+        tags = {(t or "").strip().lower() for t in item.tags}
+        first = (cfg.plan_first_tag or "").strip().lower()
+        qualifies = bool(first and first in tags)
+        floor = float(cfg.plan_first_min_points or 0)
+        if not qualifies and floor > 0:
+            # WorkItemInfo carries no Story Points / Effort today; read them if a provider
+            # ever attaches them, otherwise only the tag can qualify an item.
+            points = getattr(item, "story_points", None) or getattr(item, "effort", None)
+            with contextlib.suppress(TypeError, ValueError):
+                qualifies = points is not None and float(points) >= floor
+        if not qualifies:
+            return ""
+        approved = (cfg.plan_approved_tag or "").strip().lower()
+        return "approved" if approved and approved in tags else "plan"
+
+    def _plan_notes(self) -> tuple[str, str]:
+        approved = self._config.plan_approved_tag or "plan-approved"
+        plan_only = (
+            "## 📝 PLAN-ONLY RUN — write the plan, change nothing\n"
+            "This item is marked plan-first: a person approves the approach before any "
+            "code is written. In THIS run:\n"
+            "- Post ONE comment on the work item containing an implementation plan with "
+            "these sections: **Scope** (in / out), **Files & areas** to touch, "
+            "**Approach**, **Risks**, **Test plan**, **Open questions**.\n"
+            "- Make NO code changes, create no branch, and open NO pull request.\n"
+            "- Then write the result file with status=completed and an EMPTY artifacts "
+            f"list. A person approves the plan by adding the tag `{approved}`; the build "
+            "run starts after that."
+        )
+        follow = (
+            "## ✅ Approved plan — follow it\n"
+            "A person approved an implementation plan for this item. It is in the work "
+            "item's comments (the plan the autopilot posted before the "
+            f"`{approved}` tag was added). Implement THAT plan; where you must depart "
+            "from it, record a deviation saying where and why."
+        )
+        return plan_only, follow
+
+    async def _reconcile_plan_approvals(self) -> None:
+        """Start the build run of every held plan a person approved.
+
+        Approval is one tag, added on the board or by the Decision Inbox, so it works
+        without anyone also having to remember to clear the hold. The item is waiting
+        under the hold tag (that is what stopped it being re-picked after the plan), so
+        this releases it the way ▶ Run would: pending + hold tags off, fresh retries,
+        dispatched now.
+        """
+        c, cfg = self._c, self._config
+        approved = (cfg.plan_approved_tag or "").strip()
+        pending = (cfg.plan_pending_tag or "").strip()
+        if cfg.dry_run or not approved or not pending:
+            return
+        try:
+            tagged = await self._from_every_provider("get_work_items_tagged_any", [approved])
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("plan approval reconcile: fetch failed", error=describe_exc(exc))
+            return
+        hold = {(t or "").strip().lower() for t in (cfg.escalation_tag, pending) if t}
+        for item in tagged:
+            tags = {(t or "").strip().lower() for t in item.tags}
+            # Not gated on _processed: the plan run itself stamped it, and an approval
+            # given within the hour must not wait for that stamp to age out.
+            if pending.lower() not in tags or item.id in self._live or item.id in self._inflight:
+                continue
+            if self._lease_active() and not await self._claim_run_now(item):
+                continue
+            try:
+                for t in [t for t in item.tags if (t or "").strip().lower() in hold]:
+                    await self._provider(item.project).remove_tag(item.id, t)
+                item.tags = [t for t in item.tags if (t or "").strip().lower() not in hold]
+                self.forget(item.id)
+                await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)
+                self._processed[item.id] = datetime.now(UTC)  # block same-cycle re-pick
+                await self._provider(item.project).add_comment(
+                    item.id,
+                    "<div><b>▶️ Kế hoạch đã được duyệt</b> — bắt đầu triển khai theo kế "
+                    "hoạch trong comment.</div>",
+                )
+            except Exception as exc:  # noqa: BLE001 — one item must not stop the sweep
+                self._log.warning("plan approval release failed", id=item.id,
+                                  error=describe_exc(exc))
+                continue
+            self._log.info("plan approved — build run starting", id=item.id)
+            asyncio.create_task(self._process(item))
+
+    # ── autonomy for one run: plan-first + trust ladder ─────────────────────
+
+    async def _decide_autonomy(
+        self, item: WorkItemInfo, *, ladder: bool = True,
+    ) -> tuple[trust.Rung | None, str]:
+        """``(rung, brief_note)`` for this run. ``None`` rung = the machine's own
+        autonomy, unchanged — what every path got before these gates existed.
+
+        Never raises: a broken history query falls back to the configured autonomy and
+        says so, because losing a run to an analytics read is the wrong trade.
+        """
+        cfg = self._config
+        try:
+            mode = self._plan_mode(item)
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("plan-first check failed — running normally", id=item.id,
+                              error=describe_exc(exc))
+            mode = ""
+        plan_note, follow_note = self._plan_notes()
+        if mode == "plan":
+            self._plan_only.add(item.id)
+            self._run_rung[item.id] = trust.rung(0)
+            self._log.info("plan-first: plan-only run", id=item.id)
+            return self._run_rung[item.id], plan_note
+        self._plan_only.discard(item.id)
+        note = ""
+        if mode == "approved":
+            note = follow_note
+            pending = (cfg.plan_pending_tag or "").strip()
+            stale = [t for t in item.tags
+                     if pending and (t or "").strip().lower() == pending.lower()]
+            for t in stale:
+                with contextlib.suppress(Exception):   # best-effort; the run goes ahead
+                    await self._provider(item.project).remove_tag(item.id, t)
+            item.tags = [t for t in item.tags if t not in stale]
+        rung: trust.Rung | None = None
+        if ladder and cfg.trust_ladder_enabled:
+            try:
+                level, reason = await trust.level_for(self._c, item)
+                rung = trust.rung(level)
+                await self._note_trust(item, level, reason)
+            except Exception as exc:  # noqa: BLE001
+                self._log.warning("trust ladder unavailable — using configured autonomy",
+                                  id=item.id, error=describe_exc(exc))
+        if rung is None:
+            self._run_rung.pop(item.id, None)
+        else:
+            self._run_rung[item.id] = rung
+        return rung, note
+
+    async def _note_trust(self, item: WorkItemInfo, level: int, reason: str) -> None:
+        """Log a scope's level when it CHANGES (once), and record the rung on the run."""
+        scope = trust.scope_of(item)
+        if self._trust_seen.get(scope) != level:
+            self._log.info(
+                "trust level", project=scope[0] or "(none)", category=scope[1],
+                level=level, label=trust.LEVEL_LABELS.get(level, ""),
+                previous=self._trust_seen.get(scope), reason=reason,
+            )
+            self._trust_seen[scope] = level
+        quality = getattr(self._c, "quality_repo", None)
+        if quality is not None:
+            with contextlib.suppress(Exception):   # analytics must never cost a run
+                await quality.record(work_item_id=item.id, kind=trust.TRUST_LEVEL_KIND,
+                                     value=level, actor="autopilot", detail=reason)
+
+    def _autonomy_kwargs(self, rung: trust.Rung | None, note: str = "") -> dict:
+        """Executor kwargs. ``brief_note`` only when there is one, so an executor (or a
+        test double) that predates it is called exactly as before."""
+        cfg = self._config
+        kw: dict = {
+            "autonomy": rung.autonomy if rung else cfg.autonomy_level,
+            "draft_pr": rung.draft_pr if rung else cfg.pr_is_draft,
+        }
+        if note:
+            kw["brief_note"] = note
+        return kw
+
+    def _review_first(self, item_id: int) -> bool:
+        """Does a PR from this run wait for a person (review outcome, no hand-off)?"""
+        r = getattr(self, "_run_rung", {}).get(item_id)
+        return r.review_first if r is not None else self._config.pr_is_draft
+
+    def _run_autonomy(self, item_id: int) -> str:
+        r = getattr(self, "_run_rung", {}).get(item_id)
+        return r.autonomy if r is not None else self._config.autonomy_level
 
     def _is_my_user(self, email: str | None, name: str | None) -> bool:
         """True if the identity is one THIS machine acts for — its owner, or anyone listed
@@ -1130,6 +1401,10 @@ class AdoPollerService:
                         records[item.id] = await c.execution_repo.start_execution(
                             item, "agent-batch", trigger_tag=self._matched_tag(item)
                         )
+                        # A batch runs at the machine's autonomy (one brief, one rung);
+                        # drop whatever an earlier solo run of this item was given.
+                        self._run_rung.pop(item.id, None)
+                        self._plan_only.discard(item.id)
 
                     self._log.info("processing batch", ids=ids)
                     results = await c.executor.run_agent_batch(
@@ -1182,11 +1457,16 @@ class AdoPollerService:
             if len(self._live) >= cfg.max_concurrent:
                 self._processed.pop(item.id, None)  # at capacity — retry next cycle
                 return
-            await self._dispatch_interactive(item)
+            rung, note = await self._decide_autonomy(classified)
+            await self._dispatch_interactive(item, rung=rung, note=note)
             return
 
-        # Headless: the closed-loop engine runs the stages itself.
-        if cfg.sdlc_loop_enabled:
+        # Headless: the closed-loop engine runs the stages itself. It takes its autonomy
+        # from configuration, not from a per-run argument, so the trust ladder does not
+        # reach it — only plan-first does, by sending the plan-only run down the plain
+        # agent path below (a plan needs no stages).
+        rung, note = await self._decide_autonomy(classified, ladder=not cfg.sdlc_loop_enabled)
+        if cfg.sdlc_loop_enabled and item.id not in self._plan_only:
             await self._process_sdlc(item, classified)
             return
 
@@ -1197,9 +1477,7 @@ class AdoPollerService:
             item, "agent", trigger_tag=self._matched_tag(item)
         )
 
-        result = await c.executor.run_agent(
-            item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft
-        )
+        result = await c.executor.run_agent(item, **self._autonomy_kwargs(rung, note))
 
         await c.execution_repo.complete_execution(record_id, result)
         if result.cost_tokens:
@@ -1303,7 +1581,10 @@ class AdoPollerService:
         if not state and not tag:
             return
         # A draft PR shouldn't auto-advance to the next role before human review.
-        draft_block = bool(result.pr_url) and cfg.pr_is_draft and not cfg.sdlc_advance_on_draft
+        # "Draft" here means "this run's PR waits for a person", which the trust ladder
+        # decides per run; without a rung it is the machine's pr_is_draft as before.
+        draft_block = (bool(result.pr_url) and self._review_first(item.id)
+                       and not cfg.sdlc_advance_on_draft)
         if draft_block:
             self._log.info("sdlc handoff held (draft PR)", id=item.id,
                            would_be=state or tag)
@@ -1349,9 +1630,20 @@ class AdoPollerService:
         self._log.info("sdlc handoff", id=item.id, profile=name, state=state, tag=tag,
                        to=next_role or "(nobody waits — parked)", released=spent or None)
 
-    async def _dispatch_interactive(self, item: WorkItemInfo) -> None:
-        """Launch a Remote-Control session for the item; finalise later from its result."""
+    async def _dispatch_interactive(
+        self, item: WorkItemInfo, *, rung: trust.Rung | None = None, note: str = "",
+    ) -> None:
+        """Launch a Remote-Control session for the item; finalise later from its result.
+
+        ``rung``/``note`` come from ``_decide_autonomy``; omitted, the session gets the
+        machine's configured autonomy exactly as before."""
         c, cfg = self._c, self._config
+        plan_only = rung is not None and item.id in self._plan_only
+        if rung is None:
+            # Called without a decision (a direct caller): nothing from an earlier run of
+            # this item may leak into how this one is judged.
+            self._run_rung.pop(item.id, None)
+            self._plan_only.discard(item.id)
         # Which role is this? On a central machine every role runs in one process, so
         # it cannot be a property of the machine, and it is not a property of the
         # work-item type either (a Bug is a Bug at every step). Where the item STANDS
@@ -1371,12 +1663,17 @@ class AdoPollerService:
         else:
             profile = profile_for_state(item.state or "", cfg)
             stages = profile_stages(profile, cfg) if profile else None
+        if plan_only:
+            # A plan is not one role's steps and opens nothing: the brief's plan-only
+            # section is the whole job.
+            stages = None
         launched, session, run_dir = await c.executor.dispatch_interactive(
-            item, autonomy=cfg.autonomy_level, draft_pr=cfg.pr_is_draft, stages=stages,
+            item, stages=stages,
             # Whether this role opens a PR at all. Its stages already said so — only the
             # `pr` stage produces one — but nothing read that, so a QC run was briefed to
             # open a pull request and duly did.
-            opens_pr=role_opens_pr(profile, cfg) if profile else True,
+            opens_pr=False if plan_only else (role_opens_pr(profile, cfg) if profile else True),
+            **self._autonomy_kwargs(rung, note),
         )
         if not launched:
             await self._handle_agent_result(
@@ -1416,6 +1713,9 @@ class AdoPollerService:
                 "<br/><i>Only these steps — a later role picks the item up from its "
                 "own board.</i>"
             )
+        if plan_only:
+            scope = ("<br/>📝 <b>Chế độ lập kế hoạch</b>: phiên này chỉ đăng kế hoạch triển "
+                     "khai, không sửa code, không mở PR.")
         await self._provider(item.project).add_comment(
             item.id,
             "<div><b>🎮 Live session started</b><br/>Remote Control enabled — open claude.ai "
@@ -1963,6 +2263,208 @@ class AdoPollerService:
         )
         return report.total
 
+    # ── autonomy gates on a finished run ────────────────────────────────────
+
+    async def _hold(
+        self, item: WorkItemInfo, result: ExecutionResult, *, comment: str, detail: str,
+        tag: str = "",
+    ) -> None:
+        """Hold a finished run for a person: the needs-human outcome, one comment, an
+        optional board tag, the usual completion notice.
+
+        The run itself is NOT marked failed — its row was already written as what it
+        was. ``needs_human`` is set on the result so everything after this (the SDLC
+        hand-off, the run's status in metrics) treats it as waiting, not finished.
+        """
+        c, cfg = self._c, self._config
+        result.needs_human = True
+        await c.state_repo.set(item.id, PipelineState.NEEDS_HUMAN, detail=detail[:400])
+        await self._apply_outcome(item, "needs_human")
+        if tag and not cfg.dry_run:
+            try:
+                await self._provider(item.project).add_tag(item.id, tag)
+                item.tags = [*item.tags, tag]
+            except Exception as exc:  # noqa: BLE001 — the hold stands without the tag
+                self._log.warning("hold tag not added", id=item.id, tag=tag,
+                                  error=describe_exc(exc))
+        await self._provider(item.project).add_comment(item.id, comment)
+        await c.notifier.notify_completed(item, result)
+
+    def _is_plan_run(self, item: WorkItemInfo, result: ExecutionResult) -> bool:
+        """Was this run a plan-only one? Its own record when this process dispatched it;
+        the tags otherwise, for a PR-less run only — a plan never opens one, so a run that
+        did (a batch member, say) was a build whatever its tags say."""
+        try:
+            return item.id in getattr(self, "_plan_only", set()) or (
+                not (result.pr_url or result.pr_urls) and self._plan_mode(item) == "plan"
+            )
+        except Exception:  # noqa: BLE001 — a tag read must not decide a run's fate
+            return False
+
+    async def _plan_hold(self, item: WorkItemInfo, result: ExecutionResult, badge: str) -> bool:
+        """After a plan-only run: mark the plan pending and wait for approval.
+
+        Decided from the run's own record when this process dispatched it, and from the
+        tags otherwise — an interactive plan session that outlived a restart is still a
+        plan, and handing it on as "done" would skip the approval it exists for.
+        """
+        cfg = self._config
+        if not self._is_plan_run(item, result):
+            return False
+        getattr(self, "_plan_only", set()).discard(item.id)
+        approved = cfg.plan_approved_tag or "plan-approved"
+        await self._hold(
+            item, result, tag=(cfg.plan_pending_tag or "").strip(),
+            detail="plan posted — waiting for approval",
+            comment=badge
+            + "<div><b>📝 Kế hoạch triển khai đã được đăng — chờ duyệt.</b><br/>"
+            "Xem kế hoạch ở comment phía trên. Đồng ý thì gắn tag "
+            f"<code>{html_escape(approved)}</code>"
+            " — autopilot sẽ tự triển khai theo đúng kế hoạch đó. Muốn đổi hướng: comment "
+            "góp ý rồi gỡ tag hold để lập lại kế hoạch.</div>",
+        )
+        self._log.info("plan posted — held for approval", id=item.id)
+        return True
+
+    async def _pr_files(self, result: ExecutionResult) -> list[str]:
+        """The run's changed files, from the result or else from its PR(s).
+
+        Read-only on purpose: ``_fill_changed_files`` writes the list INTO the result,
+        which feeds the run score; the risk gate must not change how a headless run is
+        scored just by looking.
+        """
+        if result.files_changed:
+            return list(result.files_changed)
+        files: list[str] = []
+        for url in dict.fromkeys(u for u in [result.pr_url, *(result.pr_urls or [])] if u):
+            with contextlib.suppress(Exception):
+                files += await self._c.ado.pull_request_changed_files(url)
+        return list(dict.fromkeys(files))
+
+    async def _comment_on_prs(self, result: ExecutionResult, html: str) -> None:
+        """Say it where the reviewer looks, too. Best-effort per PR."""
+        for url in dict.fromkeys(u for u in [result.pr_url, *(result.pr_urls or [])] if u):
+            target = parse_pr_url(url)
+            if target is None:
+                continue
+            try:
+                await self._c.ado.add_pull_request_comment(target[0], target[1], html)
+            except Exception as exc:  # noqa: BLE001
+                self._log.warning("risk PR comment failed", pr=target[1], error=describe_exc(exc))
+
+    async def _risk_hold(self, item: WorkItemInfo, result: ExecutionResult, badge: str) -> bool:
+        """Hold a run whose changes are expensive to get wrong (see ``ai_autopilot.risk``).
+
+        Only runs that changed something are judged — a plan or a QC pass has no blast
+        radius. Any error here lets the run through: the gate is a second look, and
+        losing a finished run to it would be worse than missing one.
+        """
+        cfg = self._config
+        changed = result.pr_url or result.pr_urls or result.files_changed
+        if not cfg.risk_gate_enabled or not changed:
+            return False
+        try:
+            files = await self._pr_files(result)
+            verdict = risk.classify(files, cfg.risk_patterns, cfg.risk_max_files)
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("risk gate errored — not holding", id=item.id,
+                              error=describe_exc(exc))
+            return False
+        if not verdict.high:
+            return False
+        reasons = "".join(f"<li>{html_escape(r)}</li>" for r in verdict.reasons)
+        shown = verdict.files[:20]
+        file_list = "".join(f"<li><code>{html_escape(f)}</code></li>" for f in shown)
+        extra = len(verdict.files) - len(shown)
+        more = f"<li>… và {extra} file khác</li>" if extra > 0 else ""
+        summary = (
+            "<div><b>🧨 Thay đổi rủi ro cao — cần người duyệt trước khi chuyển tiếp</b>"
+            f"<ul>{reasons}</ul>"
+            + (f"File liên quan:<ul>{file_list}{more}</ul>" if file_list else "")
+            + "PR giữ nguyên. Người duyệt xem kỹ các file trên, rồi tự chuyển item sang "
+            "bước tiếp theo (hoặc gỡ tag hold để autopilot tiếp tục).</div>"
+        )
+        await self._hold(item, result, comment=badge + summary,
+                         tag=(cfg.risk_gate_tag or "").strip(),
+                         detail="risk gate: " + "; ".join(verdict.reasons))
+        if not cfg.dry_run:
+            await self._comment_on_prs(result, summary)
+        self._log.warning("risky change held for a person", id=item.id,
+                          reasons=verdict.reasons, files=len(verdict.files))
+        return True
+
+    async def _budget_hold(self, item: WorkItemInfo, result: ExecutionResult) -> bool:
+        """Hold an item that has spent more than ``item_budget_tokens`` across its runs.
+
+        Summed from the execution rows, so it counts every run on this machine's
+        database — including the one that just finished, whose row is written before
+        this is called. A failed read lets the run through (no cap is better than a lost
+        run).
+        """
+        cfg = self._config
+        cap = int(cfg.item_budget_tokens or 0)
+        if cap <= 0:
+            return False
+        try:
+            spent = int(await self._c.execution_repo.tokens_for_item(item.id))
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("budget check failed — not holding", id=item.id,
+                              error=describe_exc(exc))
+            return False
+        if spent <= cap:
+            return False
+        await self._hold(
+            item, result, detail=f"token budget exceeded: {spent} > {cap}",
+            comment=(
+                "<div><b>💸 Vượt ngân sách token của item</b><br/>"
+                f"Item này đã dùng <b>{spent:,}</b> token qua mọi lần chạy, vượt ngân sách "
+                f"<b>{cap:,}</b> (<code>item_budget_tokens</code>). Autopilot dừng lại để "
+                "người xem xét thay vì tự chạy lại. Gỡ tag hold để cho chạy thêm một lần, "
+                "hoặc nâng ngân sách trong Settings.</div>"
+            ),
+        )
+        self._log.warning("item over token budget — held", id=item.id, spent=spent, cap=cap)
+        return True
+
+    async def _count_for_breaker(self, result: ExecutionResult) -> None:
+        """Trip the circuit breaker after ``circuit_breaker_failures`` FAILED runs in a row.
+
+        Needs-human results are neutral: they are the work asking a question, not the
+        machine being broken. Tripping uses the same ``paused`` flag the Fleet page sets,
+        so resuming is the existing button; the count restarts from zero after a trip.
+        """
+        cfg = self._config
+        if result.needs_human:
+            return
+        if result.success:
+            self._consecutive_failures = 0
+            return
+        self._consecutive_failures = getattr(self, "_consecutive_failures", 0) + 1
+        limit = int(getattr(cfg, "circuit_breaker_failures", 0) or 0)
+        if limit <= 0 or self._consecutive_failures < limit or getattr(self, "paused", False):
+            return
+        n, self._consecutive_failures = self._consecutive_failures, 0
+        self.paused = True
+        self.paused_reason = f"ngắt mạch: {n} run lỗi liên tiếp"
+        self._log.error(
+            "circuit breaker tripped — machine paused", failures=n,
+            last_error=(result.error or "")[:200],
+            hint="fix the cause, then resume the machine (Fleet page or local resume)",
+        )
+        try:
+            from ai_autopilot.fleet import announce  # lazy: fleet pulls in the web layer
+
+            await announce(
+                self._c, "⛔ Autopilot tạm dừng (ngắt mạch)",
+                f"{n} lần chạy lỗi liên tiếp trên máy "
+                f"{claims.machine_name(cfg)} — máy đã tự tạm dừng nhận việc mới. "
+                f"Lỗi gần nhất: {(result.error or '(không rõ)')[:300]}. "
+                "Sửa nguyên nhân rồi bấm Tiếp tục (Resume) để chạy lại.",
+                warning=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — the pause stands without the notice
+            self._log.warning("circuit breaker notice failed", error=describe_exc(exc))
+
     async def _handle_agent_result(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         c, cfg = self._c, self._config
         # Stamp the role before anything reports this run. Every notification and comment
@@ -1974,6 +2476,7 @@ class AdoPollerService:
                 item.tags, item.work_item_type, cfg, state=item.state or ""
             )
         self._warn_unowned_branch(item, result)
+        await self._count_for_breaker(result)
         # Before every branch below, because each of them is a way OUT of this method and
         # three of them (needs_human, score-gate escalate, failed) would drop the verdict
         # entirely — and a QC run that escalates BECAUSE a case failed is precisely the
@@ -2004,7 +2507,8 @@ class AdoPollerService:
             # "get a score" gate: a verified-weak run is held for a human rather
             # than silently going to review/done. Skipped in report mode (L1, no PR
             # is expected) and when scoring is disabled.
-            if score and score.gate == "escalate" and cfg.autonomy_level != "report":
+            if (score and score.gate == "escalate" and self._run_autonomy(item.id) != "report"
+                    and not self._is_plan_run(item, result)):
                 # Terminal too — same reasoning as the needs_human exit above.
                 await self._file_test_cases(item, result)
                 # Here rather than beside the verdict comment: this is the exit a failing
@@ -2062,14 +2566,27 @@ class AdoPollerService:
                     await c.notifier.notify_completed(item, result)
                     self._log.info("held for spec update", id=item.id, drifts=drifts)
                     return
-            if result.pr_url and cfg.pr_is_draft:
+            # The autonomy gates, in order of what a person most needs to hear first:
+            # a plan waiting for approval, a change too risky to pass on unseen, an item
+            # that has spent its budget. Each holds the item and ends handling here.
+            if await self._plan_hold(item, result, badge):
+                return
+            if await self._risk_hold(item, result, badge):
+                return
+            if await self._budget_hold(item, result):
+                return
+            if result.pr_url and self._review_first(item.id):
+                given = getattr(self, "_run_rung", {}).get(item.id)
+                draft = given.draft_pr if given is not None else cfg.pr_is_draft
                 await c.state_repo.set(item.id, PipelineState.IN_REVIEW, pr_url=result.pr_url)
                 await self._apply_outcome(item, "review")
                 await self._provider(item.project).add_comment(
                     item.id,
                     badge
-                    + "<div><b>🔍 PR created (draft)</b>, awaiting human review.<br/>"
-                    f'PR: <a href="{result.pr_url}">{result.pr_url}</a></div>',
+                    + ("<div><b>🔍 PR created (draft)</b>, awaiting human review.<br/>"
+                       if draft else
+                       "<div><b>🔍 PR created (ready for review)</b>, awaiting human review.<br/>")
+                    + f'PR: <a href="{result.pr_url}">{result.pr_url}</a></div>',
                 )
                 await c.notifier.notify_completed(item, result)
             elif result.pr_url:
@@ -2092,6 +2609,11 @@ class AdoPollerService:
                 await c.notifier.notify_completed(item, result)
             return
 
+        # Over budget: a failure is not retried. A retry is another full run's worth of
+        # tokens on an item that has already cost more than anyone agreed to spend.
+        if await self._budget_hold(item, result):
+            c.retry_policy.record_success(item.id)   # held, not retryable
+            return
         count = await self._record_failed_attempt(item, result)
         await c.state_repo.set(item.id, PipelineState.FAILED, detail=result.error or "")
         exhausted = c.retry_policy.is_exhausted(item.id)

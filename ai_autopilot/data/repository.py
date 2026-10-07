@@ -444,6 +444,77 @@ class ExecutionRepository:
                 distinct_items=int(row[0]), total_runs=int(row[1]), total_tokens=int(row[2])
             )
 
+    async def scope_history(
+        self, project: str, category: str, limit: int = 200,
+    ) -> list[ExecutionRecord]:
+        """FINISHED runs of one (project, category) scope, OLDEST first — the trust
+        ladder replays them in order (see ``ai_autopilot.trust``).
+
+        Bounded to the newest ``limit``: the ladder's verdict depends on recent
+        behaviour, and an unbounded read would grow with the install's whole life.
+        Running rows are left out — they have no outcome to judge yet.
+        """
+        async with self._db.session() as session:
+            rows = (await session.execute(
+                select(ExecutionRecord)
+                .where(
+                    ExecutionRecord.project == (project or ""),
+                    ExecutionRecord.category == (category or ""),
+                    ExecutionRecord.status.in_(
+                        [ExecutionStatus.SUCCESS, ExecutionStatus.FAILED]
+                    ),
+                )
+                .order_by(ExecutionRecord.started_at.desc())
+                .limit(max(1, limit))
+            )).scalars().all()
+        return list(reversed(rows))
+
+    async def tokens_for_item(self, work_item_id: int) -> int:
+        """Tokens booked across EVERY run of one work item — the per-item budget's sum."""
+        async with self._db.session() as session:
+            return int((await session.execute(
+                select(func.coalesce(func.sum(ExecutionRecord.cost_tokens), 0))
+                .where(ExecutionRecord.work_item_id == work_item_id)
+            )).scalar_one() or 0)
+
+
+    async def get_by_id(self, record_id: int) -> ExecutionRecord | None:
+        """One run by its id (the feedback page's subject)."""
+        async with self._db.session() as session:
+            return await session.get(ExecutionRecord, int(record_id))
+
+    async def latest_finished_for_item(
+        self, work_item_id: int, near: datetime | None = None,
+    ) -> ExecutionRecord | None:
+        """The run a completion notice was about.
+
+        A notice carries the work-item id, not the run id, and the reader may tap it
+        hours later — after another run of the same item finished. ``near`` (the notice's
+        own timestamp) picks the run that finished closest to it instead of "the newest",
+        which would credit the vote to a run the reader never saw.
+        """
+        async with self._db.session() as session:
+            rows = list((await session.execute(
+                select(ExecutionRecord)
+                .where(ExecutionRecord.work_item_id == work_item_id,
+                       ExecutionRecord.completed_at.is_not(None))
+                .order_by(ExecutionRecord.completed_at.desc())
+                .limit(20)
+            )).scalars().all())
+        if not rows:
+            return None
+        if near is None:
+            return rows[0]
+
+        def _gap(r: ExecutionRecord) -> float:
+            at = r.completed_at
+            if at.tzinfo is not None:
+                at = at.astimezone(UTC).replace(tzinfo=None)
+            ref = near.astimezone(UTC).replace(tzinfo=None) if near.tzinfo else near
+            return abs((at - ref).total_seconds())
+
+        return min(rows, key=_gap)
+
 
 class StateRepository:
     """Persisted per-work-item pipeline state — the autopilot's resumable memory."""
@@ -833,6 +904,27 @@ class AuditRepository:
             return list((await session.execute(q)).scalars().all())
 
 
+    async def mentioning(self, work_item_id: int, limit: int = 200) -> list[AuditEvent]:
+        """Events whose target names this item as ``"<id>"`` or ``"#<id>"``, newest first.
+
+        ``for_target`` only matches the exact string, but call sites write targets as
+        ``"4021"`` in one place and ``"#4021"`` (or several ids) in another. SQL narrows
+        by substring; the exact token rule lives in ``run_timeline.mentions_item`` so a
+        search for 402 does not return everything about 4021.
+        """
+        from ai_autopilot.run_timeline import mentions_item
+
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(AuditEvent)
+                .where(AuditEvent.target.contains(str(int(work_item_id))))
+                .order_by(AuditEvent.at.desc())
+                .limit(max(1, limit))
+            )
+            found = list(rows.scalars().all())
+        return [e for e in found if mentions_item(e.target, work_item_id)]
+
+
 @dataclass
 class ReworkRow:
     """One work item's durable quality tally, for the Quality page."""
@@ -954,6 +1046,58 @@ class QualityRepository:
             if since is not None:
                 q = q.where(QualityEvent.at >= since)
             return {k: n for k, n in (await session.execute(q)).all()}
+
+    async def setbacks_for_items(self, ids: set[int] | list[int]) -> list[tuple[int, datetime]]:
+        """``(work_item_id, at)`` for every time a PERSON sent one of these items back:
+        a PR revision round, a reopen, a rejecting vote. The trust ladder's "revised".
+
+        Retries are left out (the failed run already says so) and so are SDLC
+        iterations: those are the engine correcting itself before anyone looked, which
+        is the loop working, not the work being rejected.
+        """
+        wanted = [int(i) for i in (ids or [])]
+        if not wanted:
+            return []
+        async with self._db.session() as session:
+            rows = (await session.execute(
+                select(QualityEvent.work_item_id, QualityEvent.at).where(
+                    QualityEvent.work_item_id.in_(wanted),
+                    or_(
+                        QualityEvent.kind.in_(
+                            [QualityKind.PR_REVISION, QualityKind.REOPENED]
+                        ),
+                        (QualityEvent.kind == QualityKind.REVIEW_VOTE) & (QualityEvent.value < 0),
+                    ),
+                )
+            )).all()
+        return [(int(i), at) for i, at in rows]
+
+
+    async def replace_feedback(
+        self, *, work_item_id: int, execution_id: int, value: int, actor: str = "",
+        pr_id: int = 0, detail: str = "",
+    ) -> None:
+        """Store a human's verdict on ONE run, replacing any earlier verdict on it.
+
+        The dashboard has a shared password, not per-person accounts, so "one vote per
+        voter" cannot be told apart from "one person changed their mind". One vote per
+        run, latest wins, is the rule that keeps the 👍 share honest either way: a
+        double-tap must not count twice. The run is named in ``stage`` as ``exec:<id>``
+        — the one free short column — so no schema change is needed.
+        """
+        from ai_autopilot.run_timeline import FEEDBACK_STAGE_PREFIX, HUMAN_FEEDBACK
+
+        stage = f"{FEEDBACK_STAGE_PREFIX}{int(execution_id)}"
+        async with self._db.session() as session:
+            await session.execute(delete(QualityEvent).where(
+                QualityEvent.kind == HUMAN_FEEDBACK, QualityEvent.stage == stage))
+            session.add(QualityEvent(
+                at=datetime.now(UTC).replace(tzinfo=None),
+                work_item_id=int(work_item_id or 0), kind=HUMAN_FEEDBACK, stage=stage,
+                value=1 if value > 0 else -1, actor=(actor or "")[:200],
+                pr_id=int(pr_id or 0), detail=(detail or "")[:2000],
+            ))
+            await session.commit()
 
 
 class AiConflictRepository:
@@ -2006,6 +2150,19 @@ class SyncStateRepository:
             await session.commit()
             return len(stale)
 
+    async def merged_work_item_ids(self, ids: set[int] | list[int]) -> set[int]:
+        """Which of these work items have had a PR merged — the trust ladder's "merged"."""
+        wanted = [int(i) for i in (ids or [])]
+        if not wanted:
+            return set()
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(func.distinct(MergedPr.work_item_id)).where(
+                    MergedPr.work_item_id.in_(wanted)
+                )
+            )
+            return {int(r[0]) for r in rows if r[0]}
+
 
 class FleetWorkerRepository:
     """What the central VM knows about each worker machine.
@@ -2439,6 +2596,21 @@ class PrConflictRepository:
                 row.status = "open"
             await session.commit()
             return len(rows)
+
+
+    async def for_item(self, work_item_id: int, pr_ids: list[int] | None = None,
+                       limit: int = 50) -> list[PrConflict]:
+        """Conflicts of this item's PRs — linked by the item id the PR named, or by the
+        PR ids its runs recorded (a PR whose branch carried no id still belongs here)."""
+        conds = [PrConflict.work_item_id == int(work_item_id)]
+        ids = [int(p) for p in (pr_ids or []) if p]
+        if ids:
+            conds.append(PrConflict.pr_id.in_(ids))
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(PrConflict).where(or_(*conds))
+                .order_by(PrConflict.id.desc()).limit(max(1, limit)))
+            return list(rows.scalars().all())
 
 
 class PrSessionRepository:

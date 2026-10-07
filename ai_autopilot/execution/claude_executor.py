@@ -388,7 +388,7 @@ class ClaudeExecutor:
 
     @_scoped
     async def run_agent(
-        self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool
+        self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool, brief_note: str = "",
     ) -> ExecutionResult:
         """Hand the work item to Claude and let it reason end-to-end.
 
@@ -427,7 +427,9 @@ class ClaudeExecutor:
             activity.append(
                 workspace, item.id, f"🚀 agent started{isolated} — repos: {', '.join(repos) or '-'}"
             )
-            brief = self._build_brief(item, repos, autonomy=autonomy, draft_pr=draft_pr)
+            brief = self._build_brief(
+                item, repos, autonomy=autonomy, draft_pr=draft_pr, brief_note=brief_note,
+            )
             if injected:
                 activity.append(
                     workspace, item.id, f"🧠 {injected} lesson(s) from past runs injected"
@@ -1037,7 +1039,7 @@ class ClaudeExecutor:
     @_scoped
     async def dispatch_interactive(
         self, item: WorkItemInfo, *, autonomy: str, draft_pr: bool,
-        stages: list | None = None, opens_pr: bool = True,
+        stages: list | None = None, opens_pr: bool = True, brief_note: str = "",
     ) -> tuple[bool, str, str]:
         """Launch a real, Remote-Control-enabled Claude Code session for this item.
 
@@ -1069,7 +1071,7 @@ class ClaudeExecutor:
         # (avoids passing a long, multi-line prompt through the shell).
         brief = self._build_brief(
             item, repos, autonomy=autonomy, draft_pr=draft_pr, stages=stages,
-            opens_pr=opens_pr,
+            opens_pr=opens_pr, brief_note=brief_note,
         )
         brief_rel = f".autopilot/runs/{item.id}.brief.md"
         brief_path = Path(run_dir) / brief_rel
@@ -1513,7 +1515,7 @@ class ClaudeExecutor:
 
     def _build_brief(
         self, item: WorkItemInfo, repos: list[str], *, autonomy: str, draft_pr: bool,
-        stages: list | None = None, opens_pr: bool = True,
+        stages: list | None = None, opens_pr: bool = True, brief_note: str = "",
     ) -> str:
         """High-level brief: let Claude reason, pick repo(s) + skill(s), implement,
         open the PR(s), and report back via the structured result file.
@@ -1570,8 +1572,16 @@ class ClaudeExecutor:
             )
         elif autonomy == "unattended":
             action = "Implement it, then open a normal (non-draft) PR for each repo you change."
-        else:  # assisted
+        elif draft_pr:  # assisted
             action = "Implement it, then open a DRAFT PR for each repo you change (human review)."
+        else:
+            # Assisted with a ready-for-review PR: the trust ladder's rung 2. A person still
+            # merges it — only the draft step is skipped, because this scope has earned it.
+            # Saying "DRAFT" regardless (as this branch used to) made the flag a no-op.
+            action = (
+                "Implement it, then open a normal (ready-for-review, NOT draft) PR for each "
+                "repo you change — a human reviews and merges it."
+            )
 
         # Autonomy directive — the single biggest cause of a stalled rework is the
         # agent stopping to ask the human a clarifying question instead of deciding.
@@ -1627,6 +1637,11 @@ class ClaudeExecutor:
             lines.append(f"\n## Description\n{item.description}")
         if item.acceptance_criteria:
             lines.append(f"\n## Acceptance criteria\n{item.acceptance_criteria}")
+        if brief_note:
+            # A run-specific instruction from the control plane (plan-only mode, or "an
+            # approved plan exists — follow it"). Placed above the human's latest comment
+            # so that comment still reads as the final word.
+            lines.append(f"\n{brief_note.strip()}")
         if item.pending_comment:
             lines.append(
                 "\n## ⚠️ Latest human guidance (highest priority — respond to THIS)\n"

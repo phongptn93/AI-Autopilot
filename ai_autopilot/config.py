@@ -1247,6 +1247,88 @@ class Settings(BaseSettings):
     require_approval: bool = True  # legacy flag; superseded by autonomy_level
     approval_timeout_minutes: int = 120
 
+    # ── Earned autonomy (trust ladder) ──
+    # One autonomy level for the whole machine is wrong in both directions at once: a
+    # project/category whose PRs merge untouched week after week is still made to wait
+    # on drafts, while a category whose runs keep bouncing gets the same freedom as the
+    # good one. With the ladder on, each scope (project, work-item category) earns its
+    # own level from its history — 0 plan only, 1 draft PR, 2 ready-for-review PR,
+    # 3 unattended — and ``autonomy_level`` above becomes the CEILING, never exceeded.
+    # Off by default: it changes what a run is allowed to do, so somebody must ask.
+    trust_ladder_enabled: bool = False
+    # Finished runs a scope needs (since its last level change) before it may be
+    # promoted. Ten is enough to tell a pattern from a lucky streak without making a
+    # small project wait months.
+    trust_min_runs: int = 10
+    # Share of those runs that must have merged with no revision, reopen or rejection.
+    # 0.8 tolerates the odd bounced PR; anything lower promotes scopes that are mostly
+    # creating review work.
+    trust_promote_rate: float = 0.8
+    # Hard top of the ladder, below the ceiling. 2 = ready-for-review PRs at most:
+    # unattended (3) merges without a person and is only reachable if someone raises
+    # this deliberately.
+    trust_max_level: int = 2
+
+    # ── Risk gate (blast radius) ──
+    # A run that touched migrations, auth, deploy config or dependency manifests is
+    # held for a person before it is handed on or resolved — however good its score.
+    # These are the changes whose mistakes are expensive to undo, and the score cannot
+    # see that. On by default because it only ever makes the autopilot MORE careful.
+    risk_gate_enabled: bool = True
+    # Globs over the run's changed files (``**`` crosses folders, ``*`` does not; a
+    # pattern with no ``/`` matches the file name anywhere). Case-insensitive.
+    risk_patterns: list[str] = Field(default_factory=lambda: [
+        # database migrations
+        "**/Migrations/**", "**/migrations/**", "*.sql",
+        # authentication / authorisation
+        "**/*Auth*", "**/*Permission*", "**/*Security*",
+        # deploy / infrastructure
+        "k8s/**", "**/Dockerfile", ".github/workflows/**", "azure-pipelines*.yml",
+        "**/appsettings*.json",
+        # dependency manifests
+        "**/*.csproj", "package.json", "package-lock.json", "pyproject.toml",
+    ])
+    # More files than this in one run is a blast radius on its own, whatever they are.
+    # 0 = no size rule.
+    risk_max_files: int = 25
+    # Tag added to a held risky item, so the board can filter "waiting on a risk review".
+    risk_gate_tag: str = "autopilot-risk-review"
+
+    # ── Plan first (big items) ──
+    # Large items fail expensively: a whole run spent building the wrong thing. An
+    # item that qualifies runs once in plan-only mode (a comment, no code), is held,
+    # and only builds after a person adds ``plan_approved_tag`` — the build run is told
+    # the approved plan is in the comments. Qualifies = carries ``plan_first_tag``, or
+    # (when ``plan_first_min_points`` > 0) has Story Points / Effort at or above it.
+    plan_first_tag: str = "plan-first"
+    plan_approved_tag: str = "plan-approved"
+    # Added after the plan is posted: says "waiting on plan approval" on the board, and
+    # is removed when the approved run starts.
+    plan_pending_tag: str = "plan-pending"
+    # 0 = off (the tag alone decides). Only applies where the tracker reports points.
+    plan_first_min_points: float = 0
+
+    # ── Spend & failure guards ──
+    # Tokens one work item may consume across ALL its runs before it is held for a
+    # person instead of retried. A looping item burns money silently; a cap turns it
+    # into a question. 0 = no cap.
+    item_budget_tokens: int = 0
+    # This many FAILED runs in a row on this machine pauses it (the same pause as the
+    # Fleet page's) and tells someone once. Five failures in a row is an environment
+    # problem — an expired PAT, a broken workspace — and every further pickup only
+    # spends an item's retries on it. A success resets the count; 0 = off.
+    circuit_breaker_failures: int = 5
+
+    # ── Shared run-now tag lease ──
+    # Every machine sweeps the shared ``stage_entry_tag``, so two can pick the same item
+    # in the same minute. Before starting such an item a machine claims it with a marked
+    # work-item comment and the earliest claim wins. "auto" = only when this machine is
+    # part of a fleet (a standalone install has nobody to race); "on" / "off" force it.
+    run_now_lease: str = "auto"
+    # How long to wait for the other machines' claims to land before reading who won.
+    # 0 = no wait (tests).
+    run_now_claim_settle_seconds: int = 6
+
     # ── RBAC ──
     allowed_users: list[str] = Field(default_factory=list)
     approver_users: list[str] = Field(default_factory=list)

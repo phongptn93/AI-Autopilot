@@ -192,6 +192,7 @@ _SECRETISH = re.compile(r"(^|_)pat$|token|secret|password", re.I)
 # Fields whose NAME looks secret but which hold no credential.
 _NOT_ACTUALLY_SECRET = {
     "daily_budget_tokens", "conflict_ai_min_token_len", "cost_alert_threshold_tokens",
+    "item_budget_tokens",
 }
 
 

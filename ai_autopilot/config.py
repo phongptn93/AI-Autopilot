@@ -1406,6 +1406,14 @@ class Settings(BaseSettings):
     # one notification, the /dashboard/conflicts page and a delivery-report row.
     pr_conflict_tracking_enabled: bool = True
     pr_conflict_poll_minutes: int = 5
+    # How often an OPEN interactive conflict session is checked for its result. Separate
+    # from the scan above (which walks every repo and PR): a session that finished had
+    # to wait out the whole poll — up to five minutes — before it was verified and pushed.
+    pr_session_watch_seconds: int = 15
+    # Several machines see the same conflicted PR. Each claims it ON THE PR (a marked
+    # comment), waits this long for the other claims to land, and the earliest claim
+    # wins — so one PR never gets two sessions from two machines. 0 = no wait (tests).
+    pr_conflict_claim_settle_seconds: int = 6
     # Post ONE comment on the PR when a conflict is first seen (files + how to resolve).
     pr_conflict_comment: bool = True
     # Resolve automatically on PRs the autopilot owns (bot branch prefix): merge the

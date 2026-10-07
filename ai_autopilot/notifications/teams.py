@@ -140,19 +140,25 @@ class TeamsNotifier(NotificationChannel):
         # on the notice and ignoring it. (Adaptive Card fact values render markdown.)
         label = f"#{item.id} {item.title}"
         wi = f"[{label}]({message.work_item_url})" if message.work_item_url else label
-        facts: list[dict[str, str]] = [
-            {"title": "Work Item", "value": wi},
-            {"title": "Type", "value": item.work_item_type},
-            {"title": "Category", "value": str(item.category)},
-        ]
-        # Where the item sits on the board NOW — the autopilot moves it as each stage
-        # lands, and the card reported the work without reporting the move, so nobody
-        # could tell from it whose turn the item had become.
-        if item.state:
-            facts.append({"title": "State", "value": item.state})
-        # Who the item belongs to. On a shared channel the card said what was done and to
-        # which item, but never for whom — so nobody reading it could tell whose work it was.
-        facts.append({"title": "Assignee", "value": message.assignee})
+        facts: list[dict[str, str]] = []
+        if item.id:
+            facts += [
+                {"title": "Work Item", "value": wi},
+                {"title": "Type", "value": item.work_item_type},
+                {"title": "Category", "value": str(item.category)},
+            ]
+            # Where the item sits on the board NOW — the autopilot moves it as each
+            # stage lands, and the card reported the work without reporting the move,
+            # so nobody could tell from it whose turn the item had become.
+            if item.state:
+                facts.append({"title": "State", "value": item.state})
+            # Who the item belongs to. On a shared channel the card said what was done
+            # and to which item, but never for whom.
+            facts.append({"title": "Assignee", "value": message.assignee})
+        elif item.title:
+            # A notice about a PR, a machine or a digest — not a work item. It printed
+            # "Work Item #0", "Category Unknown", "unassigned": four rows of nothing.
+            facts.append({"title": "Về", "value": item.title})
         if message.skill:
             facts.append({"title": "Skill", "value": message.skill})
         if message.result is not None:
@@ -191,7 +197,12 @@ class TeamsNotifier(NotificationChannel):
                     "color": color,
                     "wrap": True,
                 },
-                {"type": "FactSet", "facts": facts},
+                # The notice's own words. Free-form notices (a PR that needs a person,
+                # a machine that went offline, a digest) carry their whole point here,
+                # and the card used to drop it.
+                *([{"type": "TextBlock", "text": message.text, "wrap": True,
+                    "spacing": "Small"}] if message.text else []),
+                *([{"type": "FactSet", "facts": facts}] if facts else []),
             ],
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "version": "1.4",

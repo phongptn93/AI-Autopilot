@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
+import socket
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -67,6 +69,13 @@ class PrConflictService:
         self._sem = asyncio.Semaphore(1)
         self._resolver = ConflictResolver(c.executor, c.config)
         self._said_unconfigured = False
+        self._watch: asyncio.Task | None = None
+        # The scan and the session watch both finalise sessions; one at a time, or the
+        # same finished session is verified and pushed twice.
+        self._finalizing = asyncio.Lock()
+        # Rows this process is claiming right now — two spawns for one PR in the same
+        # process would otherwise both post a claim.
+        self._claiming: set[int] = set()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -75,6 +84,7 @@ class PrConflictService:
             self._log.info("PR conflict tracking disabled")
             return
         self._task = asyncio.create_task(self._run())
+        self._watch = asyncio.create_task(self._watch_sessions(), name="conflict-session-watch")
         self._log.info(
             "PR conflict tracking started",
             every_minutes=self._config.pr_conflict_poll_minutes,
@@ -82,10 +92,10 @@ class PrConflictService:
         )
 
     async def stop(self) -> None:
-        for task in [self._task, *self._tasks]:
+        for task in [self._task, self._watch, *self._tasks]:
             if task is not None:
                 task.cancel()
-        for task in [self._task, *self._tasks]:
+        for task in [self._task, self._watch, *self._tasks]:
             if task is not None:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
@@ -106,6 +116,88 @@ class PrConflictService:
             except Exception as exc:  # noqa: BLE001
                 self._log.error("conflict scan failed", error=describe_exc(exc))
             await asyncio.sleep(max(1, self._config.pr_conflict_poll_minutes) * 60)
+
+    async def _watch_sessions(self) -> None:
+        """Pick up a finished interactive session within seconds, not at the next scan.
+
+        Cheap by construction: a database query and, per open session, one file check.
+        Nothing here talks to Azure DevOps until a session has actually finished.
+        """
+        while True:
+            await asyncio.sleep(max(5, int(self._config.pr_session_watch_seconds or 15)))
+            try:
+                if await self._c.pr_conflict_repo.in_session():
+                    await self._finalize_sessions()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — the watch must outlive any one pass
+                self._log.warning("session watch failed", error=describe_exc(exc))
+
+    # ── one machine per PR ──────────────────────────────────────────────────
+
+    @property
+    def _machine(self) -> str:
+        cfg = self._config
+        return ((cfg.fleet_worker_name or "").strip() or (cfg.trigger_tag or "").strip()
+                or socket.gethostname())
+
+    def _claims(self, threads: list[dict], key: str) -> list[tuple[str, int, str]]:
+        """Every claim for ``key`` on the PR: ``(published, thread_id, machine)``."""
+        out = []
+        for thread in threads or []:
+            comments = thread.get("comments") or []
+            if not comments:
+                continue
+            first = comments[0]
+            hit = _CLAIM_RE.search(str(first.get("content") or ""))
+            if not hit or hit.group(1) != key:
+                continue
+            published = str(first.get("publishedDate") or thread.get("publishedDate") or "")
+            if _age_hours(published) > max(1, int(self._config.pr_session_hours or 8)):
+                continue          # a claim older than any session can last is dead
+            out.append((published, int(thread.get("id") or 0), hit.group(2)))
+        return sorted(out)
+
+    async def _claim_pr(self, row, key: str) -> bool:
+        """Is this machine the one that handles ``key`` on this PR?
+
+        Every machine sees the same conflicted PR, and each kept its "already handled"
+        mark in its own database — so two machines opened two sessions on one PR. The
+        PR is the only state they share, so the claim lives there: post a marked
+        comment, wait for the others' to land, and the EARLIEST claim wins. An existing
+        live claim is honoured without posting another.
+        """
+        c = self._c
+        me = self._machine
+        try:
+            existing = self._claims(
+                await c.ado.get_pull_request_threads(row.repo_id, row.pr_id), key)
+            if existing:
+                winner = existing[0][2]
+                if winner != me:
+                    self._log.info("conflict already claimed by another machine",
+                                   pr=row.pr_id, key=key, by=winner)
+                return winner == me
+            await c.ado.add_pull_request_comment(
+                row.repo_id, row.pr_id,
+                f"<div>🔒 Máy <b>{_esc(me)}</b> nhận xử lý conflict này — các máy autopilot "
+                f"khác sẽ không mở phiên trùng.<br/>"
+                f"<sub>{_CLAIM_TAG}:{key} · {_esc(me)}</sub></div>",
+            )
+            settle = max(0, int(self._config.pr_conflict_claim_settle_seconds or 0))
+            if settle:
+                await asyncio.sleep(settle)
+            claims = self._claims(
+                await c.ado.get_pull_request_threads(row.repo_id, row.pr_id), key)
+        except Exception as exc:  # noqa: BLE001 — cannot tell who owns it: do not act
+            self._log.warning("conflict claim failed — not acting", pr=row.pr_id,
+                              error=describe_exc(exc))
+            return False
+        winner = claims[0][2] if claims else me
+        if winner != me:
+            self._log.info("conflict claim lost — another machine was first",
+                           pr=row.pr_id, key=key, by=winner)
+        return winner == me
 
     def _spawn(self, coro) -> None:
         task = asyncio.create_task(coro)
@@ -174,7 +266,8 @@ class PrConflictService:
 
         requested_by = await self._resolve_command(row)
         if requested_by:
-            self._spawn(self.resolve(row.id, requested_by=requested_by))
+            # The command was already claimed for this machine in _resolve_command.
+            self._spawn(self.resolve(row.id, requested_by=requested_by, claimed=True))
         elif cfg.pr_conflict_autoresolve and row.owned and row.status in (OPEN, ESCALATED):
             # claim_attempt decides whether these inputs were already tried.
             self._spawn(self.resolve(row.id, requested_by=""))
@@ -185,6 +278,16 @@ class PrConflictService:
         c = self._c
         cleared = closed = 0
         for row in await c.pr_conflict_repo.active():
+            if row.status == IN_SESSION and (row.repo_id, row.pr_id) not in conflicted:
+                # A session still open on a PR that is gone or fixed: close it now
+                # rather than let it run out its hours and then report a failure.
+                if await self._settled_elsewhere(row):
+                    with contextlib.suppress(Exception):
+                        await self._resolver.cancel_session(row.session_dir,
+                                                            f"conflict-{row.id}")
+                    await self._finish_failed(row, "", {}, 0)
+                    cleared += 1
+                continue
             if (row.repo_id, row.pr_id) in conflicted or row.status in BUSY_STATUSES:
                 continue
             pr = await c.ado.get_pull_request(row.repo_id, row.pr_id)
@@ -225,6 +328,10 @@ class PrConflictService:
             if key == row.handled_command:
                 continue
             await c.pr_conflict_repo.update(row.id, handled_command=key)
+            # Every machine reads the same command; only the one that wins the claim
+            # answers it — the others would each post their own ack (or refusal).
+            if not await self._claim_pr(row, f"cmd-{key}"):
+                continue
             who = cmd.get("author_name") or cmd.get("author_email") or "?"
             if not matches_any_user(cmd.get("author_email"), cmd.get("author_name"),
                                     cfg.command_allowlist):
@@ -250,7 +357,8 @@ class PrConflictService:
         """Follow the machine's execution_mode, exactly as work items do."""
         return (self._config.execution_mode or "").strip().lower() == "interactive"
 
-    async def resolve(self, conflict_id: int, *, requested_by: str = "") -> str:
+    async def resolve(self, conflict_id: int, *, requested_by: str = "",
+                      claimed: bool = False) -> str:
         """Run one resolution attempt. Returns a short outcome word (for the dashboard
         and tests): ``resolved`` / ``escalated`` / ``in_session`` / ``skipped``.
 
@@ -261,6 +369,17 @@ class PrConflictService:
         row = await c.pr_conflict_repo.get(conflict_id)
         if row is None:
             return "skipped"
+        # One machine per PR and target commit — see _claim_pr. Checked BEFORE the local
+        # attempt is spent, so losing the claim costs this machine nothing.
+        if not claimed:
+            if row.id in self._claiming:
+                return "skipped"
+            self._claiming.add(row.id)
+            try:
+                if not await self._claim_pr(row, f"t-{(row.target_commit or 'head')[:12]}"):
+                    return "skipped"
+            finally:
+                self._claiming.discard(row.id)
         # A person asking is a new decision: they get one more attempt even against a
         # target commit the automatic path already spent its allowance on.
         allowance = (row.attempts + 1) if requested_by else cfg.pr_conflict_max_attempts
@@ -446,6 +565,10 @@ class PrConflictService:
     async def _finalize_sessions(self) -> int:
         """Record the outcome of every interactive session that has written its result;
         close and escalate the ones that ran past ``pr_session_hours``."""
+        async with self._finalizing:
+            return await self._finalize_sessions_locked()
+
+    async def _finalize_sessions_locked(self) -> int:
         c, cfg = self._c, self._config
         done = 0
         limit = max(1, int(cfg.pr_session_hours or 8)) * 3600
@@ -487,10 +610,45 @@ class PrConflictService:
                                        "branch không bị thay đổi", {}, 0)
         return True
 
+    async def _settled_elsewhere(self, row) -> str:
+        """``closed`` / ``resolved`` when the PR no longer needs this attempt, else "".
+
+        Asked before telling anyone a conflict "needs a person": a session can end AFTER
+        the PR was merged, abandoned, or fixed by someone else (another machine, a
+        developer by hand) — and then announced a conflict that no longer existed.
+        Unknown (ADO unreachable) counts as still conflicted: never guess it away.
+        """
+        try:
+            pr = await self._c.ado.get_pull_request(row.repo_id, row.pr_id)
+        except Exception:  # noqa: BLE001
+            return ""
+        if not pr:
+            return ""
+        status = str(pr.get("status") or "").lower()
+        if status in ("completed", "abandoned"):
+            return CLOSED
+        if not is_conflicted(pr) and merge_status(pr) == "succeeded":
+            return RESOLVED
+        return ""
+
     async def _finish_failed(self, row, error: str, checks: dict, tokens: int,
                              files: list[str] | None = None,
                              failures: list[str] | None = None) -> None:
         c = self._c
+        settled = await self._settled_elsewhere(row)
+        if settled:
+            # Nothing for a person to do — close quietly, no comment, no notice.
+            await self._close_execution(
+                row, success=True, tokens=tokens,
+                detail="PR đã hết conflict ở nơi khác — đóng phiên, không cần người")
+            await c.pr_conflict_repo.update(
+                row.id, status=settled, resolved_at=datetime.now(UTC),
+                resolved_by=row.resolved_by or BY_OTHER, session_dir="", session_name="",
+                cost_tokens=(row.cost_tokens or 0) + tokens,
+            )
+            self._log.info("conflict attempt ended after the PR was settled elsewhere",
+                           pr=row.pr_id, now=settled)
+            return
         await self._close_execution(row, success=False, detail=error or "escalated",
                                     tokens=tokens)
         await c.pr_conflict_repo.update(
@@ -614,6 +772,21 @@ class PrConflictService:
         if not (org and project and repo_name and pr_id):
             return ""
         return f"{org}/{project}/_git/{quote(repo_name, safe='')}/pullrequest/{pr_id}"
+
+
+_CLAIM_TAG = "autopilot-claim"
+_CLAIM_RE = re.compile(re.escape(_CLAIM_TAG) + r":([A-Za-z0-9:_\-]+)\s*·\s*([^<\s]+)")
+
+
+def _age_hours(published: str) -> float:
+    """Hours since an ADO timestamp; 0 when it cannot be read (treated as fresh)."""
+    try:
+        at = datetime.fromisoformat(published.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    return (datetime.now(UTC) - at).total_seconds() / 3600
 
 
 def _esc(s: str) -> str:

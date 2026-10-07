@@ -143,8 +143,15 @@ async def test_clean_merge_opens_no_session(tmp_path):
 # ── the service: follows execution_mode, finalises on scan, times out ───────
 
 class _AdoStub:
+    """Posts land as PR threads too, so the cross-machine claim reads back what was
+    posted — exactly as on a real PR."""
+
     def __init__(self):
         self.comments: list[str] = []
+        self.threads: list[dict] = []
+
+    async def get_pull_request_threads(self, repo_id, pr_id):
+        return list(self.threads)
 
     async def get_pull_request(self, repo_id, pr_id):
         return {"description": "", "status": "active"}
@@ -154,6 +161,8 @@ class _AdoStub:
 
     async def add_pull_request_comment(self, repo_id, pr_id, text, active=False):
         self.comments.append(text)
+        self.threads.append({"id": len(self.threads) + 1, "comments": [
+            {"content": text, "publishedDate": "2099-01-01T00:00:00Z"}]})
         return True
 
 
@@ -167,6 +176,7 @@ async def _service(tmp_path, ex):
     async def _noop(*a, **kw):
         return None
 
+    ex._config.pr_conflict_claim_settle_seconds = 0
     c = SimpleNamespace(
         config=ex._config, executor=ex, pr_conflict_repo=PrConflictRepository(db),
         ado=_AdoStub(), audit_repo=SimpleNamespace(record=_noop),

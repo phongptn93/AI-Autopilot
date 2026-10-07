@@ -1,0 +1,28 @@
+# EXAMPLE ONLY — documents the replay case format. `example: true` keeps it out of every
+# run unless `--include-examples` is passed: the repo and commit below exist nowhere, and
+# a suite that fails on its own documentation teaches people to ignore it.
+#
+# Real cases come from `ai-autopilot evals harvest --repo <name>`; see evals/README.md,
+# "Replay evals — đề thi từ việc thật".
+kind: replay
+example: true
+name: example-backend-wi1234
+repo: Backend-Fresh                 # folder under the workspace (or an absolute path)
+base_commit: "0000000000000000000000000000000000000000"   # first parent of the human merge; quote it
+task:
+  title: "Thêm bộ lọc theo trạng thái cho danh sách lệnh sản xuất"
+  description: |
+    Màn hình danh sách lệnh sản xuất cần thêm bộ lọc theo state (Mới / Đang chạy / Đã đóng).
+
+    Acceptance criteria:
+    - API GET /api/work-orders nhận tham số `status` (tuỳ chọn, nhiều giá trị).
+    - Không truyền `status` thì trả về như cũ.
+    - Có unit test cho cả hai trường hợp.
+test_command: dotnet test --nologo  # optional; blank = configured/detected runner
+expected_files:                     # what the human PR touched
+  - src/WorkOrders/WorkOrderController.cs
+  - src/WorkOrders/WorkOrderQuery.cs
+  - tests/WorkOrders/WorkOrderQueryTests.cs
+expected_diff_lines: 86             # informational: the size of the human change
+timeout_minutes: 30
+work_item_id: 1234

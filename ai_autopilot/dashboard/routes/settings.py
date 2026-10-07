@@ -553,6 +553,11 @@ def create_router() -> APIRouter:
                     if settings_form.owner_of(f.key, cfg) == settings_form.OWNER_CENTRAL
                 ),
                 essential_keys=essential_keys,
+                # The "Chính sách" scope: the same inputs, each asked as the decision it
+                # encodes. Filtered against FIELDS so a question whose field was removed
+                # drops out instead of counting a box the page cannot show.
+                policy_keys=[q.key for q in settings_form.POLICY_QUESTIONS if q.key in by_key],
+                policy_questions={q.key: q for q in settings_form.POLICY_QUESTIONS},
                 setup_todo=setup_todo,
                 changed_keys=[
                     f.key for f in settings_form.FIELDS

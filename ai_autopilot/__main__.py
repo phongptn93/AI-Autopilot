@@ -75,6 +75,10 @@ _USAGE = """usage: ai-autopilot [doctor | pr-doctor <url> | evals [dir] [--min-p
   pr-doctor URL  say why a comment on that pull request did not reach the autopilot
   evals [dir]    run the agent-configuration eval suite (default dir: evals/) and exit
                  non-zero when the pass rate is under --min-pass-rate (default 1.0)
+  evals harvest --repo NAME [--limit N] [--out evals/replay/]
+                 build replay cases from the repo's merged work (git history)
+  evals replay [dir] [--case NAME] [--min-pass-rate R] [--json PATH]
+                 replay real past tasks in throwaway worktrees and score the agent
   scan [...]     security scan (SAST + SCA + secrets, optional AI review) of a repo;
                  exit 1 when a NEW unsuppressed finding is at/above --fail-on.
                  `ai-autopilot scan --help` for options.
@@ -92,6 +96,11 @@ def _run_evals(args: list[str]) -> int:
 
     from ai_autopilot import evals as evals_mod
     from ai_autopilot.config import load_settings
+
+    if args and args[0] in ("harvest", "replay"):
+        from ai_autopilot import replay_cli
+
+        return replay_cli.run(args[0], args[1:])
 
     directory, threshold = "evals", 1.0
     rest = list(args)

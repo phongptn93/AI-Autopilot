@@ -816,7 +816,7 @@ def test_profile_resolution_order_is_stated_where_it_is_chosen():
     from ai_autopilot.dashboard.settings_form import FIELDS
 
     pinned = next(f for f in FIELDS if f.key == "sdlc_profile")
-    assert "sdlc:" in pinned.help and "type map" in pinned.help and "default" in pinned.help
+    assert "sdlc:" in pinned.help and "map theo loại" in pinned.help and "mặc định" in pinned.help
     order = [f.key for f in FIELDS if "Vòng SDLC khép kín" in f.section]
     assert order.index("sdlc_profile") < order.index("sdlc_type_profiles")
     assert order.index("sdlc_type_profiles") < order.index("sdlc_default_profile")

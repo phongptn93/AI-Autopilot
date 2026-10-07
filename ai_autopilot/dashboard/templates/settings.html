@@ -83,6 +83,14 @@
     font:inherit;font-size:12.5px;font-weight:600;padding:6px 14px;cursor:pointer}
   .scope-seg button.on{background:var(--accent-bg);color:var(--accent-hover)}
   .scope-why{font-size:12px;color:var(--text-dim)}
+  /* "Chính sách" re-labels the SAME inputs as the decision each one encodes. Both
+     wordings are in the markup and the scope flips which one shows, so the input, its
+     name and the save path never change — only the question written above it. */
+  .pol-q,.pol-help,.pol-key{display:none}
+  .scope-policy .pol-q{display:inline}
+  .scope-policy .pol-help{display:block}
+  .scope-policy .pol-key{display:inline;font-weight:400;font-size:11.5px;color:var(--text-dim);margin-left:6px}
+  .scope-policy .lbl-plain,.scope-policy .plain-help{display:none}
   .set-empty{padding:26px 20px;text-align:center;color:var(--text-muted);font-size:13px}
 
   /* tags overview */
@@ -429,6 +437,7 @@
       <button type="button" data-scope="need">Thiết yếu ({{ essential_keys|length }})</button>
       <button type="button" data-scope="changed">Đã đổi ({{ changed_keys|length }})</button>
       <button type="button" data-scope="all">Tất cả ({{ sections|map(attribute=1)|map('length')|sum }})</button>
+      <button type="button" data-scope="policy">Chính sách ({{ policy_keys|length }})</button>
     </div>
     <span class="scope-why" id="scope-why"></span>
   </div>
@@ -436,6 +445,7 @@
     window.__settingScopes = {
       need: {{ essential_keys|tojson }},
       changed: {{ changed_keys|tojson }},
+      policy: {{ policy_keys|tojson }},
       start: {{ ('need' if setup_todo else 'changed')|tojson }}
     };
   </script>
@@ -725,7 +735,8 @@
            {% if f.show_when_key %}data-when-key="{{ f.show_when_key }}"
            data-when-vals="{{ f.show_when_values|join(',') }}"
            data-filled="{{ '1' if kept else '' }}"{% endif %}>
-        <label for="{{ f.key }}">{{ f.label }}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}
+        {% set pol = policy_questions.get(f.key) %}
+        <label for="{{ f.key }}">{% if pol %}<span class="lbl-plain">{{ f.label }}</span><span class="pol-q">{{ pol.question }}</span><span class="pol-key">— {{ f.label }}</span>{% else %}{{ f.label }}{% endif %}{% if f.key in restart_keys %}<span class="restart-badge">restart</span>{% endif %}
           {# No "do trung tâm quản lý" pill per field. These are hidden until the section
              toggle — which says exactly that, once — is pressed, and every one of them
              is visibly locked. Stamping the same two pills onto 152 of 180 fields was
@@ -816,7 +827,8 @@
           {% else %}
             <input type="text" id="{{ f.key }}" name="{{ f.key }}" value="{{ current.get(f.key) }}" />
           {% endif %}
-          {% if f.help %}<div class="form-help">{{ f.help }}</div>{% endif %}
+          {% if f.help %}<div class="form-help{{ ' plain-help' if pol else '' }}">{{ f.help }}</div>{% endif %}
+          {% if pol %}<div class="form-help pol-help">{{ pol.why }}</div>{% endif %}
         </div>
         {% if managed %}</fieldset>{% endif %}
       </div>
@@ -1020,10 +1032,12 @@
     var WHY = {
       need: 'Những thiết lập máy không chạy được nếu thiếu — lấy từ chính các bước Cài đặt nhanh.',
       changed: 'Những thiết lập máy này đang khác mặc định.',
+      policy: 'Những quyết định đáng chốt với team — mỗi thiết lập viết thành một câu hỏi.',
       all: ''
     };
+    var layoutBody = document.querySelector('.set-body');
     var inScope = {};
-    ['need', 'changed'].forEach(function (name) {
+    ['need', 'changed', 'policy'].forEach(function (name) {
       inScope[name] = {};
       (scopes[name] || []).forEach(function (k) { inScope[name][k] = true; });
     });
@@ -1053,6 +1067,7 @@
         if (tab) tab.classList.toggle('dim', c.classList.contains('hide'));
       });
       scopeBtns.forEach(function (b) { b.classList.toggle('on', b.dataset.scope === scope); });
+      if (layoutBody) layoutBody.classList.toggle('scope-policy', scope === 'policy');
       why.textContent = q ? '' : (WHY[scope] || '');
       empty.classList.toggle('hide', hits > 0 || (!q && scope === 'all'));
       count.textContent = q ? hits + ' kết quả' : '';

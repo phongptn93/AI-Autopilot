@@ -36,6 +36,10 @@ class NavGroup:
 
 GROUPS: tuple[NavGroup, ...] = (
     NavGroup("overview", "🏠 Tổng quan", (
+        # First, above the overview: "what is waiting for ME" is the question that
+        # decides what to do next; the overview answers "how is it going".
+        NavItem("inbox", "/dashboard/inbox", "🎯", "Hộp quyết định",
+                "Mọi việc đang chờ bạn quyết — xử lý ngay tại chỗ."),
         NavItem("overview", "/dashboard", "📊", "Tổng quan",
                 "Hôm nay autopilot làm được gì, cái gì cần chú ý."),
         NavItem("now", "/dashboard/now", "⏱", "Đang chạy",

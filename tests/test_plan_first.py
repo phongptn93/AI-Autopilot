@@ -159,3 +159,47 @@ def test_the_brief_carries_the_note_and_honours_a_non_draft_assisted_run():
     assert "NOT draft" in brief
     draft = ex._build_brief(_exec_item(), ["Api"], autonomy="assisted", draft_pr=True)
     assert "DRAFT PR" in draft and "NOTE FROM" not in draft
+
+
+# ── who posts the plan (#9448) ────────────────────────────────────────────────
+
+
+async def test_the_control_plane_posts_the_plan_the_agent_returned():
+    """#9448: the agent was told to post the plan itself, had no ADO tool and a git
+    credential without Work Items scope (401), put the plan on an unrelated PR and
+    escalated. The plan now comes back in the result file and the autopilot posts it
+    with its own PAT, before the "waiting for approval" note."""
+    svc, c = _poller(execution_mode="headless")
+    result = ExecutionResult.ok(7, "agent", "plan written")
+    result.plan = "## Scope\n- **in**: báo cáo tồn kho\n\n## Risks\n- <script>x</script>"
+    c.executor = _Exec(result)
+
+    await _headless(svc, c, _wi("autopilot", "plan-first"))
+
+    texts = [t for _i, t in c.ado.comments]
+    plan_at = next(i for i, t in enumerate(texts) if "Kế hoạch triển khai</b>" in t)
+    held_at = next(i for i, t in enumerate(texts) if "chờ duyệt" in t)
+    assert plan_at < held_at
+    assert "<strong>in</strong>" in texts[plan_at]                      # Markdown rendered
+    assert "<script>" not in texts[plan_at]                             # and escaped
+    assert (7, "plan-pending") in c.ado.tags
+
+
+def test_the_brief_no_longer_asks_the_agent_to_post_anything():
+    svc, _c = _poller()
+    plan_only, _follow = svc._plan_notes()
+    assert "`plan` field" in plan_only and "Do NOT post it yourself" in plan_only
+    assert "Post ONE comment" not in plan_only
+
+
+def test_the_result_file_carries_the_plan(tmp_path):
+    import json
+
+    from ai_autopilot.execution.result_contract import read_result
+
+    runs = tmp_path / ".autopilot" / "runs"
+    runs.mkdir(parents=True)
+    (runs / "7.json").write_text(json.dumps(
+        {"status": "completed", "summary": "s", "artifacts": [], "plan": "## Scope\n- x"}),
+        encoding="utf-8")
+    assert read_result(str(tmp_path), 7).plan == "## Scope\n- x"

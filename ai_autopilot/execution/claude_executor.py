@@ -1484,6 +1484,7 @@ class ClaudeExecutor:
             result.needs_human = True
             result.output = agent.summary
             result.deviations = list(agent.deviations)
+            result.plan = agent.plan
             return result
         # A completed run is a success. Requiring a PR made "did the work" mean "wrote
         # code" — a dev-shaped assumption the relay broke the moment roles arrived: a QC
@@ -1504,6 +1505,7 @@ class ClaudeExecutor:
             result.deviations = list(agent.deviations)
             result.test_cases = list(agent.test_cases)
             result.test_results = list(agent.test_results)
+            result.plan = agent.plan
             result.pr_urls = [a.pr_url for a in agent.artifacts if a.pr_url]
             result.pr_url = result.pr_urls[0] if result.pr_urls else None
             if agent.artifacts:
@@ -1814,7 +1816,8 @@ class ClaudeExecutor:
             '                  "preconditions":"<state needed first, or empty>"}],',
             '   "test_results":[{"title":"<the case you ran>",',
             '                    "outcome":"pass|fail|blocked|pending_deploy",',
-            '                    "note":"<what happened — REQUIRED unless pass>"}]}',
+            '                    "note":"<what happened — REQUIRED unless pass>"}],',
+            '   "plan":"<Markdown implementation plan — plan-only runs; else omit>"}',
             completion_rule,
             "",
             "## deviations — REQUIRED whenever you decided something the item did not settle",

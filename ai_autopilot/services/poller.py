@@ -13,7 +13,7 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 from html import escape as html_escape
 
-from ai_autopilot import claims, metrics, risk, test_report, trust
+from ai_autopilot import claims, markdown_lite, metrics, risk, test_report, trust
 from ai_autopilot.board import handoff_states
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
 from ai_autopilot.container import Container
@@ -1014,13 +1014,17 @@ class AdoPollerService:
             "## 📝 PLAN-ONLY RUN — write the plan, change nothing\n"
             "This item is marked plan-first: a person approves the approach before any "
             "code is written. In THIS run:\n"
-            "- Post ONE comment on the work item containing an implementation plan with "
-            "these sections: **Scope** (in / out), **Files & areas** to touch, "
-            "**Approach**, **Risks**, **Test plan**, **Open questions**.\n"
+            "- Write an implementation plan in Markdown with these sections: **Scope** "
+            "(in / out), **Files & areas** to touch, **Approach**, **Risks**, **Test "
+            "plan**, **Open questions**.\n"
+            "- Put the WHOLE plan in the result file's `plan` field (a Markdown string). "
+            "Do NOT post it yourself — not on the work item, not on any PR: AI Autopilot "
+            "posts it on the work item for you. You may not have an Azure DevOps tool or "
+            "Work Items access in this session, and that is expected, not a blocker.\n"
             "- Make NO code changes, create no branch, and open NO pull request.\n"
-            "- Then write the result file with status=completed and an EMPTY artifacts "
-            f"list. A person approves the plan by adding the tag `{approved}`; the build "
-            "run starts after that."
+            "- Write the result file with status=completed, the plan in `plan`, and an "
+            f"EMPTY artifacts list. A person approves by adding the tag `{approved}`; the "
+            "build run starts after that."
         )
         follow = (
             "## ✅ Approved plan — follow it\n"
@@ -2313,6 +2317,20 @@ class AdoPollerService:
             return False
         getattr(self, "_plan_only", set()).discard(item.id)
         approved = cfg.plan_approved_tag or "plan-approved"
+        # The control plane posts the plan — the agent is told not to (see
+        # AgentResult.plan). An older agent that still posted it itself leaves `plan`
+        # empty; then the closing note below points at the comments as before.
+        plan = (getattr(result, "plan", "") or "").strip()
+        if plan and not cfg.dry_run:
+            try:
+                await self._provider(item.project).add_comment(
+                    item.id,
+                    "<div><b>📝 Kế hoạch triển khai</b> (AI Autopilot)</div>"
+                    + markdown_lite.render(plan),
+                )
+            except Exception as exc:  # noqa: BLE001 — the hold still stands, plan in History
+                self._log.warning("plan comment not posted", id=item.id,
+                                  error=describe_exc(exc))
         await self._hold(
             item, result, tag=(cfg.plan_pending_tag or "").strip(),
             detail="plan posted — waiting for approval",

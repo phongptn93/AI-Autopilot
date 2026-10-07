@@ -55,6 +55,9 @@ class ExecutionResult:
     # Test Case work item. Typed loosely for the same reason as ``deviations``.
     test_cases: list[Any] = field(default_factory=list)
     test_results: list[Any] = field(default_factory=list)
+    # A plan-only run's plan, carried so the control plane can post it (see
+    # ``AgentResult.plan``).
+    plan: str = ""
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod

@@ -169,6 +169,12 @@ class AgentResult:
     # reported 19 pass / 1 fail — onto the work item, because that session happened to
     # have an MCP tool that could. A run without that tool did the same work in silence.
     test_results: list[CaseOutcome] = field(default_factory=list)
+    # A plan-only run's implementation plan (Markdown). Posted onto the work item by the
+    # CONTROL PLANE, for the reason test results are: on #9448 the agent was told to post
+    # the plan itself, its session had no ADO tool and the runner's git credential had no
+    # Work Items scope (401) — so the plan went onto an unrelated PR and the item was
+    # escalated for a person to copy it across. The control plane holds a PAT that can.
+    plan: str = ""
 
     @property
     def pr_url(self) -> str | None:
@@ -253,6 +259,7 @@ def _parse(data: object) -> AgentResult | None:
         deviations=_parse_deviations(data.get("deviations")),
         test_cases=_parse_test_cases(data.get("test_cases")),
         test_results=_parse_case_outcomes(data.get("test_results")),
+        plan=str(data.get("plan") or "").strip(),
     )
 
 

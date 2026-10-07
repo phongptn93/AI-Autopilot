@@ -75,6 +75,16 @@ trigger_states: [Proposed]       # RỜI khỏi mọi state đầu ra
 
 🔒 Secret luôn để **biến môi trường** (`AUTOPILOT_ADO_PAT`, `AUTOPILOT_FLEET_TOKEN`…), không để trong `config.yaml`. Đặt mật khẩu dashboard trước khi mở cổng ra ngoài localhost.
 
+## 4a. Mỗi ngày bắt đầu từ Hộp quyết định
+
+**🎯 Hộp quyết định** (mục đầu tiên trên menu, có số đỏ) gom mọi việc đang chờ bạn: item bị giữ,
+lệch spec cần chốt, PR conflict, máy fleet, tri thức chờ duyệt, lỗ hổng nghiêm trọng — kèm nút xử lý
+ngay tại chỗ. Bấm `Ctrl+K` để nhảy tới bất kỳ trang hay task nào.
+
+An toàn mặc định đã bật: **chặn thay đổi rủi ro cao** (migration, auth, hạ tầng) và **ngắt mạch**
+sau 5 run lỗi liên tiếp. Muốn autopilot tự kiếm quyền tự chủ theo kết quả thật: bật **Tự chủ theo uy tín**
+ở Thiết lập → 🎚️ Tự chủ & an toàn. Việc lớn: gắn tag `plan-first` để agent lập kế hoạch trước.
+
 ## 4b. Luồng làm việc cho BA
 
 **📋 Công việc → Yêu cầu & Spec**: viết yêu cầu (tiêu đề, nhu cầu, tiêu chí chấp nhận) → tick

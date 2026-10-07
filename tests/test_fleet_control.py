@@ -265,3 +265,21 @@ def test_new_fleet_keys_never_travel_in_the_shared_document():
     cfg = Settings(fleet_role="central", fleet_accept_commands=False, fleet_disk_warn_gb=1)
     document, _ = fleet.config_document(cfg)
     assert [k for k in document if k.startswith("fleet_")] == []
+
+
+def test_the_dispatch_card_previews_the_auto_choice_and_locks_paused_machines(central):
+    busy = _report(name="busy", profile="dev", running=[fleet.RunningRun(id=1)],
+                   health=fleet.WorkerHealth(poller="running", capacity=1))
+    free = _report(name="free", profile="dev",
+                   health=fleet.WorkerHealth(poller="running", capacity=2))
+    paused = _report(name="qc-paused", profile="qc",
+                     health=fleet.WorkerHealth(poller="paused", capacity=1))
+    for r in (busy, free, paused):
+        central.post("/api/fleet/heartbeat", json=r.model_dump(mode="json"), headers=H)
+    html = central.get("/dashboard/fleet").text
+    # The preview is the server's own choice — the one dispatch will make.
+    assert "Lúc này sẽ giao cho <b>free</b>" in html
+    assert '"qc": "free"' in html                    # qc is paused → falls back to the freest
+    # A paused machine cannot be picked by hand either.
+    assert 'value="qc-paused" disabled' in " ".join(html.split())
+    assert "Điều khiển toàn fleet" in html and "fl-tile" in html

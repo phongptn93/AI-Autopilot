@@ -234,7 +234,13 @@ def create_router() -> APIRouter:
             _ctx(request, "fleet", workers=workers, central_hash=central_hash,
                  offline_after_minutes=cfg.fleet_offline_after_minutes,
                  summary=_summary(workers), flash=flash,
-                 profiles=sorted({w["profile"] for w in workers if w["profile"]})),
+                 profiles=sorted({w["profile"] for w in workers if w["profile"]}),
+                 # The same choice the dispatch endpoint will make, previewed per role
+                 # preference — so "tự chọn" is never a blind button.
+                 auto_picks={
+                     p: (fleet_mod.pick_worker(workers, p) or {}).get("name", "")
+                     for p in ["", *sorted({w["profile"] for w in workers if w["profile"]})]
+                 }),
         )
         if flash is not None:
             response.delete_cookie(_FLASH_COOKIE, path="/dashboard")

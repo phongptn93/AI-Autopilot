@@ -52,15 +52,46 @@
   .fl-kpi .l { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
   .fl-kpi.bad .n { color:#e5484d; } .fl-kpi.warn .n { color:#d29922; } .fl-kpi.ok .n { color:#3fb950; }
   /* ── control bar ── */
-  .fl-ctl { display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end; background:var(--bg-card);
-            border:1px solid var(--border,#23232b); border-radius:12px; padding:12px 16px; margin-bottom:14px; }
-  .fl-ctl form { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin:0; }
-  .fl-ctl .grp { display:flex; flex-direction:column; gap:4px; }
-  .fl-ctl label { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); }
-  .fl-ctl input, .fl-ctl select { background:var(--bg,#0d0d12); color:var(--text); border:1px solid var(--border,#23232b);
-            border-radius:7px; padding:6px 9px; font-size:13px; font-family:inherit; }
-  .fl-ctl input { width:120px; }
-  .fl-sep { width:1px; align-self:stretch; background:var(--border,#23232b); }
+  /* ── operations: two cards, one job each ── */
+  .fl-ops { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:14px; margin-bottom:14px; }
+  @media (max-width: 1100px) { .fl-ops { grid-template-columns:1fr; } }
+  .fl-op { min-width:0; background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:12px;
+           display:flex; flex-direction:column; margin:0; }
+  .fl-op-hd { padding:14px 18px 4px; }
+  .fl-op-hd h3 { font-size:14.5px; font-weight:700; margin:0 0 3px; }
+  .fl-op-hd span { font-size:12px; color:var(--text-muted); }
+  /* Wraps instead of overflowing: three fixed minimums did not fit a narrow main column. */
+  .fl-form { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));
+             gap:12px; padding:12px 18px 4px; }
+  .fl-field { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .fl-field > span:first-child { font-size:12px; font-weight:600; color:var(--text-muted); }
+  .fl-field select, .fl-input-prefix { height:38px; background:var(--bg-input,var(--bg)); color:var(--text);
+             border:1px solid var(--border,#23232b); border-radius:8px; font-size:13.5px; font-family:inherit; }
+  .fl-field select { padding:0 10px; width:100%; cursor:pointer; }
+  .fl-field select:focus, .fl-input-prefix:focus-within { outline:none; border-color:var(--accent,#6366f1);
+             box-shadow:0 0 0 3px rgba(99,102,241,.18); }
+  .fl-input-prefix { display:flex; align-items:center; padding:0 10px; gap:4px; }
+  .fl-input-prefix b { color:var(--text-dim); font-weight:600; }
+  /* The page-wide input style would draw a second box inside the prefixed one. */
+  .fl-input-prefix input { flex:1; min-width:0; height:100%; color:var(--text);
+             background:transparent !important; border:0 !important; box-shadow:none !important;
+             border-radius:0; font-size:14px; font-family:var(--mono,monospace); outline:none; padding:0; }
+  .fl-op-ft { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+              padding:12px 18px 16px; margin-top:auto; }
+  .fl-preview { font-size:12.5px; color:var(--text-muted); }
+  .fl-preview b { color:var(--text); }
+  .fl-go { height:38px; padding:0 20px; font-size:13.5px; }
+  .fl-tiles { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:12px 18px 16px; }
+  .fl-tiles form { margin:0; }
+  .fl-tile { width:100%; text-align:left; display:flex; flex-direction:column; gap:3px; padding:11px 13px;
+             background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border,#23232b);
+             border-radius:10px; cursor:pointer; font-family:inherit; transition:border-color .15s, background .15s; }
+  .fl-tile b { font-size:13.5px; font-weight:650; }
+  .fl-tile small { font-size:11.5px; color:var(--text-dim); }
+  .fl-tile:hover:not(:disabled) { border-color:var(--accent,#6366f1); }
+  .fl-tile.warn:hover:not(:disabled) { border-color:#d29922; background:rgba(210,153,34,.08); }
+  .fl-tile.accent { border-color:rgba(99,102,241,.55); background:rgba(99,102,241,.08); }
+  .fl-tile:disabled { opacity:.5; cursor:not-allowed; }
   .fl-btn { background:var(--bg,#0d0d12); color:var(--text); border:1px solid var(--border,#23232b); border-radius:7px;
             padding:6px 12px; font-size:12.5px; font-family:inherit; cursor:pointer; white-space:nowrap; }
   .fl-btn:hover { border-color:var(--accent,#6366f1); }
@@ -110,44 +141,99 @@
   <div class="fl-kpi {{ 'bad' if summary.disk_low else '' }}"><div class="n">{{ summary.disk_low }}</div><div class="l">Disk thấp</div></div>
 </div>
 
-<div class="fl-ctl">
+<div class="fl-ops">
   {# Giao việc: máy trạm tự gắn trigger tag CỦA NÓ lên item, nên quyền sở hữu và
      pipeline vai chạy y như khi có người gắn tag bằng tay cho máy đó. #}
-  <form method="post" action="/dashboard/fleet/dispatch">
-    <div class="grp"><label>🎯 Giao work item</label>
-      <input name="item_id" placeholder="#12345" inputmode="numeric" required></div>
-    <div class="grp"><label>Cho máy</label>
-      <select name="name">
-        <option value="auto">⚡ Tự chọn máy rảnh nhất</option>
-        {% for w in workers %}{% if w.online %}
-        <option value="{{ w.name }}">{{ w.name }} · {{ w.running|length }}/{{ w.health.capacity or '?' }}{{ ' · tạm dừng' if w.paused else '' }}</option>
-        {% endif %}{% endfor %}
-      </select></div>
-    {% if profiles %}
-    <div class="grp"><label>Ưu tiên vai</label>
-      <select name="profile"><option value="">— bất kỳ —</option>
-        {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
-      </select></div>
-    {% endif %}
-    <button class="fl-btn primary" type="submit">Giao việc</button>
+  <form class="fl-op fl-dispatch" method="post" action="/dashboard/fleet/dispatch">
+    <div class="fl-op-hd">
+      <h3>🎯 Giao việc cho máy trạm</h3>
+      <span>Máy nhận sẽ gắn trigger tag của nó lên item và xử lý như việc của chính nó.</span>
+    </div>
+    <div class="fl-form">
+      <label class="fl-field fl-field-id">
+        <span>Work item</span>
+        <span class="fl-input-prefix"><b>#</b>
+          <input name="item_id" placeholder="12345" inputmode="numeric" pattern="#?[0-9]+"
+                 autocomplete="off" required></span>
+      </label>
+      <label class="fl-field">
+        <span>Máy nhận</span>
+        <select name="name" id="fl-target">
+          <option value="auto" title="Tự chọn máy rảnh nhất, ưu tiên đúng vai">⚡ Máy rảnh nhất</option>
+          {% for w in workers %}
+          {% set cap = w.health.capacity if w.health and w.health.capacity else 0 %}
+          {% set busy = w.running|length %}
+          <option value="{{ w.name }}" {{ 'disabled' if not w.online or w.paused or w.draining }}>
+            {{ w.name }} — {% if not w.online %}offline{% elif w.paused %}đang tạm dừng{% elif w.draining %}đang cập nhật{% elif cap and busy >= cap %}bận · {{ busy }}/{{ cap }}{% else %}rảnh · {{ busy }}/{{ cap or '?' }}{% endif %}{% if w.profile %} · {{ w.profile }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if profiles %}
+      <label class="fl-field">
+        <span>Ưu tiên vai</span>
+        <select name="profile" id="fl-role">
+          <option value="">Bất kỳ</option>
+          {% for p in profiles %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+    </div>
+    <div class="fl-op-ft">
+      <span class="fl-preview" id="fl-preview" data-picks='{{ auto_picks|tojson }}'>
+        {% if auto_picks.get('') %}⚡ Lúc này sẽ giao cho <b>{{ auto_picks.get('') }}</b>
+        {% else %}⚠️ Chưa có máy nào nhận được việc — tất cả offline hoặc đang tạm dừng.{% endif %}
+      </span>
+      <button class="fl-btn primary fl-go" type="submit" {{ 'disabled' if not summary.online }}>Giao việc →</button>
+    </div>
   </form>
-  <span class="fl-sep"></span>
-  <div class="grp"><label>Toàn fleet (máy online)</label>
-    <div class="fl-actions">
+
+  <div class="fl-op">
+    <div class="fl-op-hd">
+      <h3>🛰 Điều khiển toàn fleet</h3>
+      <span>Áp dụng cho <b>{{ summary.online }}</b> máy đang online · lệnh tới máy trong vòng ~1 phút.</span>
+    </div>
+    <div class="fl-tiles">
       <form method="post" action="/dashboard/fleet/command/all"
-            onsubmit="return confirm('Tạm dừng nhận việc mới trên TẤT CẢ máy trạm online?')">
-        <input type="hidden" name="kind" value="pause"><button class="fl-btn" type="submit">⏸ Tạm dừng tất cả</button></form>
+            onsubmit="return confirm('Tạm dừng nhận việc mới trên TẤT CẢ máy trạm online? Run đang chạy vẫn chạy tiếp.')">
+        <input type="hidden" name="kind" value="pause">
+        <button class="fl-tile warn" type="submit" {{ 'disabled' if not summary.online }}>
+          <b>⏸ Tạm dừng</b><small>Ngừng nhận việc mới</small></button></form>
       <form method="post" action="/dashboard/fleet/command/all">
-        <input type="hidden" name="kind" value="resume"><button class="fl-btn" type="submit">▶ Tiếp tục tất cả</button></form>
+        <input type="hidden" name="kind" value="resume">
+        <button class="fl-tile" type="submit" {{ 'disabled' if not summary.paused }}>
+          <b>▶ Tiếp tục</b><small>{{ (summary.paused ~ ' máy đang dừng') if summary.paused else 'Không máy nào đang dừng' }}</small></button></form>
       <form method="post" action="/dashboard/fleet/command/all">
-        <input type="hidden" name="kind" value="sync"><button class="fl-btn" type="submit">⟳ Đồng bộ tất cả</button></form>
+        <input type="hidden" name="kind" value="sync">
+        <button class="fl-tile" type="submit" {{ 'disabled' if not summary.online }}>
+          <b>⟳ Đồng bộ</b><small>{{ (summary.out_of_sync ~ ' máy lệch config') if summary.out_of_sync else 'Kéo cấu hình ngay' }}</small></button></form>
       <form method="post" action="/dashboard/fleet/command/all"
-            onsubmit="return confirm('Cập nhật mọi máy đang chạy bản cũ hơn lên v{{ version }}? Mỗi máy đợi run đang chạy xong rồi mới cài.')">
+            onsubmit="return confirm('Cập nhật {{ summary.behind }} máy đang chạy bản cũ lên v{{ version }}? Mỗi máy đợi run đang chạy xong rồi mới cài.')">
         <input type="hidden" name="kind" value="update">
-        <button class="fl-btn" type="submit" {{ 'disabled' if not summary.behind }}>⬆ Cập nhật máy cũ ({{ summary.behind }})</button></form>
+        <button class="fl-tile {{ 'accent' if summary.behind }}" type="submit" {{ 'disabled' if not summary.behind }}>
+          <b>⬆ Cập nhật</b><small>{{ (summary.behind ~ ' máy cũ → v' ~ version) if summary.behind else 'Mọi máy đã mới nhất' }}</small></button></form>
     </div>
   </div>
 </div>
+<script>
+// The "tự chọn" preview follows the role preference, using the server's own choices.
+(function () {
+  var role = document.getElementById('fl-role'), target = document.getElementById('fl-target'),
+      out = document.getElementById('fl-preview');
+  if (!out) return;
+  var picks = {};
+  try { picks = JSON.parse(out.dataset.picks || '{}'); } catch (e) {}
+  function render() {
+    var manual = target && target.value !== 'auto';
+    if (manual) { out.innerHTML = '🎯 Giao thẳng cho <b>' + target.value.replace(/</g, '&lt;') + '</b>'; return; }
+    var name = picks[(role && role.value) || ''] || '';
+    out.innerHTML = name ? '⚡ Lúc này sẽ giao cho <b>' + name.replace(/</g, '&lt;') + '</b>'
+                         : '⚠️ Chưa có máy nào nhận được việc — tất cả offline hoặc đang tạm dừng.';
+  }
+  if (role) role.addEventListener('change', render);
+  if (target) target.addEventListener('change', render);
+})();
+</script>
 {% endif %}
 
 <div class="fl-note">

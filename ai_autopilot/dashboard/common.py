@@ -18,6 +18,7 @@ from fastapi.responses import (
     RedirectResponse,
 )
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 
 from ai_autopilot import (
     delivery,
@@ -87,6 +88,18 @@ def _human_error(text: object) -> str:
 
 
 _TEMPLATES.env.filters["human_error"] = _human_error
+
+
+def _inline_md(text: object) -> Markup:
+    """`code` and **bold** in a one-line explanation — escaped first, so a tag or a
+    display name read from ADO can never inject markup."""
+    out = str(escape(str(text or "")))
+    out = re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
+    out = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", out)
+    return Markup(out)
+
+
+_TEMPLATES.env.filters["inline_md"] = _inline_md
 
 # ── Flash messages ────────────────────────────────────────────────────────────
 # The outcome of a POST used to travel in the query string of the redirect that follows

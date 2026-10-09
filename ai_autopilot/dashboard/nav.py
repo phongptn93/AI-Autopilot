@@ -98,6 +98,8 @@ GROUPS: tuple[NavGroup, ...] = (
                 "Trình hướng dẫn từng bước cho máy mới."),
         NavItem("settings", "/dashboard/settings", "🛠️", "Thiết lập",
                 "Mọi thiết lập, sửa trực tiếp, áp dụng ngay."),
+        NavItem("trigger-check", "/dashboard/trigger-check", "🔎", "Kiểm tra kích hoạt",
+                "Vì sao máy này nhận — hoặc không nhận — một work item."),
         NavItem("config", "/dashboard/config", "⚙️", "Cấu hình hiện tại",
                 "Máy này khác cài đặt mặc định ở đâu — chỉ đọc."),
         NavItem("workspaces", "/dashboard/workspaces", "🗂", "Workspaces",

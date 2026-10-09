@@ -1539,8 +1539,9 @@ async def test_the_run_now_tag_works_on_an_item_the_autopilot_is_not_already_hol
 
     assert await _run_reconcile(svc) == [9004]
     assert (9004, "vm-autopilot-run") in ado.removed      # consumed on pickup
-    # It asked by run-now tag, not by trigger tag — that is the fix.
-    assert ado.tagged_any_queries == [["vm-autopilot-run"]]
+    # It asked by run-now tag, not by trigger tag — that is the fix. The shared tag plus
+    # each role's derived `<shared>:<role>` tag (WIQL CONTAINS matches whole tags only).
+    assert ado.tagged_any_queries == [["vm-autopilot-run", "vm-autopilot-run:qc"]]
 
 
 async def test_every_run_now_tag_is_queried_not_just_the_shared_one():
@@ -1563,7 +1564,8 @@ async def test_every_run_now_tag_is_queried_not_just_the_shared_one():
 
     await _run_reconcile(svc)
 
-    assert sorted(ado.tagged_any_queries[0]) == ["vm-autopilot-run", "vm-autopilot-run-qc"]
+    assert sorted(ado.tagged_any_queries[0]) == [
+        "vm-autopilot-run", "vm-autopilot-run-qc", "vm-autopilot-run:qc"]
 
 
 async def test_a_finished_run_says_which_role_it_was():

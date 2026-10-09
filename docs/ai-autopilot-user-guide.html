@@ -672,10 +672,13 @@ push</b>. Hiểu sai theo hướng advisory thì chỉ tốn một comment.</p>
 <tr><td><code>trigger_tags</code></td><td class="def">[]</td><td>Tag phụ (nhiều stream). <em>(Ẩn khỏi form — set qua YAML.)</em></td></tr>
 <tr><td><code>assignee_trigger_tag</code></td><td class="def">ai-autopilot</td><td><b>Tag chung cả team</b>: item mang tag này chỉ được nhặt nếu <b>gán cho</b> <code>assignee_trigger_user</code>. Cho phép cả team dùng 1 tag, mỗi máy lo việc của chủ nó. Trống = tắt.</td></tr>
 <tr><td><code>assignee_trigger_user</code></td><td class="def">""</td><td>Người máy này nhận (name/email). Trống → dùng <code>auto_transition_assignee</code>.</td></tr>
-<tr><td><code>trigger_states</code></td><td class="def">[New, To Do, Proposed, Active]</td><td>Các ADO state "vào việc". <b>Nên rời khỏi output states</b> (xem §20).</td></tr>
+<tr><td><code>trigger_states</code></td><td class="def">[New, To Do, Proposed, Active]</td><td>Các ADO state "vào việc". <b>Nên rời khỏi output states</b> (xem §20). Vai tự cộng/trừ cửa của nó: vai <b>tự chạy</b> luôn được poll ở state chờ của nó, vai <b>chờ người</b> bị gỡ khỏi poll dù có tick — trang Thiết lập gắn nhãn 🤖/🙋 lên từng state.</td></tr>
+<tr><td><code>stage_entry_tag</code></td><td class="def">autopilot-run</td><td><b>Tag chạy ngay</b> — bỏ qua tag kích hoạt và state, chạy một lần rồi bị gỡ. Tag trần chạy vai theo state hiện tại; <code>autopilot-run:&lt;vai&gt;</code> (vd <code>autopilot-run:qc</code>) ép đúng vai đó từ bất kỳ state nào, không cần cấu hình.</td></tr>
+<tr><td><code>owner_can_command</code></td><td class="def">true</td><td>Owner được ra /command và @mention. Tắt cho máy dùng chung: vẫn nhận item của owner nhưng chỉ nghe <code>command_users</code> (mục 🔐 Quyền ra lệnh).</td></tr>
 <tr><td><code>poll_interval_seconds</code></td><td class="def">30</td><td>Chu kỳ poll.</td></tr>
 <tr><td><code>reprocess_on_reopen</code></td><td class="def">true</td><td>Kéo item đã xử lý về trigger state → xoá skip-tag &amp; chạy lại (có guard chống loop).</td></tr>
 </table>
+<div class="callout c-info"><div class="h">🔎 Item không chạy? Kiểm tra kích hoạt</div>Menu <b>Hệ thống → Kiểm tra kích hoạt</b> (hoặc ô <i>"Vì sao item này (không) chạy?"</i> trong Thiết lập): nhập số work item, trang chạy lại đúng luật của poller — project, thuộc máy nào, state (và vai nào quyết định), tag giữ lại, tag chạy ngay, vai sẽ chạy — rồi nói rõ <b>vì sao</b> nhận hay không.</div>
 <div class="callout c-info"><div class="h">Tag hệ thống (không phải trigger)</div><code>processed_tag</code> (done) · <code>review_tag</code> · <code>escalation_tag</code> (hold) · <code>live_tag</code> (session live) · <code>failed_tag</code> — dùng để đánh dấu &amp; <b>skip</b> item đã xử lý (chống loop).</div>
 </section>
 

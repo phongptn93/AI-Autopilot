@@ -174,7 +174,10 @@ Most‑used keys:
 | `workspace_directory` | — | Root holding the shared `.claude/` and repo subfolders |
 | `trigger_tag` | `<host>-autopilot` | Per‑machine tag that triggers processing |
 | `assignee_trigger_tag` | `ai-autopilot` | Shared team tag — processed only for `assignee_trigger_user` |
-| `trigger_states` | `New, To Do, Proposed, Active` | ADO states eligible for pickup |
+| `trigger_states` | `New, To Do, Proposed, Active` | ADO states eligible for pickup. Role doors amend it: an **auto** role's wait state is always polled, a **manual** role's is dropped even when ticked — Settings labels each state with the rule that decides it |
+| `stage_entry_tag` | `autopilot-run` | One-shot **run now** tag — skips the trigger tag and state checks, removed on pickup. Bare tag runs the role the current state names; **`autopilot-run:<role>`** (e.g. `autopilot-run:qc`) forces that role from any state, no configuration needed |
+| `owner_can_command` | `true` | Does the owner (`assignee_trigger_user`) get to issue `/commands` and @mentions? Turn off for a shared machine that takes one person's items but obeys only `command_users`. Ownership is unaffected |
+| — | — | **🔎 Trigger check** at `/dashboard/trigger-check?id=<id>`: replays the poller's pickup rules for one work item — project, ownership, state (and which role decided it), hold tags, run-now tags, the role that would run — and says why it will or will not be picked up |
 | `autonomy_level` | `assisted` | `report` / `assisted` / `unattended` (L1 / L2 / L3) |
 | `execution_mode` | `interactive` | `interactive` (steerable session) or `headless` |
 | `interactive_close_on` | `pr_closed` | When an interactive console is closed: `pr_closed` (keep it + its worktree while the PR is open, close on merge/abandon), `result`, or `never` |

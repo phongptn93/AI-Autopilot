@@ -97,27 +97,25 @@ _BASE_FIELDS: tuple[Field, ...] = (
     Field("ado_pat", "Personal Access Token (PAT)", "password", "🔌 Kết nối Azure DevOps",
           "Để trống = giữ token hiện tại."),
     # ── Tags & Trigger ──
-    Field("trigger_tag", "Tag kích hoạt", "text", "🏷️ Tag & điều kiện nhận việc",
-          "Work item có tag này sẽ được xử lý."),
-    Field("assignee_trigger_tag", "Tag kích hoạt theo người được giao", "text",
+    # Two independent ways an item becomes THIS machine's — shown as such. The old labels
+    # hung "↳ do ai xử lý" under the machine tag, which read as a filter on it; it never
+    # was. It scopes only the SHARED tag (``_candidate_clause``).
+    Field("trigger_tag", "Cách 1 — Tag riêng của máy này", "text", "🏷️ Tag & điều kiện nhận việc",
+          "Item có tag này là việc của máy này — bất kể giao cho ai. Mỗi máy một tag riêng "
+          "(mặc định <tên-máy>-autopilot) để 2 máy không giành nhau một item."),
+    Field("assignee_trigger_tag", "Cách 2 — Tag dùng chung cả team", "text",
           "🏷️ Tag & điều kiện nhận việc",
-          "Xử lý thêm các item có tag dùng chung NÀY, nhưng chỉ item giao cho người bên dưới (vd "
-          "'ai-autopilot' dùng chung cả team). Để trống = tắt."),
-    Field("assignee_trigger_user", "↳ do ai xử lý (assignee)", "text",
+          "Cả team gắn chung một tag (vd 'ai-autopilot'); máy này chỉ nhận item mang tag đó "
+          "VÀ được giao cho người ở ô dưới. Để trống = tắt cách 2."),
+    Field("assignee_trigger_user", "↳ chỉ nhận item giao cho (owner)", "text",
           "🏷️ Tag & điều kiện nhận việc",
-          "Assignee (tên/email) mà máy này nhận cho tag dùng chung ở trên. Để trống = dùng "
-          "assignee của auto-transition. Đây cũng là OWNER: tài khoản mà máy này mặc định nghe "
-          "/commands và @mention."),
-    Field("command_users", "↳ người khác được ra lệnh", "list", "🏷️ Tag & điều kiện nhận việc",
-          "Tài khoản bổ sung (email hoặc họ tên đầy đủ, mỗi dòng một) được ra /commands và "
-          "@mention trên PR — đồng đội đang review PR của bạn có thể yêu cầu sửa mà không bị từ "
-          "chối. KHÔNG đổi việc work item của ai được nhận. Owner trống VÀ danh sách này trống = "
-          "ai cũng ra lệnh được. Dùng email đầy đủ; chỉ tên riêng thì không khớp ai (xem doctor)."),
-    Field("commands_from_anyone", "↳ cho BẤT KỲ AI ra lệnh", "bool", "🏷️ Tag & điều kiện nhận việc",
-          "Nhận /commands và @mention từ mọi tài khoản, không cần liệt kê ở trên. Chỉ mở cổng ra "
-          "lệnh — work item nào máy này nhận vẫn giới hạn theo owner. Tắt để quay về danh sách."),
+          "Tên/email người mà máy này làm thay — chỉ dùng cho tag dùng chung ở trên. Trống = "
+          "dùng assignee của auto-transition; cả hai trống = nhận MỌI item mang tag chung. "
+          "Mặc định owner cũng được ra lệnh cho máy (xem 🔐 Quyền ra lệnh)."),
     Field("trigger_states", "State kích hoạt", "stateset", "🏷️ Tag & điều kiện nhận việc",
-          "Các state ADO được phép xử lý — tick từ board, hoặc thêm state riêng bên dưới."),
+          "State mà item ở đó sẽ được nhận. Vai (trang Roles) tự cộng/trừ cửa của nó: vai "
+          "TỰ CHẠY luôn được poll ở state chờ của nó, vai KHÔNG tự chạy bị gỡ khỏi poll dù có "
+          "tick ở đây — nhãn trên từng state cho biết nó đến từ đâu."),
     Field("reprocess_on_reopen", "Chạy lại khi bị mở lại", "bool", "🏷️ Tag & điều kiện nhận việc",
           "Khi item đã xử lý bị kéo về state kích hoạt, xoá các tag autopilot để nó chạy lại. "
           "(Chỉ áp dụng cho state kích hoạt mà autopilot không tự đặt.)"),
@@ -125,13 +123,13 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Gắn tag này vào item để XOÁ tiến độ SDLC và xử lý lại từ đầu, từ bất kỳ state nào, "
           "dùng các comment mới nhất của bạn. Reopen chạy tiếp giữa vòng; restart làm lại từ "
           "stage 0. Để trống = tắt."),
-    Field("stage_entry_tag", "▶ Tag chạy ngay (dùng chung)", "text", "🏷️ Tag & điều kiện nhận việc",
-          "Gắn tag này vào item để chạy role mà state HIỆN TẠI của nó chỉ định, ngay tại chỗ — "
-          "cách chạy một role cố ý không có trong query poll. Bị gỡ khi nhận việc. Tag không tự "
-          "chỉ định role, nên ở state KHÔNG có role nào chờ thì rơi về profile mặc định — thường "
-          "là cả pipeline. Muốn chạy một role cụ thể từ bất kỳ state nào, gán cho role đó tag "
-          "chạy ngay riêng ở trang Roles. Để trống = không có tag dùng chung (tag riêng từng role "
-          "vẫn hoạt động)."),
+    Field("stage_entry_tag", "▶ Tag chạy ngay", "text", "🏷️ Tag & điều kiện nhận việc",
+          "Gắn tag này vào item để chạy NGAY một lần, bỏ qua tag kích hoạt và State kích hoạt; "
+          "tag bị gỡ khi nhận. Tag trần (vd 'autopilot-run') chạy vai mà state HIỆN TẠI chỉ định "
+          "— ở state không vai nào chờ thì rơi về profile mặc định (thường là cả pipeline). "
+          "Thêm ':<vai>' để chọn vai cụ thể từ bất kỳ state nào: 'autopilot-run:qc', "
+          "'autopilot-run:dev'… — không cần cấu hình thêm. Tag riêng đặt ở trang Roles vẫn "
+          "hoạt động. Để trống = tắt tag dùng chung (và cả dạng ':<vai>')."),
     Field("poll_interval_seconds", "Chu kỳ quét (giây)", "int", "🏷️ Tag & điều kiện nhận việc"),
     # ── Outcomes → tag + state ──
     # The policy table: for each outcome, the ADO tag to add and the ADO state to
@@ -941,6 +939,20 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Nhiều máy cùng thấy một PR conflict: chờ chừng này giây rồi comment nhận việc "
           "sớm nhất thắng — một PR chỉ một phiên.",
           show_when_key="fleet_role", show_when_values=("central", "worker")),
+    # ── 🔐 Quyền ra lệnh ── (split from the trigger section: "whose items" and "who may
+    # drive this machine" are different questions; appended last so #sec-N stay put)
+    Field("owner_can_command", "Owner được ra lệnh", "bool", "🔐 Quyền ra lệnh",
+          "Owner (ô 'chỉ nhận item giao cho') được dùng /command và @mention. Tắt cho máy dùng "
+          "chung: máy vẫn nhận item của owner nhưng chỉ nghe người trong danh sách dưới. "
+          "Danh sách trống thì công tắc này không có tác dụng (để tránh thành 'ai cũng được')."),
+    Field("command_users", "Người được ra lệnh", "list", "🔐 Quyền ra lệnh",
+          "Tài khoản (email hoặc họ tên đầy đủ, mỗi dòng một) được ra /commands và @mention trên "
+          "PR và work item — vd đồng đội review PR của bạn. KHÔNG đổi việc máy nhận. Owner "
+          "trống VÀ danh sách trống = ai cũng ra lệnh được. Chỉ tên riêng thì không khớp ai "
+          "(xem doctor)."),
+    Field("commands_from_anyone", "Cho BẤT KỲ AI ra lệnh", "bool", "🔐 Quyền ra lệnh",
+          "Nhận /commands và @mention từ mọi tài khoản. Chỉ mở cổng ra lệnh — việc máy nhận "
+          "vẫn theo tag + owner."),
 )
 
 # ── Parent switches ──────────────────────────────────────────────────────────────
@@ -1276,7 +1288,7 @@ MACHINE_LOCAL = frozenset({
     # may drive this machine, and `auto_transition_assignee` is what the local owner
     # FALLS BACK TO when it is blank — so leaving it blank on a worker handed the choice
     # of whose items this machine acts on to the central.
-    "command_users", "auto_transition_assignee",
+    "command_users", "auto_transition_assignee", "owner_can_command",
     # Whether THIS machine takes approved knowledge on sight or queues it for a person
     # here. Not a secret and not an identity — it is the machine's own policy about what
     # it accepts, which is exactly what this group is for.

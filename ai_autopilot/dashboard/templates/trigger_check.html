@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .tc-pad { padding:16px 18px; }
+  .tc-form { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .tc-id { display:flex; align-items:center; gap:4px; height:40px; padding:0 12px; min-width:200px;
+           background:var(--bg-input,var(--bg)); border:1px solid var(--border); border-radius:9px; }
+  .tc-id:focus-within { border-color:var(--accent); }
+  .tc-id b { color:var(--text-dim); }
+  .tc-id input { flex:1; min-width:0; border:0 !important; background:transparent !important; color:var(--text);
+                 font:inherit; font-family:var(--mono,monospace); font-size:14px; outline:none; padding:0; }
+  .tc-sum { font-size:13.5px; line-height:1.6; }
+  .tc-sum code, .tc-row code, .tc-head code { font-size:12.5px; }
+  .tc-head { font-size:15px; font-weight:600; padding:14px 18px; border-radius:10px; margin-bottom:12px; line-height:1.5; }
+  .tc-head.ok { background:rgba(46,160,67,.10); border:1px solid rgba(46,160,67,.35); }
+  .tc-head.no { background:rgba(248,81,73,.08); border:1px solid rgba(248,81,73,.35); }
+  .tc-meta { font-size:12.5px; color:var(--text-muted); margin:-4px 0 12px; }
+  .tc-rows { display:flex; flex-direction:column; }
+  .tc-row { display:grid; grid-template-columns:28px minmax(140px,200px) 1fr; gap:10px; padding:10px 4px;
+            border-top:1px solid var(--border); font-size:13.5px; align-items:baseline; }
+  .tc-row:first-child { border-top:0; }
+  .tc-row .lbl { font-weight:600; }
+  .tc-row .det { color:var(--text-muted); min-width:0; overflow-wrap:anywhere; }
+  @media (max-width:640px) { .tc-row { grid-template-columns:24px 1fr; } .tc-row .det { grid-column:2; } }
+  .tc-states { display:flex; flex-wrap:wrap; gap:8px; }
+  .tc-st { font-size:12.5px; padding:5px 10px; border-radius:16px; border:1px solid var(--border); }
+  .tc-st.on { border-color:rgba(46,160,67,.5); }
+  .tc-st.off { opacity:.75; }
+  .tc-st.off > s { text-decoration-color:var(--text-dim); }
+  .tc-st small { color:var(--text-dim); margin-left:4px; font-size:11.5px; }
+  .tc-run { font-size:12.5px; display:flex; flex-wrap:wrap; gap:6px 14px; }
+</style>
+
+<div class="page-header">
+  <h2 class="page-title">{{ page_title("trigger-check") }}</h2>
+  <p>Vì sao máy này nhận — hoặc không nhận — một work item. Chạy lại đúng luật của poller.</p>
+</div>
+
+<div class="card"><div class="card-body tc-pad">
+  <form class="tc-form" method="get" action="/dashboard/trigger-check">
+    <label class="tc-id"><b>#</b>
+      <input name="id" value="{{ query }}" placeholder="12345" inputmode="numeric" autocomplete="off" autofocus
+             aria-label="Số work item"></label>
+    <button class="btn-save" type="submit">Kiểm tra</button>
+    <a href="/dashboard/settings#triggers" style="color:var(--accent-hover);font-size:13px">⚙️ Sửa cấu hình nhận việc</a>
+  </form>
+</div></div>
+
+{% if error %}
+<div class="card"><div class="card-body tc-pad"><div class="tc-head no">⚠️ {{ error }}</div></div></div>
+{% endif %}
+
+{% if report %}
+<div class="card"><div class="card-body tc-pad">
+  <div class="tc-head {{ 'ok' if report.picked else 'no' }}">{{ report.headline|inline_md }}</div>
+  <div class="tc-meta">#{{ item.id }} · {{ item.work_item_type }} · {{ item.title }}
+    · giao cho <b>{{ item.assigned_to or '—' }}</b>
+    · tag: {% for t in item.tags %}<code>{{ t }}</code>{{ ', ' if not loop.last }}{% else %}(không có){% endfor %}</div>
+  <div class="tc-rows">
+    {% for ch in report.checks %}
+    <div class="tc-row">
+      <span>{% if ch.ok is none %}ℹ️{% elif ch.ok %}✅{% else %}❌{% endif %}</span>
+      <span class="lbl">{{ ch.label }}</span>
+      <span class="det">{{ ch.detail|inline_md }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div></div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header"><h3>🏷️ Máy này nhận việc của ai</h3></div>
+  <div class="card-body tc-pad">
+    <div class="tc-sum">{{ summary|inline_md }}</div>
+    {% if sources %}
+    <div class="form-help" style="margin:12px 0 6px">Nguồn của từng state:</div>
+    <div class="tc-states">
+      {% for s in sources %}
+      <span class="tc-st {{ 'on' if s.polled else 'off' }}">{% if s.polled %}{{ s.state }}{% else %}<s>{{ s.state }}</s>{% endif %}
+        <small>{% if s.source == 'role-auto' %}🤖 vai {{ s.roles|join(', ') }} tự chạy
+        {% elif s.source == 'role-manual' %}🙋 vai {{ s.roles|join(', ') }} không tự chạy → bỏ khỏi poll
+        {% else %}✔ tick tay → vai theo state/loại item{% endif %}</small></span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if run_now %}
+    <div class="form-help" style="margin:14px 0 6px">▶ Tag chạy ngay (bỏ qua tag + state, bị gỡ khi nhận):</div>
+    <div class="tc-run">
+      {% for tag, role in run_now.items() %}
+      <span><code>{{ tag }}</code> → {{ ('vai ' ~ role) if role else 'vai theo state hiện tại' }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

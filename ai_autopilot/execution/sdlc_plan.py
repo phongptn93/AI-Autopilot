@@ -283,6 +283,77 @@ def entry_tags(cfg: Settings) -> dict[str, str]:
     return out
 
 
+# Separator of the per-role run-now convention, ``<stage_entry_tag>:<role>``. A colon
+# because it is what the role pin (``sdlc:<role>``) already taught people to read as
+# "this tag names a role", and because no trigger tag in the wild carries one.
+RUN_NOW_ROLE_SEP = ":"
+
+
+def run_now_role_tag(profile_name: str, cfg: Settings) -> str:
+    """The convention run-now tag that forces ``profile_name`` — "" with no shared tag.
+
+    Derived from the shared tag rather than configured, so it exists for every role the
+    moment the role does: nobody has to visit the Roles page to be able to say "run QC
+    on this now", which is exactly what an explicit ``entry_tag`` used to require.
+    """
+    shared = (cfg.stage_entry_tag or "").strip()
+    name = (profile_name or "").strip()
+    return f"{shared}{RUN_NOW_ROLE_SEP}{name}" if shared and name else ""
+
+
+def _tags_a_run_now_tag_must_not_be(cfg: Settings) -> tuple[set[str], str]:
+    """Trigger tags (lowercased) and the role-pin prefix a DERIVED run-now tag must avoid.
+
+    The settings form refuses a hand-typed run-now tag equal to a trigger tag, but a
+    derived tag is never typed, so nothing would refuse it there. Both clashes are
+    destructive: the sweep removes the tag it matched on, so a convention tag equal to
+    a trigger tag would strip ownership off every held item, and one inside the pin
+    namespace (``stage_entry_tag="sdlc"`` gives ``sdlc:qc``) would re-run every pinned
+    item and then strip the pin the running leg depends on.
+    """
+    triggers = {
+        str(t).strip().lower()
+        for t in (getattr(cfg, "effective_trigger_tags", None) or [])
+        if str(t).strip()
+    }
+    atag = str(getattr(cfg, "assignee_trigger_tag", "") or "").strip().lower()
+    if atag:
+        triggers.add(atag)
+    pin_prefix = (cfg.sdlc_profile_tag_prefix or "sdlc:").strip().lower()
+    return triggers, pin_prefix
+
+
+def run_now_tags(cfg: Settings) -> dict[str, str | None]:
+    """Every run-now tag this machine sweeps: ``lower(tag) -> role it forces``.
+
+    ``None`` is the shared ``stage_entry_tag``: it forces nothing, the item's CURRENT
+    state picks the role. Every known role then gets ``<stage_entry_tag>:<role>`` for
+    free, and a role's explicit ``entry_tag`` (Roles page) is still honoured.
+
+    This is the single source of truth for both the poller's sweep and any page that
+    explains triggers — two hand-kept lists would drift, and a tag the page promises
+    but the sweep never queries does nothing, silently.
+
+    Precedence, last write wins: shared < convention < explicit ``entry_tag``. An
+    explicit tag is an operator's deliberate choice, so it beats anything derived —
+    including the old behaviour where a role's ``entry_tag`` equal to the shared tag
+    made that tag force the role.
+    """
+    out: dict[str, str | None] = {}
+    shared = (cfg.stage_entry_tag or "").strip().lower()
+    if shared:
+        out[shared] = None
+    roles = effective_roles(cfg)
+    triggers, pin_prefix = _tags_a_run_now_tag_must_not_be(cfg)
+    for name in sorted(roles):
+        tag = run_now_role_tag(name, cfg).lower()
+        if not tag or tag in triggers or (pin_prefix and tag.startswith(pin_prefix)):
+            continue
+        out[tag] = name
+    out.update(entry_tags(cfg))
+    return out
+
+
 def role_opens_pr(profile_name: str, cfg: Settings) -> bool:
     """Does this role open a pull request?
 

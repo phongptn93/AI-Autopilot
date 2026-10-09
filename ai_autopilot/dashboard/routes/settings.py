@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from ai_autopilot import fleet as fleet_mod
-from ai_autopilot import sdlc_presets, security
+from ai_autopilot import sdlc_presets, security, trigger_check
 from ai_autopilot.config import SdlcRole, config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import settings_form
@@ -390,6 +390,38 @@ def create_router() -> APIRouter:
             ),
         )
 
+    @router.get("/trigger-check", response_class=HTMLResponse)
+    async def trigger_check_page(request: Request, id: str = ""):
+        """Why this machine does — or does not — pick up one work item."""
+        c: Container = request.app.state.container
+        cfg = c.config
+        raw = (id or "").strip().lstrip("#")
+        report, error, item = None, "", None
+        if raw:
+            if not raw.isdigit():
+                error = f"'{raw}' không phải số work item."
+            else:
+                try:
+                    item = await c.ado.get_work_item(int(raw))
+                except Exception as exc:  # noqa: BLE001 — the page explains, never 500s
+                    error = f"Không đọc được #{raw} từ ADO: {describe_exc(exc)}"
+                if item is None and not error:
+                    error = f"Không tìm thấy #{raw} (sai id, hoặc PAT không xem được project đó)."
+                if item is not None:
+                    report = trigger_check.explain(item, cfg)
+        return _TEMPLATES.TemplateResponse(
+            request,
+            "trigger_check.html",
+            _ctx(
+                request,
+                "trigger-check",
+                query=raw, report=report, item=item, error=error,
+                summary=trigger_check.summary(cfg),
+                sources=trigger_check.state_sources(cfg),
+                run_now=sdlc_plan.run_now_tags(cfg),
+            ),
+        )
+
     @router.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
         c: Container = request.app.state.container
@@ -609,6 +641,12 @@ def create_router() -> APIRouter:
                 repos=discovered,
                 allowed_repos=allowed,
                 ado_states=ado_states,
+                # 🏷️ section: one sentence of what this machine takes, and why each
+                # trigger state is (not) polled — the role doors amend the ticked list.
+                trigger_summary=trigger_check.summary(cfg),
+                trigger_sources={
+                    s.state.strip().lower(): s for s in trigger_check.state_sources(cfg)
+                },
                 tag_overview=tag_overview,
             ),
         )

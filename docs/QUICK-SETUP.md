@@ -49,6 +49,8 @@ Mở **http://localhost:5080/dashboard** → trình **Setup** hướng dẫn t�
 ai-autopilot doctor        # kiểm cấu hình, kết nối, quyền PAT, lệnh Claude
 ```
 
+Item không được nhận? Mở **Hệ thống → 🔎 Kiểm tra kích hoạt**, nhập số work item — trang nói rõ vì sao. Muốn chạy ngay một vai cụ thể: gắn tag `autopilot-run:<vai>` (vd `autopilot-run:qc`).
+
 Tất cả ✅ là chạy được. Lỗi nào cũng có kèm cách sửa.
 
 ## 4. Cấu hình khởi đầu an toàn

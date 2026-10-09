@@ -272,6 +272,21 @@
   .fleet-col b{font-size:12px}
   .fleet-col ul{margin:5px 0 0;padding-left:18px;font-size:12px;color:var(--text-muted);line-height:1.6}
   .fleet-col code{font-family:var(--mono,monospace);font-size:11px}
+  .trig-sum { font-size: 13.5px; line-height: 1.6; margin: 6px 0 10px; }
+  .trig-sum code, .chip-legend code { font-size: 12.5px; }
+  .trig-ways { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--text-muted); }
+  .trig-ways a { color: var(--accent-hover); }
+  .trig-check { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  .trig-id { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 10px; width: 170px;
+             background: var(--bg-input, var(--bg)); border: 1px solid var(--border); border-radius: 8px; }
+  .trig-id:focus-within { border-color: var(--accent); }
+  .trig-id b { color: var(--text-dim); }
+  .trig-id input { flex: 1; min-width: 0; border: 0 !important; background: transparent !important; padding: 0 !important;
+                   color: var(--text); font-family: var(--mono, monospace); outline: none; box-shadow: none !important; }
+  .chip-src { font-size: 11px; color: var(--text-dim); margin-left: 2px; }
+  .chip-dropped { opacity: .75; }
+  .chip-dropped .chip-src { color: #d29922; }
+  .chip-legend { margin: 6px 0 0; font-size: 11.5px; }
   .more-states { margin-top: 6px; }
   .more-states > summary { cursor: pointer; font-size: 12px; color: var(--accent-hover); list-style: none; }
   .more-states > summary::-webkit-details-marker { display: none; }
@@ -477,7 +492,9 @@
      always pointed at #board-columns, which no element carried. #}
   {% set section_alias = {'🗂️ Cột trên Board': 'board-columns',
                           '🔀 Tự chuyển state': 'auto-transitions',
-                          '🛰 Fleet': 'fleet'} %}
+                          '🛰 Fleet': 'fleet',
+                          '🏷️ Tag & điều kiện nhận việc': 'triggers',
+                          '🔐 Quyền ra lệnh': 'commands'} %}
   {% for section, fields in sections %}
   <div class="card" id="sec-{{ loop.index }}">
     {% if section_alias.get(section) %}<span class="sec-alias" id="{{ section_alias[section] }}"></span>{% endif %}
@@ -502,6 +519,40 @@
        has not run yet) there was no way at all to ask, or to see what is running.
        Buttons use formaction — this card sits inside the settings form, and a nested
        <form> is invalid HTML that browsers silently flatten. #}
+    {# What the fields below ADD UP TO, in one sentence — and the one question people
+       actually have ("why didn't it pick up #123?") one click away. #}
+    {% if section == '🏷️ Tag & điều kiện nhận việc' and trigger_summary is defined %}
+    <div class="fleet-block trig-card">
+      <div class="wh-title"><b>🏷️ Máy này nhận việc của ai</b>
+        <span class="form-help" style="margin:0">Tính từ cấu hình đang lưu — sửa ô bên dưới rồi Lưu để cập nhật.</span></div>
+      <div class="trig-sum">{{ trigger_summary|inline_md }}</div>
+      <div class="trig-ways">
+        <span>① <b>Tag riêng</b> → luôn là việc của máy này</span>
+        <span>② <b>Tag chung</b> + assign đúng owner</span>
+        <span>▶ <b>Tag chạy ngay</b> → bỏ qua tag/state, chạy ngay một lần</span>
+        <span>🔐 Ai được ra lệnh: <a href="#commands">Quyền ra lệnh ↓</a></span>
+      </div>
+      <div class="trig-check">
+        <span class="trig-id"><b>#</b><input id="trig-id" inputmode="numeric" placeholder="Số work item"
+              aria-label="Số work item cần kiểm tra" autocomplete="off"></span>
+        <button type="button" class="btn-ghost" id="trig-go">🔎 Vì sao item này (không) chạy?</button>
+      </div>
+    </div>
+    <script>
+    (function () {
+      var inp = document.getElementById('trig-id'), go = document.getElementById('trig-go');
+      function open() {
+        var v = (inp.value || '').replace(/[^0-9]/g, '');
+        if (v) window.location.href = '/dashboard/trigger-check?id=' + v;
+        else inp.focus();
+      }
+      go.addEventListener('click', open);
+      // Enter here must not submit the whole settings form.
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); open(); } });
+    })();
+    </script>
+    {% endif %}
+
     {% if section == '⬆️ Cập nhật' %}
     <div class="fleet-block" id="update-panel">
       <div class="up-panel">
@@ -807,15 +858,32 @@
           {% elif f.kind == 'stateset' %}
             {% set selected = current.get(f.key) or [] %}
             {% set candidates = (ado_states or []) + selected %}
+            {# An auto role's door is polled whether or not it is ticked — show it, so the
+               list on screen is the list the poller uses. #}
+            {% if f.key == 'trigger_states' and trigger_sources is defined %}
+            {% set candidates = candidates + (trigger_sources.values()|selectattr('source', 'equalto', 'role-auto')|map(attribute='state')|list) %}
+            {% endif %}
             {% set seen = [] %}
             <input type="hidden" name="_all_states__{{ f.key }}" value="{{ candidates|join(',') }}">
             {% if candidates %}
             <div class="chips">
               {% for s in candidates %}{% if s not in seen %}{% set _ = seen.append(s) %}
-              <label class="chip {{ 'chip-accent' if s in selected else '' }}">
+              {# Trigger states only: the role doors amend this list, so say which rule
+                 decides each chip — a ticked state a manual role removes, or an unticked
+                 one an auto role adds, was invisible before. Display only: the checkbox
+                 is untouched, so saving writes exactly what it always did. #}
+              {% set src = trigger_sources.get(s|lower) if (f.key == 'trigger_states' and trigger_sources is defined) else none %}
+              <label class="chip {{ 'chip-accent' if s in selected else '' }}{{ ' chip-dropped' if src and src.source == 'role-manual' }}"
+                     {% if src and src.source == 'role-auto' %}title="Vai {{ src.roles|join(', ') }} tự chạy ở state này — luôn được poll, kể cả khi bỏ tick"
+                     {% elif src and src.source == 'role-manual' %}title="Vai {{ src.roles|join(', ') }} chờ ở state này nhưng KHÔNG tự chạy — bị gỡ khỏi poll dù có tick"{% endif %}>
                 <input type="checkbox" name="{{ f.key }}__{{ s }}" {% if s in selected %}checked{% endif %} class="chk"> {{ s }}
+                {% if src and src.source == 'role-auto' %}<small class="chip-src">🤖 {{ src.roles|join(', ') }}</small>
+                {% elif src and src.source == 'role-manual' %}<small class="chip-src">🙋 {{ src.roles|join(', ') }} · không poll</small>{% endif %}
               </label>{% endif %}{% endfor %}
-            </div>{% endif %}
+            </div>
+            {% if f.key == 'trigger_states' and trigger_sources is defined and trigger_sources %}
+            <div class="form-help chip-legend">🤖 vai tự chạy → luôn poll · 🙋 vai chờ người → không poll dù tick · không nhãn → theo tick ở đây</div>
+            {% endif %}{% endif %}
             {# Typing a state by hand is for when the list could not be loaded, or for a
                state the project has not created yet. With the real states on screen as
                chips, a full-width empty box under every picker is clutter — so it folds

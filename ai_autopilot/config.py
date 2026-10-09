@@ -1017,6 +1017,13 @@ class Settings(BaseSettings):
     # widen which ITEMS get processed — the wrong knob. This flag scopes only the command
     # gate (work-item /commands, PR /commands, @mentions); ownership is untouched.
     commands_from_anyone: bool = False
+    # Does the owner (``assignee_trigger_user``) get to command this machine just by being
+    # its owner? It always did, implicitly — so "whose items does this machine take" and
+    # "who may drive it" were one field. On by default, which is exactly the old behaviour;
+    # turn it off for a shared/service machine that should take one person's items but
+    # obey only the people listed in ``command_users`` (ignored while that list is empty,
+    # see ``command_allowlist``). Ownership is never affected.
+    owner_can_command: bool = True
     processed_tag: str = "autopilot-done"
     review_tag: str = "autopilot-review"
     # Applied when the agent escalates (needs_human); these items are held — the
@@ -2558,7 +2565,16 @@ class Settings(BaseSettings):
         which ITEMS this machine owns (shared assignee-trigger tag), so opening the command
         gate through it would make the machine start picking up colleagues' work items too.
         Command gates read THIS; ownership keeps reading the roster."""
-        return [] if self.commands_from_anyone else self.effective_command_users
+        if self.commands_from_anyone:
+            return []
+        roster = list(dict.fromkeys(
+            u.strip() for u in (self.command_users or []) if (u or "").strip()))
+        # Owner opted out → only the listed people. With NOBODY listed the opt-out is
+        # ignored: an empty roster reads as "anyone may command", the opposite of what
+        # turning the owner off asks for. Settings says so next to the switch.
+        if not self.owner_can_command and roster:
+            return roster
+        return self.effective_command_users
 
     @property
     def command_catalog(self) -> list[tuple[str, bool, str]]:

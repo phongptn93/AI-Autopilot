@@ -31,6 +31,7 @@ from ai_autopilot.execution.sdlc_plan import (
     resolve_profile_name,
     resolve_stages,
     role_opens_pr,
+    run_now_tags,
     working_state_for,
 )
 from ai_autopilot.execution.test_gate import TestGate
@@ -848,16 +849,24 @@ class AdoPollerService:
         c, cfg = self._c, self._config
         if cfg.dry_run:
             return
-        per_stage = entry_tags(cfg)
-        shared = (cfg.stage_entry_tag or "").strip().lower()
-        if not per_stage and not shared:
+        # tag -> role it forces (None = the shared tag: the state picks). The same map a
+        # dashboard explains triggers from, so what is shown is exactly what is swept.
+        run_now = run_now_tags(cfg)
+        if not run_now:
             return
+        # A role's EXPLICIT entry_tag is the only unleased kind: it is per-machine
+        # configuration, typed on this machine's Roles page. The shared tag and the
+        # derived `<shared>:<role>` tags exist identically on every machine of a fleet
+        # (every machine knows the built-in roles), so two can take the same item.
+        own_tags = set(entry_tags(cfg))
         # Query by the RUN-NOW tags themselves. This used to read the trigger-tag query,
         # which quietly halved what the tag means: an item the autopilot was not already
         # holding never appeared in the result set, so tagging it did nothing at all —
         # no pickup, no error, nothing in the log. And an item nobody is holding is
-        # precisely what a person reaches for this tag for (#9004).
-        lookup = [*per_stage] + ([shared] if shared else [])
+        # precisely what a person reaches for this tag for (#9004). Every tag is listed
+        # on its own because WIQL's `[System.Tags] CONTAINS` matches WHOLE tags: the
+        # shared tag does not find `autopilot-run:qc`.
+        lookup = list(run_now)
         try:
             tagged = await self._from_every_provider("get_work_items_tagged_any", lookup)
         except Exception as exc:  # noqa: BLE001
@@ -866,15 +875,17 @@ class AdoPollerService:
         picks: list[tuple[WorkItemInfo, dict[str, str], str]] = []
         for item in tagged:
             held = {(t or "").strip().lower(): t for t in item.tags}
-            hit = next((t for t in held if t in per_stage or (shared and t == shared)), None)
+            hits = [t for t in held if t in run_now]
+            # A tag that names a role is the more specific instruction; with both the
+            # shared tag and a role tag on one item, the role tag must not lose to
+            # whichever ADO happened to list first.
+            hit = next((t for t in hits if run_now[t]), hits[0] if hits else None)
             if hit is None or item.id in self._live or item.id in self._processed:
                 continue
             picks.append((item, held, hit))
-        # The SHARED tag is swept by every machine, so two can take the same item in the
-        # same minute. A role's own tag is not leased: it names a role, and a role lives
-        # on one machine. Claims run concurrently — each waits out the settle period, and
-        # doing them one after another would stall the poll by that much per item.
-        contested = ([i for i, _h, hit in picks if hit not in per_stage]
+        # Claims run concurrently — each waits out the settle period, and doing them one
+        # after another would stall the poll by that much per item.
+        contested = ([i for i, _h, hit in picks if hit not in own_tags]
                      if self._lease_active() else [])
         if contested:
             won = await asyncio.gather(*(self._claim_run_now(i) for i in contested))
@@ -891,7 +902,7 @@ class AdoPollerService:
             # waits in, that is `sdlc_default_profile`, i.e. tagging one role's run-now tag
             # ran the WHOLE pipeline. The shared tag keeps its documented meaning — it is
             # the state that picks the role — and pins nothing.
-            role = per_stage.get(hit, "")
+            role = run_now.get(hit) or ""
             if role:
                 await self._pin_profile(item, role)
             await c.state_repo.set(item.id, PipelineState.QUEUED, title=item.title)

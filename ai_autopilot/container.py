@@ -33,6 +33,7 @@ from ai_autopilot.data import (
     PrReviewerRepository,
     PrSessionRepository,
     QualityRepository,
+    ReviewRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
     SecurityRepository,
@@ -106,6 +107,8 @@ class Container:
         # Scheduled audits. Their own table: a report's deliverable is its text, which
         # does not fit an execution row's summary column — see ``LoopReport``.
         self.loop_report_repo = LoopReportRepository(self.database)
+        # 🧭 Review Studio: spec / report / question checked against the code.
+        self.review_repo = ReviewRepository(self.database)
         # Security findings with a lifecycle (scan CLI, scan loops, pre-PR gate, page).
         self.security_repo = SecurityRepository(self.database)
         self.pr_conflict_repo = PrConflictRepository(self.database)

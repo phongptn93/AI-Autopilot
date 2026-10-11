@@ -98,6 +98,18 @@ PRESETS: list[dict] = [
         },
     },
     {
+        "key": "spec-review-weekly",
+        "label": "🧭 Rà spec ↔ code hằng tuần",
+        "why": ("Rà lại mọi spec của BA với code thật ở Phòng rà soát; "
+                "độ bao phủ giảm thì cảnh báo."),
+        "loop": {
+            "name": "spec-review-weekly",
+            "mode": "review",
+            "cron": "37 6 * * 1",
+            "prompt": "Rà mọi spec trong workspace ↔ code (Phòng rà soát).",
+        },
+    },
+    {
         "key": "spec-drift-weekly",
         "label": "Spec drift & CI triage hằng tuần",
         "why": "Đối chiếu spec với code thật, và gom lỗi pipeline đỏ trong tuần.",

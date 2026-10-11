@@ -35,6 +35,8 @@ from ai_autopilot.data.entities import (
     PrSession,
     QualityEvent,
     QualityKind,
+    Review,
+    ReviewMessage,
     SchedulerDecision,
     SdlcLoopState,
     SecurityFinding,
@@ -2911,3 +2913,96 @@ class SecurityRepository:
             for status, severity, n in rows.all():
                 out.setdefault(str(status), {})[str(severity)] = int(n)
             return out
+
+
+class ReviewRepository:
+    """Review Studio sessions and their follow-up conversation."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def create(self, *, kind: str, target: str, title: str, work_item_id: int = 0,
+                     focus: str = "", requested_by: str = "", doc_type: str = "spec",
+                     source_text: str = "") -> int:
+        row = Review(
+            kind=kind[:20], target=target[:1000], title=title[:400],
+            work_item_id=work_item_id or 0, focus=focus[:1000],
+            doc_type=(doc_type or "spec")[:20], source_text=source_text or "",
+            requested_by=requested_by[:200], status="queued", started_at=datetime.now(UTC),
+        )
+        async with self._db.session() as session:
+            session.add(row)
+            await session.commit()
+            return int(row.id)
+
+    async def update(self, review_id: int, **fields) -> None:
+        async with self._db.session() as session:
+            await session.execute(update(Review).where(Review.id == review_id).values(**fields))
+            await session.commit()
+
+    async def get(self, review_id: int) -> Review | None:
+        async with self._db.session() as session:
+            return await session.get(Review, review_id)
+
+    async def recent(self, limit: int = 100, kind: str = "") -> list[Review]:
+        async with self._db.session() as session:
+            query = select(Review).order_by(Review.started_at.desc()).limit(limit)
+            if kind:
+                query = query.where(Review.kind == kind)
+            return list((await session.execute(query)).scalars().all())
+
+    async def previous(self, kind: str, target: str, before_id: int) -> Review | None:
+        """The last FINISHED review of the same target before this one — for the trend."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(Review).where(
+                    Review.kind == kind, Review.target == target, Review.id < before_id,
+                    Review.status == "done",
+                ).order_by(Review.id.desc()).limit(1)
+            )
+            return rows.scalars().first()
+
+    async def latest_by_target(self, kind: str) -> dict[str, Review]:
+        """Newest finished review per target — the hub's "last checked" column."""
+        out: dict[str, Review] = {}
+        for row in await self.recent(500, kind):
+            if row.status == "done" and row.target not in out:
+                out[row.target] = row
+        return out
+
+    async def fail_unfinished(self) -> int:
+        """Rows left queued/running by a restart. Their task died with the process."""
+        async with self._db.session() as session:
+            res = await session.execute(
+                update(Review).where(Review.status.in_(("queued", "running"))).values(
+                    status="failed", error="Interrupted (process restarted)",
+                    finished_at=datetime.now(UTC))
+            )
+            res2 = await session.execute(
+                update(ReviewMessage).where(ReviewMessage.status == "running").values(
+                    status="failed", content="⚠️ Bị gián đoạn (khởi động lại).")
+            )
+            await session.commit()
+            return int(res.rowcount or 0) + int(res2.rowcount or 0)
+
+    async def add_message(self, review_id: int, role: str, content: str, *,
+                          author: str = "", status: str = "done") -> int:
+        row = ReviewMessage(review_id=review_id, role=role, content=content,
+                            author=author[:200], status=status, created_at=datetime.now(UTC))
+        async with self._db.session() as session:
+            session.add(row)
+            await session.commit()
+            return int(row.id)
+
+    async def update_message(self, message_id: int, **fields) -> None:
+        async with self._db.session() as session:
+            await session.execute(
+                update(ReviewMessage).where(ReviewMessage.id == message_id).values(**fields))
+            await session.commit()
+
+    async def messages(self, review_id: int) -> list[ReviewMessage]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(ReviewMessage).where(ReviewMessage.review_id == review_id)
+                .order_by(ReviewMessage.id))
+            return list(rows.scalars().all())

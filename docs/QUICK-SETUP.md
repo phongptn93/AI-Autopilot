@@ -49,6 +49,8 @@ Mở **http://localhost:5080/dashboard** → trình **Setup** hướng dẫn t�
 ai-autopilot doctor        # kiểm cấu hình, kết nối, quyền PAT, lệnh Claude
 ```
 
+Muốn biết tài liệu của BA (PRD/BRD/Spec) đã được code tới đâu? Mở **Chất lượng & báo cáo → 🧭 Phòng rà soát**, tải tài liệu lên hoặc chọn spec → ma trận FR/AC có bằng chứng file:line, câu hỏi cho BA, và hỏi tiếp được.
+
 Item không được nhận? Mở **Hệ thống → 🔎 Kiểm tra kích hoạt**, nhập số work item — trang nói rõ vì sao. Muốn chạy ngay một vai cụ thể: gắn tag `autopilot-run:<vai>` (vd `autopilot-run:qc`).
 
 Tất cả ✅ là chạy được. Lỗi nào cũng có kèm cách sửa.

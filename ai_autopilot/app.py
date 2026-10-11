@@ -284,6 +284,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # so a failed boot never leaks resources or leaves live background tasks.
         try:
             await container.startup()
+            # Review Studio runs are detached tasks; whatever a previous process left
+            # running died with it and must not sit at "running" forever.
+            with contextlib.suppress(Exception):
+                await container.review_repo.fail_unfinished()
             # Fold together what older builds left behind. Dedup-by-meaning and the
             # dead-pointer rule both run on WRITE, so a file already on disk kept
             # everything it had accumulated: five identical reopens and two "re-read

@@ -66,6 +66,8 @@ class Field:
 # Declares the fields themselves; the parent-switch relationships are applied below,
 # in ``_DEPENDS_ON``, so they can be read as one table instead of hunting a keyword
 # argument through nine hundred lines.
+_REVIEW = "🧭 Phòng rà soát"
+
 _BASE_FIELDS: tuple[Field, ...] = (
     # ── Workspace & Repository ──
     Field("workspace_directory", "Thư mục workspace", "text", "📁 Workspace & repo",
@@ -939,6 +941,30 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Nhiều máy cùng thấy một PR conflict: chờ chừng này giây rồi comment nhận việc "
           "sớm nhất thắng — một PR chỉ một phiên.",
           show_when_key="fleet_role", show_when_values=("central", "worker")),
+    # ── 🧭 Phòng rà soát ── (appended near the end so earlier #sec-N stay put)
+    Field("review_timeout_seconds", "Thời gian tối đa mỗi phiên rà (giây)", "int",
+          _REVIEW,
+          "Rà một spec lớn cần đọc nhiều file — mặc định 15 phút."),
+    Field("review_max_turns", "Số bước tối đa của agent", "int",
+          _REVIEW,
+          "Mỗi lần đọc/tìm file là một bước. Spec càng nhiều mục càng cần nhiều bước."),
+    Field("review_max_concurrent", "Số phiên rà chạy cùng lúc", "int",
+          _REVIEW,
+          "Phiên thừa sẽ xếp hàng. Rà định kỳ toàn bộ spec cũng đi qua giới hạn này."),
+    Field("review_effort", "Mức suy luận", "select",
+          _REVIEW,
+          "high = kỹ, đúng hơn nhưng chậm/tốn hơn. Để trống = mặc định của model.",
+          ("", "low", "medium", "high", "xhigh")),
+    Field("review_alert_drop_pct", "Báo khi độ bao phủ giảm (điểm %)", "int",
+          _REVIEW,
+          "Rà lại một spec mà độ bao phủ giảm từ chừng này điểm trở lên → gửi cảnh báo. 0 = tắt."),
+    Field("review_safe_mode", "🔒 Chế độ an toàn (không lộ mã nguồn)", "bool",
+          _REVIEW,
+          "Ẩn đoạn code, câu SQL, chuỗi kết nối, khoá/bí mật khỏi mọi kết quả, câu trả lời và "
+          "bản xuất. Chỉ giữ tên class/method ngắn và vị trí file:line. Nên luôn bật."),
+    Field("review_gap_tag", "Tag cho work item tạo từ rà soát", "text",
+          _REVIEW,
+          "KHÔNG phải tag kích hoạt — gap cần người phân loại trước khi giao agent làm."),
     # ── 🔐 Quyền ra lệnh ── (split from the trigger section: "whose items" and "who may
     # drive this machine" are different questions; appended last so #sec-N stay put)
     Field("owner_can_command", "Owner được ra lệnh", "bool", "🔐 Quyền ra lệnh",

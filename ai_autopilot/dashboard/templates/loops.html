@@ -147,7 +147,7 @@
     <div class="lp-loop {{ '' if r.enabled else 'off' }}">
       <div class="lp-loop-hd">
         <b>{{ r.name }}</b>
-        <span class="lp-pill {{ 'ok' if r.mode in ('report', 'scan') else 'mute' }}">{{ r.mode }}</span>
+        <span class="lp-pill {{ 'ok' if r.mode in ('report', 'scan', 'review') else 'mute' }}">{{ r.mode }}</span>
         {% if r.running %}<span class="lp-pill ok">đang chạy</span>
         {% elif not r.enabled %}<span class="lp-pill mute">đã tắt</span>
         {% elif r.blockers %}<span class="lp-pill bad">⛔ chưa chạy được</span>
@@ -184,7 +184,8 @@
           <select class="lp-in" name="loop_{{ row }}_mode">
             <option value="report" {% if r.mode == 'report' %}selected{% endif %} title="Kiểm tra, ghi kết quả — không sửa gì">report — chỉ đọc</option>
             <option value="scan" {% if r.mode == 'scan' %}selected{% endif %} title="Chạy công cụ quét bảo mật, có thể kèm AI">scan — quét bảo mật</option>
-            <option value="pr" {% if r.mode not in ('report', 'scan') %}selected{% endif %} title="Sửa file và mở pull request">pr — sửa code, mở PR</option>
+            <option value="review" {% if r.mode == 'review' %}selected{% endif %} title="Rà mọi spec ↔ code ở Phòng rà soát">review — rà spec ↔ code</option>
+            <option value="pr" {% if r.mode not in ('report', 'scan', 'review') %}selected{% endif %} title="Sửa file và mở pull request">pr — sửa code, mở PR</option>
           </select>
           <span class="lp-hint">report chạy với công cụ ghi file bị tắt; kết quả được lưu lại, không commit.</span>
         </div>
@@ -308,6 +309,7 @@
           <select class="lp-in" name="loop_{{ blank }}_mode">
             <option value="report" selected title="Kiểm tra, ghi kết quả — không sửa gì">report — chỉ đọc</option>
             <option value="scan" title="Chạy công cụ quét bảo mật, có thể kèm AI">scan — quét bảo mật</option>
+            <option value="review" title="Rà mọi spec ↔ code ở Phòng rà soát">review — rà spec ↔ code</option>
             <option value="pr" title="Sửa file và mở pull request">pr — sửa code, mở PR</option>
           </select>
         </div>

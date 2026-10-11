@@ -108,7 +108,7 @@ def create_router() -> APIRouter:
                 "cron": str(form.get(f"loop_{idx}_cron", "")).strip(),
                 "interval_minutes": _int_or_zero(form.get(f"loop_{idx}_interval")),
                 "mode": (str(form.get(f"loop_{idx}_mode") or "pr")
-                         if form.get(f"loop_{idx}_mode") in ("report", "scan") else "pr"),
+                         if form.get(f"loop_{idx}_mode") in ("report", "scan", "review") else "pr"),
                 "agents": [a for a in form.getlist(f"loop_{idx}_agents") if a],
                 "scan_tools": [t.strip() for t in
                                str(form.get(f"loop_{idx}_scan_tools", "")).split(",")

@@ -614,6 +614,27 @@ push</b>. Hiểu sai theo hướng advisory thì chỉ tốn một comment.</p>
 </table>
 </section>
 
+<section id="users-sso">
+<h2>👥 Người dùng, phân quyền &amp; SSO</h2>
+<p>Menu <b>Hệ thống → 👥 Người dùng &amp; phân quyền</b>. Bật/tắt bất kỳ lúc nào; mặc định vẫn là <b>mật khẩu chung</b> như trước.</p>
+<table>
+<tr><th>Chế độ</th><th>Ý nghĩa</th></tr>
+<tr><td>🔑 Mật khẩu chung</td><td>Một mật khẩu cho cả nhóm — không biết ai làm gì.</td></tr>
+<tr><td>👤 Tài khoản cá nhân</td><td>Email + mật khẩu riêng, quyền theo vai.</td></tr>
+<tr><td>🏢 SSO công ty</td><td>Đăng nhập <b>Microsoft Entra ID</b> (hoặc Google / OIDC). Người mới <b>chờ Admin duyệt</b>; vai có thể tự gán theo <b>App role / nhóm</b> của Entra.</td></tr>
+</table>
+<p><b>Vai mặc định:</b> 👑 Admin · 🧑‍💻 Lead · 📋 BA · 🧪 QC · 👀 Viewer — chỉnh trong <b>ma trận quyền</b> (14 quyền: xem, điều khiển run, sửa quy trình, Phòng rà soát, ghi lên tracker, tạo/duyệt yêu cầu, quét bảo mật, tri thức, sửa thiết lập, xem secret, Fleet, cập nhật, quản lý người dùng); tạo được vai riêng. Trang/thao tác mới chưa khai báo quyền mặc định <b>chỉ Admin</b>.</p>
+<div class="callout c-info"><div class="h">Thiết lập Entra ID (≈5 phút)</div>
+<ol>
+<li>Entra admin center → <b>App registrations → New registration</b> (single tenant).</li>
+<li><b>Redirect URI</b> (Web): địa chỉ hiển thị trên trang Người dùng, dạng <code>https://&lt;dashboard&gt;/dashboard/auth/sso/callback</code>.</li>
+<li><b>Certificates &amp; secrets</b> → tạo client secret.</li>
+<li>(Tuỳ chọn) <b>App roles</b> như <code>AIAutopilot.BA</code> → map sang vai trong <code>sso_role_map</code>.</li>
+<li>Điền Tenant ID / Client ID / Client secret ở <b>Thiết lập → 👥 Người dùng &amp; SSO</b> → <b>Thử kết nối SSO</b> → bật <b>SSO công ty</b>.</li>
+</ol></div>
+<div class="callout c-warn"><div class="h">Không bao giờ bị khoá ngoài</div>Không xoá/hạ quyền được Admin cuối cùng; không bật được chế độ mới nếu không còn ai quản trị; mật khẩu chung vẫn là <b>đăng nhập khẩn cấp</b> (<code>auth_breakglass</code>, có ghi nhật ký); khi chưa có Admin nào, máy chủ (localhost) được vào để tạo Admin đầu tiên. Mọi thao tác trong Nhật ký ghi <b>email người thực hiện</b>.</div>
+</section>
+
 <section id="review-studio">
 <h2>🧭 Phòng rà soát (Review Studio)</h2>
 <p>Menu <b>Chất lượng &amp; báo cáo → Phòng rà soát</b>. Agent chạy <b>chỉ đọc</b> (Read/Grep/Glob, tool ADO chỉ đọc) trên workspace — không sửa code, không mở PR.</p>

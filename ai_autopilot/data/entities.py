@@ -790,6 +790,31 @@ class Review(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class DashboardUser(Base):
+    """A person who signs in to the dashboard (auth_mode users / sso).
+
+    ``status``: ``pending`` (signed in via SSO, waiting for an admin), ``active``,
+    ``disabled``. Roles are role keys from :mod:`ai_autopilot.rbac`, stored as JSON so a
+    custom role needs no migration.
+    """
+
+    __tablename__ = "dashboard_users"
+    __table_args__ = (UniqueConstraint("email", name="uq_dashboard_users_email"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(320), default="")
+    name: Mapped[str] = mapped_column(String(200), default="")
+    source: Mapped[str] = mapped_column(String(20), default="local")      # local | sso
+    subject: Mapped[str] = mapped_column(String(200), default="")         # IdP object id
+    roles_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    password_hash: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approved_by: Mapped[str] = mapped_column(String(320), default="")
+
+
 class ReviewMessage(Base):
     """One turn of the follow-up conversation on a review."""
 

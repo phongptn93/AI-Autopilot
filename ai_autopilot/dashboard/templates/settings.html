@@ -495,7 +495,8 @@
                           '🛰 Fleet': 'fleet',
                           '🏷️ Tag & điều kiện nhận việc': 'triggers',
                           '🔐 Quyền ra lệnh': 'commands',
-                          '🧭 Phòng rà soát': 'sec-review'} %}
+                          '🧭 Phòng rà soát': 'sec-review',
+                          '👥 Người dùng & SSO': 'sec-users'} %}
   {% for section, fields in sections %}
   <div class="card" id="sec-{{ loop.index }}">
     {% if section_alias.get(section) %}<span class="sec-alias" id="{{ section_alias[section] }}"></span>{% endif %}

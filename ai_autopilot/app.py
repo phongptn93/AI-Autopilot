@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from ai_autopilot import fleet, health, metrics, security
+from ai_autopilot import fleet, health, metrics, rbac, security, user_auth
 from ai_autopilot.config import Settings, load_settings
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import create_dashboard_router, forget_scans
@@ -414,6 +414,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     log.warning("webhook secret sent in the query string — refused; "
                                 "send it as the X-Webhook-Secret header", path=path)
                 return Response(status_code=401, content="unauthorized")
+        if path.startswith("/dashboard") and user_auth.enabled(config):
+            # Personal accounts / SSO: every request belongs to a person, and that
+            # person's roles decide what it may do (ai_autopilot.rbac).
+            needed = rbac.required(request.method, path)
+            token = None
+            if needed:
+                user, why = await user_auth.resolve(request, app.state.container)
+                if user is None:
+                    return _sign_in_first(request, why)
+                if not user.can(needed):
+                    return _forbidden(request, user, needed)
+                request.state.user = user
+                token = user_auth.current_actor.set(
+                    user.email if user.kind == "user" else user.kind)
+            try:
+                response = await call_next(request)
+            finally:
+                if token is not None:
+                    user_auth.current_actor.reset(token)
+            if "html" in (response.headers.get("content-type") or ""):
+                response.headers["Cache-Control"] = "no-store, must-revalidate"
+            return response
         dashboard_locked = bool(config.dashboard_auth_password_hash or config.dashboard_auth_token)
         if dashboard_locked and path.startswith("/dashboard"):
             # The login page itself must stay reachable while locked, or there is no way in.
@@ -566,3 +588,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(create_dashboard_router())
     return app
+
+
+def _sign_in_first(request, why: str):
+    """Send a browser to the login page; answer anything else with 401."""
+    from urllib.parse import quote
+
+    from fastapi.responses import RedirectResponse
+
+    if why == "pending":
+        return RedirectResponse("/dashboard/login?pending=1", status_code=303)
+    accept = request.headers.get("accept") or ""
+    wants_json = "application/json" in accept or request.url.path.endswith((".json", "/status"))
+    if request.method == "GET" and not wants_json:
+        nxt = quote(request.url.path + (f"?{request.url.query}" if request.url.query else ""))
+        err = f"&error={quote(why)}" if why else ""
+        return RedirectResponse(f"/dashboard/login?next={nxt}{err}", status_code=303)
+    return Response(status_code=401, content="unauthorized")
+
+
+def _forbidden(request, user, needed: str):
+    """A clear page — who you are, what this needs, who can grant it — not a bare 403."""
+    from html import escape
+
+    from ai_autopilot import rbac as _rbac
+
+    label = _rbac.PERMISSIONS.get(needed, ("Quản trị (Admin)",))[0]
+    table = _rbac.roles(getattr(request.app.state.container.config, "user_roles", {}))
+    roles = ", ".join(table[r].label for r in user.roles if r in table) or "chưa có vai"
+    css = ("body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d0f14;"
+           "color:#e6e8ee;font:14px/1.6 system-ui,'Segoe UI',sans-serif}"
+           ".c{max-width:460px;padding:28px 30px;border:1px solid #2a2f3a;border-radius:14px;"
+           "background:#151922}h1{font-size:19px;margin:0 0 10px}p{color:#a7adbb;margin:6px 0}"
+           "b{color:#e6e8ee}a{color:#8b93ff}")
+    body = (
+        '<!doctype html><html lang="vi"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f"<title>Không đủ quyền</title><style>{css}</style></head><body><div class=\"c\">"
+        "<h1>🔒 Bạn không có quyền làm việc này</h1>"
+        f"<p>Thao tác cần quyền <b>{escape(label)}</b>.</p>"
+        f"<p>Bạn đang đăng nhập là <b>{escape(user.label)}</b> — vai: <b>{escape(roles)}</b>.</p>"
+        "<p>Nhờ Admin cấp thêm quyền ở <b>Hệ thống → 👥 Người dùng &amp; phân quyền</b>.</p>"
+        '<p><a href="/dashboard">← Về trang chính</a></p></div></body></html>'
+    )
+    return Response(status_code=403, content=body, media_type="text/html; charset=utf-8")

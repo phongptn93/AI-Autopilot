@@ -106,3 +106,19 @@ def test_sibling_pages_are_one_click_away_and_health_is_on_the_overview(tmp_path
         assert 'aria-current="page"' in flow
         home = client.get("/dashboard").text
         assert "Sức khoẻ hệ thống" in home and "/dashboard/setup?step=done" in home
+
+
+def test_keyboard_help_and_security_first_visit(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        page = client.get("/dashboard").text
+        assert 'id="kbd-help"' in page and "/dashboard/inbox" in page
+        sec = client.get("/dashboard/security").text
+        assert "Chưa quét repo nào" in sec
+
+
+def test_pr_cards_say_not_connected_instead_of_an_outage(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)            # no PAT → no tracker
+    with TestClient(app) as client:
+        home = client.get("/dashboard").text
+        assert "chưa kết nối tracker" in home and "chưa đọc được Azure DevOps" not in home

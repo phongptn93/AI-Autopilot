@@ -65,6 +65,44 @@
   .st.amber { color:var(--amber); background:rgba(245,166,35,.1); border-color:rgba(245,166,35,.4); }
   .st.red { color:var(--red); background:var(--red-bg); border-color:rgba(240,82,106,.45); }
   .st.muted { color:var(--text-dim); background:var(--bg-input); }
+  .st.blue { color:#5aa9ff; background:rgba(90,169,255,.1); border-color:rgba(90,169,255,.45); }
+  .side { font-size:11px; font-weight:650; margin-top:5px; color:var(--text-muted); }
+  .side.update_doc { color:#5aa9ff; } .side.fix_code { color:var(--amber); }
+  .conf { font-size:10.5px; color:var(--text-dim); margin-top:3px; letter-spacing:.02em; }
+  .conf.low { color:var(--amber); }
+  .srch { margin-top:5px; font-size:11.5px; color:var(--text-dim); }
+  .srch > summary { cursor:pointer; list-style:none; } .srch > summary::-webkit-details-marker { display:none; }
+  .chal { margin-top:8px; }
+  .chal > summary { cursor:pointer; list-style:none; font-size:11.5px; color:var(--accent-hover); }
+  .chal > summary::-webkit-details-marker { display:none; }
+  .chal textarea { width:100%; box-sizing:border-box; margin:6px 0; padding:7px 9px; border-radius:8px; font:inherit; font-size:12.5px;
+    background:var(--bg-input); color:var(--text); border:1px solid var(--border); resize:vertical; }
+  .chal button { font-size:12px; }
+  .chal-h { margin-top:7px; padding:6px 8px; border-radius:7px; font-size:11.5px; line-height:1.5; background:var(--bg-input);
+    border:1px solid var(--border); color:var(--text-muted); }
+  .chal-h.accept { border-color:rgba(46,204,113,.4); } .chal-h.reject { border-color:rgba(240,82,106,.35); }
+  .dq-chip { margin-top:8px; font:inherit; font-size:12.5px; padding:4px 11px; border-radius:14px; cursor:pointer;
+    border:1px solid var(--border); background:var(--bg-input); color:var(--text-muted); }
+  .dq-chip.green { border-color:rgba(46,204,113,.45); } .dq-chip.amber { border-color:rgba(245,166,35,.5); }
+  .dq-chip.red { border-color:rgba(240,82,106,.5); }
+  .dq-hd { display:flex; gap:16px; align-items:center; padding:16px 18px; border-bottom:1px solid var(--border-soft); }
+  .dq-score { width:74px; height:74px; border-radius:50%; display:grid; place-items:center; text-align:center; border:3px solid var(--border); flex:none; }
+  .dq-score b { font-size:24px; line-height:1; } .dq-score small { display:block; font-size:10px; color:var(--text-dim); }
+  .dq-score.green { border-color:var(--green); } .dq-score.amber { border-color:var(--amber); } .dq-score.red { border-color:var(--red); }
+  .dq-k { display:inline-block; font-size:11px; font-weight:650; padding:2px 8px; border-radius:6px; background:var(--bg-input);
+    border:1px solid var(--border); white-space:nowrap; }
+  .dq-k.code_better { color:#5aa9ff; border-color:rgba(90,169,255,.45); }
+  .dq-k.ambiguous, .dq-k.untestable { color:var(--amber); } .dq-k.contradictory, .dq-k.incomplete { color:var(--red); }
+  .snap { padding:0; }
+  .snap > summary { display:flex; gap:6px 12px; flex-wrap:wrap; align-items:baseline; padding:11px 18px; cursor:pointer; font-size:12.5px;
+    color:var(--text-muted); list-style:none; }
+  .snap > summary::-webkit-details-marker { display:none; }
+  .snap code { font-family:var(--mono); font-size:11.5px; }
+  .snap-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:8px; padding:0 18px 14px; }
+  .snap-r { display:flex; flex-direction:column; gap:2px; padding:8px 11px; border:1px solid var(--border); border-radius:9px;
+    background:var(--bg-input); font-size:12px; min-width:0; overflow-wrap:anywhere; }
+  .snap-r .dim, .snap .dim { color:var(--text-dim); }
+  .sn-ok { color:var(--green); } .sn-warn { color:var(--amber); font-weight:650; }
   .ev { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
   .ev code { font-family:var(--mono); font-size:11px; padding:2px 7px; border-radius:5px; background:var(--bg-input); max-width:100%; overflow-wrap:anywhere;
     border:1px solid var(--border); color:var(--accent-hover); cursor:copy; }
@@ -162,6 +200,7 @@
       {% if row.target.startswith('upload:') %}<span>📎 tải lên: <b>{{ row.target[7:] }}</b></span>
       {% elif row.kind != 'question' %}<span><code>{{ row.target }}</code></span>{% endif %}
       {% if row.kind == 'spec' %}<span>Loại: <b>{{ doc_types.get(row.doc_type, ('Spec',))[0] }}</b></span>{% endif %}
+      {% if ws_label %}<span>🗂 {{ ws_label }}</span>{% endif %}
       {% if safe %}<span title="Đoạn code, SQL, chuỗi kết nối, khoá/bí mật được ẩn khỏi kết quả và bản xuất">🔒 an toàn</span>{% endif %}
       {% if row.work_item_id %}<span>Work item <b>#{{ row.work_item_id }}</b></span>{% endif %}
       {% if row.focus %}<span>Trọng tâm: {{ row.focus }}</span>{% endif %}
@@ -190,10 +229,10 @@
   </div>
 </div>
 
-{% if row.status in ('queued', 'running') %}
+{% if row.status in ('queued', 'preparing', 'running') %}
 <div class="rv-card" id="running">
   <div class="run"><div class="spin"></div>
-    <div><div class="verdict">{{ 'Đang xếp hàng' if row.status == 'queued' else 'Agent đang đọc code' }}<span class="dots"></span></div>
+    <div><div class="verdict">{{ {'queued': 'Đang xếp hàng', 'preparing': 'Đang lấy bản code mới nhất từ origin', 'running': 'Agent đang đọc code'}[row.status] }}<span class="dots"></span></div>
       <div class="summary">{% if row.kind == 'spec' %}Tách spec thành từng FR / AC / Edge case, tìm code hiện thực và bằng chứng cho từng mục.
         {% elif row.kind == 'report' %}Mở lại từng finding trong code hiện tại để xem còn, đã sửa hay báo sai.
         {% else %}Tra code liên quan để trả lời kèm tham chiếu file:line.{% endif %}
@@ -203,6 +242,25 @@
 {% elif row.status == 'failed' %}
 <div class="rv-card" style="border-color:rgba(240,82,106,.45)"><div class="md">⚠️ <b>Phiên rà không hoàn tất.</b><br>
   <span style="color:var(--text-muted)">{{ row.error or 'Không rõ lỗi.' }}</span></div></div>
+{% endif %}
+
+{% if snapshot %}
+<details class="rv-card snap" {{ 'open' if snapshot|selectattr('source', 'equalto', 'checkout')|selectattr('behind', 'gt', 0)|list }}>
+  <summary><b>📦 Bản code đã rà</b>
+    <span>{% for r in snapshot %}{{ r.repo }} <code>{{ r.commit }}</code>{{ ' · ' if not loop.last }}{% endfor %}</span>
+    {% if snapshot|selectattr('source', 'equalto', 'upstream')|list %}<span class="sn-ok">mới nhất từ origin</span>{% endif %}
+    {% if snapshot|selectattr('source', 'equalto', 'checkout')|selectattr('behind', 'gt', 0)|list %}<span class="sn-warn">⚠️ có repo đọc từ thư mục cũ — kết quả có thể sai</span>{% endif %}
+  </summary>
+  <div class="snap-grid">
+    {% for r in snapshot %}
+    <div class="snap-r"><b>{{ r.repo }}</b>
+      <span><code>{{ r.upstream if r.source == 'upstream' else (r.branch or 'HEAD') }}</code> @ <code>{{ r.commit }}</code> · {{ r.commit_date }}</span>
+      <span class="dim">{{ r.subject }}</span>
+      <span class="{{ 'sn-ok' if r.source == 'upstream' else ('sn-warn' if r.behind else 'dim') }}">{{ {'upstream': 'bản mới nhất (đã fetch)', 'checkout': 'thư mục trên máy', 'head-fallback': 'commit hiện tại (không có upstream)'}[r.source] }}{% if r.source != 'upstream' and r.behind %} — chậm {{ r.behind }} commit{% endif %}{% if r.note %} · {{ r.note }}{% endif %}</span>
+    </div>
+    {% endfor %}
+  </div>
+</details>
 {% endif %}
 
 {% if row.status == 'done' %}
@@ -217,6 +275,11 @@
     {% endif %}
     <div>
       <div class="verdict">{{ result.verdict or row.verdict or 'Đã rà xong.' }}</div>
+      {% set dq = result.doc_quality %}
+      {% if dq and dq.score is not none %}
+      <button type="button" class="dq-chip {{ 'green' if dq.score >= 80 else ('amber' if dq.score >= 55 else 'red') }}" data-goto="t-dq">
+        📝 Chất lượng tài liệu <b>{{ dq.score }}/100</b>{% if dq.issues %} · {{ dq.issues|length }} vấn đề{% endif %}</button>
+      {% endif %}
       {% if result.summary and result.summary != result.verdict %}<div class="summary">{{ result.summary }}</div>{% endif %}
       {% if prev and prev.score is not none and score is not none %}
       {% set d = (score - prev.score)|round(1) %}
@@ -261,6 +324,7 @@
   <div class="tabs" role="tablist">
     {% if result.traces %}<button type="button" class="tab on" data-pane="t-mx">{{ '📋 Ma trận truy vết' if row.kind == 'spec' else '🛡️ Từng finding' }}<span class="n">{{ result.traces|length }}</span></button>{% endif %}
     {% if result.questions %}<button type="button" class="tab" data-pane="t-q">❓ Câu hỏi cho BA<span class="n">{{ result.questions|length }}</span></button>{% endif %}
+    {% if result.doc_quality and (result.doc_quality.issues or result.doc_quality.verdict) %}<button type="button" class="tab" data-pane="t-dq">📝 Đánh giá tài liệu<span class="n">{{ result.doc_quality.issues|length }}</span></button>{% endif %}
     {% if result.risks %}<button type="button" class="tab" data-pane="t-risk">⚠️ Rủi ro<span class="n">{{ result.risks|length }}</span></button>{% endif %}
     {% if result.extras %}<button type="button" class="tab" data-pane="t-extra">➕ Ngoài spec<span class="n">{{ result.extras|length }}</span></button>{% endif %}
     {% if changes and (changes.changed or changes.added or changes.removed) %}<button type="button" class="tab" data-pane="t-chg">🔁 Thay đổi<span class="n">{{ changes.changed|length + changes.added|length + changes.removed|length }}</span></button>{% endif %}
@@ -289,10 +353,23 @@
           {% if t.severity %}<br><span class="sev {{ t.severity }}">{{ t.severity }}</span>{% endif %}</td>
         <td class="spec">{{ t.spec or '—' }}</td>
         <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span>
+          {% if t.side %}<div class="side {{ t.side }}">→ {{ sides.get(t.side, t.side) }}</div>{% endif %}
+          {% if t.confidence %}<div class="conf {{ t.confidence }}" title="Độ tin cậy của kết luận">{{ {'high': '●●●', 'medium': '●●○', 'low': '●○○'}[t.confidence] }} {{ confidence.get(t.confidence) }}</div>{% endif %}
           {% if t.filed_as %}<div class="filed"><a href="#" title="work item">#{{ t.filed_as }}</a></div>{% endif %}</td>
         <td class="code">{{ t.code or '—' }}
+          {% if t.searched %}<details class="srch"><summary>🔍 đã tìm</summary>{{ t.searched }}</details>{% endif %}
           {% if t.evidence %}<div class="ev">{% for e in t.evidence %}{% if e.where %}<code title="{{ e.where }}{{ ' — ' ~ e.note if e.note }} · bấm để copy" data-copy="{{ e.where }}">{{ e.where|short_path(3) }}</code>{% endif %}{% endfor %}</div>{% endif %}</td>
-        <td class="fix">{{ t.fix or '—' }}</td>
+        <td class="fix">{{ t.fix or '—' }}
+          {% for ch in t.challenges %}
+          <div class="chal-h {{ ch.verdict }}">⚖️ <i>{{ ch.note }}</i><br>
+            {{ {'accept': '✅ Chấp nhận', 'reject': '↩️ Giữ kết luận', 'partial': '🟡 Một phần'}.get(ch.verdict, 'ℹ️ Đã kiểm lại') }}{% if ch.before != ch.after %}: {{ statuses.get(ch.before, ('', ch.before))[1] }} → {{ statuses.get(ch.after, ('', ch.after))[1] }}{% endif %}{% if ch.reason %} — {{ ch.reason }}{% endif %}</div>
+          {% endfor %}
+          <details class="chal">
+            <summary>⚖️ Phản biện</summary>
+            <textarea name="note_{{ loop.index0 }}" rows="2" maxlength="1500" placeholder="Vì sao kết luận này sai? vd: đã có ở nhánh development, MachineServicingController — copy-machine"></textarea>
+            <button class="btn-ghost" type="submit" name="challenge_row" value="{{ loop.index0 }}"
+                    formaction="/dashboard/review/{{ row.id }}/challenge" formnovalidate>Gửi để kiểm lại</button>
+          </details></td>
       </tr>
       {% endfor %}
     </table>
@@ -337,6 +414,28 @@
         {% if q.options %}<ul>{% for o in q.options %}<li>{{ o }}</li>{% endfor %}</ul>{% endif %}</div>
       {% endfor %}
     </div>
+  </div>
+  {% endif %}
+
+  {% if result.doc_quality and (result.doc_quality.issues or result.doc_quality.verdict) %}
+  {% set dq = result.doc_quality %}
+  <div class="pane" id="t-dq" hidden>
+    <div class="dq-hd">
+      {% if dq.score is not none %}<div class="dq-score {{ 'green' if dq.score >= 80 else ('amber' if dq.score >= 55 else 'red') }}"><b>{{ dq.score }}</b><small>/100</small></div>{% endif %}
+      <div><div class="verdict" style="font-size:14.5px">{{ dq.verdict or 'Đánh giá chất lượng tài liệu' }}</div>
+        <div class="act-help">Tài liệu không mặc nhiên đúng: chấm độ rõ ràng, đầy đủ, kiểm thử được — và nói thẳng khi hệ thống đã làm tốt hơn tài liệu.</div></div>
+    </div>
+    {% if dq.strengths %}<div class="list"><div class="q"><div class="t">👍 Điểm tốt</div><ul>{% for x in dq.strengths %}<li>{{ x }}</li>{% endfor %}</ul></div></div>{% endif %}
+    {% if dq.issues %}
+    <div class="mx-wrap"><table class="mx" style="min-width:700px">
+      <tr><th>Mục</th><th>Loại vấn đề</th><th>Vấn đề</th><th>Gợi ý viết lại</th></tr>
+      {% for i in dq.issues %}
+      <tr><td><span class="ref">{{ i.ref or '—' }}</span></td>
+        <td><span class="dq-k {{ i.kind }}">{{ doc_issues.get(i.kind, i.kind) }}</span></td>
+        <td class="spec">{{ i.text }}</td><td class="fix">{{ i.suggestion or '—' }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
   </div>
   {% endif %}
 
@@ -433,6 +532,9 @@
     document.querySelectorAll('.pane').forEach(function (p) { p.hidden = p.id !== id; });
   }
   tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.pane); }); });
+  document.querySelectorAll('[data-goto]').forEach(function (b) {
+    b.addEventListener('click', function () { show(b.dataset.goto); b.closest('.rv-card').nextElementSibling.scrollIntoView({behavior: 'smooth'}); });
+  });
   var first = tabs[0];
   if (location.hash === '#chat' && document.getElementById('t-chat')) show('t-chat');
   else if (first) show(first.dataset.pane);
@@ -492,12 +594,12 @@
   }
 
   // poll while the review or an answer is still running
-  var running = {{ 'true' if row.status in ('queued', 'running') else 'false' }};
+  var running = {{ 'true' if row.status in ('queued', 'preparing', 'running') else 'false' }};
   var pending = {{ 'true' if messages|selectattr('status', 'equalto', 'running')|list else 'false' }};
   if (running || pending) {
     var t = setInterval(function () {
       fetch('/dashboard/review/{{ row.id }}/status').then(function (r) { return r.json(); }).then(function (d) {
-        if ((running && d.status !== 'queued' && d.status !== 'running') || (pending && !d.pending.length && !running)) {
+        if ((running && ['queued', 'preparing', 'running'].indexOf(d.status) < 0) || (pending && !d.pending.length && !running)) {
           clearInterval(t); if (pending) location.hash = 'chat'; location.reload();
         }
       }).catch(function () {});

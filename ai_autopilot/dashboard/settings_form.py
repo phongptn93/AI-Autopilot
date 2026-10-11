@@ -962,6 +962,11 @@ _BASE_FIELDS: tuple[Field, ...] = (
           _REVIEW,
           "Ẩn đoạn code, câu SQL, chuỗi kết nối, khoá/bí mật khỏi mọi kết quả, câu trả lời và "
           "bản xuất. Chỉ giữ tên class/method ngắn và vị trí file:line. Nên luôn bật."),
+    Field("review_code_source", "Bản code được rà", "select",
+          _REVIEW,
+          "latest = lấy code mới nhất từ origin (fetch) và rà trên bản tách riêng — không đụng "
+          "thư mục làm việc của bạn. checkout = rà đúng thư mục trên đĩa (có thể cũ).",
+          ("latest", "checkout")),
     Field("review_gap_tag", "Tag cho work item tạo từ rà soát", "text",
           _REVIEW,
           "KHÔNG phải tag kích hoạt — gap cần người phân loại trước khi giao agent làm."),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from urllib.parse import quote
@@ -9,10 +10,16 @@ from urllib.parse import quote
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
-from ai_autopilot import markdown_lite, review_docs, spec_library
+from ai_autopilot import markdown_lite, review_docs, review_snapshot, spec_library
 from ai_autopilot import review_studio as rs
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard.common import _FLASH_COOKIE, _TEMPLATES, _flash, _take_flash
+from ai_autopilot.dashboard.common import (
+    _FLASH_COOKIE,
+    _TEMPLATES,
+    _flash,
+    _take_flash,
+    selected_workspace,
+)
 from ai_autopilot.dashboard.routes._shared import _ctx
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.services.review_studio import studio_for
@@ -48,9 +55,19 @@ def create_router() -> APIRouter:
     async def review_hub(request: Request):
         c: Container = request.app.state.container
         flash = _take_flash(request)
-        specs = spec_library.discover(c.config.workspace_directory)
+        studio = studio_for(c)
+        wss = studio.workspaces()
+        # Default to the workspace the sidebar is showing; "all" → the first one.
+        picked = selected_workspace(request)
+        current = next((w for w in wss if w.id == picked), wss[0] if wss else None)
         last = await c.review_repo.latest_by_target(rs.KIND_SPEC)
-        spec_rows = [{"spec": s, "last": last.get(s.rel)} for s in specs]
+        spec_rows = []
+        for ws in wss or [None]:
+            folder = ws.directory if ws else c.config.workspace_directory
+            for s in spec_library.discover(folder):
+                spec_rows.append({"spec": s, "last": last.get(s.rel),
+                                  "ws": ws.id if ws else "", "ws_label": ws.label if ws else ""})
+        specs = [r["spec"] for r in spec_rows]
         reports = await c.loop_report_repo.recent(15)
         history = await c.review_repo.recent(60)
         done = [r for r in history if r.status == "done"]
@@ -66,12 +83,22 @@ def create_router() -> APIRouter:
             "running": sum(1 for r in history if r.status in ("queued", "running")),
             "questions": open_q,
         }
+        # Local state only (no fetch): enough to warn that the checkout is stale before
+        # anyone reads a review of it. The run itself fetches.
+        try:
+            repos = await asyncio.wait_for(asyncio.to_thread(
+                review_snapshot.inspect,
+                current.directory if current else c.config.workspace_directory), timeout=15)
+        except Exception:  # noqa: BLE001 — the hub renders without it
+            repos = []
         response = _TEMPLATES.TemplateResponse(request, "review.html", _ctx(
             request, "review", spec_rows=spec_rows, reports=reports, history=history,
             kpi=kpi, kind_label=_KIND_LABEL, ago=_ago, flash=flash,
             workspace=c.config.workspace_directory, doc_types=rs.DOC_TYPES,
             accept=",".join(review_docs.ALLOWED), safe=c.config.review_safe_mode,
             upload_error=request.query_params.get("upload_error", ""),
+            repos=repos, code_source=c.config.review_code_source,
+            review_workspaces=wss, current_ws=current,
         ))
         if flash:
             response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
@@ -83,17 +110,22 @@ def create_router() -> APIRouter:
         form = await request.form()
         kind = str(form.get("kind") or "")
         focus = str(form.get("focus") or "").strip()
+        workspace = str(form.get("workspace") or "").strip()
         studio = studio_for(c)
         try:
             if kind == rs.KIND_SPEC:
-                rid = await studio.start_spec(str(form.get("target") or ""), focus=focus,
-                                              by="dashboard",
-                                              doc_type=str(form.get("doc_type") or "spec"))
+                target = str(form.get("target") or "")
+                if "|" in target:                      # "<workspace id>|<spec path>"
+                    workspace, target = target.split("|", 1)
+                rid = await studio.start_spec(target, focus=focus, by="dashboard",
+                                              doc_type=str(form.get("doc_type") or "spec"),
+                                              workspace=workspace)
             elif kind == rs.KIND_REPORT:
                 rid = await studio.start_report(int(str(form.get("target") or "0")),
-                                                focus=focus, by="dashboard")
+                                                focus=focus, by="dashboard", workspace=workspace)
             else:
-                rid = await studio.start_question(str(form.get("question") or ""), by="dashboard")
+                rid = await studio.start_question(str(form.get("question") or ""),
+                                                  by="dashboard", workspace=workspace)
         except (ValueError, TypeError) as exc:
             _log.info("review not started", error=describe_exc(exc))
             return _flash("/dashboard/review", "review_bad_target")
@@ -116,7 +148,8 @@ def create_router() -> APIRouter:
             rid = await studio_for(c).start_document(
                 up.filename or "tai-lieu", data, doc_type=str(form.get("doc_type") or "brd"),
                 focus=str(form.get("focus") or "").strip(),
-                item_id=int(raw_item) if raw_item.isdigit() else 0, by="dashboard")
+                item_id=int(raw_item) if raw_item.isdigit() else 0, by="dashboard",
+                workspace=str(form.get("workspace") or "").strip())
         except review_docs.DocumentError as exc:
             return RedirectResponse("/dashboard/review?upload_error=" + quote(str(exc)),
                                     status_code=303)
@@ -149,6 +182,10 @@ def create_router() -> APIRouter:
             statuses=rs.statuses_for(row.kind), counts=result.counts(row.kind),
             gaps=set(rs.gaps(result, row.kind)), kind_label=_KIND_LABEL, ago=_ago,
             md=markdown_lite.render, flash=flash, doc_types=rs.DOC_TYPES,
+            snapshot=review_snapshot.from_json(row.snapshot_json or ""),
+            ws_label=next((w.label for w in studio_for(c).workspaces()
+                           if w.id == (row.workspace or "")), ""),
+            sides=rs.SIDES, confidence=rs.CONFIDENCE, doc_issues=rs.DOC_ISSUES,
             groups=rs.by_kind(result) if row.kind == rs.KIND_SPEC else [], changes=changes,
             started_iso=(row.started_at.replace(tzinfo=UTC) if row.started_at.tzinfo is None
                          else row.started_at).isoformat(),
@@ -169,6 +206,25 @@ def create_router() -> APIRouter:
             return JSONResponse({"status": "missing"}, status_code=404)
         pending = [m.id for m in await c.review_repo.messages(rid) if m.status == "running"]
         return {"status": row.status, "pending": pending}
+
+    @router.post("/review/{rid}/challenge")
+    async def review_challenge(request: Request, rid: int):
+        """Dispute one matrix row — the agent re-checks it and accepts or rejects."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        # The matrix is one form (its checkboxes are also named "row"), so each row's
+        # challenge button carries its own index and its note field is note_<index>.
+        raw = str(form.get("challenge_row") or form.get("row") or "")
+        note = str(form.get(f"note_{raw}") or form.get("note") or "")
+        try:
+            await studio_for(c).challenge(rid, int(raw) if raw.isdigit() else -1, note,
+                                          by="dashboard")
+        except ValueError:
+            return _flash(f"/dashboard/review/{rid}", "review_bad_target")
+        await c.audit_repo.record(actor="dashboard", source="dashboard",
+                                  action="review.challenge", target=f"review #{rid} row {raw}",
+                                  detail=note[:200])
+        return RedirectResponse(f"/dashboard/review/{rid}#chat", status_code=303)
 
     @router.post("/review/{rid}/ask")
     async def review_ask(request: Request, rid: int):
@@ -208,7 +264,10 @@ def create_router() -> APIRouter:
         prev = await c.review_repo.previous(row.kind, row.target, rid)
         chat = [(m.role, m.content) for m in await c.review_repo.messages(rid)
                 if m.status == "done" and m.content]
+        snapshot = review_snapshot.from_json(row.snapshot_json or "")
         return _TEMPLATES.TemplateResponse(request, "review_report.html", {
+            "snapshot": [] if external else snapshot, "sides": rs.SIDES,
+            "doc_issues": rs.DOC_ISSUES,
             "row": row, "result": result, "external": external, "prev": prev,
             "statuses": rs.statuses_for(row.kind), "counts": result.counts(row.kind),
             "groups": rs.by_kind(result) if row.kind == rs.KIND_SPEC else [],

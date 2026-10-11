@@ -625,6 +625,13 @@ push</b>. Hiểu sai theo hướng advisory thì chỉ tốn một comment.</p>
 <tr><td>💬 <b>Hỏi về hệ thống</b></td><td>Trả lời từ code thật, có tham chiếu file:line.</td></tr>
 </table>
 <p>Mọi phiên đều <b>hỏi tiếp</b> được (agent nối lại đúng phiên đã đọc code). Từ ma trận: <b>tạo work item</b> cho các dòng đã chọn (tag <code>review-gap</code> — không phải tag kích hoạt, người phân loại trước), <b>comment 4 phần</b> lên work item của spec (kết luận · bảng mục spec trích nguyên văn · ngoài spec · cần chốt), hoặc <b>xuất Markdown</b>.</p>
+<div class="callout c-info"><div class="h">📦 Rà đúng bản code mới nhất · ⚖️ Phản biện · 📝 Đánh giá tài liệu</div>
+<ul>
+<li><b>Bản code:</b> mặc định (<code>review_code_source: latest</code>) mỗi phiên <code>git fetch</code> và rà <b>bản mới nhất trên origin</b> qua một worktree tách riêng — không đụng thư mục làm việc. Thẻ <i>📦 Code sẽ được rà</i> cảnh báo repo nào trên máy đang cũ; mỗi kết quả ghi rõ repo/nhánh/commit đã đọc.</li>
+<li><b>Đánh giá tài liệu:</b> tài liệu không mặc nhiên đúng — có điểm chất lượng và danh sách vấn đề (mơ hồ, thiếu, không kiểm thử được, mâu thuẫn, lỗi thời…). Khi hệ thống làm <b>tốt hơn</b> tài liệu, mục được đánh <b>💡 Code tốt hơn tài liệu → Cập nhật tài liệu</b> thay vì bắt sửa code.</li>
+<li><b>⚖️ Phản biện từng mục:</b> ghi lý do/bằng chứng ngay trên dòng; agent kiểm lại riêng mục đó, chấp nhận hoặc bác kèm lý do; lịch sử phản biện được giữ và điểm cập nhật. Kết luận <i>Chưa có</i> luôn kèm <i>đã tìm những gì</i> và độ tin cậy.</li>
+<li><b>Workspace:</b> chọn workspace cần rà; danh sách spec gom từ mọi workspace.</li>
+</ul></div>
 <div class="callout c-info"><div class="h">🔒 An toàn — không lộ mã nguồn</div>Agent chỉ có tool đọc (không Bash, không ghi file, không Internet). Tài liệu tải lên chỉ lưu dạng chữ trong CSDL của máy, không đưa vào workspace, và được coi là <b>dữ liệu</b> — câu lệnh nhúng trong tài liệu bị bỏ qua. Với <code>review_safe_mode</code> (mặc định bật), đoạn code, SQL, chuỗi kết nối, khoá/bí mật bị ẩn khỏi mọi kết quả, câu trả lời và bản xuất. <b>⬇ Bản chia sẻ</b> (gửi BA/khách) ẩn luôn vị trí file:line.</div>
 <div class="callout c-info"><div class="h">Rà định kỳ</div>Tác vụ định kỳ → preset <b>«🧭 Rà spec ↔ code hằng tuần»</b> (chế độ <code>review</code>, mặc định chưa bật đến khi bạn lưu). Độ bao phủ một spec giảm từ <code>review_alert_drop_pct</code> điểm trở lên → gửi cảnh báo.</div>
 </section>

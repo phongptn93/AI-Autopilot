@@ -494,7 +494,8 @@
                           '🔀 Tự chuyển state': 'auto-transitions',
                           '🛰 Fleet': 'fleet',
                           '🏷️ Tag & điều kiện nhận việc': 'triggers',
-                          '🔐 Quyền ra lệnh': 'commands'} %}
+                          '🔐 Quyền ra lệnh': 'commands',
+                          '🧭 Phòng rà soát': 'sec-review'} %}
   {% for section, fields in sections %}
   <div class="card" id="sec-{{ loop.index }}">
     {% if section_alias.get(section) %}<span class="sec-alias" id="{{ section_alias[section] }}"></span>{% endif %}

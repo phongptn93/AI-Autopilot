@@ -760,11 +760,19 @@ class Review(Base):
     focus: Mapped[str] = mapped_column(String(1000), default="")
     # spec | prd | brd | other — what kind of requirements document was reviewed.
     doc_type: Mapped[str] = mapped_column(String(20), default="spec")
+    # Which workspace (workspaces.resolve id) the review read — its folder and repos.
+    # Blank = the default workspace, which is what every review before this read.
+    workspace: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # An UPLOADED document's extracted text, kept so a rerun reviews the same words and
     # the BA can check what was actually read. Blank for workspace specs (re-read from
     # disk) and for questions.
     source_text: Mapped[str] = mapped_column(Text, default="")
-    # queued | running | done | failed
+    # Exactly which code was read: per repo branch, commit, how far the local checkout
+    # lagged its upstream, and whether the latest upstream was used (review_snapshot).
+    snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The throwaway worktree folder the agent ran in — reused by follow-ups/challenges.
+    tree_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # queued | preparing | running | done | failed
     status: Mapped[str] = mapped_column(String(20), default="queued")
     requested_by: Mapped[str] = mapped_column(String(200), default="")
     verdict: Mapped[str] = mapped_column(String(1000), default="")

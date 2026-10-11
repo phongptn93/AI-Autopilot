@@ -926,34 +926,57 @@ class AdoClient:
 
     # ── Git / Pull Request API (PR babysitter) ──────────────────────────────
 
-    async def get_repositories(self) -> list[dict[str, Any]]:
+    async def get_repositories(self, project: str = "") -> list[dict[str, Any]]:
+        """Repos of the code project for ``project`` (blank = the default one)."""
         resp = await self._send(
             "GET",
-            self._git_url(f"git/repositories?{_API}"), headers=await self._auth.get_auth_header()
+            self._git_url(f"git/repositories?{_API}", project),
+            headers=await self._auth.get_auth_header(),
         )
         if resp.status_code >= 400:
             self._log.warning("get_repositories failed", status=resp.status_code)
             return []
         return resp.json().get("value") or []
 
-    async def get_active_pull_requests(self, repo_id: str) -> list[dict[str, Any]]:
-        return await self._pull_requests_by_status(repo_id, "active")
+    async def get_active_pull_requests(self, repo_id: str, project: str = "",
+                                       ) -> list[dict[str, Any]]:
+        return await self._pull_requests_by_status(repo_id, "active", project)
 
-    async def get_completed_pull_requests(self, repo_id: str) -> list[dict[str, Any]]:
-        return await self._pull_requests_by_status(repo_id, "completed")
+    async def get_completed_pull_requests(self, repo_id: str, project: str = "",
+                                          ) -> list[dict[str, Any]]:
+        return await self._pull_requests_by_status(repo_id, "completed", project)
 
-    async def get_abandoned_pull_requests(self, repo_id: str) -> list[dict[str, Any]]:
-        return await self._pull_requests_by_status(repo_id, "abandoned")
+    async def get_abandoned_pull_requests(self, repo_id: str, project: str = "",
+                                          ) -> list[dict[str, Any]]:
+        return await self._pull_requests_by_status(repo_id, "abandoned", project)
 
-    async def _pull_requests_by_status(self, repo_id: str, status: str) -> list[dict[str, Any]]:
-        url = self._git_url(
-            f"git/repositories/{repo_id}/pullrequests?searchCriteria.status={status}&{_API}"
-        )
-        resp = await self._send("GET", url, headers=await self._auth.get_auth_header())
-        if resp.status_code >= 400:
-            self._log.warning("get_pull_requests failed", status=resp.status_code, pr_status=status)
-            return []
-        return resp.json().get("value") or []
+    # One page and the ceiling across pages. ADO answers a PR list WITHOUT ``$top`` with
+    # one short page (~100) and no continuation, so every "completed" count on a busy
+    # repo silently stopped at the newest hundred — the Overview showed 38 merged PRs
+    # where the autopilot's older ones had simply fallen off the end. The ceiling keeps
+    # a repo with years of history from turning one dashboard refresh into a crawl.
+    _PR_PAGE = 500
+    _PR_MAX = 10000
+
+    async def _pull_requests_by_status(self, repo_id: str, status: str, project: str = "",
+                                       ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        skip = 0
+        while skip < self._PR_MAX:
+            url = self._git_url(
+                f"git/repositories/{repo_id}/pullrequests?searchCriteria.status={status}"
+                f"&$top={self._PR_PAGE}&$skip={skip}&{_API}", project)
+            resp = await self._send("GET", url, headers=await self._auth.get_auth_header())
+            if resp.status_code >= 400:
+                self._log.warning("get_pull_requests failed", status=resp.status_code,
+                                  pr_status=status, skip=skip)
+                break
+            page = resp.json().get("value") or []
+            out.extend(page)
+            if len(page) < self._PR_PAGE:
+                break
+            skip += len(page)
+        return out
 
     async def get_pull_request(self, repo_id: str, pr_id: int, project: str = "") -> dict | None:
         resp = await self._send(

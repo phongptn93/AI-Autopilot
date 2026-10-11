@@ -614,6 +614,21 @@ push</b>. Hiểu sai theo hướng advisory thì chỉ tốn một comment.</p>
 </table>
 </section>
 
+<section id="review-studio">
+<h2>🧭 Phòng rà soát (Review Studio)</h2>
+<p>Menu <b>Chất lượng &amp; báo cáo → Phòng rà soát</b>. Agent chạy <b>chỉ đọc</b> (Read/Grep/Glob, tool ADO chỉ đọc) trên workspace — không sửa code, không mở PR.</p>
+<table>
+<tr><th>Chế độ</th><th>Kết quả</th></tr>
+<tr><td>📎 <b>Tải tài liệu lên</b></td><td>PRD · BRD · SRS · Spec · biên bản yêu cầu (<code>.docx</code>, <code>.pdf</code>*, <code>.md</code>, <code>.txt</code>, <code>.html</code>, ≤ 15 MB). Chọn <b>loại tài liệu</b> — BRD được rà theo năng lực nghiệp vụ (BR), PRD theo tính năng/user story, Spec theo từng hành vi. Tab <i>Tài liệu đã đọc</i> cho xem đúng nội dung agent đọc. <small>*PDF cần <code>pip install "ai-autopilot[docs]"</code>.</small></td></tr>
+<tr><td>📄 <b>Spec ↔ code</b></td><td><b>Ma trận truy vết</b>: từng FR / AC / Edge / Data / Validation → ✅ Đã có · 🟡 Một phần · ❌ Chưa có · ⚠️ Trái spec · ❔ Chưa xác định, kèm <b>bằng chứng file:line</b> và đề xuất sửa. Điểm <b>độ bao phủ</b> (Một phần = ½), xu hướng so với lần rà trước, <b>câu hỏi cho BA</b> (kèm phương án), rủi ro, hành vi ngoài spec.</td></tr>
+<tr><td>🛡️ <b>Kiểm chứng báo cáo</b></td><td>Mở lại từng finding của một báo cáo rà soát cũ trên code hiện tại → 🔴 Vẫn còn · ✅ Đã sửa · 🚫 Báo sai.</td></tr>
+<tr><td>💬 <b>Hỏi về hệ thống</b></td><td>Trả lời từ code thật, có tham chiếu file:line.</td></tr>
+</table>
+<p>Mọi phiên đều <b>hỏi tiếp</b> được (agent nối lại đúng phiên đã đọc code). Từ ma trận: <b>tạo work item</b> cho các dòng đã chọn (tag <code>review-gap</code> — không phải tag kích hoạt, người phân loại trước), <b>comment 4 phần</b> lên work item của spec (kết luận · bảng mục spec trích nguyên văn · ngoài spec · cần chốt), hoặc <b>xuất Markdown</b>.</p>
+<div class="callout c-info"><div class="h">🔒 An toàn — không lộ mã nguồn</div>Agent chỉ có tool đọc (không Bash, không ghi file, không Internet). Tài liệu tải lên chỉ lưu dạng chữ trong CSDL của máy, không đưa vào workspace, và được coi là <b>dữ liệu</b> — câu lệnh nhúng trong tài liệu bị bỏ qua. Với <code>review_safe_mode</code> (mặc định bật), đoạn code, SQL, chuỗi kết nối, khoá/bí mật bị ẩn khỏi mọi kết quả, câu trả lời và bản xuất. <b>⬇ Bản chia sẻ</b> (gửi BA/khách) ẩn luôn vị trí file:line.</div>
+<div class="callout c-info"><div class="h">Rà định kỳ</div>Tác vụ định kỳ → preset <b>«🧭 Rà spec ↔ code hằng tuần»</b> (chế độ <code>review</code>, mặc định chưa bật đến khi bạn lưu). Độ bao phủ một spec giảm từ <code>review_alert_drop_pct</code> điểm trở lên → gửi cảnh báo.</div>
+</section>
+
 <section id="cfg-trigger">
 <h2>18. Cấu hình — Triggering (tag / state)</h2>
 <p>Item được nhặt khi: <b>(mang tag trigger)</b> <b>VÀ</b> <b>(đang ở một trigger state)</b> <b>VÀ</b> <b>(không có skip-tag)</b>.</p>

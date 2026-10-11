@@ -737,6 +737,67 @@ class LoopReport(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class Review(Base):
+    """One Review Studio session: a spec, a report or a question checked against code.
+
+    The result is stored as the parsed contract (``result_json``) plus the few numbers
+    the LIST needs (score, counts) — the same split as ``LoopReport``, for the same
+    reason: the list is loaded far more often than any one review.
+    """
+
+    __tablename__ = "reviews"
+    __table_args__ = (
+        Index("ix_reviews_target", "kind", "target"),
+        Index("ix_reviews_started_at", "started_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(20), default="spec")      # spec|report|question
+    # What was reviewed: a spec's workspace-relative path, "report:<id>", or the question.
+    target: Mapped[str] = mapped_column(String(1000), default="")
+    title: Mapped[str] = mapped_column(String(400), default="")
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0)
+    focus: Mapped[str] = mapped_column(String(1000), default="")
+    # spec | prd | brd | other — what kind of requirements document was reviewed.
+    doc_type: Mapped[str] = mapped_column(String(20), default="spec")
+    # An UPLOADED document's extracted text, kept so a rerun reviews the same words and
+    # the BA can check what was actually read. Blank for workspace specs (re-read from
+    # disk) and for questions.
+    source_text: Mapped[str] = mapped_column(Text, default="")
+    # queued | running | done | failed
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    requested_by: Mapped[str] = mapped_column(String(200), default="")
+    verdict: Mapped[str] = mapped_column(String(1000), default="")
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    counts_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    analysis_md: Mapped[str] = mapped_column(Text, default="")
+    # The agent session, resumed for follow-up questions so they reuse what it read.
+    session_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    commented_on: Mapped[int] = mapped_column(Integer, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ReviewMessage(Base):
+    """One turn of the follow-up conversation on a review."""
+
+    __tablename__ = "review_messages"
+    __table_args__ = (Index("ix_review_messages_review", "review_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    review_id: Mapped[int] = mapped_column(Integer, default=0)
+    role: Mapped[str] = mapped_column(String(20), default="user")      # user | assistant
+    content: Mapped[str] = mapped_column(Text, default="")
+    author: Mapped[str] = mapped_column(String(200), default="")
+    status: Mapped[str] = mapped_column(String(20), default="done")    # running | done | failed
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class PrConflict(Base):
     """A pull request whose merge into its target is blocked by conflicts.
 

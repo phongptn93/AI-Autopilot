@@ -300,6 +300,15 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
         "⛔ Chưa lưu — một <b>Run-now tag</b> của vai trò trùng tag đã có nghĩa khác "
         "(xem log). Đặt tên riêng cho nó rồi lưu lại.",
     ),
+    "review_bad_target": ("red", "⛔ Chưa bắt đầu được — spec/báo cáo không còn, "
+                                 "hoặc câu hỏi trống."),
+    "review_sweep": ("green", "🧭 Đã xếp hàng rà toàn bộ spec — mỗi spec một phiên, xem tiến độ ở "
+                              "bảng Lịch sử bên dưới."),
+    "review_no_item": ("amber", "Nhập số work item để comment kết quả rà soát lên đó."),
+    "review_comment_failed": ("red", "⚠️ Không comment được lên work item — kiểm tra số item "
+                                     "và quyền PAT (Work Items R/W)."),
+    "review_commented": ("green", "✅ Đã comment kết quả rà soát (4 phần) lên work item — BA/QC "
+                                  "đọc được ngay trên ADO."),
     "file_all_already": (
         "warn",
         "Mọi finding đã chọn đều có work item rồi — không tạo lại. "

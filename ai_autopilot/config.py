@@ -845,6 +845,11 @@ class ScheduledLoop(BaseModel):
         return (self.mode or "pr").strip().lower() in ("report", "scan")
 
     @property
+    def is_review(self) -> bool:
+        """True when this loop re-runs 🧭 Review Studio over every spec (read-only)."""
+        return (self.mode or "pr").strip().lower() == "review"
+
+    @property
     def is_scan(self) -> bool:
         """True when this loop is a security scan (report-shaped, scanner-driven)."""
         return (self.mode or "pr").strip().lower() == "scan"
@@ -1977,6 +1982,24 @@ class Settings(BaseSettings):
     # Hold the item for a human instead of letting it advance while the spec is stale.
     # Off by default: a drift is a documentation debt, not a reason to stop delivery.
     spec_drift_holds_item: bool = False
+    # ── 🧭 Review Studio ── spec / report / question checked against the code, read-only.
+    # A spec review reads the whole spec and walks the code behind every item, so it
+    # needs far more room than a chat turn: turns and time are sized for that.
+    review_timeout_seconds: int = 900
+    review_max_turns: int = 80
+    review_max_concurrent: int = 2
+    review_effort: str = "high"
+    review_spec_max_chars: int = 60000
+    # Notify when a spec's coverage falls by at least this many points between two
+    # reviews (the scheduled sweep makes this a regression alarm). 0 = never.
+    review_alert_drop_pct: int = 10
+    # Tag on work items filed from a review. Deliberately NOT a trigger tag: a gap a
+    # review found is for a person to triage first, not for an agent to start building.
+    review_gap_tag: str = "review-gap"
+    # 🔒 Strip code blocks, code-like spans and anything shaped like a credential from
+    # every review result and answer — they are shared with BAs and customers. On by
+    # default; turning it off only affects what is shown, never the read-only tools.
+    review_safe_mode: bool = True
     # Verify after the fact that every PR the autopilot opens names its work item, and
     # attach the link when it does not. An instruction in the brief is advice a model
     # can drop on a long run; this is the check that notices.

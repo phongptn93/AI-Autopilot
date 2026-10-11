@@ -122,6 +122,14 @@ class LoopScheduler:
 
     async def _dispatch(self, loop: ScheduledLoop) -> None:
         c, cfg = self._c, self._config
+        if loop.is_review:
+            # Review Studio sweep: one read-only review per spec, through the studio's own
+            # concurrency gate; no repo needed — specs are found in the workspace.
+            from ai_autopilot.services.review_studio import studio_for
+
+            ids = await studio_for(c).review_all_specs(by=f"loop {loop.name}")
+            self._log.info("scheduled spec review queued", name=loop.name, reviews=len(ids))
+            return
         # A loop bound to a project runs in THAT project's workspace, so its repo and
         # base branch default to the workspace's rather than the root config's.
         scoped = cfg.scoped_for_project(loop.project)

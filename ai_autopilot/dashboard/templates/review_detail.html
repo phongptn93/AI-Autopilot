@@ -1,0 +1,509 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width:none; }
+  .rd-back { font-size:12.5px; color:var(--text-dim); text-decoration:none; }
+  .rd-back:hover { color:var(--accent-hover); }
+  .rd-top { display:flex; gap:12px 18px; align-items:flex-start; flex-wrap:wrap; margin:8px 0 14px; }
+  .rd-top h2 { font-size:21px; font-weight:750; letter-spacing:-.02em; margin:4px 0 4px; }
+  .rd-meta { font-size:12px; color:var(--text-dim); display:flex; flex-wrap:wrap; gap:4px 14px; }
+  .rd-meta code { font-family:var(--mono); font-size:11.5px; }
+  .rd-top .sp { flex:1; min-width:240px; }
+  .rd-acts { display:flex; gap:8px; flex-wrap:wrap; }
+  .rd-acts form { margin:0; }
+  .rd-acts a, .rd-acts button { font-size:12.5px; }
+
+  .rv-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; margin-bottom:16px; overflow:hidden; }
+  .rv-hd { display:flex; align-items:baseline; gap:8px 14px; flex-wrap:wrap; padding:13px 18px; border-bottom:1px solid var(--border-soft); }
+  .rv-hd h3 { font-size:14px; font-weight:700; margin:0; }
+  .rv-hd span { font-size:12px; color:var(--text-dim); }
+
+  /* hero: the score and the one-line verdict, then the summary */
+  .hero { display:grid; grid-template-columns:auto minmax(0,1fr); gap:18px 22px; padding:18px 20px; align-items:center; }
+  @media (max-width:640px) { .hero { grid-template-columns:1fr; } }
+  .ring { width:118px; height:118px; border-radius:50%; display:grid; place-items:center;
+    background:conic-gradient(var(--ring) calc(var(--p) * 1%), var(--bg-input) 0); }
+  .ring > div { width:92px; height:92px; border-radius:50%; background:var(--bg-card); display:grid; place-items:center; text-align:center; }
+  .ring b { font-size:25px; font-weight:800; letter-spacing:-.02em; display:block; line-height:1; }
+  .ring small { font-size:10.5px; color:var(--text-dim); display:block; margin-top:4px; }
+  .verdict { font-size:16px; font-weight:650; line-height:1.5; }
+  .summary { font-size:13.5px; color:var(--text-muted); line-height:1.65; margin-top:6px; max-width:120ch; }
+  .trend { font-size:12.5px; margin-top:8px; }
+  .trend a { color:var(--accent-hover); }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .chip-s { font:inherit; font-size:12px; font-weight:600; padding:5px 11px; border-radius:16px; cursor:pointer;
+    border:1px solid var(--border); background:var(--bg-input); color:var(--text-muted); }
+  .chip-s.on { border-color:var(--accent); color:var(--text); box-shadow:0 0 0 1px var(--accent) inset; }
+  .chip-s b { margin-left:4px; }
+
+  .tabs { display:flex; gap:2px; padding:8px 12px 0; border-bottom:1px solid var(--border-soft); flex-wrap:wrap; }
+  .tab { background:none; border:0; border-bottom:2px solid transparent; color:var(--text-muted); font:inherit; font-size:13.5px;
+    font-weight:600; padding:8px 12px 10px; cursor:pointer; }
+  .tab.on { color:var(--text); border-bottom-color:var(--accent); }
+  .tab .n { font-size:11px; color:var(--text-dim); margin-left:4px; font-weight:700; }
+  .pane[hidden] { display:none; }
+
+  .mx-tools { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:12px 18px; border-bottom:1px solid var(--border-soft); }
+  .mx-tools input[type=search] { flex:1; min-width:200px; max-width:420px; height:34px; padding:0 12px; border-radius:8px;
+    font:inherit; font-size:13px; background:var(--bg-input); color:var(--text); border:1px solid var(--border); }
+  .mx-wrap { overflow-x:auto; }
+  .mx { width:100%; border-collapse:collapse; min-width:860px; }
+  .mx th { text-align:left; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim);
+    padding:9px 12px; border-bottom:1px solid var(--border-soft); white-space:nowrap; position:sticky; top:0; background:var(--bg-card); }
+  .mx td { padding:11px 12px; border-bottom:1px solid var(--border-soft); font-size:13px; vertical-align:top; line-height:1.5; }
+  .mx tr.gap td:first-child { box-shadow:inset 3px 0 0 var(--amber); }
+  .mx tr.bad td:first-child { box-shadow:inset 3px 0 0 var(--red); }
+  .mx .ref { font-family:var(--mono); font-weight:700; font-size:12px; white-space:nowrap; }
+  .mx .kind { display:inline-block; font-size:9.5px; font-weight:700; letter-spacing:.04em; color:var(--text-dim);
+    border:1px solid var(--border); border-radius:4px; padding:0 5px; margin-top:4px; }
+  .mx .spec { color:var(--text); max-width:46ch; }
+  .mx .code { color:var(--text-muted); max-width:52ch; }
+  .mx .fix { color:var(--text-muted); max-width:36ch; font-size:12.5px; }
+  .st { display:inline-flex; gap:5px; align-items:center; font-size:12px; font-weight:650; padding:3px 9px; border-radius:7px;
+    white-space:nowrap; border:1px solid var(--border); }
+  .st.green { color:var(--green); background:var(--green-bg); border-color:rgba(46,204,113,.4); }
+  .st.amber { color:var(--amber); background:rgba(245,166,35,.1); border-color:rgba(245,166,35,.4); }
+  .st.red { color:var(--red); background:var(--red-bg); border-color:rgba(240,82,106,.45); }
+  .st.muted { color:var(--text-dim); background:var(--bg-input); }
+  .ev { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .ev code { font-family:var(--mono); font-size:11px; padding:2px 7px; border-radius:5px; background:var(--bg-input);
+    border:1px solid var(--border); color:var(--accent-hover); cursor:copy; }
+  .sev { font-size:10px; font-family:var(--mono); font-weight:700; padding:1px 6px; border-radius:5px; border:1px solid var(--border); color:var(--text-dim); }
+  .sev.critical, .sev.high { color:var(--red); border-color:rgba(240,82,106,.45); }
+  .sev.medium { color:var(--amber); border-color:rgba(245,166,35,.4); }
+  .filed a { color:var(--accent-hover); font-size:12px; }
+
+  .act { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px; padding:14px 18px; border-top:1px solid var(--border-soft); }
+  @media (max-width:900px) { .act { grid-template-columns:1fr; } }
+  .act-box { border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--bg-input); }
+  .act-box h4 { margin:0 0 8px; font-size:13px; }
+  .act-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .act-row select, .act-row input { height:34px; padding:0 10px; border-radius:8px; font:inherit; font-size:13px;
+    background:var(--bg-card); color:var(--text); border:1px solid var(--border); }
+  .act-help { font-size:11.5px; color:var(--text-dim); margin-top:6px; line-height:1.5; }
+
+  .list { padding:6px 18px 14px; }
+  .q { padding:12px 0; border-bottom:1px solid var(--border-soft); }
+  .q:last-child { border-bottom:0; }
+  .q .t { font-size:14px; font-weight:600; line-height:1.5; }
+  .q .t .r { font-family:var(--mono); font-size:11.5px; color:var(--accent-hover); margin-right:6px; }
+  .q .w { font-size:12.5px; color:var(--text-muted); margin-top:4px; }
+  .q ul { margin:6px 0 0 18px; padding:0; font-size:13px; color:var(--text-muted); }
+  .empty { padding:22px 18px; color:var(--text-dim); font-size:13px; }
+
+  .md { padding:16px 20px; font-size:13.5px; line-height:1.7; }
+  .md table { border-collapse:collapse; margin:8px 0; } .md td, .md th { border:1px solid var(--border); padding:5px 9px; }
+  .md code { font-family:var(--mono); font-size:12px; background:var(--bg-input); padding:1px 5px; border-radius:4px; }
+  .md pre { background:var(--bg-input); padding:10px 12px; border-radius:8px; overflow:auto; }
+
+  .chat { padding:14px 18px; display:flex; flex-direction:column; gap:12px; }
+  .msg { max-width:min(860px,92%); padding:10px 14px; border-radius:12px; font-size:13.5px; line-height:1.65; }
+  .msg.user { align-self:flex-end; background:var(--accent-bg); border:1px solid rgba(99,102,241,.4); }
+  .msg .txt { white-space:pre-wrap; }
+  .msg ul, .msg ol { padding-left:20px; margin:6px 0; }
+  .msg p { margin:0 0 6px; } .msg p:last-child { margin-bottom:0; }
+  .msg table { border-collapse:collapse; margin:6px 0; } .msg td, .msg th { border:1px solid var(--border); padding:4px 8px; }
+  .msg.assistant { align-self:flex-start; background:var(--bg-input); border:1px solid var(--border); }
+  .msg.assistant code { font-family:var(--mono); font-size:12px; }
+  .msg.failed { border-color:rgba(240,82,106,.45); }
+  .msg .who { font-size:10.5px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+  .ask { display:flex; gap:10px; padding:0 18px 16px; align-items:flex-end; flex-wrap:wrap; }
+  .ask textarea { flex:1; min-width:240px; min-height:56px; padding:10px 12px; border-radius:10px; font:inherit; font-size:13.5px;
+    background:var(--bg-input); color:var(--text); border:1px solid var(--border); resize:vertical; }
+  .ask textarea:focus { outline:none; border-color:var(--accent); }
+  .sugs { display:flex; flex-wrap:wrap; gap:6px; padding:0 18px 12px; }
+  .sug { font:inherit; font-size:12px; padding:5px 10px; border-radius:14px; border:1px solid var(--border); background:var(--bg-input);
+    color:var(--text-muted); cursor:pointer; }
+  .sug:hover { border-color:var(--accent); color:var(--text); }
+
+  .srcdoc { margin:10px 18px 18px; padding:12px 14px; max-height:520px; overflow:auto; white-space:pre-wrap; font-family:var(--mono);
+    font-size:12px; line-height:1.6; background:var(--bg-input); border:1px solid var(--border); border-radius:8px; }
+  .exp { position:relative; }
+  .exp > summary { list-style:none; cursor:pointer; font-size:12.5px; }
+  .exp > summary::-webkit-details-marker { display:none; }
+  .exp-menu { position:absolute; right:0; top:calc(100% + 6px); z-index:20; width:300px; background:var(--bg-card);
+    border:1px solid var(--border); border-radius:12px; padding:6px; box-shadow:0 12px 32px rgba(0,0,0,.35); }
+  .exp-menu a { display:flex; flex-direction:column; gap:2px; padding:9px 11px; border-radius:8px; text-decoration:none; color:var(--text); }
+  .exp-menu a:hover { background:var(--bg-input); }
+  .exp-menu b { font-size:13px; } .exp-menu small { font-size:11.5px; color:var(--text-dim); }
+  .groups { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; margin-top:14px; }
+  .grp { border:1px solid var(--border); border-radius:10px; padding:8px 11px; background:var(--bg-input); }
+  .grp .h { display:flex; justify-content:space-between; font-size:11.5px; font-weight:700; color:var(--text-dim); }
+  .grp .h b { color:var(--text); }
+  .gbar { display:flex; height:6px; border-radius:4px; overflow:hidden; background:var(--bg-card); margin-top:6px; }
+  .gbar i { display:block; height:100%; }
+  .gbar .d { background:var(--green); } .gbar .p { background:var(--amber); } .gbar .b { background:var(--red); }
+  .grp small { font-size:10.5px; color:var(--text-dim); }
+  .chg-sum { display:flex; gap:8px; flex-wrap:wrap; padding:12px 18px; border-bottom:1px solid var(--border-soft); font-size:12.5px; }
+  .chg-sum span { padding:3px 10px; border-radius:12px; border:1px solid var(--border); background:var(--bg-input); }
+  .chg-sum .up { color:var(--green); border-color:rgba(46,204,113,.4); }
+  .chg-sum .down { color:var(--red); border-color:rgba(240,82,106,.45); }
+  .elapsed { font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-top:6px; }
+  .run { display:flex; gap:16px; align-items:center; padding:22px 20px; }
+  .spin { width:34px; height:34px; border-radius:50%; border:3px solid var(--bg-input); border-top-color:var(--accent); animation:sp 1s linear infinite; flex:none; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  .dots::after { content:''; animation:dt 1.4s steps(4) infinite; }
+  @keyframes dt { 0% { content:''; } 25% { content:'.'; } 50% { content:'..'; } 75% { content:'...'; } }
+</style>
+
+{% set tone = {'green':'var(--green)','amber':'var(--amber)','red':'var(--red)'} %}
+{% set is_q = row.kind == 'question' %}
+{% set score = row.score %}
+{% set stone = ('green' if score >= 80 else ('amber' if score >= 50 else 'red')) if score is not none else 'muted' %}
+
+<a class="rd-back" href="/dashboard/review">← Phòng rà soát</a>
+{% if flash %}<div class="rv-card" style="border-color:var(--{{ flash[0] }});padding:12px 18px;font-size:13px;margin-top:10px">{{ flash[1]|safe }}</div>{% endif %}
+
+<div class="rd-top">
+  <div class="sp">
+    <span class="st muted">{{ kind_label.get(row.kind, row.kind) }}</span>
+    <h2>{{ row.title }}</h2>
+    <div class="rd-meta">
+      {% if row.target.startswith('upload:') %}<span>📎 tải lên: <b>{{ row.target[7:] }}</b></span>
+      {% elif row.kind != 'question' %}<span><code>{{ row.target }}</code></span>{% endif %}
+      {% if row.kind == 'spec' %}<span>Loại: <b>{{ doc_types.get(row.doc_type, ('Spec',))[0] }}</b></span>{% endif %}
+      {% if safe %}<span title="Đoạn code, SQL, chuỗi kết nối, khoá/bí mật được ẩn khỏi kết quả và bản xuất">🔒 an toàn</span>{% endif %}
+      {% if row.work_item_id %}<span>Work item <b>#{{ row.work_item_id }}</b></span>{% endif %}
+      {% if row.focus %}<span>Trọng tâm: {{ row.focus }}</span>{% endif %}
+      <span>{{ ago(row.started_at) }}{% if row.requested_by %} · {{ row.requested_by }}{% endif %}</span>
+      {% if row.duration_seconds %}<span>⏱ {{ (row.duration_seconds / 60)|round(1) }} phút</span>{% endif %}
+      {% if row.cost_usd %}<span>💲{{ '%.2f'|format(row.cost_usd) }}</span>{% endif %}
+      {% if row.commented_on %}<span>💬 đã comment lên #{{ row.commented_on }}</span>{% endif %}
+    </div>
+  </div>
+  <div class="rd-acts">
+    {% if row.status in ('done', 'failed') %}
+    <form method="post" action="/dashboard/review/{{ row.id }}/rerun"><button class="btn-ghost" type="submit">⟳ Rà lại</button></form>
+    {% endif %}
+    {% if row.status == 'done' %}
+    <details class="exp">
+      <summary class="btn-save">📑 Xuất báo cáo ▾</summary>
+      <div class="exp-menu">
+        <a href="/dashboard/review/{{ row.id }}/report.html" target="_blank" rel="noopener"><b>📑 Báo cáo nội bộ</b><small>Trang in được → Ctrl+P lưu PDF · kèm vị trí file:line</small></a>
+        <a href="/dashboard/review/{{ row.id }}/report.html?audience=external" target="_blank" rel="noopener"><b>🤝 Báo cáo chia sẻ (BA/khách)</b><small>Không mã nguồn, không vị trí trong code</small></a>
+        <a href="/dashboard/review/{{ row.id }}/export.md"><b>⬇ Markdown nội bộ</b><small>Dán vào wiki / PR · kèm hỏi đáp</small></a>
+        <a href="/dashboard/review/{{ row.id }}/export.md?audience=external"><b>⬇ Markdown chia sẻ</b><small>Bản an toàn để gửi ra ngoài</small></a>
+      </div>
+    </details>
+    <a class="btn-ghost" href="/dashboard/review/{{ row.id }}/result.json" target="_blank" rel="noopener">{ } JSON</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if row.status in ('queued', 'running') %}
+<div class="rv-card" id="running">
+  <div class="run"><div class="spin"></div>
+    <div><div class="verdict">{{ 'Đang xếp hàng' if row.status == 'queued' else 'Agent đang đọc code' }}<span class="dots"></span></div>
+      <div class="summary">{% if row.kind == 'spec' %}Tách spec thành từng FR / AC / Edge case, tìm code hiện thực và bằng chứng cho từng mục.
+        {% elif row.kind == 'report' %}Mở lại từng finding trong code hiện tại để xem còn, đã sửa hay báo sai.
+        {% else %}Tra code liên quan để trả lời kèm tham chiếu file:line.{% endif %}
+        Trang tự cập nhật khi xong — có thể rời trang, kết quả được lưu ở Lịch sử.</div>
+      <div class="elapsed" id="elapsed" data-start="{{ started_iso }}"></div></div></div>
+</div>
+{% elif row.status == 'failed' %}
+<div class="rv-card" style="border-color:rgba(240,82,106,.45)"><div class="md">⚠️ <b>Phiên rà không hoàn tất.</b><br>
+  <span style="color:var(--text-muted)">{{ row.error or 'Không rõ lỗi.' }}</span></div></div>
+{% endif %}
+
+{% if row.status == 'done' %}
+<div class="rv-card">
+  <div class="hero">
+    {% if score is not none %}
+    <div class="ring" style="--p:{{ score }};--ring:{{ tone.get(stone, 'var(--text-dim)') }}"><div>
+      <b style="color:{{ tone.get(stone) }}">{{ score|round|int }}%</b>
+      <small>{{ 'độ bao phủ' if row.kind == 'spec' else 'finding còn' }}</small></div></div>
+    {% else %}
+    <div class="ring" style="--p:0;--ring:var(--accent)"><div><b>{{ '💬' if is_q else '—' }}</b><small>{{ 'hỏi đáp' if is_q else 'chưa chấm' }}</small></div></div>
+    {% endif %}
+    <div>
+      <div class="verdict">{{ result.verdict or row.verdict or 'Đã rà xong.' }}</div>
+      {% if result.summary and result.summary != result.verdict %}<div class="summary">{{ result.summary }}</div>{% endif %}
+      {% if prev and prev.score is not none and score is not none %}
+      {% set d = (score - prev.score)|round(1) %}
+      <div class="trend">{% if d > 0 %}<b style="color:var(--green)">▲ +{{ d }} điểm</b>{% elif d < 0 %}<b style="color:var(--red)">▼ {{ d }} điểm</b>{% else %}<b>= không đổi</b>{% endif %}
+        so với <a href="/dashboard/review/{{ prev.id }}">lần rà #{{ prev.id }}</a> ({{ ago(prev.finished_at) }}, {{ prev.score|round|int }}%)</div>
+      {% endif %}
+      {% if not result.parsed %}<div class="trend" style="color:var(--amber)">⚠️ Agent không trả về ma trận theo định dạng — xem nguyên văn ở tab Phân tích, hoặc bấm Rà lại.</div>{% endif %}
+      {% if groups|length > 1 %}
+      <div class="groups">
+        {% for g in groups %}
+        <div class="grp" title="{{ g.done }} có · {{ g.partial }} một phần · {{ g.bad }} thiếu/trái · {{ g.unclear }} chưa rõ">
+          <div class="h"><span>{{ g.kind }}</span><b>{{ g.score|round|int }}%</b></div>
+          <div class="gbar"><i class="d" style="width:{{ 100 * g.done / g.total }}%"></i><i class="p" style="width:{{ 100 * g.partial / g.total }}%"></i><i class="b" style="width:{{ 100 * g.bad / g.total }}%"></i></div>
+          <small>{{ g.done }}/{{ g.total }} đã có{% if g.bad %} · {{ g.bad }} thiếu/trái{% endif %}</small>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if result.traces %}
+      <div class="chips" id="st-chips">
+        <button type="button" class="chip-s on" data-st="">Tất cả <b>{{ result.traces|length }}</b></button>
+        {% for k, n in counts.items() %}{% if n %}
+        <button type="button" class="chip-s" data-st="{{ k }}">{{ statuses[k][0] }} {{ statuses[k][1] }} <b>{{ n }}</b></button>
+        {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if is_q and (answer_html or result.references) %}
+<div class="rv-card">
+  <div class="rv-hd"><h3>💬 Trả lời</h3></div>
+  {% if answer_html %}<div class="md">{{ answer_html|safe }}</div>{% endif %}
+  {% if result.references %}
+  <div class="list"><div class="ev">{% for e in result.references %}<code title="{{ e.note }}" data-copy="{{ e.where }}">{{ e.where }}</code>{% endfor %}</div></div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="rv-card">
+  <div class="tabs" role="tablist">
+    {% if result.traces %}<button type="button" class="tab on" data-pane="t-mx">{{ '📋 Ma trận truy vết' if row.kind == 'spec' else '🛡️ Từng finding' }}<span class="n">{{ result.traces|length }}</span></button>{% endif %}
+    {% if result.questions %}<button type="button" class="tab" data-pane="t-q">❓ Câu hỏi cho BA<span class="n">{{ result.questions|length }}</span></button>{% endif %}
+    {% if result.risks %}<button type="button" class="tab" data-pane="t-risk">⚠️ Rủi ro<span class="n">{{ result.risks|length }}</span></button>{% endif %}
+    {% if result.extras %}<button type="button" class="tab" data-pane="t-extra">➕ Ngoài spec<span class="n">{{ result.extras|length }}</span></button>{% endif %}
+    {% if changes and (changes.changed or changes.added or changes.removed) %}<button type="button" class="tab" data-pane="t-chg">🔁 Thay đổi<span class="n">{{ changes.changed|length + changes.added|length + changes.removed|length }}</span></button>{% endif %}
+    <button type="button" class="tab" data-pane="t-chat" id="tab-chat">💬 Hỏi tiếp<span class="n">{{ (messages|length // 2) if messages else 0 }}</span></button>
+    {% if analysis_html %}<button type="button" class="tab" data-pane="t-an">📝 Phân tích</button>{% endif %}
+    {% if row.source_text %}<button type="button" class="tab" data-pane="t-src">📎 Tài liệu đã đọc</button>{% endif %}
+  </div>
+
+  {% if result.traces %}
+  <div class="pane" id="t-mx">
+    <form method="post" action="/dashboard/review/{{ row.id }}/file" id="file-form">
+    <div class="mx-tools">
+      <input type="search" id="mx-q" placeholder="🔍 Tìm trong mục, yêu cầu, file…" aria-label="Tìm trong ma trận">
+      <label style="font-size:12.5px;color:var(--text-muted)"><input type="checkbox" id="mx-all"> chọn mọi dòng đang hiện</label>
+    </div>
+    <div class="mx-wrap">
+    <table class="mx">
+      <tr><th style="width:28px"></th><th>Mục</th><th>{{ 'Yêu cầu (tài liệu)' if row.kind == 'spec' else 'Finding gốc' }}</th><th>Trạng thái</th><th>Code hiện tại · bằng chứng</th><th>Đề xuất</th></tr>
+      {% for t in result.traces %}
+      {% set s = statuses.get(t.status, ('❔', t.status, 'muted')) %}
+      <tr class="mx-row {{ 'bad' if s[2] == 'red' else ('gap' if s[2] == 'amber' else '') }}" data-st="{{ t.status }}"
+          data-text="{{ (t.ref ~ ' ' ~ t.spec ~ ' ' ~ t.code ~ ' ' ~ (t.evidence|map(attribute='file')|join(' ')))|lower }}">
+        <td>{% if t.filed_as %}<span title="đã tạo #{{ t.filed_as }}">🔗</span>{% else %}
+          <input type="checkbox" name="row" value="{{ loop.index0 }}" class="pick" {{ 'checked' if loop.index0 in gaps }}>{% endif %}</td>
+        <td><span class="ref">{{ t.ref }}</span><br><span class="kind">{{ t.kind }}</span>
+          {% if t.severity %}<br><span class="sev {{ t.severity }}">{{ t.severity }}</span>{% endif %}</td>
+        <td class="spec">{{ t.spec or '—' }}</td>
+        <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span>
+          {% if t.filed_as %}<div class="filed"><a href="#" title="work item">#{{ t.filed_as }}</a></div>{% endif %}</td>
+        <td class="code">{{ t.code or '—' }}
+          {% if t.evidence %}<div class="ev">{% for e in t.evidence %}{% if e.where %}<code title="{{ e.note }} — bấm để copy" data-copy="{{ e.where }}">{{ e.where }}</code>{% endif %}{% endfor %}</div>{% endif %}</td>
+        <td class="fix">{{ t.fix or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+    </form>
+    <div class="act">
+      <div class="act-box">
+        <h4>🎫 Tạo work item từ các dòng đã chọn</h4>
+        <div class="act-row">
+          <select name="item_type" form="file-form" aria-label="Loại work item">
+            {% for t in ['Task', 'Bug', 'User Story', 'Product Backlog Item'] %}<option>{{ t }}</option>{% endfor %}
+          </select>
+          <select name="mode" form="file-form" aria-label="Cách tạo">
+            <option value="each">Mỗi dòng một item</option><option value="one">Gộp thành một item</option>
+          </select>
+          <button class="btn-save" type="submit" form="file-form"><span id="pick-n">0</span> dòng → tạo</button>
+        </div>
+        <div class="act-help">Gắn tag <code>{{ gap_tag }}</code> (không phải tag kích hoạt — người phân loại trước).
+          {% if row.work_item_id %}Item con của #{{ row.work_item_id }}.{% endif %} Mặc định đã chọn sẵn các dòng cần xử lý.</div>
+      </div>
+      {% if row.kind == 'spec' %}
+      <form class="act-box" method="post" action="/dashboard/review/{{ row.id }}/comment"
+            onsubmit="return confirm('Comment kết quả rà soát (4 phần) lên work item này trên Azure DevOps?')">
+        <h4>💬 Comment kết quả lên work item</h4>
+        <div class="act-row">
+          <input name="item_id" value="{{ row.commented_on or row.work_item_id or '' }}" placeholder="# số item" inputmode="numeric" style="width:130px" aria-label="Số work item">
+          <button class="btn-ghost" type="submit">Gửi comment</button>
+        </div>
+        <div class="act-help">Đúng mẫu 4 phần BA/QC đang đọc: kết luận · bảng mục spec (trích nguyên văn) · hành vi ngoài spec · cần chốt.</div>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if result.questions %}
+  <div class="pane" id="t-q" {{ 'hidden' if result.traces }}>
+    <div class="list">
+      {% for q in result.questions %}
+      <div class="q"><div class="t">{% if q.ref %}<span class="r">{{ q.ref }}</span>{% endif %}{{ loop.index }}. {{ q.text }}</div>
+        {% if q.why %}<div class="w">💡 {{ q.why }}</div>{% endif %}
+        {% if q.options %}<ul>{% for o in q.options %}<li>{{ o }}</li>{% endfor %}</ul>{% endif %}</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if result.risks %}
+  <div class="pane" id="t-risk" {{ 'hidden' if (result.traces or result.questions) }}>
+    <div class="list">
+      {% for r in result.risks %}
+      <div class="q"><div class="t"><span class="sev {{ r.severity }}">{{ r.severity }}</span> {{ r.title }}</div>
+        {% if r.detail %}<div class="w">{{ r.detail }}</div>{% endif %}
+        {% if r.file %}<div class="ev"><code data-copy="{{ r.file }}{{ ':' ~ r.line if r.line }}">{{ r.file }}{{ ':' ~ r.line if r.line }}</code></div>{% endif %}</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if result.extras %}
+  <div class="pane" id="t-extra" hidden>
+    <div class="list">{% for x in result.extras %}<div class="q"><div class="w" style="color:var(--text)">{{ x }}</div></div>{% endfor %}
+      <div class="act-help" style="padding-top:8px">Hành vi code có mà spec không nhắc tới — QC không đọc diff, nên cần BA bổ sung vào spec hoặc xác nhận là ngoài phạm vi.</div></div>
+  </div>
+  {% endif %}
+
+  {% if changes and (changes.changed or changes.added or changes.removed) %}
+  <div class="pane" id="t-chg" hidden>
+    <div class="chg-sum">
+      <span>So với <a href="/dashboard/review/{{ prev.id }}" style="color:var(--accent-hover)">lần rà #{{ prev.id }}</a> · {{ ago(prev.finished_at) }}</span>
+      {% if changes.improved %}<span class="up">▲ {{ changes.improved }} mục tốt lên</span>{% endif %}
+      {% if changes.regressed %}<span class="down">▼ {{ changes.regressed }} mục xấu đi</span>{% endif %}
+      {% if changes.added %}<span>＋ {{ changes.added|length }} mục mới</span>{% endif %}
+      {% if changes.removed %}<span>－ {{ changes.removed|length }} mục không còn</span>{% endif %}
+    </div>
+    <div class="mx-wrap"><table class="mx" style="min-width:640px">
+      <tr><th>Mục</th><th>Yêu cầu</th><th>Trước</th><th></th><th>Bây giờ</th></tr>
+      {% for c in changes.changed %}
+      {% set o = statuses.get(c.old, ('❔', c.old, 'muted')) %}{% set n = statuses.get(c.new, ('❔', c.new, 'muted')) %}
+      <tr class="{{ 'bad' if c.dir == 'down' }}"><td><span class="ref">{{ c.ref }}</span></td><td class="spec">{{ c.spec }}</td>
+        <td><span class="st {{ o[2] }}">{{ o[0] }} {{ o[1] }}</span></td>
+        <td style="font-size:16px;color:{{ 'var(--green)' if c.dir == 'up' else ('var(--red)' if c.dir == 'down' else 'var(--text-dim)') }}">{{ '▲' if c.dir == 'up' else ('▼' if c.dir == 'down' else '→') }}</td>
+        <td><span class="st {{ n[2] }}">{{ n[0] }} {{ n[1] }}</span></td></tr>
+      {% endfor %}
+      {% for t in changes.added %}<tr><td><span class="ref">{{ t.ref }}</span></td><td class="spec">{{ t.spec }}</td><td>—</td><td>＋</td>
+        <td><span class="st {{ statuses.get(t.status, ('', '', 'muted'))[2] }}">{{ statuses.get(t.status, ('❔', t.status))[0] }} {{ statuses.get(t.status, ('', t.status))[1] }}</span></td></tr>{% endfor %}
+      {% for t in changes.removed %}<tr><td><span class="ref">{{ t.ref }}</span></td><td class="spec">{{ t.spec }}</td>
+        <td><span class="st muted">{{ statuses.get(t.status, ('', t.status))[1] }}</span></td><td>－</td><td><span class="st muted">không còn trong lần này</span></td></tr>{% endfor %}
+    </table></div>
+  </div>
+  {% endif %}
+
+  <div class="pane" id="t-chat" {{ 'hidden' if (result.traces or result.questions or result.risks) }}>
+    <div class="chat" id="chat">
+      {% for m in messages %}
+      <div class="msg {{ m.role }} {{ 'failed' if m.status == 'failed' }}">
+        <div class="who">{{ 'Bạn' if m.role == 'user' else '🧭 Agent' }}</div>
+        {% if m.role == 'assistant' and m.status == 'running' %}<span class="dots">Đang tra code</span>
+        {% elif m.role == 'assistant' %}{{ md(m.content)|safe }}{% else %}<div class="txt">{{ m.content|trim }}</div>{% endif %}
+      </div>
+      {% else %}
+      <div class="empty" style="padding:4px 0">Hỏi tiếp về kết quả này — agent dùng lại phần code đã đọc, không phải đọc lại từ đầu.</div>
+      {% endfor %}
+    </div>
+    <div class="sugs">
+      {% set sugs = result.follow_ups if result.follow_ups else (
+        ['Mục nào rủi ro nhất nếu go-live tuần này?', 'Ước lượng công sức để đóng các mục còn thiếu?',
+         'Viết giúp test case cho các AC chưa có?', 'Gợi ý cách sửa spec cho các câu hỏi mở?'] if row.kind == 'spec' else
+        ['Finding nào nên sửa trước?', 'Có pattern chung nào giữa các finding còn lại?'] if row.kind == 'report' else
+        ['Giải thích chi tiết hơn với ví dụ', 'Có test nào bao phủ phần này không?']) %}
+      {% for s in sugs %}<button type="button" class="sug" data-q="{{ s }}">{{ s }}</button>{% endfor %}
+    </div>
+    <form class="ask" method="post" action="/dashboard/review/{{ row.id }}/ask">
+      <textarea name="question" id="ask-q" required maxlength="2000" placeholder="Hỏi tiếp… (Ctrl+Enter để gửi)"></textarea>
+      <button class="btn-save" type="submit">Gửi</button>
+    </form>
+  </div>
+
+  {% if row.source_text %}
+  <div class="pane" id="t-src" hidden>
+    <div class="act-help" style="padding:12px 18px 0">Nội dung chữ trích từ file tải lên — đúng những gì agent đã đọc. Sai/thiếu (vd bảng trong ảnh) thì lưu lại thành .docx/.md rồi tải lại.</div>
+    <pre class="srcdoc">{{ row.source_text }}</pre>
+  </div>
+  {% endif %}
+
+  {% if analysis_html %}
+  <div class="pane" id="t-an" hidden><div class="md">{{ analysis_html|safe }}</div></div>
+  {% endif %}
+</div>
+{% endif %}
+
+<script>
+(function () {
+  // tabs
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  function show(id) {
+    tabs.forEach(function (t) { t.classList.toggle('on', t.dataset.pane === id); });
+    document.querySelectorAll('.pane').forEach(function (p) { p.hidden = p.id !== id; });
+  }
+  tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.pane); }); });
+  var first = tabs[0];
+  if (location.hash === '#chat' && document.getElementById('t-chat')) show('t-chat');
+  else if (first) show(first.dataset.pane);
+
+  // matrix filter: status chip + text
+  var rows = Array.prototype.slice.call(document.querySelectorAll('.mx-row'));
+  var st = '', q = '';
+  function filter() {
+    rows.forEach(function (r) {
+      r.style.display = (!st || r.dataset.st === st) && (!q || r.dataset.text.indexOf(q) >= 0) ? '' : 'none';
+    });
+  }
+  document.querySelectorAll('.chip-s').forEach(function (c) {
+    c.addEventListener('click', function () {
+      document.querySelectorAll('.chip-s').forEach(function (x) { x.classList.toggle('on', x === c); });
+      st = c.dataset.st; if (document.getElementById('t-mx')) show('t-mx'); filter();
+    });
+  });
+  var mq = document.getElementById('mx-q');
+  if (mq) mq.addEventListener('input', function () { q = mq.value.trim().toLowerCase(); filter(); });
+
+  // pick counter + select-visible
+  var picks = Array.prototype.slice.call(document.querySelectorAll('.pick'));
+  var n = document.getElementById('pick-n');
+  function count() { if (n) n.textContent = picks.filter(function (p) { return p.checked; }).length; }
+  picks.forEach(function (p) { p.addEventListener('change', count); }); count();
+  var all = document.getElementById('mx-all');
+  if (all) all.addEventListener('change', function () {
+    picks.forEach(function (p) { if (p.closest('tr').style.display !== 'none') p.checked = all.checked; }); count();
+  });
+
+  // copy file:line
+  document.querySelectorAll('[data-copy]').forEach(function (el) {
+    el.addEventListener('click', function () {
+      if (navigator.clipboard) navigator.clipboard.writeText(el.dataset.copy).then(function () {
+        var old = el.textContent; el.textContent = '✓ đã copy'; setTimeout(function () { el.textContent = old; }, 900);
+      });
+    });
+  });
+
+  // follow-up suggestions + Ctrl+Enter
+  var ta = document.getElementById('ask-q');
+  document.querySelectorAll('.sug').forEach(function (b) {
+    b.addEventListener('click', function () { if (ta) { ta.value = b.dataset.q; ta.focus(); } });
+  });
+  if (ta) ta.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) ta.form.submit(); });
+
+  // elapsed clock on a running review
+  var el = document.getElementById('elapsed');
+  if (el) {
+    var t0 = Date.parse(el.dataset.start);
+    var tick = function () {
+      var s = Math.max(0, Math.round((Date.now() - t0) / 1000));
+      el.textContent = '⏱ ' + Math.floor(s / 60) + ' phút ' + ('0' + (s % 60)).slice(-2) + ' giây';
+    };
+    tick(); setInterval(tick, 1000);
+  }
+
+  // poll while the review or an answer is still running
+  var running = {{ 'true' if row.status in ('queued', 'running') else 'false' }};
+  var pending = {{ 'true' if messages|selectattr('status', 'equalto', 'running')|list else 'false' }};
+  if (running || pending) {
+    var t = setInterval(function () {
+      fetch('/dashboard/review/{{ row.id }}/status').then(function (r) { return r.json(); }).then(function (d) {
+        if ((running && d.status !== 'queued' && d.status !== 'running') || (pending && !d.pending.length && !running)) {
+          clearInterval(t); if (pending) location.hash = 'chat'; location.reload();
+        }
+      }).catch(function () {});
+    }, 4000);
+  }
+  if (location.hash === '#chat') { var c = document.getElementById('chat'); if (c) c.lastElementChild && c.lastElementChild.scrollIntoView({block: 'end'}); }
+})();
+</script>
+{% endblock %}

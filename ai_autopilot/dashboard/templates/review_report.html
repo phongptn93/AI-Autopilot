@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Báo cáo rà soát #{{ row.id }} — {{ row.title }}</title>
+{# Standalone on purpose: no dashboard chrome, no scripts, no external assets — saved
+   or printed, it is one self-contained file. Light theme because it goes on paper. #}
+<style>
+  :root { --ink:#16181d; --muted:#5b6270; --dim:#8a909c; --line:#e3e6eb; --soft:#f5f6f8;
+          --green:#1a7f45; --green-bg:#e8f5ee; --amber:#a35d00; --amber-bg:#fff4e0;
+          --red:#b42335; --red-bg:#fdecee; --accent:#4f46e5; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#eef0f3; color:var(--ink); font:13.5px/1.6 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; }
+  .page { max-width:1040px; margin:24px auto; background:#fff; padding:40px 48px; border-radius:10px; box-shadow:0 4px 24px rgba(0,0,0,.08); }
+  .bar { display:flex; justify-content:space-between; gap:16px; align-items:center; font-size:11.5px; color:var(--dim);
+         border-bottom:2px solid var(--ink); padding-bottom:10px; margin-bottom:22px; text-transform:uppercase; letter-spacing:.06em; }
+  .badge { display:inline-block; padding:3px 10px; border-radius:12px; font-weight:700; font-size:11px; letter-spacing:.04em; }
+  .badge.int { background:var(--soft); color:var(--muted); border:1px solid var(--line); }
+  .badge.ext { background:var(--green-bg); color:var(--green); border:1px solid #b9e2c9; }
+  h1 { font-size:24px; line-height:1.3; margin:0 0 6px; letter-spacing:-.01em; }
+  .meta { color:var(--muted); font-size:12.5px; display:flex; flex-wrap:wrap; gap:4px 18px; margin-bottom:22px; }
+  .meta b { color:var(--ink); }
+  .exec { display:grid; grid-template-columns:150px 1fr; gap:24px; align-items:center; padding:20px 22px;
+          border:1px solid var(--line); border-radius:12px; background:var(--soft); margin-bottom:22px; }
+  .score { text-align:center; }
+  .score .n { font-size:42px; font-weight:800; line-height:1; }
+  .score .l { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-top:6px; }
+  .verdict { font-size:16px; font-weight:650; margin-bottom:6px; }
+  .summary { color:var(--muted); }
+  .counts { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .chip { font-size:11.5px; font-weight:650; padding:2px 9px; border-radius:10px; border:1px solid var(--line); background:#fff; }
+  h2 { font-size:15.5px; margin:28px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+  .groups { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+  .grp { border:1px solid var(--line); border-radius:8px; padding:8px 11px; }
+  .grp .h { display:flex; justify-content:space-between; font-weight:700; font-size:12px; }
+  .gbar { display:flex; height:6px; border-radius:3px; overflow:hidden; background:var(--soft); margin:6px 0 2px; }
+  .gbar i { display:block; height:100%; } .gbar .d { background:var(--green); } .gbar .p { background:#e0a12b; } .gbar .b { background:var(--red); }
+  .grp small { color:var(--muted); font-size:11px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
+       background:var(--soft); padding:7px 9px; border-bottom:1px solid var(--line); }
+  td { padding:8px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr { page-break-inside:avoid; }
+  .ref { font-family:Consolas, "Cascadia Mono", monospace; font-weight:700; white-space:nowrap; font-size:12px; }
+  .kind { display:block; font-size:9.5px; color:var(--dim); font-weight:700; }
+  .st { display:inline-block; white-space:nowrap; font-weight:700; font-size:11.5px; padding:1px 8px; border-radius:6px; }
+  .st.green { background:var(--green-bg); color:var(--green); } .st.amber { background:var(--amber-bg); color:var(--amber); }
+  .st.red { background:var(--red-bg); color:var(--red); } .st.muted { background:var(--soft); color:var(--muted); }
+  code, .ev { font-family:Consolas, "Cascadia Mono", monospace; font-size:11px; }
+  .ev { color:var(--accent); display:block; margin-top:3px; }
+  .q { margin:0 0 12px; padding:10px 14px; border-left:3px solid var(--accent); background:var(--soft); border-radius:0 8px 8px 0; page-break-inside:avoid; }
+  .q .t { font-weight:650; } .q .w { color:var(--muted); font-size:12.5px; }
+  .q ul { margin:4px 0 0 18px; padding:0; }
+  .risk { margin:0 0 8px; } .sev { font-weight:800; text-transform:uppercase; font-size:10.5px; }
+  .sev.critical, .sev.high { color:var(--red); } .sev.medium { color:var(--amber); }
+  .chat .m { margin:0 0 10px; padding:9px 13px; border-radius:8px; page-break-inside:avoid; }
+  .chat .u { background:#eef0ff; } .chat .a { background:var(--soft); }
+  .chat .who { font-size:10.5px; font-weight:700; color:var(--dim); text-transform:uppercase; }
+  .answer table td, .answer table th, .chat table td, .chat table th { border:1px solid var(--line); }
+  .foot { margin-top:30px; padding-top:12px; border-top:1px solid var(--line); font-size:11px; color:var(--dim); display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .print { position:fixed; right:22px; bottom:22px; background:var(--accent); color:#fff; border:0; border-radius:22px; padding:10px 18px;
+           font:inherit; font-weight:650; cursor:pointer; box-shadow:0 6px 18px rgba(79,70,229,.35); }
+  @media (max-width:700px) { .page { padding:22px 16px; margin:0; border-radius:0; } .exec { grid-template-columns:1fr; } table { font-size:11.5px; } }
+  @media print {
+    body { background:#fff; } .page { box-shadow:none; margin:0; max-width:none; padding:0; } .print { display:none; }
+    @page { size:A4; margin:16mm 14mm; }
+    h2 { page-break-after:avoid; }
+  }
+</style>
+</head>
+<body>
+{% set score = row.score %}
+{% set tone = ('green' if score >= 80 else ('amber' if score >= 50 else 'red')) if score is not none else 'muted' %}
+<button class="print" onclick="window.print()">🖨 In / Lưu PDF</button>
+<div class="page">
+  <div class="bar">
+    <span>🧭 Báo cáo rà soát · AI Autopilot</span>
+    <span class="badge {{ 'ext' if external else 'int' }}">{{ 'Bản chia sẻ — không kèm mã nguồn' if external else 'Tài liệu nội bộ' }}</span>
+  </div>
+
+  <h1>{{ row.title }}</h1>
+  <div class="meta">
+    <span>{{ kind_label.get(row.kind, row.kind) }}</span>
+    {% if row.kind == 'spec' %}<span>Loại tài liệu: <b>{{ doc_types.get(row.doc_type, ('Spec',))[0] }}</b></span>{% endif %}
+    {% if row.kind != 'question' %}<span>Nguồn: <b>{{ source }}</b></span>{% endif %}
+    {% if row.work_item_id %}<span>Work item: <b>#{{ row.work_item_id }}</b></span>{% endif %}
+    <span>Rà lúc: <b>{{ row.finished_at.strftime('%d/%m/%Y %H:%M') if row.finished_at else '—' }}</b></span>
+    <span>Phiên: <b>#{{ row.id }}</b></span>
+    {% if row.focus %}<span>Trọng tâm: <b>{{ row.focus }}</b></span>{% endif %}
+  </div>
+
+  <div class="exec">
+    <div class="score">
+      {% if score is not none %}<div class="n" style="color:var(--{{ tone }})">{{ score|round|int }}%</div>
+      <div class="l">{{ 'Độ bao phủ' if row.kind == 'spec' else 'Finding còn hiệu lực' }}</div>
+      {% else %}<div class="n">💬</div><div class="l">Hỏi đáp</div>{% endif %}
+      {% if prev and prev.score is not none and score is not none %}
+      {% set d = (score - prev.score)|round(1) %}
+      <div class="l" style="color:{{ 'var(--green)' if d > 0 else ('var(--red)' if d < 0 else 'var(--muted)') }}">{{ '▲ +' ~ d if d > 0 else ('▼ ' ~ d if d < 0 else '= ') }} điểm so với lần trước</div>
+      {% endif %}
+    </div>
+    <div>
+      <div class="verdict">{{ result.verdict or row.verdict or '—' }}</div>
+      {% if result.summary and result.summary != result.verdict %}<div class="summary">{{ result.summary }}</div>{% endif %}
+      {% if result.traces %}
+      <div class="counts">
+        {% for k, n in counts.items() %}{% if n %}<span class="chip">{{ statuses[k][0] }} {{ statuses[k][1] }}: {{ n }}</span>{% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if groups|length > 1 %}
+  <h2>Độ bao phủ theo nhóm yêu cầu</h2>
+  <div class="groups">
+    {% for g in groups %}
+    <div class="grp"><div class="h"><span>{{ g.kind }}</span><span>{{ g.score|round|int }}%</span></div>
+      <div class="gbar"><i class="d" style="width:{{ 100 * g.done / g.total }}%"></i><i class="p" style="width:{{ 100 * g.partial / g.total }}%"></i><i class="b" style="width:{{ 100 * g.bad / g.total }}%"></i></div>
+      <small>{{ g.done }}/{{ g.total }} đã có{% if g.bad %} · {{ g.bad }} thiếu/trái{% endif %}</small></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if answer_html %}<h2>Trả lời</h2><div class="answer">{{ answer_html|safe }}</div>{% endif %}
+
+  {% if result.traces %}
+  <h2>{{ 'Ma trận truy vết' if row.kind == 'spec' else 'Kiểm chứng từng finding' }}</h2>
+  <table>
+    <tr><th style="width:80px">Mục</th><th>Yêu cầu</th><th style="width:110px">Trạng thái</th><th>Hiện trạng hệ thống</th><th>Đề xuất</th></tr>
+    {% for t in result.traces %}{% set s = statuses.get(t.status, ('❔', t.status, 'muted')) %}
+    <tr><td><span class="ref">{{ t.ref }}</span><span class="kind">{{ t.kind }}</span></td>
+      <td>{{ t.spec or '—' }}</td>
+      <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span></td>
+      <td>{{ t.code or '—' }}
+        {% if not external %}{% for e in t.evidence %}{% if e.where %}<span class="ev">{{ e.where }}</span>{% endif %}{% endfor %}{% endif %}</td>
+      <td>{{ t.fix or '—' }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if result.questions %}
+  <h2>Câu hỏi cần BA / khách hàng chốt</h2>
+  {% for q in result.questions %}
+  <div class="q"><div class="t">{{ loop.index }}. {% if q.ref %}[{{ q.ref }}] {% endif %}{{ q.text }}</div>
+    {% if q.why %}<div class="w">{{ q.why }}</div>{% endif %}
+    {% if q.options %}<ul>{% for o in q.options %}<li>☐ {{ o }}</li>{% endfor %}</ul>{% endif %}</div>
+  {% endfor %}
+  {% endif %}
+
+  {% if result.risks %}
+  <h2>Rủi ro</h2>
+  {% for r in result.risks %}
+  <div class="risk"><span class="sev {{ r.severity }}">{{ r.severity }}</span> · <b>{{ r.title }}</b>{% if r.detail %} — {{ r.detail }}{% endif %}
+    {% if not external and r.file %}<span class="ev">{{ r.file }}{{ ':' ~ r.line if r.line }}</span>{% endif %}</div>
+  {% endfor %}
+  {% endif %}
+
+  {% if result.extras %}
+  <h2>Hành vi hệ thống ngoài tài liệu</h2>
+  <ul>{% for x in result.extras %}<li>{{ x }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {% if chat %}
+  <h2>Hỏi đáp bổ sung</h2>
+  <div class="chat">
+    {% for role, html in chat %}
+    <div class="m {{ 'u' if role == 'user' else 'a' }}"><div class="who">{{ 'Hỏi' if role == 'user' else 'Trả lời' }}</div>{{ html|safe }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="foot">
+    <span>{{ 'Bản chia sẻ: nội dung mô tả hành vi hệ thống, không kèm mã nguồn hay vị trí trong code.' if external else 'Tài liệu nội bộ — có vị trí trong code; mã nguồn và bí mật đã được ẩn.' }}</span>
+    <span>Tạo lúc {{ now }} · AI Autopilot</span>
+  </div>
+</div>
+</body>
+</html>

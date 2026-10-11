@@ -70,6 +70,9 @@ GROUPS: tuple[NavGroup, ...] = (
                 "Số vòng sửa, số lần retry, điểm PR theo thời gian."),
         NavItem("specs", "/dashboard/specs", "📐", "Lệch spec",
                 "Chỗ code đã làm khác spec — cần BA cập nhật tài liệu."),
+        NavItem("review", "/dashboard/review", "🧭", "Phòng rà soát",
+                "Rà tài liệu BA (PRD/BRD/Spec) và báo cáo với code thật — an toàn, "
+                "không lộ mã nguồn."),
         NavItem("learning", "/dashboard/learning", "🧠", "Tri thức",
                 "Bài học autopilot rút ra và chia sẻ cho cả đội."),
     )),

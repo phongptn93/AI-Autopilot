@@ -287,12 +287,14 @@ def create_router() -> APIRouter:
         with contextlib.suppress(Exception):
             midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             spend_today = await c.execution_repo.spend_since(midnight, projects=in_scope)
+        health = await _health(c.config)
         return _TEMPLATES.TemplateResponse(
             request,
             "overview.html",
             _ctx(
                 request,
                 "overview",
+                health=health,
                 stats=stats,
                 recent=recent,
                 efficiency=efficiency,
@@ -646,3 +648,36 @@ def create_router() -> APIRouter:
         return Response(status_code=204)
 
     return router
+
+
+_HEALTH: dict = {"at": 0.0, "value": None}
+_HEALTH_TTL = 300
+
+
+async def _health(cfg) -> dict | None:
+    """The doctor's verdict for the landing page — counts plus the worst few problems.
+
+    Config-only checks (no network), about a second, so it runs off the event loop and
+    is cached for a few minutes: the Overview is the page opened most, and a setup
+    problem should be visible there rather than only to someone who runs `doctor`.
+    """
+    import asyncio
+    import time
+
+    from ai_autopilot import doctor as doctor_mod
+
+    if _HEALTH["value"] is not None and time.time() - _HEALTH["at"] < _HEALTH_TTL:
+        return _HEALTH["value"]
+    try:
+        found = await asyncio.wait_for(asyncio.to_thread(doctor_mod.diagnose, cfg), timeout=10)
+    except Exception:  # noqa: BLE001 — the overview renders without it
+        return None
+    errors = [f for f in found if f.level == doctor_mod.ERROR]
+    warns = [f for f in found if f.level == doctor_mod.WARN]
+    value = {
+        "errors": len(errors), "warns": len(warns),
+        "ok": sum(1 for f in found if f.level == doctor_mod.OK),
+        "top": [{"level": f.level, "title": f.title, "fix": f.fix} for f in (errors + warns)[:4]],
+    }
+    _HEALTH.update(at=time.time(), value=value)
+    return value

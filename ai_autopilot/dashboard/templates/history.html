@@ -69,6 +69,7 @@
     color:var(--red); border-radius:7px; cursor:pointer; }
   .danger-zone button:hover { background:var(--red-bg); }
   .hs-empty { padding:26px 18px; color:var(--text-dim); font-size:12.5px; }
+  .hf-date { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); }
 </style>
 
 <div class="hs-top"><h2 class="page-title">{{ page_title("history") }}</h2></div>
@@ -95,8 +96,8 @@
         <option value="{{ v }}" {{ 'selected' if cat == v }}>{{ lbl }}</option>
         {% endfor %}
       </select>
-      <input class="hf" type="date" name="from" value="{{ date_from }}" title="Từ ngày" aria-label="Từ ngày">
-      <input class="hf" type="date" name="to" value="{{ date_to }}" title="Đến ngày" aria-label="Đến ngày">
+      <label class="hf-date">Từ <input class="hf" type="date" name="from" value="{{ date_from }}" aria-label="Từ ngày" onchange="this.form.submit()"></label>
+      <label class="hf-date">Đến <input class="hf" type="date" name="to" value="{{ date_to }}" aria-label="Đến ngày" onchange="this.form.submit()"></label>
       <button type="submit" class="btn-ghost" style="padding:6px 12px;font-size:12.5px">Lọc</button>
       {% if filtered %}<a class="hs-reset" href="/dashboard/history">✕ Bỏ lọc</a>{% endif %}
     </form>

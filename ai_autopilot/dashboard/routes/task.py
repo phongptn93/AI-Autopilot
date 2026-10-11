@@ -70,11 +70,20 @@ def create_router() -> APIRouter:
             "last": runs[0] if runs else None,
         }
         latest_pr = next((p for p in room.prs if p.url), None)
+        # Specs whose header names this work item ("ADO: #1234") — reviewing one against
+        # the code is the natural next question once a task has been built.
+        try:
+            from ai_autopilot import spec_library
+
+            item_specs = [s for s in spec_library.discover(c.config.workspace_directory)
+                          if s.item_id == work_item_id][:3]
+        except Exception:  # noqa: BLE001
+            item_specs = []
         return _TEMPLATES.TemplateResponse(
             request, "task_room.html",
             _ctx(
                 request, "task", room=room, tab=tab, pstate=pstate, totals=totals,
-                latest_pr=latest_pr,
+                latest_pr=latest_pr, item_specs=item_specs,
                 item_url=f"{org}/_workitems/edit/{work_item_id}" if org else "",
                 drift_label=spec_drift.label_for, drift_icon=spec_drift.icon_for,
             ),

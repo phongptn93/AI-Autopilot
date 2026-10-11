@@ -126,9 +126,9 @@
 {% endif %}
 
 {% if not known_agents %}
-<div class="lp-flash bad">
-  Không tìm thấy sub-agent nào trong <code>&lt;workspace&gt;/.claude/agents</code>. Loop vẫn
-  chạy được, nhưng sẽ tự làm toàn bộ thay vì giao việc.
+<div class="lp-flash" style="border-color:var(--border);color:var(--text-muted)">
+  ℹ️ Chưa có sub-agent nào trong <code>&lt;workspace&gt;/.claude/agents</code> — loop vẫn chạy
+  bình thường, chỉ là tự làm toàn bộ thay vì giao việc cho agent chuyên trách.
 </div>
 {% endif %}
 

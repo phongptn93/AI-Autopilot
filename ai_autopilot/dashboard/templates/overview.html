@@ -41,6 +41,36 @@
     {% endif %}
 </div>
 
+{% if health and (health.errors or health.warns) %}
+<div class="hl {{ 'bad' if health.errors else 'warn' }}">
+  <div class="hl-hd">
+    <b>🩺 Sức khoẻ hệ thống</b>
+    <span>{% if health.errors %}<span class="hl-n bad">{{ health.errors }} lỗi</span>{% endif %}
+      {% if health.warns %}<span class="hl-n warn">{{ health.warns }} cảnh báo</span>{% endif %}
+      <span class="hl-n okn">{{ health.ok }} ổn</span></span>
+    <a href="/dashboard/setup?step=done">Xem &amp; sửa từng mục →</a>
+  </div>
+  <ul>
+    {% for f in health.top %}
+    <li class="{{ f.level }}"><span>{{ '⛔' if f.level == 'error' else '⚠️' }}</span><div><b>{{ f.title }}</b>{% if f.fix %}<small>{{ f.fix }}</small>{% endif %}</div></li>
+    {% endfor %}
+  </ul>
+</div>
+<style>
+  .hl { border:1px solid var(--border); border-radius:12px; background:var(--bg-card); padding:12px 16px; margin:0 0 16px; }
+  .hl.bad { border-color:rgba(240,82,106,.5); } .hl.warn { border-color:rgba(245,166,35,.5); }
+  .hl-hd { display:flex; gap:8px 14px; align-items:center; flex-wrap:wrap; }
+  .hl-hd > span { display:flex; gap:6px; flex:1; }
+  .hl-hd a { color:var(--accent-hover); font-size:12.5px; font-weight:600; text-decoration:none; white-space:nowrap; }
+  .hl-n { font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:6px; border:1px solid var(--border); }
+  .hl-n.bad { color:var(--red); border-color:rgba(240,82,106,.45); } .hl-n.warn { color:var(--amber); border-color:rgba(245,166,35,.5); }
+  .hl-n.okn { color:var(--green); border-color:rgba(46,204,113,.4); }
+  .hl ul { list-style:none; margin:10px 0 0; padding:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr)); gap:8px; }
+  .hl li { display:flex; gap:8px; font-size:12.5px; padding:8px 10px; border-radius:9px; background:var(--bg-input); min-width:0; }
+  .hl li b { display:block; font-weight:600; overflow-wrap:anywhere; } .hl li small { color:var(--text-dim); overflow-wrap:anywhere; }
+</style>
+{% endif %}
+
 <div class="stats-grid">
     <div class="stat-card">
         <div class="stat-card-header"><span class="stat-card-label">Tổng số run</span><div class="stat-card-icon">📊</div></div>

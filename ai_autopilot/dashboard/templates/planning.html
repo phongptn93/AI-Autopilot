@@ -56,7 +56,7 @@
                placeholder="vd: a@x.com, b@x.com"/>
       </div>
       <div class="pf-field" style="min-width:150px">
-        <span>State</span>
+        <span>Trạng thái (state)</span>
         <select class="pf-input" name="state">
           <option value="all" {% if state_filter=='all' %}selected{% endif %}>Mọi state</option>
           {% for s in states %}<option value="{{ s }}" {% if state_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
@@ -69,7 +69,7 @@
           {% for t in wtypes %}<option value="{{ t }}" {% if type_filter==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
         </select>
       </div>
-      <button class="btn-primary" type="submit">Tải</button>
+      <button class="btn-primary" type="submit">Tải danh sách</button>
     </div>
   </form>
 </div>
@@ -126,7 +126,7 @@
     {% else %}
     <div class="empty-state">
       Không có work item nào cho {% if assignee %}<b>{{ assignee }}</b>{% else %}<b>cả team</b>{% endif %}{% if state_filter!='all' %} · state “{{ state_filter }}”{% endif %}{% if type_filter!='all' %} · type “{{ type_filter }}”{% endif %}.
-      {% if assignee %}<div class="dim" style="margin-top:6px">Xoá trống ô Người được giao rồi bấm <b>Tải</b> để xem việc của cả team.</div>
+      {% if assignee %}<div class="dim" style="margin-top:6px">Xoá trống ô Người được giao rồi bấm <b>Tải danh sách</b> để xem việc của cả team.</div>
       {% else %}<div class="dim" style="margin-top:6px">Đổi state / loại ở bộ lọc phía trên, hoặc xem toàn bộ việc trên <a class="table-link" href="/dashboard/board">Board</a>.</div>{% endif %}
     </div>
     {% endif %}

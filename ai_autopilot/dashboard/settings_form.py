@@ -997,6 +997,12 @@ _BASE_FIELDS: tuple[Field, ...] = (
           placeholder="AIAutopilot.BA = ba"),
     Field("sso_redirect_base", "Địa chỉ public của dashboard", "text", "👥 Người dùng & SSO",
           "Khi chạy sau proxy/HTTPS, vd https://autopilot.congty.vn. Trống = lấy từ trình duyệt."),
+    Field("health_tls_certfile", "Chứng chỉ HTTPS (file .pem)", "text", "👥 Người dùng & SSO",
+          "Để dashboard tự chạy HTTPS — Entra ID chỉ nhận Redirect URI https://. Đường dẫn file "
+          "cert trên máy này. Khởi động lại để áp dụng. Trống = HTTP (vd đã có proxy lo HTTPS).",
+          placeholder="C:/autopilot/tls/cert.pem"),
+    Field("health_tls_keyfile", "Khoá riêng HTTPS (file .pem)", "text", "👥 Người dùng & SSO",
+          "Khoá đi kèm chứng chỉ ở trên.", placeholder="C:/autopilot/tls/key.pem"),
     Field("auth_breakglass", "Cho đăng nhập khẩn cấp bằng mật khẩu chung", "bool",
           "👥 Người dùng & SSO",
           "Mật khẩu dashboard cũ vẫn vào được với quyền Admin khi SSO hỏng. Nên bật; mỗi lần "
@@ -1248,6 +1254,7 @@ NEVER_SHARED = frozenset({
     # sharing them would pin a teammate to folders that do not exist on their machine.
     "workspace_map", "workspaces",
     "database_url", "health_host", "health_port", "plugins_directory",
+    "health_tls_certfile", "health_tls_keyfile",
     "dashboard_allow_remote_without_auth",
     "trigger_tag",          # per-host default tag
     # ── fleet wiring: identity, never shared ──
@@ -1700,7 +1707,7 @@ def save_to_yaml(path: Path, updates: Mapping[str, Any]) -> None:
 # for "put this configuration back the way it came", not "make this host unreachable".
 RESET_KEEP = frozenset({
     "dashboard_auth_password_hash", "dashboard_auth_token", "config_export_password",
-    "database_url", "health_host", "health_port",
+    "database_url", "health_host", "health_port", "health_tls_certfile", "health_tls_keyfile",
     "fleet_role", "fleet_central_url", "fleet_token", "fleet_worker_name",
     "fleet_local_keys", "fleet_sync_interval_minutes", "fleet_offline_after_minutes",
     "fleet_accept_commands", "fleet_accept_remote_update",

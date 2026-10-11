@@ -441,14 +441,4 @@
   setTimeout(tick, 3000);
 })();
 </script>
-<script>
-document.querySelectorAll('.sc-cmd code[data-copy]').forEach(function (el) {
-  el.addEventListener('click', function () {
-    if (!navigator.clipboard) return;
-    navigator.clipboard.writeText(el.dataset.copy).then(function () {
-      var t = el.textContent; el.textContent = '✓ đã copy'; setTimeout(function () { el.textContent = t; }, 900);
-    });
-  });
-});
-</script>
 {% endblock %}

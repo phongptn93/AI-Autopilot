@@ -40,12 +40,38 @@
   .mx thead th { position:sticky; top:0; background:var(--bg-card); vertical-align:bottom; }
   .mx thead input { width:140px; font-size:12px; text-align:center; }
   .mx .grp td { text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim); background:var(--bg-input); }
-  .steps { margin:0; padding-left:20px; font-size:13px; line-height:1.8; color:var(--text-muted); }
-  .steps b, .steps code { color:var(--text); }
-  .copy { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:10px 0; }
-  .copy code { font-family:var(--mono); font-size:12.5px; padding:6px 10px; border-radius:8px; background:var(--bg-input); border:1px solid var(--border); overflow-wrap:anywhere; }
-  .kv { display:grid; grid-template-columns:180px 1fr; gap:6px 14px; font-size:13px; margin:12px 0; }
-  .kv span:nth-child(odd) { color:var(--text-dim); }
+  .sso-state { margin-left:auto; font-size:12px; font-weight:600; color:var(--text-dim); }
+  .sso-state.ready { color:var(--amber); } .sso-state.on { color:var(--green); }
+  .sso-warn { border:1px solid rgba(245,158,11,.35); background:rgba(245,158,11,.07); border-radius:10px;
+              padding:12px 14px; font-size:13px; line-height:1.65; color:var(--text-muted); margin-bottom:16px; }
+  .sso-warn b { color:var(--amber); } .sso-warn ul { margin:6px 0 6px 18px; padding:0; }
+  .sso-warn ul b, .sso-warn code { color:var(--text); }
+  .sso-tip { display:block; font-size:12px; color:var(--text-dim); }
+  .us-body a { color:var(--accent-hover); }
+  .us-body code { font-family:var(--mono); font-size:12px; color:var(--text); background:var(--bg-input);
+                  border:1px solid var(--border-soft); border-radius:5px; padding:0 5px; }
+  .sso-steps { list-style:none; counter-reset:st; margin:0; padding:0; display:grid; gap:8px; }
+  .sso-steps li { counter-increment:st; display:flex; gap:12px; padding:12px 14px; border:1px solid var(--border-soft);
+                  border-radius:10px; background:var(--bg-input); }
+  .sso-steps li::before { content:counter(st); flex:none; width:24px; height:24px; border-radius:50%; display:grid;
+                  place-items:center; font-size:12px; font-weight:700; color:#fff; background:var(--accent); }
+  .sso-steps li > div { flex:1; min-width:0; }
+  .sso-steps b { font-size:13.5px; color:var(--text); }
+  .sso-steps p { margin:3px 0 0; font-size:12.5px; line-height:1.65; color:var(--text-muted); }
+  .sso-tag { font-size:10.5px; font-weight:600; color:var(--text-dim); border:1px solid var(--border); border-radius:999px;
+             padding:1px 8px; margin-left:6px; vertical-align:2px; }
+  .sso-copy { display:flex; gap:8px; margin-top:8px; }
+  .sso-copy input { flex:1; min-width:0; font-family:var(--mono); font-size:12.5px; color:var(--text);
+                    background:var(--bg-card); border:1px solid var(--border); border-radius:8px; padding:0 10px; min-height:28px; }
+  .sso-status { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(300px,100%), 1fr)); gap:6px 18px;
+                margin:16px 0 14px; font-size:13px; }
+  .sso-status div { display:flex; gap:8px; align-items:baseline; min-width:0; }
+  .sso-status i { font-style:normal; width:14px; flex:none; text-align:center; }
+  .sso-status span { color:var(--text-dim); width:118px; flex:none; }
+  .sso-status b { font-weight:500; overflow-wrap:anywhere; }
+  .sso-status .ok i { color:var(--green); } .sso-status .miss i, .sso-status .miss b { color:var(--amber); }
+  .sso-status .info i { color:var(--text-dim); }
+  .sso-actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding-top:14px; border-top:1px solid var(--border-soft); }
   .note { font-size:12px; color:var(--text-dim); margin-top:8px; line-height:1.6; }
 </style>
 
@@ -163,32 +189,72 @@
 </form>
 
 <div class="us-card" id="sso">
-  <div class="us-hd"><h3>🏢 Cấu hình SSO — Microsoft Entra ID</h3><span>Làm một lần, khoảng 5 phút, cần quyền tạo App registration.</span></div>
+  {% set have_ids = cfg.sso_tenant_id and cfg.sso_client_id and cfg.sso_client_secret %}
+  {% set insecure = redirect_uri.startswith('http://') and '//localhost' not in redirect_uri and '//127.0.0.1' not in redirect_uri %}
+  <div class="us-hd">
+    <h3>🏢 Cấu hình SSO — Microsoft Entra ID</h3>
+    <span>Làm một lần, khoảng 5 phút, cần quyền tạo App registration.</span>
+    <b class="sso-state {{ 'on' if mode == 'sso' else ('ready' if have_ids else '') }}">
+      {{ '● Đang bật' if mode == 'sso' else ('● Đủ thông tin — chưa bật' if have_ids else '○ Chưa cấu hình') }}</b>
+  </div>
   <div class="us-body">
-    <ol class="steps">
-      <li><b>Entra admin center → App registrations → New registration.</b> Tên: <code>AI Autopilot</code>; loại tài khoản: <i>Accounts in this organizational directory only</i>.</li>
-      <li><b>Redirect URI</b> (loại <i>Web</i>) — dán đúng địa chỉ này:
-        <div class="copy"><code id="ruri">{{ redirect_uri }}</code><button class="btn-ghost" type="button" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('ruri').textContent).then(()=>this.textContent='✓ đã copy')">Copy</button></div>
-        Chạy sau proxy/HTTPS thì đặt <i>Địa chỉ public của dashboard</i> trong Thiết lập trước.</li>
-      <li><b>Certificates &amp; secrets → New client secret</b> → copy cột <i>Value</i>.</li>
-      <li>(Tuỳ chọn) <b>App roles</b>: tạo <code>AIAutopilot.Admin</code>, <code>AIAutopilot.BA</code>… rồi gán người/nhóm ở <i>Enterprise applications</i>; hoặc bật <b>groups claim</b> ở <i>Token configuration</i>.</li>
-      <li>Điền <b>Tenant ID, Client ID, Client secret</b> và bảng map vai ở <a href="/dashboard/settings#sec-users" style="color:var(--accent-hover)">Thiết lập → 👥 Người dùng &amp; SSO</a>, bấm <b>Thử kết nối</b>, rồi bật <b>SSO công ty</b> ở trên.</li>
-    </ol>
-    <div class="kv">
-      <span>Nhà cung cấp</span><span>{{ cfg.sso_provider }}</span>
-      <span>Tenant ID</span><span>{{ cfg.sso_tenant_id or '— chưa đặt' }}</span>
-      <span>Client ID</span><span>{{ cfg.sso_client_id or '— chưa đặt' }}</span>
-      <span>Client secret</span><span>{{ '●●●● đã đặt' if cfg.sso_client_secret else '— chưa đặt' }}</span>
-      <span>Domain cho phép</span><span>{{ cfg.sso_allowed_domains|join(', ') or 'mọi email trong tenant' }}</span>
-      <span>Người mới</span><span>{{ 'chờ Admin duyệt' if cfg.sso_new_users != 'viewer' else 'vào ngay với quyền xem' }}</span>
-      <span>Map vai</span><span>{% for k, v in cfg.sso_role_map.items() %}<code>{{ k }}</code> → {{ v }}{{ ', ' if not loop.last }}{% else %}— chưa có (Admin gán vai thủ công){% endfor %}</span>
+    {% if insecure %}
+    <div class="sso-warn">
+      <b>⚠ Cần HTTPS trước.</b> Azure chỉ nhận Redirect URI bắt đầu bằng <code>https://</code> (hoặc <code>http://localhost</code>),
+      còn dashboard đang chạy <code>http://</code>. Chọn một cách:
+      <ul>
+        <li><b>Cho dashboard tự chạy HTTPS:</b> điền <i>Chứng chỉ HTTPS</i> và <i>Khoá riêng HTTPS</i> (file .pem) ở
+          <a href="/dashboard/settings#sec-users">Thiết lập → 👥 Người dùng &amp; SSO</a>, rồi khởi động lại.</li>
+        <li><b>Đặt sau reverse proxy</b> (IIS, Caddy, nginx…) đã có HTTPS, rồi điền <i>Địa chỉ public của dashboard</i>
+          (vd <code>https://autopilot.congty.vn</code>) ở cùng chỗ đó.</li>
+      </ul>
+      <span class="sso-tip">Máy ảo Azure chưa có tên miền? Vào VM → <i>Public IP → Configuration → DNS name label</i>, Azure cấp miễn phí
+        dạng <code>ten.&lt;region&gt;.cloudapp.azure.com</code> để xin chứng chỉ.</span>
     </div>
-    <form method="post" action="/dashboard/users/sso-test" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button class="btn-ghost" type="submit">🧪 Thử kết nối SSO</button>
+    {% endif %}
+
+    <ol class="sso-steps">
+      <li><div><b>Tạo ứng dụng</b>
+        <p>Entra admin center → <i>App registrations</i> → <i>New registration</i>. Tên <code>AI Autopilot</code>,
+          loại tài khoản <i>Accounts in this organizational directory only</i>.</p></div></li>
+      <li><div><b>Redirect URI</b> <span class="sso-tag">loại Web</span>
+        <p>Dán đúng địa chỉ này vào ô Redirect URI:</p>
+        <div class="sso-copy">
+          <input id="ruri" readonly value="{{ redirect_uri }}" aria-label="Redirect URI" onclick="this.select()">
+          <button class="btn-soft btn-sm" type="button" data-copy-from="#ruri">📋 Copy</button>
+        </div></div></li>
+      <li><div><b>Tạo client secret</b>
+        <p><i>Certificates &amp; secrets</i> → <i>New client secret</i> → copy cột <b>Value</b> (chỉ hiện một lần).</p></div></li>
+      <li><div><b>Gán vai tự động</b> <span class="sso-tag">tuỳ chọn</span>
+        <p><i>App roles</i>: tạo <code>AIAutopilot.Admin</code>, <code>AIAutopilot.BA</code>… rồi gán người/nhóm ở
+          <i>Enterprise applications</i>. Hoặc bật <i>groups claim</i> ở <i>Token configuration</i>.</p></div></li>
+      <li><div><b>Điền vào AI Autopilot</b>
+        <p>Lấy <i>Directory (tenant) ID</i> và <i>Application (client) ID</i> ở trang <i>Overview</i> của app, điền cùng
+          client secret ở <a href="/dashboard/settings#sec-users">Thiết lập → 👥 Người dùng &amp; SSO</a>.
+          Bấm <b>Thử kết nối</b> bên dưới, rồi bật <b>SSO công ty</b> ở đầu trang.</p></div></li>
+    </ol>
+
+    <div class="sso-status">
+      {% set rows = [
+        ('Tenant ID', cfg.sso_tenant_id, cfg.sso_tenant_id or 'chưa đặt'),
+        ('Client ID', cfg.sso_client_id, cfg.sso_client_id or 'chưa đặt'),
+        ('Client secret', cfg.sso_client_secret, 'đã đặt' if cfg.sso_client_secret else 'chưa đặt'),
+        ('HTTPS', not insecure, 'có' if not insecure else 'chưa — xem cảnh báo ở trên')] %}
+      {% for label, ok, val in rows %}
+      <div class="{{ 'ok' if ok else 'miss' }}"><i>{{ '✓' if ok else '○' }}</i><span>{{ label }}</span><b>{{ val }}</b></div>
+      {% endfor %}
+      <div class="info"><i>·</i><span>Domain cho phép</span><b>{{ cfg.sso_allowed_domains|join(', ') or 'mọi email trong tenant' }}</b></div>
+      <div class="info"><i>·</i><span>Người mới</span><b>{{ 'chờ Admin duyệt' if cfg.sso_new_users != 'viewer' else 'vào ngay với quyền xem' }}</b></div>
+      <div class="info"><i>·</i><span>Map vai</span><b>{% for k, v in cfg.sso_role_map.items() %}<code>{{ k }}</code> → {{ v }}{{ ', ' if not loop.last }}{% else %}chưa có — Admin gán vai thủ công{% endfor %}</b></div>
+    </div>
+
+    <form class="sso-actions" method="post" action="/dashboard/users/sso-test">
+      <button class="btn-save" type="submit" {% if not have_ids %}disabled title="Điền Tenant ID, Client ID, Client secret trước"{% endif %}>🧪 Thử kết nối SSO</button>
+      <a class="btn-ghost" href="/dashboard/settings#sec-users">⚙ Mở thiết lập SSO</a>
       {% if sso_test %}{% set ok = sso_test.startswith('ok|') %}
       <span class="tagl {{ 'green' if ok else 'red' }}">{{ '✓' if ok else '✕' }} {{ sso_test.split('|', 1)[1] }}</span>{% endif %}
     </form>
-    <div class="note">🔒 Mọi đăng nhập, duyệt tài khoản, đổi vai đều ghi vào <a href="/dashboard/audit" style="color:var(--accent-hover)">Nhật ký thao tác</a> với email người thực hiện.</div>
+    <div class="note">🔒 Mọi đăng nhập, duyệt tài khoản, đổi vai đều ghi vào <a href="/dashboard/audit">Nhật ký thao tác</a> với email người thực hiện.</div>
   </div>
 </div>
 {% endblock %}

@@ -437,7 +437,7 @@
 (function () {
   var c = document.getElementById('tr-copy');
   if (c) c.addEventListener('click', function () {
-    if (navigator.clipboard) navigator.clipboard.writeText(location.origin + location.pathname)
+    window.apCopy(location.origin + location.pathname)
       .then(function () { c.textContent = '✓ Đã copy'; setTimeout(function () { c.textContent = '🔗 Copy link'; }, 1200); });
   });
   var sm = document.getElementById('tr-summary'), more = document.getElementById('tr-more');

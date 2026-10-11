@@ -2075,6 +2075,11 @@ class Settings(BaseSettings):
     # ── Web / health ──
     health_port: int = 5080
     health_host: str = "0.0.0.0"
+    # Serve the dashboard over HTTPS directly (PEM files). Needed for SSO: Entra ID only
+    # accepts https:// redirect URIs (or http://localhost). Blank = plain HTTP, e.g.
+    # behind a reverse proxy that terminates TLS.
+    health_tls_certfile: str = ""
+    health_tls_keyfile: str = ""
     # Base URL the dashboard is reachable at FROM A READER'S BROWSER, e.g.
     # "https://autopilot.example.com". Used to link chat messages back to the pages
     # that hold the detail. Blank = no link is offered: a Teams digest is read on a

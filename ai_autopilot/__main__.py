@@ -160,12 +160,16 @@ def main() -> None:
 
     _ensure_dashboard_password()
     config = load_settings()
+    tls = {}
+    if config.health_tls_certfile and config.health_tls_keyfile:
+        tls = {"ssl_certfile": config.health_tls_certfile, "ssl_keyfile": config.health_tls_keyfile}
     uvicorn.run(
         "ai_autopilot.app:create_app",
         factory=True,
         host=config.health_host,
         port=config.health_port,
         log_config=None,  # logging is configured inside create_app()
+        **tls,
     )
 
 

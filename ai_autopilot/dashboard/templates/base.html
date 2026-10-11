@@ -587,6 +587,38 @@
   </div>
 </div>
 <script>
+// Copy that also works on plain http:// — navigator.clipboard only exists on HTTPS and
+// localhost, and the dashboard is often opened as http://<server-ip>:5080.
+(function () {
+  function fallback(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok ? Promise.resolve() : Promise.reject(new Error('copy blocked'));
+  }
+  window.apCopy = function (text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text).catch(function () { return fallback(text); });
+    return fallback(text);
+  };
+  // [data-copy="literal text"] or [data-copy-from="#id"] (copies that field's value)
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest && e.target.closest('[data-copy], [data-copy-from]');
+    if (!el) return;
+    var src = el.dataset.copyFrom && document.querySelector(el.dataset.copyFrom);
+    var text = src ? (src.value != null ? src.value : src.textContent) : el.dataset.copy;
+    if (!text) return;
+    var label = el.dataset.copyLabel || el.textContent;
+    el.dataset.copyLabel = label;
+    window.apCopy(text.trim()).then(function () { el.textContent = '✓ Đã copy'; },
+                                    function () { el.textContent = '⚠ Bấm Ctrl+C'; if (src && src.select) src.select(); })
+      .then(function () { setTimeout(function () { el.textContent = label; }, 1400); });
+  });
+})();
+</script>
+<script>
 // Navigation progress: a click on a same-site link (or a form submit) starts the bar;
 // the next page replaces this one, so it never needs stopping — except when the user
 // comes back via the history cache, or the navigation is cancelled.

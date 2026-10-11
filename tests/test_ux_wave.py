@@ -154,3 +154,25 @@ def test_login_styles_every_field_type():
     tpl = Path(__file__).resolve().parents[1] / "ai_autopilot" / "dashboard" / "templates"
     login = (tpl / "login.html").read_text(encoding="utf-8")
     assert "input[type=email]" in login and "-webkit-autofill" in login
+
+
+def test_sso_card_warns_about_http_and_copy_works_without_clipboard_api(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch, dashboard_public_url="http://20.195.11.39:5080")
+    with TestClient(app) as client:
+        page = client.get("/dashboard/users").text
+        assert "http://20.195.11.39:5080/dashboard/auth/sso/callback" in page
+        assert "Cần HTTPS trước" in page and 'data-copy-from="#ruri"' in page
+        assert "window.apCopy" in page and "execCommand('copy')" in page
+    app = _app(tmp_path, monkeypatch, dashboard_public_url="https://autopilot.acme.vn")
+    with TestClient(app) as client:
+        page = client.get("/dashboard/users").text
+        assert "https://autopilot.acme.vn/dashboard/auth/sso/callback" in page
+        assert "Cần HTTPS trước" not in page
+
+
+def test_no_page_calls_the_clipboard_api_directly():
+    from pathlib import Path
+    tpl = Path(__file__).resolve().parents[1] / "ai_autopilot" / "dashboard" / "templates"
+    for f in tpl.glob("*.html"):
+        if f.name != "base.html":
+            assert "navigator.clipboard" not in f.read_text(encoding="utf-8"), f.name

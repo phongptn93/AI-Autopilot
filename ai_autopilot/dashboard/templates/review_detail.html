@@ -565,14 +565,7 @@
     picks.forEach(function (p) { if (p.closest('tr').style.display !== 'none') p.checked = all.checked; }); count();
   });
 
-  // copy file:line
-  document.querySelectorAll('[data-copy]').forEach(function (el) {
-    el.addEventListener('click', function () {
-      if (navigator.clipboard) navigator.clipboard.writeText(el.dataset.copy).then(function () {
-        var old = el.textContent; el.textContent = '✓ đã copy'; setTimeout(function () { el.textContent = old; }, 900);
-      });
-    });
-  });
+  // copy file:line — handled by [data-copy] in base.html
 
   // follow-up suggestions + Ctrl+Enter
   var ta = document.getElementById('ask-q');

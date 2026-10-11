@@ -63,7 +63,8 @@ async def _shared_password_ok(cfg, password: str) -> bool:
 
 
 def redirect_uri(request: Request, cfg) -> str:
-    base = (cfg.sso_redirect_base or "").strip().rstrip("/") or str(request.base_url).rstrip("/")
+    base = ((cfg.sso_redirect_base or "").strip() or (cfg.dashboard_public_url or "").strip()
+            or str(request.base_url)).rstrip("/")
     return f"{base}/dashboard/auth/sso/callback"
 
 

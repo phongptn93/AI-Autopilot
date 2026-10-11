@@ -34,11 +34,6 @@
   .ib-age { color:var(--text-dim); font-size:12px; white-space:nowrap; flex:none; min-width:84px; text-align:right; }
   .ib-acts { display:flex; gap:6px; flex:none; flex-wrap:wrap; justify-content:flex-end; }
   .ib-acts form { margin:0; }
-  .ib-btn { font-size:12px; padding:4px 10px; border-radius:7px; border:1px solid var(--border);
-    background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit; white-space:nowrap;
-    text-decoration:none; display:inline-block; line-height:1.5; }
-  .ib-btn:hover { border-color:var(--accent); }
-  .ib-btn.primary { border-color:var(--accent); background:var(--accent-bg); color:var(--accent-hover); }
   .ib-empty { background:var(--bg-card); border:1px solid var(--border); border-radius:12px;
     padding:26px 22px; color:var(--text-muted); font-size:14px; }
   .ib-empty a { color:var(--accent-hover); }
@@ -122,10 +117,10 @@
         {% if a.method == 'post' %}
         <form method="post" action="{{ a.href }}"{% if a.confirm %} onsubmit="return confirm({{ a.confirm | tojson | forceescape }})"{% endif %}>
           {% for k, v in a.fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
-          <button type="submit" class="ib-btn {{ 'primary' if loop.first }}"{% if a.title %} title="{{ a.title }}"{% endif %}>{{ a.label }}</button>
+          <button type="submit" class="btn-sm {{ 'btn-soft' if loop.first else 'btn-ghost' }}"{% if a.title %} title="{{ a.title }}"{% endif %}>{{ a.label }}</button>
         </form>
         {% else %}
-        <a class="ib-btn" href="{{ a.href }}"{% if a.external %} target="_blank" rel="noopener"{% endif %}{% if a.title %} title="{{ a.title }}"{% endif %}>{{ a.label }}</a>
+        <a class="btn-ghost btn-sm" href="{{ a.href }}"{% if a.external %} target="_blank" rel="noopener"{% endif %}{% if a.title %} title="{{ a.title }}"{% endif %}>{{ a.label }}</a>
         {% endif %}
       {% endfor %}
       </div>

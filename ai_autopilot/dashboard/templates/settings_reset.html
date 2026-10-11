@@ -29,9 +29,6 @@
   .rs-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 18px;
            border-top:1px solid var(--border);background:var(--bg)}
   .rs-spacer{flex:1}
-  .rs-go{background:var(--red,#e5484d);color:#fff;border:none;border-radius:8px;
-         padding:8px 17px;font-size:13.5px;font-weight:650;font-family:inherit;cursor:pointer}
-  .rs-go:hover{filter:brightness(1.08)}
   .rs-keep{font-size:12.3px;color:var(--text-muted);line-height:1.7}
   .rs-keep code{font-family:var(--mono);font-size:11px;background:var(--bg-input);
                 padding:1px 6px;border-radius:5px}
@@ -92,7 +89,7 @@
     <form method="post" action="/dashboard/settings/reset" style="margin:0"
           onsubmit="return confirm('Đặt lại {{ rows|length }} thiết lập về mặc định? Giá trị hiện tại không khôi phục được — tải bản sao lưu ở Thiết lập → Xuất / Nhập nếu cần.')">
       <input type="hidden" name="section" value="{{ section }}">
-      <button type="submit" class="rs-go">↩ Đặt lại {{ rows|length }} thiết lập</button>
+      <button type="submit" class="btn-danger">↩ Đặt lại {{ rows|length }} thiết lập</button>
     </form>
     {% endif %}
   </div>

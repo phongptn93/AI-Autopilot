@@ -113,7 +113,6 @@
   .krow.off:hover > * { opacity:.8; }
   .noinj { color:var(--text-dim); font-size:11px; white-space:nowrap; cursor:help;
     border:1px solid var(--border); border-radius:999px; padding:1px 7px; }
-  .x-btn { background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-size:14px; }
   .x-btn:hover { color:var(--red,#e5484d); }
   .repo-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .off-note { border:1px solid var(--amber,#f5a524); border-radius:10px; padding:12px 14px;
@@ -313,7 +312,7 @@
         <span class="kact">
           <form method="post" action="/dashboard/learning/offer/accept" style="display:inline">
             <input type="hidden" name="text" value="{{ text }}"/>
-            <button class="btn-ghost" type="submit" style="font-size:12px;padding:3px 9px">Nhận</button>
+            <button class="btn-ghost btn-sm" type="submit">Nhận</button>
           </form>
           <form method="post" action="/dashboard/learning/offer/decline" style="display:inline"
                 onsubmit="return confirm('Từ chối vĩnh viễn dòng này? Nó sẽ không được gửi lại.');">
@@ -366,7 +365,7 @@
           {% if row.status != 'approved' %}
           <form method="post" action="/dashboard/learning/pool/approved" style="display:inline">
             <input type="hidden" name="key" value="{{ row.key }}"/>
-            <button class="btn-ghost" type="submit" style="font-size:12px;padding:3px 9px">Duyệt</button>
+            <button class="btn-ghost btn-sm" type="submit">Duyệt</button>
           </form>
           {% endif %}
           {% if row.status != 'rejected' %}
@@ -461,8 +460,6 @@
   .kh-advice { display:flex; flex-direction:column; gap:8px; font-size:13px; line-height:1.55; }
   .krow.stale { opacity:.55; }
   .rep.hot { background:rgba(210,153,34,.18); color:#d29922; }
-  .promote-btn { font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid #d29922; color:#d29922;
-    background:none; cursor:pointer; font-family:inherit; white-space:nowrap; }
 </style>
 {% endif %}
 
@@ -531,17 +528,17 @@
           <form method="post" action="/dashboard/learning/promote" style="display:inline">
             <input type="hidden" name="repo" value="{{ repo }}"/>
             <input type="hidden" name="text" value="{{ lesson.text }}"/>
-            <button class="promote-btn" type="submit"
+            <button class="btn-soft btn-sm" type="submit"
                     title="Lặp lại {{ lesson.count }} lần dù đã có trong skill — đưa vào file rule mà mọi run đều nạp">📌 Nâng thành quy tắc</button>
           </form>
           {% endif %}
-          <button class="x-btn" type="button" title="Sửa câu chữ, giữ nguyên ngày và số lần"
+          <button class="btn-quiet x-btn" type="button" title="Sửa câu chữ, giữ nguyên ngày và số lần"
                   onclick="document.getElementById('e{{ rid }}').classList.toggle('on')">✎</button>
           <form method="post" action="/dashboard/learning/delete" style="display:inline"
                 onsubmit="return confirm('Xoá dòng này?');">
             <input type="hidden" name="repo" value="{{ repo }}"/>
             <input type="hidden" name="text" value="{{ lesson.text }}"/>
-            <button class="x-btn" type="submit" title="Sai hoặc lỗi thời — xoá để nó thôi vào brief">✕</button>
+            <button class="btn-quiet x-btn" type="submit" title="Sai hoặc lỗi thời — xoá để nó thôi vào brief">✕</button>
           </form>
         </span>
       </div>

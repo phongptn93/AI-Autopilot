@@ -29,13 +29,6 @@
   .fl-wide { grid-column:1 / -1; }
   .fl-foot { display:flex; align-items:center; gap:14px; flex-wrap:wrap;
              padding:10px 16px; border-top:1px solid var(--border,#23232b); font-size:12px; color:var(--text-muted); }
-  .fl-sync { background:var(--accent,#6366f1); color:#fff; border:none; border-radius:8px;
-             padding:7px 15px; font-size:13px; font-weight:600; font-family:inherit; cursor:pointer; }
-  .fl-sync:hover { filter:brightness(1.1); }
-  .fl-sync:disabled { opacity:.45; cursor:not-allowed; filter:none; }
-  .fl-btn { background:var(--bg,#0d0d12); color:var(--text); border:1px solid var(--border,#23232b); border-radius:8px;
-            padding:7px 14px; font-size:13px; font-family:inherit; cursor:pointer; }
-  .fl-btn:hover { border-color:var(--accent,#6366f1); }
   .fl-cmd { font-size:12.5px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; color:var(--text-dim); }
 </style>
 
@@ -76,7 +69,7 @@
     </div>
     <form method="post" action="/dashboard/fleet/local" style="margin:0">
       <input type="hidden" name="action" value="resume">
-      <button type="submit" class="fl-sync">▶ Tiếp tục nhận việc</button>
+      <button type="submit" class="btn-save">▶ Tiếp tục nhận việc</button>
     </form>
   </div>
 </div>
@@ -188,7 +181,7 @@
 
   <div class="fl-foot">
     <form method="post" action="/dashboard/fleet/sync" style="margin:0">
-      <button type="submit" class="fl-sync"
+      <button type="submit" class="btn-save"
               {% if not central_url or not token_set or not agent_live %}disabled
               title="Cần URL trung tâm, token chung và fleet agent đang chạy"{% endif %}>
         ⟳ Đồng bộ ngay
@@ -200,7 +193,7 @@
     <form method="post" action="/dashboard/fleet/local" style="margin:0"
           onsubmit="return confirm('Tạm dừng nhận việc mới trên máy này? Run đang chạy vẫn chạy tiếp.')">
       <input type="hidden" name="action" value="pause">
-      <button type="submit" class="fl-btn">⏸ Tạm dừng máy này</button>
+      <button type="submit" class="btn-ghost btn-sm">⏸ Tạm dừng máy này</button>
     </form>
     {% endif %}
   </div>

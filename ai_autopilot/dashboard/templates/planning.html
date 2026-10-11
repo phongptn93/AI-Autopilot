@@ -7,13 +7,6 @@
   .pf-field > span { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); }
   /* Looks come from base.html; this only matches the filter bar's button height. */
   .pf-input { min-height:36px; }
-  .btn-primary { background:var(--accent); color:#fff; border:none; border-radius:var(--radius-sm);
-    padding:9px 16px; font-size:13px; font-weight:650; cursor:pointer; font-family:inherit; min-height:36px; }
-  .btn-primary:hover { background:var(--accent-hover); }
-  .btn-go { background:var(--green); color:#04140b; border:none; border-radius:var(--radius-sm);
-    padding:9px 18px; font-size:13.5px; font-weight:700; cursor:pointer; font-family:inherit; min-height:36px; }
-  .btn-go:hover { filter:brightness(1.08); }
-  .btn-go:disabled { opacity:.45; cursor:not-allowed; filter:none; }
   .flash { padding:11px 16px; border-radius:var(--radius-sm); font-size:13px; margin-bottom:18px; font-weight:600; }
   .flash-ok { background:var(--green-bg); color:var(--green); }
   .flash-info { background:var(--blue-bg); color:var(--blue); }
@@ -121,7 +114,7 @@
         <label id="lbl-sch"><input type="radio" name="mode" value="schedule" onchange="_mode()"> Hẹn giờ</label>
       </div>
       <input class="pf-input" id="whenat" type="datetime-local" name="when_at" value="{{ default_when }}" disabled aria-label="Thời điểm chạy" style="min-width:200px"/>
-      <button class="btn-go" type="submit" formaction="/dashboard/planning/start">▶ Bắt đầu</button>
+      <button class="btn-success" type="submit" formaction="/dashboard/planning/start">▶ Bắt đầu</button>
     </div>
     {% else %}
     <div class="empty-state">

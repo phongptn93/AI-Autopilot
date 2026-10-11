@@ -77,7 +77,6 @@
   .chal > summary::-webkit-details-marker { display:none; }
   .chal textarea { width:100%; box-sizing:border-box; margin:6px 0; padding:7px 9px; border-radius:8px; font:inherit; font-size:12.5px;
     background:var(--bg-input); color:var(--text); border:1px solid var(--border); resize:vertical; }
-  .chal button { font-size:12px; }
   .chal-h { margin-top:7px; padding:6px 8px; border-radius:7px; font-size:11.5px; line-height:1.5; background:var(--bg-input);
     border:1px solid var(--border); color:var(--text-muted); }
   .chal-h.accept { border-color:rgba(46,204,113,.4); } .chal-h.reject { border-color:rgba(240,82,106,.35); }
@@ -367,7 +366,7 @@
           <details class="chal">
             <summary>⚖️ Phản biện</summary>
             <textarea name="note_{{ loop.index0 }}" rows="2" maxlength="1500" placeholder="Vì sao kết luận này sai? vd: đã có ở nhánh development, MachineServicingController — copy-machine"></textarea>
-            <button class="btn-ghost" type="submit" name="challenge_row" value="{{ loop.index0 }}"
+            <button class="btn-ghost btn-sm" type="submit" name="challenge_row" value="{{ loop.index0 }}"
                     formaction="/dashboard/review/{{ row.id }}/challenge" formnovalidate>Gửi để kiểm lại</button>
           </details></td>
       </tr>

@@ -31,14 +31,16 @@
     });
     async function refresh() {
       if (document.hidden) return;
+      stamp.classList.add('ap-stamp');
       try {
         const r = await fetch('/dashboard/activity/{{ item_id }}/partial');
         if (r.ok) {
           term.textContent = await r.text();
+          stamp.classList.remove('stale');
           stamp.textContent = 'vừa cập nhật';
           if (pinned) term.scrollTop = term.scrollHeight;
-        }
-      } catch (e) { /* keep last view */ }
+        } else { stamp.classList.add('stale'); stamp.textContent = '⚠ chưa cập nhật được'; }
+      } catch (e) { stamp.classList.add('stale'); stamp.textContent = '⚠ mất kết nối — sẽ thử lại'; }
     }
     term.scrollTop = term.scrollHeight;
     setInterval(refresh, 3000);

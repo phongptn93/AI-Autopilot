@@ -39,9 +39,6 @@
   .wz-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
            padding:13px 20px;border-top:1px solid var(--border);background:var(--bg)}
   .wz-spacer{flex:1}
-  .wz-next{background:var(--accent,#6366f1);color:#fff;border:none;border-radius:8px;
-           padding:8px 18px;font-size:13.5px;font-weight:650;font-family:inherit;cursor:pointer}
-  .wz-next:hover{filter:brightness(1.1)}
   .wz-skip{color:var(--text-dim);font-size:12.5px;text-decoration:none}
   .wz-skip:hover{color:var(--text)}
   /* Role picker: three cards, because this one answer decides every later step. */
@@ -65,9 +62,6 @@
   .wz-next-steps ol{margin:6px 0 0 18px;padding:0;font-size:13px;line-height:1.9}
   .wz-next-steps code{font-size:11.5px}
   .wz-check{margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .wz-test{background:var(--bg);border:1px solid var(--border);color:var(--text);
-           border-radius:8px;padding:6px 13px;font-size:12.5px;font-family:inherit;cursor:pointer}
-  .wz-test:hover{border-color:var(--accent)}
   .wz-res{font-size:12.5px}
   .wz-res.ok{color:#3fb950}
   .wz-res.bad{color:var(--red,#e5484d)}
@@ -81,11 +75,10 @@
   .wz-find .tx span{color:var(--text-muted);font-size:12.3px}
   .pw-wrap{display:flex;align-items:center;gap:6px}
   .pw-wrap input{flex:1;min-width:0}
-  .pw-btn{flex:none;background:var(--bg);border:1px solid var(--border);border-radius:7px;
-          padding:5px 8px;font-size:13px;cursor:pointer;line-height:1}
   .wz-note{font-size:12.5px;color:var(--text-muted);background:var(--bg);
            border:1px solid var(--border);border-radius:9px;padding:11px 14px;margin-bottom:14px}
   .wz-note code{font-family:var(--mono);font-size:11.5px}
+  .pw-btn{flex:none}
 </style>
 
 <div class="wz-head"><h2 class="page-title">{{ page_title("setup") }}</h2></div>
@@ -137,7 +130,7 @@
     </div>
     <div class="wz-foot">
       <span class="wz-spacer"></span>
-      <button type="submit" class="wz-next">Tiếp tục →</button>
+      <button type="submit" class="btn-save">Tiếp tục →</button>
     </div>
   </div>
 </form>
@@ -180,7 +173,7 @@
   <div class="wz-foot">
     <a class="wz-skip" href="/dashboard/setup?step=role">← Xem lại từ đầu</a>
     <span class="wz-spacer"></span>
-    <a class="wz-next" style="text-decoration:none" href="/dashboard">Vào dashboard →</a>
+    <a class="btn-save" href="/dashboard">Vào dashboard →</a>
   </div>
 </div>
 
@@ -281,9 +274,9 @@
         <span class="pw-wrap">
           <input type="password" id="{{ f.key }}" name="{{ f.key }}" autocomplete="off"
                  placeholder="{{ '•••••• đã đặt — để trống là giữ nguyên' if secrets_set.get(f.key) else 'chưa đặt' }}">
-          <button type="button" class="pw-btn" data-pw-toggle="{{ f.key }}" title="Hiện / ẩn">👁</button>
+          <button type="button" class="btn-ghost btn-sm pw-btn" data-pw-toggle="{{ f.key }}" title="Hiện / ẩn">👁</button>
           {% if f.generate %}
-          <button type="button" class="pw-btn" data-pw-gen="{{ f.key }}"
+          <button type="button" class="btn-ghost btn-sm pw-btn" data-pw-gen="{{ f.key }}"
                   title="Sinh token ngẫu nhiên và hiện ra để copy">✨</button>
           {% endif %}
         </span>
@@ -335,7 +328,7 @@
       {# Verify before moving on. A wizard that only collects text and lets the failure
          surface hours later, inside a real run, is a form with extra clicks. #}
       <div class="wz-check">
-        <button type="button" class="wz-test" data-check="{{ check }}">
+        <button type="button" class="btn-ghost btn-sm wz-test" data-check="{{ check }}">
           {{ '🔌 Lưu & kiểm tra kết nối ADO' if check == 'ado' else '🛰 Lưu & kiểm tra trung tâm' }}
         </button>
         <span class="wz-res" id="check-result">Lưu những gì vừa nhập rồi kiểm tra thật.</span>
@@ -346,7 +339,7 @@
       {% if prev_id %}<a class="wz-skip" href="/dashboard/setup?step={{ prev_id }}&src={{ source }}">← Quay lại</a>{% endif %}
       <span class="wz-spacer"></span>
       <a class="wz-skip" href="/dashboard/setup?step={{ next_id }}&src={{ source }}">Bỏ qua bước này</a>
-      <button type="submit" class="wz-next">Lưu và tiếp tục →</button>
+      <button type="submit" class="btn-save">Lưu và tiếp tục →</button>
     </div>
   </div>
 </form>

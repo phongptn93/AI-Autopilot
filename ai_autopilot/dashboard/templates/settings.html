@@ -56,7 +56,6 @@
   .up-new{color:var(--amber);border:1px solid rgba(245,166,35,.45);background:rgba(245,166,35,.12)}
   .up-ok{color:var(--green);border:1px solid rgba(46,204,113,.45);background:var(--green-bg)}
   .up-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-left:auto}
-  .up-actions .btn-ghost:disabled{opacity:.45;cursor:not-allowed}
   /* ~200 settings across 24 sections: scrolling for one is the slowest way to find it. */
   .set-find{display:flex;flex-direction:column;gap:3px}
   .set-find input{background:var(--bg-input);color:var(--text);border:1px solid var(--border);
@@ -218,8 +217,6 @@
   .file-pick:hover span{border-color:var(--accent);color:var(--text)}
   .file-pick input:focus-visible+span{outline:2px solid var(--accent);outline-offset:1px}
   .file-pick.has-file span{border-style:solid;color:var(--text)}
-  .danger-btn{color:var(--red);border-color:rgba(240,82,106,.35)}
-  .danger-btn:hover{background:var(--red-bg)}
   .is-disabled{opacity:.42;pointer-events:none}
   .wh-probe-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
   .wh-probe{margin-top:10px;border:1px solid var(--border);border-radius:9px;overflow:hidden}
@@ -247,10 +244,6 @@
              text-transform:none;letter-spacing:0;white-space:nowrap}
   .own-central{background:rgba(99,102,241,.14);color:var(--accent-hover,#818cf8)}
   .own-claimed{background:rgba(46,160,67,.16);color:#3fb950}
-  .own-btn{background:none;border:1px solid var(--border);color:var(--text-dim);
-           border-radius:20px;padding:2px 9px;font-size:11px;font-family:inherit;
-           cursor:pointer;margin-left:6px;white-space:nowrap}
-  .own-btn:hover{border-color:var(--accent);color:var(--text)}
   .na-badge{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:20px;margin-left:6px;
             background:var(--bg);border:1px solid var(--border);color:var(--text-dim);
             text-transform:none;letter-spacing:0;white-space:nowrap}
@@ -264,9 +257,6 @@
   .card-header{flex-wrap:wrap}
   .pw-wrap{display:flex;align-items:center;gap:6px}
   .pw-wrap input{flex:1;min-width:0}
-  .pw-btn{flex:none;background:var(--bg);border:1px solid var(--border);border-radius:7px;
-          padding:5px 8px;font-size:13px;cursor:pointer;line-height:1}
-  .pw-btn:hover{border-color:var(--accent)}
   .fleet-block{padding:14px 20px 4px;border-bottom:1px solid var(--border-soft)}
   .fleet-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 18px;margin-top:8px}
   .fleet-col b{font-size:12px}
@@ -291,6 +281,7 @@
   .more-states > summary { cursor: pointer; font-size: 12px; color: var(--accent-hover); list-style: none; }
   .more-states > summary::-webkit-details-marker { display: none; }
   .more-states[open] > summary { margin-bottom: 6px; }
+  .pw-btn{flex:none}
 </style>
 
 <div class="set-head">
@@ -370,7 +361,7 @@
           </label>
           <input type="password" name="password" placeholder="Mật khẩu của tệp" required
                  autocomplete="off">
-          <button type="submit" class="btn-ghost danger-btn">🔓 Ghi đè</button>
+          <button type="submit" class="btn-danger">🔓 Ghi đè</button>
         </form>
       </div>
     </section>
@@ -801,11 +792,11 @@
              the noise: it repeated a fact the group already stated and left no room for
              the label itself. What stays is the one thing that is actionable. #}
           {% if managed %}
-          <button type="submit" form="claim-form" name="key" value="{{ f.key }}" class="own-btn"
+          <button type="submit" form="claim-form" name="key" value="{{ f.key }}" class="btn-ghost btn-sm"
                   title="Trung tâm đang phát giá trị này. Bấm để máy này tự quyết — trung tâm sẽ không ghi đè nữa.">🖥 Giành quyền</button>
           {% elif owner == 'claimed' %}
           <span class="own-badge own-claimed" title="Máy này đã giành quyền — trung tâm không ghi đè.">🖥 máy này tự giữ</span>
-          <button type="submit" form="release-form" name="key" value="{{ f.key }}" class="own-btn"
+          <button type="submit" form="release-form" name="key" value="{{ f.key }}" class="btn-ghost btn-sm"
                   title="Trả về cho trung tâm — lần đồng bộ tới sẽ nhận lại giá trị chung">🛰 Trả lại</button>
           {% endif %}
           {# Not shown next to a central-managed field: "chỉ khi X đang bật" answers a
@@ -838,11 +829,11 @@
             <span class="pw-wrap">
               <input type="password" id="{{ f.key }}" name="{{ f.key }}"
                      placeholder="{{ '•••••• đã đặt — để trống để giữ' if secrets_set.get(f.key) else 'chưa đặt' }}" autocomplete="off" />
-              <button type="button" class="pw-btn" data-pw-toggle="{{ f.key }}"
+              <button type="button" class="btn-ghost btn-sm pw-btn" data-pw-toggle="{{ f.key }}"
                       {% if f.reveal %}data-pw-reveal="{{ f.key }}"{% endif %}
                       title="{{ 'Hiện giá trị đang lưu (để copy sang máy khác)' if f.reveal else 'Hiện / ẩn' }}">👁</button>
               {% if f.generate %}
-              <button type="button" class="pw-btn" data-pw-gen="{{ f.key }}"
+              <button type="button" class="btn-ghost btn-sm pw-btn" data-pw-gen="{{ f.key }}"
                       title="Sinh token ngẫu nhiên (32 byte) và hiện ra để copy">✨</button>
               {% endif %}
             </span>

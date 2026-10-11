@@ -50,7 +50,6 @@
   .sc-chip input { accent-color:var(--accent); margin:0; }
   /* A disabled button must LOOK disabled: this one used to render exactly like an
      active one, so pressing it and seeing nothing happen read as "scan is broken". */
-  .btn-save:disabled, .btn-ghost:disabled { opacity:.45; cursor:not-allowed; filter:grayscale(.4); }
   .sc-pick { cursor:pointer; }
   .sc-prog { display:flex; align-items:center; gap:10px; padding:10px 18px; font-size:12.5px; border-top:1px solid var(--border-soft); background:var(--accent-bg); }
   .sc-prog .spin { width:12px; height:12px; border:2px solid var(--accent); border-right-color:transparent; border-radius:50%; animation:sc-spin .9s linear infinite; }
@@ -85,7 +84,6 @@
   .sev.fail { background:var(--red-bg); color:var(--red); border:1px solid rgba(240,82,106,.45); }
   .sc-act { white-space:nowrap; }
   .sc-act form { display:inline; }
-  .sc-act button { font-size:11px; padding:3px 8px; }
   .sc-act details { display:inline-block; }
   .sc-act details summary { cursor:pointer; font-size:11px; color:var(--accent-hover); list-style:none; }
   .sc-act details div { margin-top:6px; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--bg-input); white-space:normal; min-width:260px; }
@@ -145,7 +143,7 @@
 <div class="sc-grid">
   <div class="sc-card">
     <div class="sc-hd"><h3>▶ Quét ngay</h3><span>{{ repo_label }}</span>
-      <div class="r">{% if feed_url %}<a class="btn-ghost" href="{{ feed_url }}" style="font-size:11px">xem trực tiếp</a>{% endif %}</div>
+      <div class="r">{% if feed_url %}<a class="btn-ghost btn-sm" href="{{ feed_url }}">xem trực tiếp</a>{% endif %}</div>
     </div>
     <form method="post" action="/dashboard/security/rescan">
       <div class="sc-form">
@@ -346,7 +344,7 @@
       <td>{% if f.cwe %}<a class="sc-tag" href="https://cwe.mitre.org/data/definitions/{{ f.cwe[4:] }}.html" target="_blank" rel="noopener">{{ f.cwe }}</a>{% endif %}{% if f.owasp %}<span class="sc-tag">{{ f.owasp }}</span>{% endif %}</td>
       <td class="sc-where">{{ f.times_seen }}× · {{ f.last_seen.strftime('%m-%d %H:%M') if f.last_seen else '' }}
           {% if f.ado_bug_id %}<div>{% if item_link %}<a class="table-link" href="{{ item_link }}/{{ f.ado_bug_id }}" target="_blank" rel="noopener">Bug #{{ f.ado_bug_id }}</a>{% else %}Bug #{{ f.ado_bug_id }}{% endif %}</div>{% endif %}</td>
-      <td class="sc-act">
+      <td class="sc-act actions-sm">
         {% if f.status == 'open' %}
         <details><summary>Bỏ qua</summary><div>
           <form method="post" action="/dashboard/security/{{ f.id }}/suppress">

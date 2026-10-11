@@ -21,6 +21,9 @@ _DDL = re.compile(r"(?:INTEGER|TEXT|FLOAT|REAL|BOOLEAN|DATETIME|VARCHAR\(\d{1,4}
                   r"(?: NOT NULL)?(?: DEFAULT (?:\d+|'[A-Za-z0-9_ ]*'))?")
 
 _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("reviews", "snapshot_json", "TEXT"),
+    ("reviews", "workspace", "VARCHAR(100)"),
+    ("reviews", "tree_path", "VARCHAR(1000)"),
     ("executions", "trigger_tag", "VARCHAR(100)"),
     ("executions", "pr_urls", "TEXT"),
     ("executions", "lessons_injected", "INTEGER"),

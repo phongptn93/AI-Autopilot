@@ -1614,12 +1614,16 @@ def check_security_scan(config: Settings) -> list[Finding]:
             ))
     import os
 
-    if sec.ai_enabled and not os.getenv("ANTHROPIC_API_KEY", "").strip():
+    # The AI pass runs through the Agent SDK (this machine's Claude Code and its
+    # login), like every task run — an API key is optional. Only warn when NEITHER is
+    # usable; the CLI check itself already explains a missing/unusable claude.
+    if sec.ai_enabled and not os.getenv("ANTHROPIC_API_KEY", "").strip() and any(
+            f.level in (ERROR, WARN) for f in check_claude_cli(config)):
         out.append(Finding(
-            WARN, "Security scan AI pass has no API key",
-            f"ai_mode is '{sec.ai_mode}' but no ANTHROPIC_API_KEY is set; the model "
-            "pass is skipped with an error status on every run.",
-            "Set the key, or security_scan.ai_mode: off.",
+            WARN, "Security scan AI pass has no usable Claude Code",
+            f"ai_mode is '{sec.ai_mode}' but there is neither a usable `claude` "
+            "executable nor an ANTHROPIC_API_KEY; the model pass will fail.",
+            "Install Claude Code (and log in), or security_scan.ai_mode: off.",
         ))
     if (sec.fail_on or "").lower() not in ("critical", "high", "medium", "low", "info"):
         out.append(Finding(

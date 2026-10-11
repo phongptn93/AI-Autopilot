@@ -49,6 +49,13 @@
   .st { display:inline-block; font-weight:700; font-size:11.5px; padding:1px 8px; border-radius:6px; }
   .st.green { background:var(--green-bg); color:var(--green); } .st.amber { background:var(--amber-bg); color:var(--amber); }
   .st.red { background:var(--red-bg); color:var(--red); } .st.muted { background:var(--soft); color:var(--muted); }
+  .st.blue { background:#e7f1ff; color:#1f5fbf; }
+  .side { display:block; font-size:10.5px; color:var(--muted); margin-top:3px; }
+  .dq { display:grid; grid-template-columns:90px 1fr; gap:16px; align-items:center; margin-bottom:10px; }
+  .dq .n { font-size:30px; font-weight:800; text-align:center; } .dq .n small { font-size:12px; color:var(--muted); }
+  .kindtag { font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:6px; background:var(--soft); border:1px solid var(--line); white-space:nowrap; }
+  .snap { font-size:11.5px; color:var(--muted); margin:-12px 0 20px; }
+  .snap code { font-size:11px; }
   code, .ev { font-family:Consolas, "Cascadia Mono", monospace; font-size:11px; overflow-wrap:anywhere; }
   .ev { color:var(--accent); display:block; margin-top:3px; }
   .q { margin:0 0 12px; padding:10px 14px; border-left:3px solid var(--accent); background:var(--soft); border-radius:0 8px 8px 0; page-break-inside:avoid; }
@@ -93,6 +100,9 @@
     {% if row.focus %}<span>Trọng tâm: <b>{{ row.focus }}</b></span>{% endif %}
   </div>
 
+  {% if snapshot %}
+  <div class="snap">📦 Bản code đã rà: {% for r in snapshot %}<b>{{ r.repo }}</b> <code>{{ r.upstream if r.source == 'upstream' else (r.branch or 'HEAD') }}@{{ r.commit }}</code> ({{ r.commit_date }}){% if r.source != 'upstream' and r.behind %} — <b style="color:var(--amber)">thư mục cũ, chậm {{ r.behind }} commit</b>{% endif %}{{ ' · ' if not loop.last }}{% endfor %}</div>
+  {% endif %}
   <div class="exec">
     <div class="score">
       {% if score is not none %}<div class="n" style="color:var(--{{ tone }})">{{ score|round|int }}%</div>
@@ -135,12 +145,32 @@
     {% for t in result.traces %}{% set s = statuses.get(t.status, ('❔', t.status, 'muted')) %}
     <tr><td><span class="ref">{{ t.ref }}</span><span class="kind">{{ t.kind }}</span></td>
       <td>{{ t.spec or '—' }}</td>
-      <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span></td>
+      <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span>{% if t.side %}<span class="side">→ {{ sides.get(t.side, t.side) }}</span>{% endif %}</td>
       <td>{{ t.code or '—' }}
         {% if not external %}{% for e in t.evidence %}{% if e.where %}<span class="ev" title="{{ e.where }}">{{ e.where|short_path }}</span>{% endif %}{% endfor %}{% endif %}</td>
       <td>{{ t.fix or '—' }}</td></tr>
     {% endfor %}
   </table>
+  {% endif %}
+
+  {% set dq = result.doc_quality %}
+  {% if dq and (dq.issues or dq.verdict) %}
+  <h2>Đánh giá chất lượng tài liệu</h2>
+  <div class="dq">
+    <div class="n">{% if dq.score is not none %}{{ dq.score }}<small>/100</small>{% else %}—{% endif %}</div>
+    <div><b>{{ dq.verdict }}</b>
+      {% if dq.strengths %}<div style="color:var(--muted);font-size:12.5px;margin-top:4px">👍 {{ dq.strengths|join(' · ') }}</div>{% endif %}</div>
+  </div>
+  {% if dq.issues %}
+  <table class="mx">
+    <colgroup><col style="width:12%"><col style="width:16%"><col style="width:38%"><col style="width:34%"></colgroup>
+    <tr><th>Mục</th><th>Loại</th><th>Vấn đề</th><th>Gợi ý viết lại</th></tr>
+    {% for i in dq.issues %}
+    <tr><td><span class="ref">{{ i.ref or '—' }}</span></td><td><span class="kindtag">{{ doc_issues.get(i.kind, i.kind) }}</span></td>
+      <td>{{ i.text }}</td><td>{{ i.suggestion or '—' }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
   {% endif %}
 
   {% if result.questions %}

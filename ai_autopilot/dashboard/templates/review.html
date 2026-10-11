@@ -50,6 +50,22 @@
     background:var(--bg-input); color:var(--text-muted); cursor:pointer; }
   .rv-sug:hover { border-color:var(--accent); color:var(--text); }
 
+  .rv-ws { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
+  .rv-ws select { height:38px; padding:0 10px; border-radius:9px; font:inherit; font-size:13px; background:var(--bg-input);
+    color:var(--text); border:1px solid var(--border); max-width:220px; }
+  .wsb { display:inline-block; font-family:inherit; font-size:10.5px; font-weight:700; padding:0 6px; border-radius:5px;
+    background:var(--accent-bg); color:var(--accent-hover); margin-right:4px; }
+  .rv-fresh { border:1px solid var(--border); background:var(--bg-card); border-radius:12px; padding:12px 16px; margin:0 0 16px; }
+  .rv-fresh.warn { border-color:rgba(245,166,35,.55); background:rgba(245,166,35,.06); }
+  .rv-fresh-hd { display:flex; gap:6px 12px; flex-wrap:wrap; align-items:baseline; font-size:12.5px; color:var(--text-muted); }
+  .rv-fresh-hd b { color:var(--text); font-size:13.5px; }
+  .rv-fresh code, .rv-repo code { font-family:var(--mono); font-size:11.5px; }
+  .rv-repos { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:8px; margin-top:10px; }
+  .rv-repo { display:flex; flex-direction:column; gap:2px; padding:8px 11px; border:1px solid var(--border); border-radius:9px;
+    background:var(--bg-input); font-size:12px; color:var(--text-dim); min-width:0; }
+  .rv-repo b { font-size:13px; color:var(--text); }
+  .rv-repo.lag { border-color:rgba(245,166,35,.5); }
+  .rv-repo .lagt { color:var(--amber); } .rv-repo .okt { color:var(--green); }
   .rv-safe { display:flex; gap:6px 12px; flex-wrap:wrap; align-items:baseline; padding:11px 16px; border-radius:10px;
     margin:0 0 16px; font-size:12.5px; line-height:1.6; color:var(--text-muted); }
   .rv-safe.on { background:rgba(46,204,113,.07); border:1px solid rgba(46,204,113,.35); }
@@ -104,6 +120,13 @@
 </style>
 
 {% macro score_tone(s) %}{{ 'green' if s >= 80 else ('amber' if s >= 50 else 'red') }}{% endmacro %}
+{# Which workspace a review reads. Hidden when there is only one to choose. #}
+{% macro ws_select() %}{% if review_workspaces|length > 1 %}
+  <label class="rv-ws" title="Workspace (thư mục + repo) mà phiên rà sẽ đọc">🗂
+    <select name="workspace" aria-label="Workspace">
+      {% for w in review_workspaces %}<option value="{{ w.id }}" {{ 'selected' if current_ws and w.id == current_ws.id }}>{{ w.label }}</option>{% endfor %}
+    </select></label>
+{% elif review_workspaces %}<input type="hidden" name="workspace" value="{{ review_workspaces[0].id }}">{% endif %}{% endmacro %}
 
 <div class="page-header">
   <h2 class="page-title">{{ page_title("review") }}</h2>
@@ -120,6 +143,28 @@
   {% else %}Kết quả có thể chứa đoạn code — bật lại ở <a href="/dashboard/settings">Thiết lập → 🧭 Phòng rà soát</a>.{% endif %}
   Tài liệu tải lên chỉ lưu dạng chữ trong CSDL của máy này, không đưa vào workspace.</span>
 </div>
+
+{% if repos %}
+{% set stale = repos|selectattr('behind', 'gt', 0)|list %}
+<div class="rv-fresh {{ 'warn' if stale and code_source != 'latest' else '' }}">
+  <div class="rv-fresh-hd">
+    <b>📦 Code sẽ được rà{% if current_ws and review_workspaces|length > 1 %} · {{ current_ws.label }}{% endif %}</b>
+    <span>{% if code_source == 'latest' %}Mỗi phiên <b>lấy bản mới nhất từ origin</b> và rà trên bản tách riêng — thư mục làm việc của bạn không bị đụng.
+      {% else %}Rà đúng thư mục trên đĩa (<code>review_code_source: checkout</code>).{% endif %}
+      <a href="/dashboard/settings#sec-review" style="color:var(--accent-hover)">Đổi</a></span>
+  </div>
+  <div class="rv-repos">
+    {% for r in repos %}
+    <div class="rv-repo {{ 'lag' if r.behind else '' }}">
+      <b>{{ r.repo }}</b>
+      <span><code>{{ r.branch or '—' }}</code> · {{ r.commit }} · {{ r.commit_date }}</span>
+      {% if r.behind %}<span class="lagt">thư mục trên máy chậm {{ r.behind }} commit so với <code>{{ r.upstream }}</code>{% if code_source == 'latest' %} — phiên rà vẫn dùng bản mới nhất{% endif %}</span>
+      {% elif r.upstream %}<span class="okt">khớp {{ r.upstream }} (lần fetch gần nhất)</span>{% else %}<span class="okt">không có upstream</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 <div class="rv-kpis">
   <div class="rv-kpi"><div class="k">📄 Spec workspace đã rà</div>
@@ -162,6 +207,7 @@
         {% endfor %}
       </div>
       <div class="rv-go">
+        {{ ws_select() }}
         <input type="text" name="item_id" placeholder="# work item (tuỳ chọn)" inputmode="numeric" style="flex:0 0 170px;min-width:0">
         <input type="text" name="focus" placeholder="(Tuỳ chọn) tập trung vào: vd 'quy trình duyệt', 'báo cáo tồn kho'…" maxlength="300">
         <button class="btn-save" type="submit">🧭 Rà soát tài liệu</button>
@@ -176,9 +222,9 @@
       <div class="rv-list" id="spec-list">
         {% for r in spec_rows %}{% set s = r.spec %}{% set last = r.last %}
         <label class="rv-opt" data-text="{{ (s.title ~ ' ' ~ s.rel ~ ' ' ~ s.item_id)|lower }}">
-          <input type="radio" name="target" value="{{ s.rel }}" {{ 'checked' if loop.first }} required>
+          <input type="radio" name="target" value="{{ r.ws }}|{{ s.rel }}" {{ 'checked' if loop.first }} required>
           <b title="{{ s.title }}">{{ s.title }}{% if s.item_id %} <span style="color:var(--text-dim);font-weight:500">· #{{ s.item_id }}</span>{% endif %}</b>
-          <span class="p" title="{{ s.rel }}">{{ s.rel }}</span>
+          <span class="p" title="{{ s.rel }}">{% if review_workspaces|length > 1 %}<span class="wsb">{{ r.ws_label }}</span> {% endif %}{{ s.rel }}</span>
           <span class="last">{% if last and last.score is not none %}
             <b class="tone-{{ score_tone(last.score) }}">{{ last.score|round|int }}%</b>{{ ago(last.finished_at) }}
             {% else %}chưa rà{% endif %}</span>
@@ -222,6 +268,7 @@
         {% endfor %}
       </div>
       <div class="rv-go">
+        {{ ws_select() }}
         <input type="text" name="focus" placeholder="(Tuỳ chọn) chỉ kiểm finding mức cao, hoặc một module…" maxlength="300">
         <button class="btn-save" type="submit">🛡️ Kiểm chứng với code hiện tại</button>
       </div>
@@ -246,7 +293,7 @@
         <button type="button" class="rv-sug" data-q="{{ q }}">{{ q }}</button>
         {% endfor %}
       </div>
-      <div class="rv-go"><button class="btn-save" type="submit">💬 Hỏi</button>
+      <div class="rv-go">{{ ws_select() }}<button class="btn-save" type="submit">💬 Hỏi</button>
         <span style="font-size:12px;color:var(--text-dim)">Có thể hỏi tiếp trong cùng phiên — agent nhớ phần code đã đọc.</span></div>
     </form>
   </div>

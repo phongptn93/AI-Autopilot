@@ -2000,6 +2000,14 @@ class Settings(BaseSettings):
     # every review result and answer — they are shared with BAs and customers. On by
     # default; turning it off only affects what is shown, never the read-only tools.
     review_safe_mode: bool = True
+    # Which code a review reads. "latest" (default): fetch each repo and read its
+    # upstream tip through a throwaway worktree, so a stale local checkout cannot make
+    # shipped features look missing. "checkout": the workspace as it sits on disk.
+    review_code_source: str = "latest"
+    # A work item "Queued" for longer than this is checked against the tracker; one
+    # that no longer qualifies is settled (Done / Needs human) instead of being listed
+    # as "Sắp chạy" forever.
+    queue_stale_minutes: int = 30
     # Verify after the fact that every PR the autopilot opens names its work item, and
     # attach the link when it does not. An instruction in the brief is advice a model
     # can drop on a long run; this is the check that notices.

@@ -363,6 +363,9 @@ class AdoPollerService:
         # A hold a person released on the board (the hold tag removed in ADO) must
         # release here too — otherwise the item sits in "Needs human" forever.
         await self._reconcile_released_holds()
+        # "Queued" rows nothing will ever pick up (see _reconcile_stale_queue).
+        with contextlib.suppress(Exception):
+            await self._reconcile_stale_queue()
 
         # Reopen items a human dragged back to a trigger state (clears skip tags),
         # so the pending query below picks them up again this cycle.
@@ -1309,6 +1312,69 @@ class AdoPollerService:
                 self._log.info("/ai command queued (item in flight)", id=item.id)
                 continue
             await self._dispatch_with_comment(item, instruction)
+
+    async def _reconcile_stale_queue(self) -> None:
+        """Settle "Queued" rows that no poll will ever pick up.
+
+        A row becomes Queued in several places — most often at startup, when every run
+        that was In progress is re-queued "to resume". Nothing re-dispatches it; the
+        normal poll picks it up only if the item still qualifies. When the work was
+        finished some other way meanwhile (a person merged the PR, the item moved on),
+        it never qualifies again, and the Now page listed it under "Sắp chạy" for
+        months.
+
+        So a Queued row older than ``queue_stale_minutes`` is checked against the
+        tracker with the SAME rules the trigger check explains: still eligible → left
+        alone; finished (outcome tag, or a closed state) → Done; anything else →
+        Needs human, with the reason, because then a person has to decide.
+        """
+        c, cfg = self._c, self._config
+        now = datetime.now(UTC)
+        last = getattr(self, "_queue_reconciled_at", None)
+        if last is not None and (now - last).total_seconds() < 600:
+            return
+        self._queue_reconciled_at = now
+        stale_after = timedelta(minutes=int(getattr(cfg, "queue_stale_minutes", 30) or 30))
+        stale = []
+        for st in await c.state_repo.all():
+            if st.state != PipelineState.QUEUED or st.work_item_id in self._inflight \
+                    or st.work_item_id in self._live:
+                continue
+            at = st.updated_at if st.updated_at.tzinfo else st.updated_at.replace(tzinfo=UTC)
+            if now - at >= stale_after:
+                stale.append(st)
+        if not stale:
+            return
+        from ai_autopilot import trigger_check
+
+        items = {i.id: i for i in await c.ado.get_work_items_by_ids(
+            [s.work_item_id for s in stale])}
+        done_tags = {t.lower() for t in (cfg.processed_tag, cfg.review_tag) if t}
+        closed = {"done", "closed", "resolved", "removed", "completed", "released"}
+        for st in stale:
+            item = items.get(st.work_item_id)
+            if item is None:
+                await c.state_repo.set(st.work_item_id, PipelineState.DONE,
+                                       detail="Không còn trên tracker — gỡ khỏi hàng đợi.")
+                continue
+            report = trigger_check.explain(item, cfg)
+            if report.picked:
+                continue                       # genuinely up next
+            tags = {t.lower() for t in item.tags}
+            if tags & done_tags or (item.state or "").strip().lower() in closed:
+                await c.state_repo.set(item.id, PipelineState.DONE, title=item.title,
+                                       detail=f"Đã xong ngoài hàng đợi (state «{item.state}»).")
+                reason = "finished"
+            else:
+                first = next((x for x in report.checks if x.ok is False), None)
+                why = f"{first.label}: {first.detail}" if first else report.headline
+                await c.state_repo.set(
+                    item.id, PipelineState.NEEDS_HUMAN, title=item.title,
+                    detail=("Nằm trong hàng đợi nhưng không còn đủ điều kiện nhận việc — "
+                            + why)[:1900])
+                reason = "not-eligible"
+            self._log.info("stale queue entry settled", id=item.id, outcome=reason,
+                           state=item.state)
 
     async def _dispatch_with_comment(self, item: WorkItemInfo, comment: str) -> None:
         """Re-enter an autopilot-owned item to act on a fresh human comment: clear its

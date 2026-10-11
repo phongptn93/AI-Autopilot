@@ -69,11 +69,41 @@ def _owasp_link(owasp: str) -> str:
     return _OWASP_URL[key] if owasp else ""
 
 
+# Copyable install lines per missing tool, Windows first (this is where it is asked).
+# winget is not on every Windows image (LTSC has none), so a second route is listed.
+INSTALL_HINTS: dict[str, list[tuple[str, str]]] = {
+    "gitleaks": [("Windows (scoop)", "scoop install gitleaks"),
+                 ("Windows (choco)", "choco install gitleaks"),
+                 ("macOS", "brew install gitleaks"),
+                 ("Tải file .exe", "https://github.com/gitleaks/gitleaks/releases/latest")],
+    "semgrep": [("Mọi hệ điều hành (pip)", "pip install semgrep"),
+                ("macOS", "brew install semgrep")],
+    "sca": [("Trivy (khuyên dùng)", "scoop install trivy"),
+            ("Python", "pip install pip-audit")],
+    "claude": [("Windows", "irm https://claude.ai/install.ps1 | iex"),
+               ("macOS / Linux", "curl -fsSL https://claude.ai/install.sh | bash"),
+               ("Đăng nhập", "claude  (rồi /login)")],
+}
+
+
+def claude_ready(cfg) -> tuple[bool, str]:
+    """``(usable, how)`` — Claude Code on this machine, or an API key."""
+    import os
+
+    from ai_autopilot.doctor import ERROR, WARN, check_claude_cli
+
+    if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        return True, "dùng ANTHROPIC_API_KEY"
+    finding = check_claude_cli(cfg)[0]
+    if finding.level in (ERROR, WARN):
+        return False, "chưa có Claude Code dùng được — xem cách cài"
+    return True, "dùng Claude Code của máy này"
+
+
 def _readiness(cfg) -> list[dict]:
     """What this machine can actually run — shown ON the page, not only in doctor,
     because the person pressing ▶ Scan now is the one who needs to know that
     semgrep is missing and the AI pass has no key."""
-    import os
     import shutil
 
     from ai_autopilot.security_scan.tools import registry
@@ -87,15 +117,20 @@ def _readiness(cfg) -> list[dict]:
             "name": name, "ok": ok, "on": name in sec.tools,
             "note": ("luôn sẵn có" if name == "builtin" else
                      ("đã cài" if ok else "chưa cài — sẽ bỏ qua")),
+            "install": [] if ok else INSTALL_HINTS.get(name, []),
         })
-    key_ok = bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
-    rows.append({"name": "ai", "ok": key_ok or sec.ai_mode == "off", "on": sec.ai_mode != "off",
-                 "note": (f"chế độ {sec.ai_mode}"
-                          + ("" if key_ok else " — thiếu ANTHROPIC_API_KEY"))
-                 if sec.ai_mode != "off" else "tắt"})
-    rows.append({"name": "verify", "ok": cfg.use_worktrees and key_ok, "on": sec.verify_enabled,
-                 "note": ("worktree + key đã sẵn sàng" if (cfg.use_worktrees and key_ok)
-                          else "cần use_worktrees và API key")})
+    # The AI pass and verify run through the Agent SDK — i.e. this machine's Claude
+    # Code and its own login — exactly like every task run. An Anthropic API key is one
+    # way to authenticate, not a requirement, so asking for it here sent people off to
+    # create a key for something that already worked.
+    ai_ok, ai_via = claude_ready(cfg)
+    rows.append({"name": "ai", "ok": ai_ok or sec.ai_mode == "off", "on": sec.ai_mode != "off",
+                 "note": (f"chế độ {sec.ai_mode} · {ai_via}" if sec.ai_mode != "off" else "tắt"),
+                 "install": [] if ai_ok else INSTALL_HINTS["claude"]})
+    rows.append({"name": "verify", "ok": cfg.use_worktrees and ai_ok, "on": sec.verify_enabled,
+                 "note": (f"worktree + {ai_via}" if (cfg.use_worktrees and ai_ok)
+                          else ("cần bật use_worktrees" if ai_ok else ai_via)),
+                 "install": []})
     rows.append({"name": "ado bugs", "ok": bool(cfg.ado_pat) and cfg.autonomy_level != "report",
                  "on": sec.file_bugs,
                  "note": ("sẵn sàng" if cfg.ado_pat and cfg.autonomy_level != "report"

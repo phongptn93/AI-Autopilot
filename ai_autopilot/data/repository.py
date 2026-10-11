@@ -2923,11 +2923,12 @@ class ReviewRepository:
 
     async def create(self, *, kind: str, target: str, title: str, work_item_id: int = 0,
                      focus: str = "", requested_by: str = "", doc_type: str = "spec",
-                     source_text: str = "") -> int:
+                     source_text: str = "", workspace: str = "") -> int:
         row = Review(
             kind=kind[:20], target=target[:1000], title=title[:400],
             work_item_id=work_item_id or 0, focus=focus[:1000],
             doc_type=(doc_type or "spec")[:20], source_text=source_text or "",
+            workspace=(workspace or "")[:100] or None,
             requested_by=requested_by[:200], status="queued", started_at=datetime.now(UTC),
         )
         async with self._db.session() as session:
@@ -2974,7 +2975,7 @@ class ReviewRepository:
         """Rows left queued/running by a restart. Their task died with the process."""
         async with self._db.session() as session:
             res = await session.execute(
-                update(Review).where(Review.status.in_(("queued", "running"))).values(
+                update(Review).where(Review.status.in_(("queued", "preparing", "running"))).values(
                     status="failed", error="Interrupted (process restarted)",
                     finished_at=datetime.now(UTC))
             )

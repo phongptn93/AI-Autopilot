@@ -124,7 +124,7 @@ def _app(tmp_path, monkeypatch, reply=_REPLY):
                    database_url=f"sqlite+aiosqlite:///{tmp_path / 'r.db'}")
     calls = []
 
-    async def fake_agent(self, prompt, *, resume=None, turns=None):
+    async def fake_agent(self, prompt, *, resume=None, turns=None, cwd=None):
         calls.append((prompt, resume))
         text = "Câu trả lời tiếp theo `src/a.cs:1`" if resume else reply
         return SimpleNamespace(text=text, session_id="sess-1", cost_usd=0.12, is_error=False)

@@ -48,14 +48,21 @@
         label { display: block; font-size: 12px; color: var(--text-muted);
             margin-bottom: 7px; font-weight: 520; }
         .field { position: relative; }
-        input[type=password], input[type=text] {
-            width: 100%; padding: 11px 42px 11px 13px; font-size: 14px;
+        .field + label { margin-top: 16px; }
+        input[type=password], input[type=text], input[type=email] {
+            width: 100%; padding: 11px 13px; font-size: 14px;
             font-family: var(--sans); color: var(--text);
             background: var(--bg-input); border: 1px solid var(--border);
             border-radius: var(--radius-sm); outline: none;
             transition: border-color .15s, box-shadow .15s;
         }
+        .field:has(.peek) input { padding-right: 42px; }
+        input::placeholder { color: var(--text-dim); }
         input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+        /* Browser autofill paints its own light background — keep the field dark. */
+        input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus {
+            -webkit-text-fill-color: var(--text); caret-color: var(--text);
+            -webkit-box-shadow: 0 0 0 1000px var(--bg-input) inset; transition: background-color 9999s; }
         .peek {
             position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
             background: none; border: 0; cursor: pointer; padding: 7px 9px;

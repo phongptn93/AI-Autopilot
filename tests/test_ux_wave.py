@@ -147,3 +147,10 @@ def test_loading_states_progress_bar_and_skeleton(tmp_path, monkeypatch):
         page = client.get("/dashboard").text
         assert 'id="ap-progress"' in page and "window.apProgress" in page
         assert ".skel {" in page and ".ap-stamp.stale" in page
+
+
+def test_login_styles_every_field_type():
+    from pathlib import Path
+    tpl = Path(__file__).resolve().parents[1] / "ai_autopilot" / "dashboard" / "templates"
+    login = (tpl / "login.html").read_text(encoding="utf-8")
+    assert "input[type=email]" in login and "-webkit-autofill" in login

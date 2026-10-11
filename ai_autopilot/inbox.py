@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -106,6 +107,13 @@ class InboxEntry:
     at: datetime | None = None
     actions: list[InboxAction] = field(default_factory=list)
     href: str = ""          # where the title links to, if anywhere
+
+    @property
+    def work_item_id(self) -> int:
+        """The work item a row is about (titles start "#1234 —"), or 0 — so every row
+        can offer "open in Azure DevOps" next to the link into the dashboard."""
+        m = re.match(r"#(\d+)\b", self.title or "")
+        return int(m.group(1)) if m else 0
 
     @property
     def age_seconds(self) -> float | None:

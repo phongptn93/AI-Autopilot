@@ -7,7 +7,7 @@ import asyncio
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
-from ai_autopilot import activity
+from ai_autopilot import activity, cron_text
 from ai_autopilot import workspaces as workspaces_mod
 from ai_autopilot.config import ScheduledLoop, config_file_path
 from ai_autopilot.container import Container
@@ -66,6 +66,7 @@ def create_router() -> APIRouter:
                 # default workspace's repo names would name repos it cannot reach.
                 "repos": _workspace_repos(cfg.scoped_for_project(loop.project)),
                 "next_run": _next_run(scheduler, loop.name),
+                "cron_text": cron_text.describe(loop.cron) if loop.cron else "",
                 # Its own live feed — an audit is minutes of silence otherwise, and the
                 # only other place its progress appears is a log file on the server.
                 "feed": activity.loop_key(loop.name),

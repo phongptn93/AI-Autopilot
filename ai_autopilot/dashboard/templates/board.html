@@ -137,6 +137,7 @@
   .board-card.cat-be { --stripe:var(--blue); } .board-card.cat-fe { --stripe:var(--violet); }
   .board-card.cat-db { --stripe:var(--amber); } .board-card.cat-qc { --stripe:var(--green); }
   .board-card.cat-bug { --stripe:var(--red); } .board-card.cat-req { --stripe:var(--accent); }
+  .bf-date { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); }
 </style>
 
 <div class="page-header bd-top">
@@ -144,8 +145,8 @@
         <h2 class="page-title">{{ page_title("board") }}</h2>
         <p class="bd-lede">
             {% if view.key == 'pipeline' %}
-            Mọi work item autopilot đang theo dõi trong
-            <span class="mono">{{ projects | join(', ') if projects else project }}</span> — <b>{{ total }}</b> item
+            Mọi work item autopilot đang theo dõi{% if projects or project %} trong
+            <span class="mono">{{ projects | join(', ') if projects else project }}</span>{% endif %} — <b>{{ total }}</b> item
             {% else %}
             <b>{{ view.label }}</b> — <b>{{ in_view }}</b> / {{ total }} item
             {% if view.tags %}có tag <span class="mono">{{ view.tags | join(', ') }}</span>{% else %}(không lọc tag){% endif %}
@@ -155,12 +156,12 @@
     <form method="get" action="/dashboard/board" class="board-filters">
         {% if view.key != 'pipeline' %}<input type="hidden" name="view" value="{{ view.key }}"/>{% endif %}
         <input type="text" name="q" value="{{ q }}" placeholder="🔍 id hoặc tiêu đề" class="bf-input" style="width:170px"/>
-        <select name="cat" class="bf-input">
+        <select name="cat" class="bf-input" onchange="this.form.submit()" title="Loại việc">
             {% for v, lbl in [('all','Mọi loại'),('BE','BE'),('FE','FE'),('DB','DB'),('QC','QC')] %}
             <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ lbl }}</option>{% endfor %}
         </select>
-        <input type="date" name="from" value="{{ date_from }}" class="bf-input" title="Cập nhật từ ngày"/>
-        <input type="date" name="to" value="{{ date_to }}" class="bf-input" title="Cập nhật đến ngày"/>
+        <label class="bf-date"><span>Từ</span><input type="date" name="from" value="{{ date_from }}" class="bf-input" title="Cập nhật từ ngày" onchange="this.form.submit()"/></label>
+        <label class="bf-date"><span>Đến</span><input type="date" name="to" value="{{ date_to }}" class="bf-input" title="Cập nhật đến ngày" onchange="this.form.submit()"/></label>
         {% if projects and projects | length > 1 %}
         <select name="project" class="bf-input" onchange="this.form.submit()" title="Project của work item">
             <option value="all" {% if selected_project == 'all' %}selected{% endif %}>Mọi project</option>

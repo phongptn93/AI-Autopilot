@@ -1,5 +1,31 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+  table.rr { table-layout:fixed; width:100%; }
+  table.rr th { white-space:nowrap; }
+  table.rr col.c-kind { width:96px; } table.rr col.c-res { width:128px; } table.rr col.c-dur { width:96px; }
+  table.rr col.c-when { width:104px; } table.rr col.c-acts { width:236px; }
+  table.rr .badge { white-space:nowrap; }
+  table.rr tr.rr-row { cursor:pointer; }
+  table.rr tr.rr-row:hover td { background:var(--bg-hover); }
+  .rr-main { display:flex; align-items:center; gap:10px; min-width:0; }
+  .rr-id { font-family:var(--mono); font-weight:700; color:var(--accent-hover); text-decoration:none; flex:none; }
+  .rr-id:hover { text-decoration:underline; }
+  .rr-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .rr-loop { flex:none; font-size:11px; font-weight:650; padding:2px 8px; border-radius:6px; background:var(--bg-input);
+    border:1px solid var(--border); color:var(--text-muted); white-space:nowrap; }
+  .rr-when { white-space:nowrap; color:var(--text-muted); font-size:12.5px; }
+  .rr-acts { white-space:nowrap; text-align:right; }
+  .rr-acts-h { text-align:right; }
+  .rr-btn { display:inline-block; margin-left:4px; padding:3px 9px; border-radius:7px; font-size:12px; font-weight:600;
+    text-decoration:none; border:1px solid var(--border); color:var(--text-muted); background:var(--bg-input); }
+  .rr-btn:hover { border-color:var(--accent); color:var(--accent-hover); }
+  @media (max-width:900px) {
+    table.rr col.c-kind, table.rr col.c-dur { width:0; }
+    table.rr th:nth-child(2), table.rr td:nth-child(2), table.rr th:nth-child(4), table.rr td:nth-child(4) { display:none; }
+    table.rr col.c-acts { width:110px; } .rr-btn:not(:first-child) { display:none; }
+  }
+</style>
 <style>.main { max-width: none; }</style>
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px">
     <div>
@@ -49,21 +75,21 @@
         <div style="font-size:12px;color:var(--text-muted)">đang quét Azure DevOps — tải lại sau giây lát</div>
         {% elif prs.ok %}
         <div class="stat-card-value success-val">{{ prs.merged }}</div>
-        <div style="font-size:12px;color:var(--text-muted)">{{ prs.active }} open · {{ prs.abandoned }} abandoned</div>
+        <div style="font-size:12px;color:var(--text-muted)">{{ prs.active }} đang mở · {{ prs.abandoned }} đã huỷ</div>
         {% else %}
         <div class="stat-card-value" style="color:var(--amber)">?</div>
-        <div style="font-size:12px;color:var(--amber)">couldn't reach Azure DevOps — retrying next load</div>
+        <div style="font-size:12px;color:var(--amber)">chưa đọc được Azure DevOps — sẽ thử lại khi tải trang</div>
         {% endif %}
     </div>
     <div class="stat-card">
         <div class="stat-card-header"><span class="stat-card-label">Tỉ lệ merge</span><div class="stat-card-icon">🎯</div></div>
         <div class="stat-card-value" {% if not prs.ok %}style="color:var(--amber)"{% elif prs.pending %}style="color:var(--text-muted)"{% endif %}>{% if not prs.ok %}?{% elif prs.pending %}…{% elif prs.merge_rate is not none %}{{ prs.merge_rate }}%{% else %}—{% endif %}</div>
-        <div style="font-size:12px;color:var(--text-muted)">merged / (merged + abandoned)</div>
+        <div style="font-size:12px;color:var(--text-muted)">merge / (merge + huỷ)</div>
     </div>
     <div class="stat-card">
         <div class="stat-card-header"><span class="stat-card-label">Run / item</span><div class="stat-card-icon">🔁</div></div>
         <div class="stat-card-value">{{ '%.1f' % efficiency.avg_runs_per_item }}</div>
-        <div style="font-size:12px;color:var(--text-muted)">{{ efficiency.total_runs }} runs · {{ efficiency.distinct_items }} items</div>
+        <div style="font-size:12px;color:var(--text-muted)">{{ efficiency.total_runs }} lượt chạy · {{ efficiency.distinct_items }} việc</div>
     </div>
     <div class="stat-card">
         <div class="stat-card-header"><span class="stat-card-label">Spec cần cập nhật</span><div class="stat-card-icon">📐</div></div>
@@ -76,7 +102,7 @@
     <div class="stat-card">
         <div class="stat-card-header"><span class="stat-card-label">Token / PR merge</span><div class="stat-card-icon">💰</div></div>
         <div class="stat-card-value" {% if not prs.ok %}style="color:var(--amber)"{% elif prs.pending %}style="color:var(--text-muted)"{% endif %}>{% if not prs.ok %}?{% elif prs.pending %}…{% elif tokens_per_merged is not none %}{{ '{:,}'.format(tokens_per_merged) }}{% else %}—{% endif %}</div>
-        <div style="font-size:12px;color:var(--text-muted)">{{ '{:,}'.format(efficiency.total_tokens) }} tokens total{% if prs.ok and not prs.pending and not prs.merged %} · no merged PR yet{% endif %}</div>
+        <div style="font-size:12px;color:var(--text-muted)">{{ '{:,}'.format(efficiency.total_tokens) }} token tổng{% if prs.ok and not prs.pending and not prs.merged %} · chưa có PR merge{% endif %}</div>
     </div>
 </div>
 
@@ -115,23 +141,48 @@
     <div class="card-header"><h3>Run gần đây</h3><span style="font-size:13px;color:var(--text-muted)">{{ recent|length }} run mới nhất</span></div>
     <div class="card-body">
         {% if recent %}
-        <table>
-            <thead><tr><th>ID</th><th>Title</th><th>Category</th><th>Status</th><th>Duration</th><th>Started</th><th>Finished</th></tr></thead>
+        {% set ST_VI = {'Success': 'Thành công', 'Failed': 'Thất bại', 'Running': 'Đang chạy',
+                        'Pending': 'Đang chờ', 'Cancelled': 'Đã huỷ', 'Escalated': 'Cần người'} %}
+        <table class="rr">
+            <colgroup><col><col class="c-kind"><col class="c-res"><col class="c-dur"><col class="c-when"><col class="c-acts"></colgroup>
+            <thead><tr><th>Việc</th><th>Loại</th><th>Kết quả</th><th>Thời lượng</th><th>Bắt đầu</th><th class="rr-acts-h">Mở nhanh</th></tr></thead>
             <tbody>
                 {% for e in recent %}
                 {% set label, css = category_badge(e.category) %}
-                <tr>
-                    <td class="id-col">#{{ e.work_item_id }}</td>
-                    <td class="title-col">{{ e.title }}</td>
-                    <td><span class="cat-badge {{ css }}">{{ label }}</span></td>
-                    <td><span class="badge {{ status_class(e.status.value) }}"><span class="badge-dot"></span>{{ e.status.value }}</span></td>
-                    <td class="mono">{% if e.completed_at %}{{ fmt_duration(e.duration_seconds) }}{% else %}<span style="color:var(--text-muted)">running…</span>{% endif %}</td>
-                    <td>{{ e.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                    <td>{% if e.completed_at %}{{ e.completed_at.strftime('%Y-%m-%d %H:%M') }}{% else %}<span style="color:var(--text-muted)">—</span>{% endif %}</td>
+                {% set is_loop = not e.work_item_id %}
+                {% set loop_name = e.title.replace('[audit] ', '').replace('[loop] ', '') if is_loop else '' %}
+                {% set row_href = '/dashboard/reports' if is_loop else '/dashboard/task/' ~ e.work_item_id %}
+                <tr class="rr-row" data-href="{{ row_href }}">
+                    <td class="rr-main">
+                        {% if is_loop %}<span class="rr-loop" title="Lượt chạy theo lịch — không gắn work item">⏰ định kỳ</span>
+                        {% else %}<a class="rr-id" href="/dashboard/task/{{ e.work_item_id }}" title="Mở phòng task">#{{ e.work_item_id }}</a>{% endif %}
+                        <span class="rr-title" title="{{ e.title }}">{{ loop_name if is_loop else e.title }}</span>
+                    </td>
+                    <td>{% if is_loop %}<span class="cat-badge">Định kỳ</span>{% elif label and label != 'Unknown' %}<span class="cat-badge {{ css }}">{{ label }}</span>{% else %}<span style="color:var(--text-dim)">—</span>{% endif %}</td>
+                    <td><span class="badge {{ status_class(e.status.value) }}"><span class="badge-dot"></span>{{ ST_VI.get(e.status.value, e.status.value) }}</span></td>
+                    <td class="mono">{% if e.completed_at %}{{ fmt_duration(e.duration_seconds) }}{% else %}<span style="color:var(--text-muted)">đang chạy…</span>{% endif %}</td>
+                    <td class="rr-when" title="{{ e.started_at.strftime('%Y-%m-%d %H:%M') }}{% if e.completed_at %} → {{ e.completed_at.strftime('%H:%M') }}{% endif %}">{{ e.started_at.strftime('%d/%m %H:%M') }}</td>
+                    <td class="rr-acts">
+                        {% if is_loop %}<a href="/dashboard/reports" class="rr-btn">📄 Báo cáo</a>
+                        {% else %}
+                        <a href="/dashboard/task/{{ e.work_item_id }}" class="rr-btn" title="Mọi thứ về việc này: run, PR, lệch spec, nhật ký">Chi tiết</a>
+                        {% set u = ado_url(e.work_item_id) %}{% if u %}<a href="{{ u }}" class="rr-btn" target="_blank" rel="noopener" title="Mở #{{ e.work_item_id }} trên Azure DevOps">ADO ↗</a>{% endif %}
+                        {% if e.pr_url %}<a href="{{ e.pr_url }}" class="rr-btn" target="_blank" rel="noopener" title="{{ e.pr_url }}">PR ↗</a>{% endif %}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+        <script>
+        // The whole row opens the item — the buttons inside still do their own thing.
+        document.querySelectorAll('tr.rr-row').forEach(function (tr) {
+          tr.addEventListener('click', function (e) {
+            if (e.target.closest('a,button')) return;
+            if (e.ctrlKey || e.metaKey) window.open(tr.dataset.href, '_blank'); else location.href = tr.dataset.href;
+          });
+        });
+        </script>
         {% else %}
         <div class="empty-state"><p>Chưa có run nào. Gắn trigger tag cho một work item, hoặc bấm ▶ trên <a href="/dashboard/board">Board</a> — xem các bước ở <a href="/dashboard/setup?step=done">Cài đặt nhanh</a>.</p></div>
         {% endif %}

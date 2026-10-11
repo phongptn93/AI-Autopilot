@@ -1030,8 +1030,7 @@ def test_overview_says_so_when_the_pr_scan_failed(tmp_path):
             # cache the running app will actually read.
             dashboard._PR_OUTCOMES.failed = True   # a scan ran and could not reach ADO
             text = client.get("/dashboard").text
-        assert ("couldn&#39;t reach Azure DevOps" in text
-                or "couldn't reach Azure DevOps" in text)
+        assert "chưa đọc được Azure DevOps" in text
     finally:
         dashboard._PR_OUTCOMES.reset()
 

@@ -435,6 +435,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     user_auth.current_actor.reset(token)
             if "html" in (response.headers.get("content-type") or ""):
                 response.headers["Cache-Control"] = "no-store, must-revalidate"
+            _post_feedback(request, response)
             return response
         dashboard_locked = bool(config.dashboard_auth_password_hash or config.dashboard_auth_token)
         if dashboard_locked and path.startswith("/dashboard"):
@@ -468,6 +469,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers.get("content-type") or ""
         ):
             response.headers["Cache-Control"] = "no-store, must-revalidate"
+        _post_feedback(request, response)
         return response
 
     @app.get("/health")
@@ -587,6 +589,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
 
     app.include_router(create_dashboard_router())
+
+    # Dashboard errors as pages, not raw JSON: a mistyped link or a deleted run used to
+    # answer {"detail":"Not Found"}. API paths keep their JSON.
+    from starlette.exceptions import HTTPException as _StarletteHTTPException
+
+    @app.exception_handler(_StarletteHTTPException)
+    async def _dashboard_http_error(request: Request, exc: _StarletteHTTPException):
+        from fastapi.exception_handlers import http_exception_handler
+
+        if not _wants_error_page(request) or exc.status_code not in (404, 405, 410):
+            return await http_exception_handler(request, exc)
+        return _error_page(request, exc.status_code, str(exc.detail or ""))
+
+    @app.exception_handler(Exception)
+    async def _dashboard_crash(request: Request, exc: Exception):
+        log.error("dashboard page failed", path=request.url.path, error=repr(exc)[:500])
+        if not _wants_error_page(request):
+            return Response(status_code=500, content="internal error")
+        return _error_page(request, 500, f"{type(exc).__name__}: {exc}"[:1500])
     return app
 
 
@@ -632,3 +653,56 @@ def _forbidden(request, user, needed: str):
         '<p><a href="/dashboard">← Về trang chính</a></p></div></body></html>'
     )
     return Response(status_code=403, content=body, media_type="text/html; charset=utf-8")
+
+
+def _post_feedback(request, response) -> None:
+    """After a dashboard form POST that succeeded (a redirect), say so.
+
+    Most handlers redirect back to their page and many never told the person anything:
+    "Áp dụng", "Lưu loop", a dismiss — each looked identical to a click that did
+    nothing. A page with its own wording sets the flash cookie, and that wins; every
+    other successful POST gets a generic toast (read by base.html, then cleared).
+    """
+    if request.method != "POST" or not request.url.path.startswith("/dashboard"):
+        return
+    if response.status_code not in (302, 303):
+        return
+    path = request.url.path
+    if path.endswith(("/login", "/logout")) or "/auth/" in path:
+        return
+    location = response.headers.get("location") or ""
+    if "error" in location:
+        return
+    cookies = response.headers.getlist("set-cookie") if hasattr(response.headers, "getlist") else []
+    if any(c.startswith("autopilot_flash=") for c in cookies):
+        return
+    response.set_cookie("ap_toast", "saved", max_age=30, path="/dashboard", samesite="lax")
+
+
+def _wants_error_page(request) -> bool:
+    path = request.url.path
+    return (path.startswith("/dashboard") and "/api/" not in path
+            and not path.endswith((".json", ".md", "/status"))
+            and "application/json" not in (request.headers.get("accept") or ""))
+
+
+def _error_page(request, code: int, detail: str):
+    from ai_autopilot.dashboard.common import _TEMPLATES
+    from ai_autopilot.dashboard.routes._shared import _ctx
+
+    heading, message = {
+        404: ("Không tìm thấy trang này",
+              "Đường dẫn sai, hoặc thứ bạn tìm (run, báo cáo, phiên rà soát…) đã bị xoá."),
+        405: ("Thao tác không hợp lệ", "Trang này không nhận kiểu yêu cầu vừa gửi."),
+        410: ("Không còn tồn tại", "Mục này đã bị xoá."),
+        500: ("Có lỗi khi hiển thị trang",
+              "Lỗi đã được ghi vào log. Thử lại, hoặc gửi phần chi tiết bên dưới cho "
+              "người quản trị."),
+    }.get(code, ("Có lỗi", ""))
+    try:
+        ctx = _ctx(request, "", code=code, heading=heading, message=message,
+                   detail=detail if code == 500 else "")
+        return _TEMPLATES.TemplateResponse(request, "error.html", ctx, status_code=code)
+    except Exception:  # noqa: BLE001 — the error page must never itself fail
+        return Response(status_code=code, content=f"{code} — {heading}",
+                        media_type="text/plain; charset=utf-8")

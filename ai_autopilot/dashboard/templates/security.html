@@ -204,7 +204,7 @@
       {% endfor %}
     </div>
     <details class="sc-adv">
-      <summary>⚙ Cài đặt quét — áp dụng ngay <span class="sc-path" title="{{ config_file }}">· lưu vào {{ config_file }}</span></summary>
+      <summary>⚙ Cài đặt quét — áp dụng ngay <span class="sc-path">· lưu vào cấu hình của máy này</span></summary>
       <form method="post" action="/dashboard/security/settings">
         <div class="sc-form">
           <div class="sc-f"><label>Bật</label><label class="sc-chip {{ 'on' if sec.enabled else '' }}"><input type="checkbox" name="enabled" value="1" {% if sec.enabled %}checked{% endif %} onchange="this.parentNode.classList.toggle('on', this.checked)">cho phép quét</label></div>

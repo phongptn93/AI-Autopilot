@@ -38,6 +38,9 @@ def _ctx(request: Request, active: str, **extra) -> dict:
         # there is no person, so every action stays visible, as before.
         "current_user": user,
         "can": (lambda perm: user is None or user.can(perm)),
+        # "Open #id in Azure DevOps" — every work-item reference offers it next to the
+        # link into the dashboard (see _macros.html: wi_ref).
+        "ado_url": _ado_url_for(cfg),
         "workspaces": all_workspaces,
         "current_workspace": current,
         # Only worth showing a selector when there is something to choose between.
@@ -216,3 +219,10 @@ def _setup_source(request: Request, cfg) -> str:
 
 def _setup_role(cfg) -> str:
     return (cfg.fleet_role or "").strip() or "standalone"
+
+
+def _ado_url_for(cfg):
+    from ai_autopilot.dashboard.common import work_item_link_base
+
+    base = work_item_link_base(cfg) if cfg else ""
+    return lambda wid: f"{base}/{int(wid)}" if base and wid else ""

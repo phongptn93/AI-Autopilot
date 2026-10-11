@@ -252,7 +252,7 @@
             padding: 10px 16px; margin-bottom: 16px; border-radius: 10px; font-size: 13px;
             border: 1px solid rgba(210,153,34,.45); background: rgba(210,153,34,.08); color: var(--text); }
         .offline-banner span { flex: 1; min-width: 260px; }
-        .offline-banner a { color: #d29922; font-weight: 600; white-space: nowrap; text-decoration: none; }
+        .offline-banner a { color: var(--amber, #d29922); font-weight: 600; white-space: nowrap; text-decoration: none; }
         /* Long page introductions fold to two lines (see script at the end of body). */
         .lede-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .lede-more { background: none; border: none; color: var(--accent-hover); font-size: 12px;
@@ -275,6 +275,25 @@
         .nav-badge[hidden] { display: none; }
 
         /* ── Quick find (Ctrl+K / ⌘K / "/") ── */
+        /* ── Global feedback: a toast after every save, a busy state while it runs ── */
+        .ap-toast { position: fixed; right: 20px; bottom: 20px; z-index: 120; display: flex; gap: 10px; align-items: center;
+                    padding: 11px 16px; border-radius: 11px; background: var(--bg-elev); border: 1px solid rgba(46,204,113,.5);
+                    color: var(--text); font-size: 13.5px; box-shadow: 0 12px 30px rgba(0,0,0,.35);
+                    transform: translateY(12px); opacity: 0; transition: opacity .2s, transform .2s; max-width: calc(100vw - 40px); }
+        .ap-toast.show { transform: none; opacity: 1; }
+        .ap-toast button { background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 15px; padding: 0 2px; }
+        button.is-busy, input[type=submit].is-busy { opacity: .7; cursor: progress; }
+        button.is-busy::after { content: ""; display: inline-block; width: 11px; height: 11px; margin-left: 8px; vertical-align: -1px;
+                                border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+                                animation: ap-spin .7s linear infinite; }
+        @keyframes ap-spin { to { transform: rotate(360deg); } }
+        /* "ADO ↗" next to every work-item reference (see _macros.html) */
+        .wi-ado { display: inline-flex; align-items: center; margin-left: 8px; padding: 1px 7px; border-radius: 6px;
+                  font-size: 11px; font-weight: 650; text-decoration: none !important; white-space: nowrap; vertical-align: 1px;
+                  color: var(--accent-hover) !important; border: 1px solid rgba(99,102,241,.4); background: var(--accent-bg); }
+        .wi-ado:hover { border-color: var(--accent); }
+        .cmdk-group { padding: 8px 12px 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+                      color: var(--text-dim); list-style: none; }
         .cmdk-hint { display: flex; align-items: center; gap: 8px; width: 100%; margin: 10px 0 2px;
             padding: 7px 11px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-input);
             color: var(--text-dim); font-family: inherit; font-size: 12.5px; cursor: pointer; text-align: left; }
@@ -374,7 +393,7 @@
             <summary class="nav-section">{{ g.label }}</summary>
             <nav>
             {% for i in g["items"] %}
-                <a class="nav-link {{ 'active' if active == i.key else '' }}" href="{{ i.href }}"
+                <a class="nav-link {{ 'active' if active == i.key else '' }}" href="{{ i.href }}" {{ 'aria-current="page"' if active == i.key }}
                    title="{{ i.hint }}"><span class="ico">{{ i.icon }}</span> {{ i.label }}{% if i.key == 'inbox' %}<span class="nav-badge" id="inbox-badge" hidden></span>{% endif %}</a>
             {% endfor %}
             </nav>
@@ -462,6 +481,46 @@
         {% block content %}{% endblock %}
     </main>
 </div>
+<div class="ap-toast" id="ap-toast" role="status" aria-live="polite" hidden><span id="ap-toast-text"></span>
+  <button type="button" aria-label="Đóng" onclick="this.parentElement.classList.remove('show')">✕</button></div>
+<script>
+// ── Feedback for every form ──
+// 1) Busy: the clicked button shows a spinner and the form refuses a second submit, so
+//    a slow save is not pressed twice. Disabled on the next tick — disabling it during
+//    the event would drop the button's own name/value from what is sent.
+// 2) Toast: the server marks a successful POST (ap_toast cookie) when the page has no
+//    wording of its own; it is shown once here and cleared.
+(function () {
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (e.defaultPrevented || !form || (form.method || 'get').toLowerCase() !== 'post'
+        || form.hasAttribute('data-no-busy') || form.target === '_blank') return;
+    if (form.dataset.busy === '1') { e.preventDefault(); return; }
+    form.dataset.busy = '1';
+    var btn = e.submitter || form.querySelector('button[type=submit],button:not([type])');
+    setTimeout(function () {
+      if (btn) { btn.classList.add('is-busy'); btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
+    }, 0);
+  });
+  // Back/forward restores a page from cache with its buttons still spinning.
+  window.addEventListener('pageshow', function () {
+    document.querySelectorAll('form[data-busy="1"]').forEach(function (f) { delete f.dataset.busy; });
+    document.querySelectorAll('.is-busy').forEach(function (b) {
+      b.classList.remove('is-busy'); b.disabled = false; b.removeAttribute('aria-busy');
+    });
+  });
+  var m = document.cookie.match(/(?:^|; )ap_toast=([^;]+)/);
+  if (m) {
+    document.cookie = 'ap_toast=; Max-Age=0; path=/dashboard';
+    var text = { saved: '✅ Đã lưu — thay đổi áp dụng ngay.' }[decodeURIComponent(m[1])] || '✅ Xong.';
+    var t = document.getElementById('ap-toast');
+    document.getElementById('ap-toast-text').textContent = text;
+    t.hidden = false;
+    requestAnimationFrame(function () { t.classList.add('show'); });
+    setTimeout(function () { t.classList.remove('show'); }, 4000);
+  }
+})();
+</script>
 <script>
 // Every page introduces itself under its title; some do it in five lines. Fold any
 // introduction taller than three lines to two, with one click to read the rest — the
@@ -502,7 +561,7 @@
 <div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Tìm nhanh" hidden>
   <div class="cmdk-box">
     <input type="text" class="cmdk-input" id="cmdk-input" autocomplete="off" spellcheck="false"
-           placeholder="Tìm trang, gõ số work item (#1234), hoặc tên thiết lập…"
+           placeholder="Tìm trang, work item, spec, phiên rà soát… hoặc gõ #1234"
            role="combobox" aria-expanded="true" aria-controls="cmdk-list" aria-autocomplete="list">
     <ul class="cmdk-list" id="cmdk-list" role="listbox" aria-label="Kết quả"></ul>
     <div class="cmdk-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> chọn</span><span><kbd>Enter</kbd> mở</span><span><kbd>Esc</kbd> đóng</span></div>
@@ -526,6 +585,26 @@
   }
   var items = [], active = 0, opener = null;
 
+  // Quick actions: the things people open the palette to DO, not just pages.
+  var ACTIONS = [
+    { href: '/dashboard/review', icon: '🧭', label: 'Rà soát tài liệu / spec', sub: 'Tải PRD/BRD/Spec lên, đối chiếu với code', k: 'ra soat review tai lieu spec brd prd' },
+    { href: '/dashboard/requirements', icon: '📝', label: 'Tạo yêu cầu mới', sub: 'Viết yêu cầu cho BA → work item', k: 'tao yeu cau requirement' },
+    { href: '/dashboard/security', icon: '🔐', label: 'Quét bảo mật', sub: 'Chạy quét lại một repo', k: 'quet bao mat security scan' },
+    { href: '/dashboard/trigger-check', icon: '🔎', label: 'Vì sao item không chạy?', sub: 'Kiểm tra kích hoạt theo số work item', k: 'kiem tra kich hoat trigger khong chay' },
+    { href: '/dashboard/now', icon: '⏱', label: 'Xem đang chạy', sub: 'Run đang chạy, hàng đợi, vừa xong', k: 'dang chay now running' }
+  ];
+  var remote = [], remoteFor = '', timer = null;
+  function fetchRemote(q) {
+    clearTimeout(timer);
+    var nq = norm(q).trim();
+    if (nq.length < 2 || !window.fetch) { remote = []; remoteFor = ''; return; }
+    timer = setTimeout(function () {
+      fetch('/dashboard/api/search?q=' + encodeURIComponent(q.trim()), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : { results: [] }; })
+        .then(function (d) { if (norm(input.value).trim() === nq) { remote = d.results || []; remoteFor = nq; render(); } })
+        .catch(function () {});
+    }, 160);
+  }
   function build(q) {
     var out = [], nq = norm(q).trim();
     var num = q.trim().match(/^#?(\d{1,9})$/);
@@ -535,6 +614,10 @@
       if (!nq || norm(p.label + ' ' + p.hint + ' ' + p.group).indexOf(nq) !== -1)
         out.push({ href: p.href, icon: p.icon, label: p.label, sub: p.hint });
     });
+    ACTIONS.forEach(function (a) {
+      if (!nq || norm(a.label + ' ' + a.k).indexOf(nq) !== -1) out.push({ href: a.href, icon: a.icon, label: a.label, sub: a.sub, group: 'Thao tác nhanh' });
+    });
+    if (remoteFor === nq) remote.forEach(function (r) { out.push(r); });
     if (nq && !num) out.push({ href: '/dashboard/settings?q=' + encodeURIComponent(q.trim()) + '#set-find',
                                icon: '🛠️', label: 'Tìm thiết lập «' + q.trim() + '»', sub: 'Lọc trang Thiết lập theo từ khoá' });
     return out;
@@ -544,10 +627,16 @@
     if (active >= items.length) active = Math.max(0, items.length - 1);
     list.innerHTML = '';
     if (!items.length) {
-      var li = document.createElement('li'); li.className = 'cmdk-empty'; li.textContent = 'Không tìm thấy trang nào.';
+      var li = document.createElement('li'); li.className = 'cmdk-empty'; li.textContent = 'Không tìm thấy gì — thử số work item (#1234) hoặc từ khác.';
       list.appendChild(li); input.removeAttribute('aria-activedescendant'); return;
     }
+    var lastGroup = null;
     items.forEach(function (it, i) {
+      if (it.group && it.group !== lastGroup) {
+        var g = document.createElement('li'); g.className = 'cmdk-group'; g.textContent = it.group;
+        g.setAttribute('role', 'presentation'); list.appendChild(g);
+      }
+      lastGroup = it.group || lastGroup;
       var li = document.createElement('li');
       li.className = 'cmdk-item'; li.id = 'cmdk-opt-' + i; li.setAttribute('role', 'option');
       li.setAttribute('aria-selected', i === active ? 'true' : 'false');
@@ -582,7 +671,7 @@
     root.hidden = true;
     if (opener && opener !== document.body && opener.focus) { try { opener.focus(); } catch (e) {} }
   }
-  input.addEventListener('input', function () { active = 0; render(); });
+  input.addEventListener('input', function () { active = 0; render(); fetchRemote(input.value); });
   root.addEventListener('mousedown', function (e) { if (e.target === root) close(); });
   root.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowDown') { e.preventDefault(); if (items.length) { active = (active + 1) % items.length; mark(); } }

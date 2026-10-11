@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m %}
 {% block content %}
 <style>
   /* ── Execution history (scoped) ──
@@ -116,7 +117,7 @@
       {% set live = skill.startswith('interactive') or 'interactive' in skill %}
       <tr>
         <td><span class="badge {{ status_class(e.status.value) }}" title="{{ e.status.value }}"><span class="badge-dot"></span>{{ run_status.get(e.status.value, e.status.value) }}</span></td>
-        <td class="id">{% if e.work_item_id %}<a href="/dashboard/task/{{ e.work_item_id }}" title="Mở phòng task">#{{ e.work_item_id }}</a>{% else %}<span class="loop-tag" title="Lượt chạy theo lịch — không gắn work item">loop</span>{% endif %}</td>
+        <td class="id">{% if e.work_item_id %}<a href="/dashboard/task/{{ e.work_item_id }}" title="Mở phòng task">#{{ e.work_item_id }}</a>{{ m.ado_btn(e.work_item_id, ado_url) }}{% else %}<span class="loop-tag" title="Lượt chạy theo lịch — không gắn work item">loop</span>{% endif %}</td>
         <td class="title" title="{{ e.title }}">{{ e.title }}{% if e.lessons_injected %}<span class="lesson-badge" title="{{ e.lessons_injected }} bài học từ run trước đã được đưa vào brief">🧠 {{ e.lessons_injected }}</span>{% endif %}
             {% if e.error and e.status.value == 'Failed' %}<span class="sub" title="{{ e.error }}">⚠ {{ e.error }}</span>{% endif %}</td>
         <td>{% if label and label != 'Unknown' %}<span class="cat-badge {{ css }}">{{ label }}</span>{% else %}<span class="dim">—</span>{% endif %}</td>

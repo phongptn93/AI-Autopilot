@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m %}
 {% block content %}
 <style>
   .ib-bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:16px; }
@@ -22,7 +23,9 @@
   .ib-row:hover { background:var(--bg-hover); }
   .ib-ico { font-size:17px; width:22px; text-align:center; flex:none; }
   .ib-text { flex:1 1 auto; min-width:0; }
-  .ib-title { font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ib-title { font-weight:600; font-size:13.5px; display:flex; align-items:center; min-width:0; }
+  .ib-title > a:first-child, .ib-title > span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .ib-title .wi-ado { flex:none; }
   .ib-title a { color:var(--text); text-decoration:none; }
   .ib-title a:hover { color:var(--accent-hover); }
   .ib-ctx { color:var(--text-muted); font-size:12.5px; margin-top:2px;
@@ -110,7 +113,7 @@
     <div class="ib-row" data-source="{{ e.source }}">
       <span class="ib-ico" aria-hidden="true">{{ e.icon }}</span>
       <div class="ib-text">
-        <div class="ib-title">{% if e.href %}<a href="{{ e.href }}"{% if e.href.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}</div>
+        <div class="ib-title">{% if e.href %}<a href="{{ e.href }}"{% if e.href.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}{% if e.work_item_id %}{{ m.ado_btn(e.work_item_id, ado_url) }}{% endif %}</div>
         <div class="ib-ctx" title="{{ e.context }}"><span class="ib-src">{{ sources[e.source][1] }}</span>{% if e.context %} · {{ e.context }}{% endif %}</div>
       </div>
       <span class="ib-age">{% if e.age_seconds is not none %}{{ fmt_ago(e.age_seconds) }} trước{% endif %}</span>

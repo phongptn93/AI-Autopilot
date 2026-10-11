@@ -1,0 +1,12 @@
+{#
+  wi_ref(id, ado_url, title="")
+  A work-item reference done the same way everywhere:
+    #1234  → the dashboard's task room (everything the autopilot knows about it)
+    ↗ ADO  → the work item itself in Azure DevOps, new tab
+  Clicking the number used to land in the dashboard only, so the most common wish —
+  "open it in ADO" — took a second page and a hunt for the link there.
+#}
+{% macro ado_btn(id, ado_url) -%}
+{%- set u = ado_url(id) if ado_url is defined and ado_url else "" -%}
+{%- if u %}<a class="wi-ado" href="{{ u }}" target="_blank" rel="noopener" title="Mở #{{ id }} trên Azure DevOps (tab mới)">ADO ↗</a>{% endif -%}
+{%- endmacro %}

@@ -210,6 +210,7 @@
           <label>Cron</label>
           <input type="text" class="lp-in mono" name="loop_{{ row }}_cron"
                  value="{{ r.cron }}" placeholder="7 18 * * 1-5">
+          {% if r.cron_text %}<span class="lp-hint" style="color:var(--green)">⏰ {{ r.cron_text }}{% if r.next_run %} · lần tới {{ r.next_run }}{% endif %}</span>{% endif %}
           <span class="lp-hint">Cron 5 trường, theo giờ server. Tránh phút :00 — mọi thứ khác đều chạy vào lúc đó.</span>
         </div>
 

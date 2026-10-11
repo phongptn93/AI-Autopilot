@@ -28,7 +28,8 @@
   .act-links a { color:var(--accent,#818cf8); text-decoration:none; font-size:12px; white-space:nowrap; }
   .act-links a:hover { text-decoration:underline; }
 
-  .grid-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(380px,1fr)); gap:14px; }
+  .grid-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr)); gap:14px; }
+  .grid-2 > * { min-width:0; }
   .tbl { width:100%; border-collapse:collapse; font-size:13px; }
   .tbl th { text-align:left; padding:7px 10px; font-size:11px; text-transform:uppercase;
             letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border,#23232b); }
@@ -121,7 +122,7 @@
   </div>
   <div class="card-body" style="padding:0 6px 6px">
     {% if report.actions %}
-    <table class="act-table">
+    <div style="overflow-x:auto"><table class="act-table">
       <thead><tr><th>Loại</th><th>Việc</th><th>Người</th><th style="text-align:right">Đã chờ</th><th></th></tr></thead>
       <tbody>
       {% for a in report.actions %}
@@ -141,7 +142,7 @@
       </tr>
       {% endfor %}
       </tbody>
-    </table>
+    </table></div>
     {% else %}
     <div class="empty">✅ Không có việc nào tắc quá ngưỡng. Xem việc đang chạy ở <a class="table-link" href="/dashboard/board">Board</a>.</div>
     {% endif %}

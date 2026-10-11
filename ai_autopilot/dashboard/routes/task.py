@@ -57,10 +57,24 @@ def create_router() -> APIRouter:
         if not tab:
             tab = "story" if room.runs else "overview"
         org = (c.config.ado_organization or "").rstrip("/")
+        # What the header needs to answer "where is this, and what do I do now?" —
+        # the autopilot's own state for it, and the totals across its runs.
+        try:
+            pstate = await c.state_repo.get(work_item_id)
+        except Exception:  # noqa: BLE001 — the room renders without it
+            pstate = None
+        runs = room.runs or []
+        totals = {
+            "cost": sum((getattr(r, "cost_usd", None) or 0) for r in runs),
+            "minutes": sum((getattr(r, "duration_seconds", None) or 0) for r in runs) / 60,
+            "last": runs[0] if runs else None,
+        }
+        latest_pr = next((p for p in room.prs if p.url), None)
         return _TEMPLATES.TemplateResponse(
             request, "task_room.html",
             _ctx(
-                request, "task", room=room, tab=tab,
+                request, "task", room=room, tab=tab, pstate=pstate, totals=totals,
+                latest_pr=latest_pr,
                 item_url=f"{org}/_workitems/edit/{work_item_id}" if org else "",
                 drift_label=spec_drift.label_for, drift_icon=spec_drift.icon_for,
             ),

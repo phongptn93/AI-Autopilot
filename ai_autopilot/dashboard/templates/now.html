@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as m %}
 {% block content %}
 <style>
   /* ── In flight (scoped) ──
@@ -180,7 +181,7 @@
     {% if queued %}
     <ul class="rows">
       {% for q in queued %}
-      <li><a class="id" href="/dashboard/task/{{ q.id }}">#{{ q.id }}</a><span class="t" title="{{ q.title }}">{{ q.title or '—' }}</span>
+      <li><a class="id" href="/dashboard/task/{{ q.id }}" title="Mở phòng task">#{{ q.id }}</a><span class="t" title="{{ q.title }}">{{ q.title or '—' }}</span>{{ m.ado_btn(q.id, ado_url) }}
         <span class="m">{{ q.since.strftime('%m-%d %H:%M') if q.since else '' }}</span></li>
       {% endfor %}
     </ul>
@@ -192,7 +193,7 @@
     <ul class="rows">
       {% for e in recent %}
       <li><span class="badge {{ status_class(e.status.value) }}" style="min-width:74px" title="{{ e.status.value }}"><span class="badge-dot"></span>{{ run_status.get(e.status.value, e.status.value) }}</span>
-        {% if e.work_item_id %}<a class="id" href="/dashboard/task/{{ e.work_item_id }}">#{{ e.work_item_id }}</a>{% else %}<span class="id">loop</span>{% endif %}
+        {% if e.work_item_id %}<a class="id" href="/dashboard/task/{{ e.work_item_id }}" title="Mở phòng task">#{{ e.work_item_id }}</a>{{ m.ado_btn(e.work_item_id, ado_url) }}{% else %}<span class="id">loop</span>{% endif %}
         <span class="t" title="{{ e.error if e.error and e.status.value == 'Failed' else e.title }}">{{ e.title }}</span>
         <span class="m">{{ mmss(e.duration_seconds) }} · {{ e.started_at.strftime('%H:%M') }}</span></li>
       {% endfor %}

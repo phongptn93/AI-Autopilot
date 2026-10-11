@@ -79,6 +79,16 @@
            border:1px solid var(--border);border-radius:9px;padding:11px 14px;margin-bottom:14px}
   .wz-note code{font-family:var(--mono);font-size:11.5px}
   .pw-btn{flex:none}
+  .wz-tags { margin-top:18px; padding:14px 16px; border:1px solid var(--border-soft); border-radius:10px; background:var(--bg-input); }
+  .wz-tags-hd { display:flex; flex-wrap:wrap; gap:4px 12px; align-items:baseline; margin-bottom:6px; }
+  .wz-tags-hd span, .wz-tg-hd span { font-size:12px; color:var(--text-dim); }
+  .wz-tg { padding:8px 0; border-top:1px solid var(--border-soft); }
+  .wz-tg:first-of-type { border-top:0; }
+  .wz-tg-hd { display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; margin-bottom:4px; font-size:13px; }
+  .wz-tg-row { display:grid; grid-template-columns:minmax(150px, 240px) 1fr; gap:4px 14px; padding:3px 0 3px 20px; font-size:12.5px; }
+  .wz-tg-row code { user-select:all; cursor:copy; justify-self:start; padding:1px 7px; border-radius:6px; background:var(--bg-card); border:1px solid var(--border-soft); overflow-wrap:anywhere; }
+  .wz-tg-row span { color:var(--text-dim); }
+  @media (max-width:640px) { .wz-tg-row { grid-template-columns:1fr; padding-left:8px; } }
 </style>
 
 <div class="wz-head"><h2 class="page-title">{{ page_title("setup") }}</h2></div>
@@ -323,6 +333,25 @@
       </div>
       {% endfor %}
       {% if step_id == 'policy' %}</details>{% endif %}
+
+      {% if tag_guide %}
+      {# The three boxes above are only the ways IN. The full set of tags that steer a
+         run — per-role run-now, plan gate, the ones the machine parks items with — is
+         what an operator actually types into ADO, so it is listed here, whole. #}
+      <div class="wz-tags">
+        <div class="wz-tags-hd"><b>🏷️ Bảng tag điều khiển</b>
+          <span>Tính từ cấu hình đang lưu — sửa ô phía trên rồi Lưu để cập nhật. Bấm vào tag để chọn &amp; copy.</span></div>
+        {% for g in tag_guide %}
+        <div class="wz-tg">
+          <div class="wz-tg-hd">{{ g.icon }} <b>{{ g.title }}</b><span>{{ g.note }}</span></div>
+          {% for tag, what in g.rows %}
+          <div class="wz-tg-row"><code>{{ tag }}</code><span>{{ what }}</span></div>
+          {% endfor %}
+        </div>
+        {% endfor %}
+        <div class="form-help" style="margin:8px 0 0">Item không chạy? <a href="/dashboard/trigger-check" style="color:var(--accent-hover)">🔎 Kiểm tra vì sao</a></div>
+      </div>
+      {% endif %}
 
       {% if check %}
       {# Verify before moving on. A wizard that only collects text and lets the failure

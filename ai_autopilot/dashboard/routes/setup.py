@@ -53,6 +53,68 @@ def _workspace_flash(directory: str) -> str:
     return ""
 
 
+def _pickup_tag_guide(cfg) -> list[dict]:
+    """Every tag that steers this machine, grouped by who adds it and what it does.
+
+    The pickup step asked for three values and explained the rest in one long help line,
+    so "which tag makes QC run now?" or "why does this item sit still?" meant reading
+    Settings. Derived from the SAME helpers the poller sweeps with (run_now_tags,
+    effective_roles), so the card cannot promise a tag the machine never queries.
+    """
+    from ai_autopilot.execution import sdlc_plan
+
+    def t(v) -> str:
+        return (v or "").strip()
+
+    def group(icon, title, note, rows):
+        rows = [(tag, what) for tag, what in rows if tag]
+        return {"icon": icon, "title": title, "note": note, "rows": rows} if rows else None
+
+    owner = t(cfg.assignee_trigger_user) or t(getattr(cfg, "auto_transition_assignee", ""))
+    pickup = [(t(cfg.trigger_tag), "Việc của máy này — bất kể giao cho ai.")]
+    pickup += [(t(x), "Tag nhận việc bổ sung (luồng riêng).") for x in cfg.trigger_tags or []]
+    pickup.append((t(cfg.assignee_trigger_tag),
+                   "Tag chung của đội — chỉ nhận khi item giao cho "
+                   + (f"«{owner}»." if owner else "chủ máy (chưa đặt chủ máy).")))
+
+    roles = sdlc_plan.effective_roles(cfg)
+    run_now = []
+    for tag, role in sdlc_plan.run_now_tags(cfg).items():
+        run_now.append((tag, f"Chạy NGAY vai «{role}», từ bất kỳ state nào." if role
+                        else "Chạy NGAY vai mà state hiện tại chỉ định."))
+    run_now.append((t(cfg.restart_tag),
+                    "Chạy lại TỪ ĐẦU: xoá tiến độ đã lưu, đọc lại comment mới nhất."))
+
+    plan = [(t(cfg.plan_first_tag), "Bắt lập kế hoạch trước, chưa viết code."),
+            (t(cfg.plan_approved_tag), "Người duyệt gắn để cho phép build theo kế hoạch.")]
+
+    machine = [
+        (t(cfg.live_tag), "Đang chạy — đừng gỡ tay khi phiên còn sống."),
+        (t(cfg.processed_tag), "Đã xong — máy bỏ qua item này."),
+        (t(cfg.review_tag), "Chờ người review kết quả."),
+        (t(cfg.escalation_tag), "Agent cần người — máy dừng ở đây đến khi gỡ."),
+        (t(cfg.failed_tag), "Hết lượt thử, đã bỏ cuộc."),
+        (t(cfg.plan_pending_tag), "Đã đăng kế hoạch, chờ duyệt."),
+        (t(cfg.risk_gate_tag), "Thay đổi rủi ro, chờ người duyệt."),
+    ]
+    machine += [(t(r.done_tag), f"Vai «{name}» đã xong chặng của mình.")
+                for name, r in sorted(roles.items()) if t(getattr(r, "done_tag", ""))]
+    machine += [(t(tag), f"Bàn giao sau vai «{name}» — bấm Chạy trên Board để đi tiếp.")
+                for name, tag in sorted((cfg.sdlc_profile_tags or {}).items())]
+    machine.append((sdlc_plan.profile_tag("<vai>", cfg),
+                     "Ghim vai cho lượt chạy này — Board tự gắn khi bấm Chạy, tự gỡ khi bàn giao."))
+
+    return [g for g in (
+        group("🎯", "Nhận việc", "Gắn một trong các tag này (hoặc đưa item vào State kích hoạt).",
+              pickup),
+        group("▶", "Chạy ngay", "Một lần, bỏ qua tag & state kích hoạt; máy gỡ tag khi nhận.",
+              run_now),
+        group("🧭", "Kế hoạch trước", "Cho item lớn: duyệt kế hoạch rồi mới code.", plan),
+        group("🤖", "Máy tự gắn", "Gỡ tag giữ chỗ (done / review / hold…) để item được nhận lại.",
+              machine),
+    ) if g]
+
+
 def _setup_findings(cfg) -> list[dict]:
     """What the real doctor says about this machine, worst first."""
     from ai_autopilot import doctor as doctor_mod
@@ -198,6 +260,7 @@ def create_router() -> APIRouter:
                 preset_now=next((k for k in _SETUP_PRESETS
                                  if not sdlc_presets.diff(sdlc_presets.PRESETS[k], cfg)), ""),
                 trigger_tag=cfg.trigger_tag,
+                tag_guide=_pickup_tag_guide(cfg) if current == "pickup" else [],
                 trigger_states=list(cfg.effective_trigger_states),
             ),
         )

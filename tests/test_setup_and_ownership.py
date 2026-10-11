@@ -808,3 +808,22 @@ def test_the_wizard_accepts_a_run_now_tag_that_does_not_collide(tmp_path, own_co
             "stage_entry_tag": f"{live.trigger_tag}-run",
         }, follow_redirects=False)
         assert live.stage_entry_tag == f"{live.trigger_tag}-run"
+
+
+def test_pickup_step_lists_every_tag_that_steers_a_run(tmp_path):
+    """The pickup step is where an operator learns what to type into the tracker — the
+    per-role run-now tags and the tags the machine parks items with included."""
+    from ai_autopilot.config import SdlcRole
+
+    cfg = _settings(tmp_path, trigger_tag="vm-autopilot", stage_entry_tag="vm-autopilot-run",
+                    sdlc_roles={"qc": SdlcRole(stages=["test"], waits_in="Ready for Testing"),
+                                "ba": SdlcRole(stages=["analyze"], done_tag="ba-done")})
+    with TestClient(create_app(cfg)) as client:
+        html = client.get("/dashboard/setup?step=pickup").text
+    assert "Bảng tag điều khiển" in html
+    for tag in ("vm-autopilot", "vm-autopilot-run", "vm-autopilot-run:qc",
+                "vm-autopilot-run:ba", "autopilot-restart", "plan-approved",
+                "autopilot-hold", "autopilot-live", "ba-done"):
+        assert f"<code>{tag}</code>" in html, tag
+    with TestClient(create_app(cfg)) as client:
+        assert "Bảng tag điều khiển" not in client.get("/dashboard/setup?step=role").text

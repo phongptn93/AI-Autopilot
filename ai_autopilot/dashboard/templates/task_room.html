@@ -82,6 +82,9 @@
     white-space:pre-line; overflow-wrap:anywhere; }
   .tr-summary.open { max-height:none; }
   .tr-more { margin-top:6px; background:none; border:0; color:var(--accent-hover); cursor:pointer; font:inherit; font-size:12.5px; padding:0; }
+  .tr-crumb { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--text-dim); margin:-6px 0 10px; }
+  .tr-crumb a { color:var(--text-muted); text-decoration:none; } .tr-crumb a:hover { color:var(--accent-hover); }
+  .tr-crumb span { opacity:.6; } .tr-crumb b { color:var(--text-muted); font-family:var(--mono); }
 </style>
 
 {% set item = room.item %}
@@ -95,6 +98,9 @@
   'Failed': ('⛔', 'Run lỗi', 'Xem lỗi ở tab Diễn biến, sửa nguyên nhân rồi chạy lại.', 'red'),
 } %}
 {% set nx = NEXT.get(ps) %}
+<nav class="tr-crumb" aria-label="Vị trí">
+  <a href="/dashboard/board">📋 Board</a><span>›</span><a href="/dashboard/history?q={{ room.work_item_id }}">Lịch sử chạy</a><span>›</span><b>#{{ room.work_item_id }}</b>
+</nav>
 <div class="tr-head">
   <div class="tr-head-main">
     <div class="tr-title"><span class="tr-num">#{{ room.work_item_id }}</span>
@@ -119,6 +125,11 @@
       <input type="hidden" name="item_id" value="{{ room.work_item_id }}"><button class="tr-act" type="submit">▶ Chạy ngay</button></form>
     {% endif %}
     <a class="tr-act" href="/dashboard/trigger-check?id={{ room.work_item_id }}" title="Kiểm tra máy có nhận việc này không, và vì sao">🔎 Vì sao (không) chạy?</a>
+    {% for sp in item_specs %}
+    <form method="post" action="/dashboard/review/start" title="Đối chiếu spec «{{ sp.title }}» với code mới nhất">
+      <input type="hidden" name="kind" value="spec"><input type="hidden" name="target" value="{{ sp.rel }}">
+      <button class="tr-act" type="submit">🧭 Rà spec{{ ' ' ~ loop.index if item_specs|length > 1 }}</button></form>
+    {% endfor %}
     <button class="tr-act" type="button" id="tr-copy" title="Copy link phòng task này">🔗 Copy link</button>
   </div>
 </div>

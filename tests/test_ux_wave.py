@@ -96,3 +96,13 @@ def test_task_room_puts_the_actions_first(tmp_path, monkeypatch):
         assert "https://dev.azure.com/acme/_workitems/edit/6749" in page and "Mở trên ADO" in page
         assert "Cần người xử lý" in page and "Chờ BA chốt quy tắc chia đều" in page
         assert "/dashboard/queue/resume" in page and "/dashboard/trigger-check?id=6749" in page
+
+
+def test_sibling_pages_are_one_click_away_and_health_is_on_the_overview(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        flow = client.get("/dashboard/flow").text
+        assert 'class="subnav"' in flow and 'href="/dashboard/roles"' in flow
+        assert 'aria-current="page"' in flow
+        home = client.get("/dashboard").text
+        assert "Sức khoẻ hệ thống" in home and "/dashboard/setup?step=done" in home

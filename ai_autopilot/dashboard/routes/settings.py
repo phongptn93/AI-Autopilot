@@ -510,7 +510,7 @@ def create_router() -> APIRouter:
             {"label": "Đang chạy", "cls": "chip-blue",
              "tags": [cfg.live_tag], "hint": "phiên tương tác đang chạy"},
             {"label": "Thất bại", "cls": "chip",
-             "tags": [cfg.failed_tag or f"{cfg.processed_tag} (tag Xong)"],
+             "tags": [cfg.failed_tag or f"{cfg.processed_tag} (dùng chung tag Xong)"],
              "hint": "bỏ cuộc sau khi thử lại"},
         ]
         discovered = discover_repos(c.config.workspace_directory)

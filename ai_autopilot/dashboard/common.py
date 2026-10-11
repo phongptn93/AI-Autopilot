@@ -101,6 +101,16 @@ def _inline_md(text: object) -> Markup:
 
 _TEMPLATES.env.filters["inline_md"] = _inline_md
 
+
+def _short_path(where: object, keep: int = 2) -> str:
+    """``a/b/c/Service.cs:42`` → ``…/c/Service.cs:42`` — the part a reader recognises."""
+    text = str(where or "")
+    parts = text.replace("\\", "/").split("/")
+    return text if len(parts) <= keep else "…/" + "/".join(parts[-keep:])
+
+
+_TEMPLATES.env.filters["short_path"] = _short_path
+
 # ── Flash messages ────────────────────────────────────────────────────────────
 # The outcome of a POST used to travel in the query string of the redirect that follows
 # it (`/dashboard/settings?saved=1`, `?import_error=<text>`). The POST itself was always

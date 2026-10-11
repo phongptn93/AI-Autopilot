@@ -37,17 +37,19 @@
   .gbar { display:flex; height:6px; border-radius:3px; overflow:hidden; background:var(--soft); margin:6px 0 2px; }
   .gbar i { display:block; height:100%; } .gbar .d { background:var(--green); } .gbar .p { background:#e0a12b; } .gbar .b { background:var(--red); }
   .grp small { color:var(--muted); font-size:11px; }
-  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed; }
+  table.mx col.c-ref { width:10%; } table.mx col.c-req { width:25%; } table.mx col.c-st { width:12%; }
+  table.mx col.c-now { width:33%; } table.mx col.c-fix { width:20%; }
   th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
        background:var(--soft); padding:7px 9px; border-bottom:1px solid var(--line); }
-  td { padding:8px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td { padding:8px 9px; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:break-word; }
   tr { page-break-inside:avoid; }
-  .ref { font-family:Consolas, "Cascadia Mono", monospace; font-weight:700; white-space:nowrap; font-size:12px; }
+  .ref { font-family:Consolas, "Cascadia Mono", monospace; font-weight:700; font-size:12px; overflow-wrap:break-word; }
   .kind { display:block; font-size:9.5px; color:var(--dim); font-weight:700; }
-  .st { display:inline-block; white-space:nowrap; font-weight:700; font-size:11.5px; padding:1px 8px; border-radius:6px; }
+  .st { display:inline-block; font-weight:700; font-size:11.5px; padding:1px 8px; border-radius:6px; }
   .st.green { background:var(--green-bg); color:var(--green); } .st.amber { background:var(--amber-bg); color:var(--amber); }
   .st.red { background:var(--red-bg); color:var(--red); } .st.muted { background:var(--soft); color:var(--muted); }
-  code, .ev { font-family:Consolas, "Cascadia Mono", monospace; font-size:11px; }
+  code, .ev { font-family:Consolas, "Cascadia Mono", monospace; font-size:11px; overflow-wrap:anywhere; }
   .ev { color:var(--accent); display:block; margin-top:3px; }
   .q { margin:0 0 12px; padding:10px 14px; border-left:3px solid var(--accent); background:var(--soft); border-radius:0 8px 8px 0; page-break-inside:avoid; }
   .q .t { font-weight:650; } .q .w { color:var(--muted); font-size:12.5px; }
@@ -61,7 +63,8 @@
   .foot { margin-top:30px; padding-top:12px; border-top:1px solid var(--line); font-size:11px; color:var(--dim); display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
   .print { position:fixed; right:22px; bottom:22px; background:var(--accent); color:#fff; border:0; border-radius:22px; padding:10px 18px;
            font:inherit; font-weight:650; cursor:pointer; box-shadow:0 6px 18px rgba(79,70,229,.35); }
-  @media (max-width:700px) { .page { padding:22px 16px; margin:0; border-radius:0; } .exec { grid-template-columns:1fr; } table { font-size:11.5px; } }
+  @media (max-width:700px) { .page { padding:22px 16px; margin:0; border-radius:0; } .exec { grid-template-columns:1fr; } table { font-size:11px; }
+    td, th { padding:6px 5px; } }
   @media print {
     body { background:#fff; } .page { box-shadow:none; margin:0; max-width:none; padding:0; } .print { display:none; }
     @page { size:A4; margin:16mm 14mm; }
@@ -126,14 +129,15 @@
 
   {% if result.traces %}
   <h2>{{ 'Ma trận truy vết' if row.kind == 'spec' else 'Kiểm chứng từng finding' }}</h2>
-  <table>
-    <tr><th style="width:80px">Mục</th><th>Yêu cầu</th><th style="width:110px">Trạng thái</th><th>Hiện trạng hệ thống</th><th>Đề xuất</th></tr>
+  <table class="mx">
+    <colgroup><col class="c-ref"><col class="c-req"><col class="c-st"><col class="c-now"><col class="c-fix"></colgroup>
+    <tr><th>Mục</th><th>Yêu cầu</th><th>Trạng thái</th><th>Hiện trạng hệ thống</th><th>Đề xuất</th></tr>
     {% for t in result.traces %}{% set s = statuses.get(t.status, ('❔', t.status, 'muted')) %}
     <tr><td><span class="ref">{{ t.ref }}</span><span class="kind">{{ t.kind }}</span></td>
       <td>{{ t.spec or '—' }}</td>
       <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span></td>
       <td>{{ t.code or '—' }}
-        {% if not external %}{% for e in t.evidence %}{% if e.where %}<span class="ev">{{ e.where }}</span>{% endif %}{% endfor %}{% endif %}</td>
+        {% if not external %}{% for e in t.evidence %}{% if e.where %}<span class="ev" title="{{ e.where }}">{{ e.where|short_path }}</span>{% endif %}{% endfor %}{% endif %}</td>
       <td>{{ t.fix or '—' }}</td></tr>
     {% endfor %}
   </table>
@@ -152,7 +156,7 @@
   <h2>Rủi ro</h2>
   {% for r in result.risks %}
   <div class="risk"><span class="sev {{ r.severity }}">{{ r.severity }}</span> · <b>{{ r.title }}</b>{% if r.detail %} — {{ r.detail }}{% endif %}
-    {% if not external and r.file %}<span class="ev">{{ r.file }}{{ ':' ~ r.line if r.line }}</span>{% endif %}</div>
+    {% if not external and r.file %}<span class="ev" title="{{ r.file }}">{{ (r.file ~ (':' ~ r.line if r.line else ''))|short_path }}</span>{% endif %}</div>
   {% endfor %}
   {% endif %}
 

@@ -1021,7 +1021,9 @@ async def test_a_successful_scan_is_cached():
 
 
 def test_overview_says_so_when_the_pr_scan_failed(tmp_path):
-    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    # A connected tracker: these tests are about the scan's own states, not "not set up".
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+                        ado_pat="x", ado_organization="https://dev.azure.com/o", ado_project="P")
     try:
         with TestClient(create_app(settings)) as client:
             client.app.state.container.ado.get_repositories = (
@@ -1040,7 +1042,9 @@ def test_overview_does_not_wait_for_the_pr_scan(tmp_path):
     finished - 1 + 3N list requests plus a link lookup per PR whose branch carries no id,
     strictly sequential. On a real org that is a minute of blank browser tab, which is
     what "the system is hanging" actually was. Five stat cards must never cost a page load."""
-    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    # A connected tracker: these tests are about the scan's own states, not "not set up".
+    settings = Settings(database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+                        ado_pat="x", ado_organization="https://dev.azure.com/o", ado_project="P")
     dashboard._PR_OUTCOMES.reset()
 
     async def never_answers():

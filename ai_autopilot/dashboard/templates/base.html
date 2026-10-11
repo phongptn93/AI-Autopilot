@@ -301,6 +301,15 @@
                   font-size: 11px; font-weight: 650; text-decoration: none !important; white-space: nowrap; vertical-align: 1px;
                   color: var(--accent-hover) !important; border: 1px solid rgba(99,102,241,.4); background: var(--accent-bg); }
         .wi-ado:hover { border-color: var(--accent); }
+        .kbd-help { position: fixed; inset: 0; z-index: 110; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 16px; }
+        .kbd-help[hidden] { display: none; }
+        .kbd-box { width: 100%; max-width: 520px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px;
+                   padding: 18px 20px; box-shadow: 0 20px 50px rgba(0,0,0,.45); }
+        .kbd-box h3 { margin: 0 0 12px; font-size: 15px; }
+        .kbd-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; font-size: 13px; align-items: center; }
+        .kbd-grid kbd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 5px; border: 1px solid var(--border);
+                        background: var(--bg-input); white-space: nowrap; }
+        .kbd-grid span { color: var(--text-muted); }
         .cmdk-group { padding: 8px 12px 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
                       color: var(--text-dim); list-style: none; }
         .cmdk-hint { display: flex; align-items: center; gap: 8px; width: 100%; margin: 10px 0 2px;
@@ -504,6 +513,45 @@
 </div>
 <div class="ap-toast" id="ap-toast" role="status" aria-live="polite" hidden><span id="ap-toast-text"></span>
   <button type="button" aria-label="Đóng" onclick="this.parentElement.classList.remove('show')">✕</button></div>
+<div class="kbd-help" id="kbd-help" role="dialog" aria-modal="true" aria-label="Phím tắt" hidden>
+  <div class="kbd-box">
+    <h3>⌨️ Phím tắt</h3>
+    <div class="kbd-grid">
+      <div><kbd>Ctrl</kbd> <kbd>K</kbd> / <kbd>/</kbd></div><span>Tìm nhanh: trang, work item, spec, phiên rà soát</span>
+      <div><kbd>g</kbd> <kbd>i</kbd></div><span>🎯 Hộp quyết định</span>
+      <div><kbd>g</kbd> <kbd>o</kbd></div><span>📊 Tổng quan</span>
+      <div><kbd>g</kbd> <kbd>n</kbd></div><span>⏱ Đang chạy</span>
+      <div><kbd>g</kbd> <kbd>b</kbd></div><span>📁 Board</span>
+      <div><kbd>g</kbd> <kbd>h</kbd></div><span>📜 Lịch sử chạy</span>
+      <div><kbd>g</kbd> <kbd>r</kbd></div><span>🧭 Phòng rà soát</span>
+      <div><kbd>g</kbd> <kbd>p</kbd></div><span>📋 Yêu cầu &amp; Spec</span>
+      <div><kbd>g</kbd> <kbd>s</kbd></div><span>🛠️ Thiết lập</span>
+      <div><kbd>?</kbd></div><span>Hiện / ẩn bảng này</span>
+    </div>
+  </div>
+</div>
+<script>
+// Go-to shortcuts ("g" then a letter) and "?" for help — only when nobody is typing.
+(function () {
+  var MAP = { i: '/dashboard/inbox', o: '/dashboard', n: '/dashboard/now', b: '/dashboard/board',
+              h: '/dashboard/history', r: '/dashboard/review', p: '/dashboard/requirements', s: '/dashboard/settings' };
+  var help = document.getElementById('kbd-help'), armed = 0;
+  function typing(t) {
+    var tag = t && t.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable);
+  }
+  help.addEventListener('mousedown', function (e) { if (e.target === help) help.hidden = true; });
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
+    var cmdk = document.getElementById('cmdk');
+    if (cmdk && !cmdk.hidden) return;
+    if (e.key === '?') { e.preventDefault(); help.hidden = !help.hidden; return; }
+    if (e.key === 'Escape' && !help.hidden) { help.hidden = true; return; }
+    if (armed && Date.now() - armed < 1500 && MAP[e.key]) { e.preventDefault(); armed = 0; location.href = MAP[e.key]; return; }
+    armed = e.key === 'g' ? Date.now() : 0;
+  });
+})();
+</script>
 <script>
 // ── Feedback for every form ──
 // 1) Busy: the clicked button shows a spinner and the form refuses a second submit, so
@@ -585,7 +633,7 @@
            placeholder="Tìm trang, work item, spec, phiên rà soát… hoặc gõ #1234"
            role="combobox" aria-expanded="true" aria-controls="cmdk-list" aria-autocomplete="list">
     <ul class="cmdk-list" id="cmdk-list" role="listbox" aria-label="Kết quả"></ul>
-    <div class="cmdk-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> chọn</span><span><kbd>Enter</kbd> mở</span><span><kbd>Esc</kbd> đóng</span></div>
+    <div class="cmdk-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> chọn</span><span><kbd>Enter</kbd> mở</span><span><kbd>Esc</kbd> đóng</span><span style="margin-left:auto"><kbd>?</kbd> phím tắt</span></div>
   </div>
 </div>
 <script>

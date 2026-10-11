@@ -56,7 +56,7 @@ def create_router() -> APIRouter:
         table = rbac.roles(cfg.user_roles)
         response = _TEMPLATES.TemplateResponse(request, "users.html", _ctx(
             request, "users", users=users, roles_of=_roles_of, role_table=table,
-            permissions=rbac.PERMISSIONS, flash=flash, cfg=cfg,
+            permissions=rbac.PERMISSIONS, sensitive=rbac.SENSITIVE, flash=flash, cfg=cfg,
             redirect_uri=redirect_uri(request, cfg),
             pending=sum(1 for r in rows if r.status == "pending"),
             admins=sum(1 for r in rows if r.status == "active" and rbac.ADMIN in _roles_of(r)),
@@ -145,9 +145,11 @@ def create_router() -> APIRouter:
         for key, role in table.items():
             if key == rbac.ADMIN or form.get(f"delete_{key}") and not role.builtin:
                 continue
+            if form.get(f"reset_{key}") and role.builtin:
+                continue  # not stored = the built-in default, including later additions
             perms = [p for p in rbac.PERMISSIONS if form.get(f"perm_{key}_{p}")]
             custom[key] = {"label": str(form.get(f"label_{key}") or role.label)[:60],
-                           "permissions": perms}
+                           "permissions": perms, "known": list(rbac.PERMISSIONS)}
         new_key = re.sub(r"[^a-z0-9_-]", "", str(form.get("new_key") or "").lower())[:40]
         if new_key and new_key not in table and new_key != rbac.ADMIN:
             custom[new_key] = {"label": str(form.get("new_label") or new_key)[:60],

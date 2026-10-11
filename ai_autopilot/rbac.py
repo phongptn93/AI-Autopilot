@@ -25,8 +25,12 @@ from dataclasses import dataclass
 # key → (label, group, description)
 PERMISSIONS: dict[str, tuple[str, str, str]] = {
     "view": ("Xem dashboard", "Chung", "Mở mọi trang chỉ-xem: board, lịch sử, báo cáo, phân tích."),
-    "runs.control": ("Điều khiển run", "Vận hành",
-                     "Chạy / huỷ / tiếp tục run, kéo thả Board, duyệt kế hoạch, lập kế hoạch."),
+    "runs.start": ("Chạy theo vai", "Vận hành",
+                   "Bấm Chạy trên Board, huỷ phiên đang chạy, chấm kết quả run — đủ để "
+                   "QC/BA tự chạy chặng của mình."),
+    "runs.control": ("Điều phối run", "Vận hành",
+                     "Kéo thả Board (đổi state), duyệt kế hoạch, lập kế hoạch, xử lý xung đột, "
+                     "gỡ dừng máy / hàng đợi, xoá lịch sử. Bao gồm Chạy theo vai."),
     "process.edit": ("Sửa quy trình", "Vận hành",
                      "Vai trò SDLC, luồng trạng thái, board, tác vụ định kỳ."),
     "review.run": ("Phòng rà soát", "Chất lượng",
@@ -49,18 +53,41 @@ PERMISSIONS: dict[str, tuple[str, str, str]] = {
                      "Duyệt tài khoản, gán vai, sửa ma trận quyền, cấu hình SSO."),
 }
 
+# Grants that can leak a credential or take the dashboard away from its admins — the
+# matrix flags them so nobody ticks one in passing.
+SENSITIVE = frozenset({"settings.edit", "secrets.view", "system.update", "users.manage"})
+
+# Holding the left key means holding the right ones: steering runs without being able to
+# start one is not a role anybody has.
+_IMPLIES: dict[str, tuple[str, ...]] = {"runs.control": ("runs.start",)}
+
 ADMIN = "admin"
 BUILTIN_ROLES: dict[str, tuple[str, list[str]]] = {
     ADMIN: ("👑 Admin", ["*"]),
     "lead": ("🧑‍💻 Lead / vận hành", [
-        "view", "runs.control", "process.edit", "review.run", "tracker.write",
+        "view", "runs.start", "runs.control", "process.edit", "review.run", "tracker.write",
         "requirements.write", "requirements.approve", "security.run", "knowledge.edit",
         "fleet.control"]),
-    "ba": ("📋 BA", ["view", "review.run", "tracker.write", "requirements.write",
-                    "requirements.approve"]),
-    "qc": ("🧪 QC", ["view", "review.run", "tracker.write", "security.run"]),
+    "ba": ("📋 BA", ["view", "runs.start", "review.run", "tracker.write",
+                    "requirements.write", "requirements.approve"]),
+    "qc": ("🧪 QC", ["view", "runs.start", "review.run", "tracker.write", "security.run"]),
     "viewer": ("👀 Viewer", ["view"]),
 }
+ROLE_HINTS: dict[str, str] = {
+    ADMIN: "Toàn quyền, kể cả secret và người dùng.",
+    "lead": "Điều phối máy & quy trình; không đụng secret/thiết lập.",
+    "ba": "Viết, duyệt spec; tự chạy chặng BA.",
+    "qc": "Rà soát, quét bảo mật, báo bug; tự chạy chặng QC.",
+    "viewer": "Chỉ xem.",
+}
+
+# Every permission key that existed before saved roles started recording ``known``. A
+# built-in role saved back then gets any key added since at its built-in default — an
+# unticked box can only mean "denied" for a key the admin was actually shown.
+_LEGACY_KNOWN = frozenset({
+    "view", "runs.control", "process.edit", "review.run", "tracker.write",
+    "requirements.write", "requirements.approve", "security.run", "knowledge.edit",
+    "settings.edit", "secrets.view", "fleet.control", "system.update", "users.manage"})
 
 # (method, path regex under /dashboard, permission). First match wins. Paths are matched
 # against the part AFTER "/dashboard".
@@ -71,8 +98,9 @@ _RULES: list[tuple[str, str, str]] = [
     ("POST", r"/settings/import-full$", "secrets.view"),
     ("*", r"/users(/.*)?$", "users.manage"),
     ("GET", r".*", "view"),
-    ("POST", r"/(board/(move|run)|inbox/.*|queue/resume|planning/.*|conflicts/.*|"
-             r"sessions/.*/cancel|feedback/.*|history/.*)$", "runs.control"),
+    ("POST", r"/(board/run|sessions/[^/]+/cancel|feedback/[^/]+)$", "runs.start"),
+    ("POST", r"/(board/move|inbox/.*|queue/resume|planning/.*|conflicts/.*|history/.*)$",
+     "runs.control"),
     ("POST", r"/(roles(/preset)?|flow|board-views|loops(/.*)?)$", "process.edit"),
     ("POST", r"/review/(start|upload|sweep|\d+/(ask|challenge|rerun))$", "review.run"),
     ("POST", r"/(review/\d+/(file|comment)|reports/\d+/file|security/\d+/file)$",
@@ -104,23 +132,41 @@ class Role:
     label: str
     permissions: list[str]
     builtin: bool = True
+    customized: bool = False
+
+    @property
+    def hint(self) -> str:
+        return ROLE_HINTS.get(self.key, "")
 
 
 def roles(custom: dict | None) -> dict[str, Role]:
     """Built-in roles overlaid with the admin's edits and additions.
 
-    ``custom`` is ``{key: {"label": "...", "permissions": [...]}}``. ``admin`` is never
+    ``custom`` is ``{key: {"label": "...", "permissions": [...], "known": [...]}}`` —
+    ``known`` is the permission list the admin was shown when saving. ``admin`` is never
     overridden: the matrix editor must not be able to lock the last admin out.
     """
-    out = {k: Role(k, lbl, list(p)) for k, (lbl, p) in BUILTIN_ROLES.items()}
+    out = {k: Role(k, lbl, _implied(p)) for k, (lbl, p) in BUILTIN_ROLES.items()}
     for key, spec in (custom or {}).items():
         k = re.sub(r"[^a-z0-9_-]", "", str(key).lower())[:40]
         if not k or k == ADMIN or not isinstance(spec, dict):
             continue
         perms = [p for p in spec.get("permissions") or [] if p in PERMISSIONS]
+        if k in BUILTIN_ROLES:
+            known = set(spec.get("known") or _LEGACY_KNOWN)
+            perms += [p for p in BUILTIN_ROLES[k][1] if p not in known and p not in perms]
         label = str(spec.get("label") or (out[k].label if k in out else k))[:60]
-        out[k] = Role(k, label, perms, builtin=k in BUILTIN_ROLES)
+        builtin = k in BUILTIN_ROLES
+        out[k] = Role(k, label, _implied(perms), builtin=builtin,
+                      customized=builtin and _implied(perms) != out[k].permissions)
     return out
+
+
+def _implied(perms: list[str]) -> list[str]:
+    out = list(perms)
+    for p in perms:
+        out += [q for q in _IMPLIES.get(p, ()) if q not in out]
+    return [p for p in PERMISSIONS if p in out] if "*" not in out else ["*"]
 
 
 def permissions_of(user_roles: list[str], custom: dict | None) -> set[str]:

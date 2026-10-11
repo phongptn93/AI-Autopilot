@@ -23,7 +23,12 @@ from ai_autopilot.config import Settings
     ("GET", "/dashboard/board", "view"),
     ("GET", "/dashboard/settings/reveal/ado_pat", "secrets.view"),
     ("POST", "/dashboard/settings", "settings.edit"),
-    ("POST", "/dashboard/board/run", "runs.control"),
+    ("POST", "/dashboard/board/run", "runs.start"),
+    ("POST", "/dashboard/sessions/abc-1/cancel", "runs.start"),
+    ("POST", "/dashboard/feedback/42", "runs.start"),
+    ("POST", "/dashboard/board/move", "runs.control"),
+    ("POST", "/dashboard/history/clear", "runs.control"),
+    ("POST", "/dashboard/inbox/resume", "runs.control"),
     ("POST", "/dashboard/review/12/challenge", "review.run"),
     ("POST", "/dashboard/review/12/comment", "tracker.write"),
     ("POST", "/dashboard/users/3/update", "users.manage"),
@@ -37,14 +42,68 @@ def test_route_permissions(method, path, perm):
 
 
 def test_roles_are_customisable_but_admin_is_not():
-    custom = {"ba": {"permissions": ["view"]}, "pm": {"label": "PM", "permissions": ["view", "x"]},
+    custom = {"ba": {"permissions": ["view"], "known": list(rbac.PERMISSIONS)},
+              "pm": {"label": "PM", "permissions": ["view", "x"]},
               "admin": {"permissions": []}}
     table = rbac.roles(custom)
     assert table["ba"].permissions == ["view"] and table["pm"].permissions == ["view"]
+    assert table["ba"].customized and not table["qc"].customized
     assert table["admin"].permissions == ["*"]
     perms = rbac.permissions_of(["ba", "qc"], custom)
     assert rbac.allowed(perms, "security.run") and not rbac.allowed(perms, "settings.edit")
     assert not rbac.allowed(perms, rbac.ADMIN) and rbac.allowed({"*"}, rbac.ADMIN)
+
+
+def test_qc_and_ba_can_run_their_own_stage_but_not_steer_the_machine():
+    for role in ("qc", "ba"):
+        perms = rbac.permissions_of([role], {})
+        assert rbac.allowed(perms, rbac.required("POST", "/dashboard/board/run"))
+        assert not rbac.allowed(perms, rbac.required("POST", "/dashboard/history/clear"))
+        assert not rbac.allowed(perms, rbac.required("POST", "/dashboard/board/move"))
+
+
+def test_a_role_saved_before_a_permission_existed_gets_its_default():
+    # Saved by an older build: no "known", so runs.start was never shown to the admin.
+    legacy = {"qc": {"permissions": ["view", "review.run"]},
+              "lead": {"permissions": ["view", "runs.control"]}}
+    table = rbac.roles(legacy)
+    assert "runs.start" in table["qc"].permissions
+    assert "runs.start" in table["lead"].permissions          # implied by runs.control
+    # Saved by this build with the box unticked: that is a real "no".
+    table = rbac.roles({"qc": {"permissions": ["view"], "known": list(rbac.PERMISSIONS)}})
+    assert table["qc"].permissions == ["view"]
+
+
+def test_matrix_save_records_known_and_reset_restores_default(tmp_path, monkeypatch):
+    from ai_autopilot.dashboard.routes import users as users_routes
+
+    saved: dict = {}
+    monkeypatch.setattr(users_routes, "config_file_path", lambda: tmp_path / "c.yaml")
+    monkeypatch.setattr(users_routes.settings_form, "save_to_yaml",
+                        lambda _p, d: saved.update(d))
+    monkeypatch.setattr(users_routes.settings_form, "apply_to_config", lambda *_a: None)
+    import asyncio
+    from types import SimpleNamespace
+
+    class _Form(dict):
+        def getlist(self, k):
+            return []
+
+    class _Audit:
+        async def record(self, **_kw):
+            return None
+
+    form = _Form({"perm_qc_view": "on", "reset_ba": "on", "perm_ba_view": "on"})
+    req = SimpleNamespace(
+        form=lambda: asyncio.sleep(0, form),
+        app=SimpleNamespace(state=SimpleNamespace(container=SimpleNamespace(
+            config=SimpleNamespace(user_roles={}), audit_repo=_Audit()))))
+    route = next(r for r in users_routes.create_router().routes if r.path == "/users/roles")
+    asyncio.run(route.endpoint(req))
+    roles = saved["user_roles"]
+    assert roles["qc"]["permissions"] == ["view"]
+    assert set(roles["qc"]["known"]) == set(rbac.PERMISSIONS)
+    assert "ba" not in roles and "admin" not in roles
 
 
 # ── OIDC token verification ───────────────────────────────────────────────────

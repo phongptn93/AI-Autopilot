@@ -39,6 +39,8 @@
   .mx td:first-child b { display:block; } .mx td:first-child small { color:var(--text-dim); }
   .mx thead th { position:sticky; top:0; background:var(--bg-card); vertical-align:bottom; }
   .mx thead input { width:140px; font-size:12px; text-align:center; }
+  .mx-hint { display:block; max-width:150px; margin:4px auto 0; font-weight:400; font-size:11px; line-height:1.35; color:var(--text-dim); white-space:normal; }
+  .mx-sens { display:inline-block; margin:2px 0; padding:0 6px; border-radius:6px; font-size:10.5px; color:var(--red); border:1px solid var(--red); }
   .mx .grp td { text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim); background:var(--bg-input); }
   .sso-state { margin-left:auto; font-size:12px; font-weight:600; color:var(--text-dim); }
   .sso-state.ready { color:var(--amber); } .sso-state.on { color:var(--green); }
@@ -169,12 +171,14 @@
     <thead><tr><th>Quyền</th>
       {% for key, role in role_table.items() %}
       <th>{% if key == 'admin' %}{{ role.label }}{% else %}<input name="label_{{ key }}" value="{{ role.label }}" aria-label="Tên vai {{ key }}">
-        {% if not role.builtin %}<br><label style="font-size:11px;color:var(--red)"><input type="checkbox" name="delete_{{ key }}"> xoá</label>{% endif %}{% endif %}</th>
+        {% if not role.builtin %}<br><label style="font-size:11px;color:var(--red)"><input type="checkbox" name="delete_{{ key }}"> xoá</label>
+        {% elif role.customized %}<br><label style="font-size:11px;color:var(--amber)" title="Bỏ các chỉnh sửa, dùng lại quyền mặc định của vai này"><input type="checkbox" name="reset_{{ key }}"> ↺ về mặc định</label>{% endif %}{% endif %}
+        {% if role.hint %}<small class="mx-hint">{{ role.hint }}</small>{% endif %}</th>
       {% endfor %}</tr></thead>
     {% set groups = [] %}
     {% for pkey, p in permissions.items() %}
     {% if p[1] not in groups %}{% set _ = groups.append(p[1]) %}<tr class="grp"><td colspan="{{ role_table|length + 1 }}">{{ p[1] }}</td></tr>{% endif %}
-    <tr><td><b>{{ p[0] }}</b><small>{{ p[2] }}</small></td>
+    <tr><td><b>{{ p[0] }}</b>{% if pkey in sensitive %} <span class="mx-sens" title="Quyền nhạy cảm — chạm tới secret, thiết lập hoặc người dùng">⚠️ nhạy cảm</span>{% endif %}<small>{{ p[2] }}</small></td>
       {% for key, role in role_table.items() %}
       <td>{% if key == 'admin' %}✔{% else %}<input type="checkbox" name="perm_{{ key }}_{{ pkey }}" {{ 'checked' if pkey in role.permissions }} aria-label="{{ role.label }} — {{ p[0] }}">{% endif %}</td>
       {% endfor %}</tr>

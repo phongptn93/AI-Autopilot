@@ -46,6 +46,7 @@ from ai_autopilot.dashboard.routes import (
     settings,
     setup,
     task,
+    users,
     workspaces,
 )
 
@@ -73,7 +74,7 @@ __all__ = [
 _AREAS = (
     auth, board, settings, loops, security, reports, reviews, planning, runs, task,
     analytics, fleet, workspaces, learning, flow, setup, requirements, inbox,
-    feedback, review,
+    feedback, review, users,
 )
 
 

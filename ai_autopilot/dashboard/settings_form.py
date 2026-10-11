@@ -970,6 +970,37 @@ _BASE_FIELDS: tuple[Field, ...] = (
     Field("review_gap_tag", "Tag cho work item tạo từ rà soát", "text",
           _REVIEW,
           "KHÔNG phải tag kích hoạt — gap cần người phân loại trước khi giao agent làm."),
+    # ── 👥 Người dùng & SSO ── (auth_mode itself is switched on the Users page, which
+    # refuses a switch nobody could undo; the fields below are the SSO app's details.)
+    Field("sso_provider", "Nhà cung cấp SSO", "select", "👥 Người dùng & SSO",
+          "entra = Microsoft Entra ID (Azure AD / Microsoft 365). google = Google Workspace. "
+          "oidc = Keycloak / Okta / Auth0… (cần Issuer URL).", ("entra", "google", "oidc")),
+    Field("sso_tenant_id", "Directory (tenant) ID", "text", "👥 Người dùng & SSO",
+          "Entra → App registrations → ứng dụng → Overview. Chỉ tài khoản thuộc tenant này "
+          "được đăng nhập.", show_when_key="sso_provider", show_when_values=("entra",)),
+    Field("sso_client_id", "Application (client) ID", "text", "👥 Người dùng & SSO",
+          "ID của ứng dụng đăng ký cho AI Autopilot."),
+    Field("sso_client_secret", "Client secret", "password", "👥 Người dùng & SSO",
+          "Certificates & secrets → New client secret → copy cột Value. Để trống = giữ "
+          "secret hiện tại."),
+    Field("sso_issuer", "Issuer URL", "text", "👥 Người dùng & SSO",
+          "Chỉ cho OIDC khác, vd https://sso.congty.vn/realms/main.",
+          show_when_key="sso_provider", show_when_values=("oidc",)),
+    Field("sso_allowed_domains", "Chỉ cho phép domain email", "list", "👥 Người dùng & SSO",
+          "Mỗi dòng một domain (vd congty.vn). Trống = mọi email trong tenant."),
+    Field("sso_new_users", "Người đăng nhập lần đầu", "select", "👥 Người dùng & SSO",
+          "pending = chờ Admin duyệt (an toàn nhất). viewer = vào ngay với quyền xem.",
+          ("pending", "viewer")),
+    Field("sso_role_map", "Map nhóm / app role → vai", "map", "👥 Người dùng & SSO",
+          "Mỗi dòng 'giá-trị=vai', vd 'AIAutopilot.BA=ba' (App role) hoặc '<group object id>=qc'. "
+          "Vai được cập nhật mỗi lần đăng nhập.",
+          placeholder="AIAutopilot.BA = ba"),
+    Field("sso_redirect_base", "Địa chỉ public của dashboard", "text", "👥 Người dùng & SSO",
+          "Khi chạy sau proxy/HTTPS, vd https://autopilot.congty.vn. Trống = lấy từ trình duyệt."),
+    Field("auth_breakglass", "Cho đăng nhập khẩn cấp bằng mật khẩu chung", "bool",
+          "👥 Người dùng & SSO",
+          "Mật khẩu dashboard cũ vẫn vào được với quyền Admin khi SSO hỏng. Nên bật; mỗi lần "
+          "dùng đều ghi nhật ký."),
     # ── 🔐 Quyền ra lệnh ── (split from the trigger section: "whose items" and "who may
     # drive this machine" are different questions; appended last so #sec-N stay put)
     Field("owner_can_command", "Owner được ra lệnh", "bool", "🔐 Quyền ra lệnh",
@@ -1180,7 +1211,7 @@ RESTART_REQUIRED = frozenset({"max_concurrent"})
 # Anyone who can open this page can already rewrite the ADO PAT, so they are trusted
 # with the webhook URLs too.
 SECRET_KEYS = frozenset({
-    "ado_pat", "teams_agent_app_secret",
+    "ado_pat", "teams_agent_app_secret", "sso_client_secret",
     # The fleet token is a password field like the rest, and leaving it out of this set
     # was not a security hole (a password input never renders its value) — it broke the
     # page's ability to SAY it is set: the box read "not set" on a central with a
@@ -1198,6 +1229,11 @@ SECRET_KEYS = frozenset({
 NEVER_SHARED = frozenset({
     # ── secrets ──
     "ado_pat", "oauth_app_id", "oauth_app_secret",
+    # Who may sign in to THIS dashboard is this machine's decision — and the client
+    # secret is a credential. A central must never hand its SSO app to every worker.
+    "auth_mode", "auth_breakglass", "sso_provider", "sso_tenant_id", "sso_client_id",
+    "sso_client_secret", "sso_issuer", "sso_allowed_domains", "sso_new_users",
+    "sso_role_map", "sso_redirect_base", "user_roles",
     "smtp_host", "smtp_port", "smtp_user", "smtp_password",
     "zalo_oa_access_token", "zalo_recipient_user_id",
     "teams_webhook_url", "teams_webhook_urls", "teams_webhook_channels",

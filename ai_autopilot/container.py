@@ -34,6 +34,7 @@ from ai_autopilot.data import (
     PrSessionRepository,
     QualityRepository,
     ReviewRepository,
+    UserRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
     SecurityRepository,
@@ -109,6 +110,8 @@ class Container:
         self.loop_report_repo = LoopReportRepository(self.database)
         # 🧭 Review Studio: spec / report / question checked against the code.
         self.review_repo = ReviewRepository(self.database)
+        # 👥 Dashboard accounts — only consulted when auth_mode is users / sso.
+        self.user_repo = UserRepository(self.database)
         # Security findings with a lifecycle (scan CLI, scan loops, pre-PR gate, page).
         self.security_repo = SecurityRepository(self.database)
         self.pr_conflict_repo = PrConflictRepository(self.database)

@@ -152,10 +152,13 @@ def test_review_reads_the_chosen_workspace_and_a_challenge_rechecks(tmp_path, mo
 
     monkeypatch.setattr(svc_mod.ReviewStudio, "_agent", fake)
     with TestClient(create_app(cfg)) as client:
-        hub = client.get("/dashboard/review").text
-        assert "Team B" in hub and "Spec B" in hub
         ws_b = next(w.id for w in svc_mod.studio_for(client.app.state.container).workspaces()
                     if w.directory == str(b))
+        hub = client.get("/dashboard/review").text            # first workspace by default
+        assert "Team B" in hub and "Spec A" in hub and "Spec B" not in hub
+        hub_b = client.get(f"/dashboard/review?ws={ws_b}").text
+        assert "Spec B" in hub_b and "Spec A" not in hub_b
+        assert f'name="workspace" value="{ws_b}"' in hub_b      # forms carry the page's ws
         r = client.post("/dashboard/review/start", data={
             "kind": "spec", "target": f"{ws_b}|specs/f/s.md"}, follow_redirects=False)
         rid = int(r.headers["location"].rsplit("/", 1)[1])
@@ -167,6 +170,9 @@ def test_review_reads_the_chosen_workspace_and_a_challenge_rechecks(tmp_path, mo
         page = client.get(f"/dashboard/review/{rid}").text
         assert "Code tốt hơn tài liệu" in page and "Đánh giá tài liệu" in page
         assert "⚖️ Phản biện" in page and "Team B" in page
+        # history is per workspace too
+        assert f"/dashboard/review/{rid}" in client.get(f"/dashboard/review?ws={ws_b}").text
+        assert f"/dashboard/review/{rid}\"" not in client.get("/dashboard/review").text
 
         client.post(f"/dashboard/review/{rid}/challenge",
                     data={"challenge_row": "2", "note_2": "đã có ở nhánh development",

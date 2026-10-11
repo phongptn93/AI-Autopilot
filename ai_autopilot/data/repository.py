@@ -35,6 +35,7 @@ from ai_autopilot.data.entities import (
     PrSession,
     QualityEvent,
     QualityKind,
+    DashboardUser,
     Review,
     ReviewMessage,
     SchedulerDecision,
@@ -874,6 +875,12 @@ class AuditRepository:
     async def record(
         self, *, actor: str, source: str, action: str, target: str = "", detail: str = ""
     ) -> None:
+        # In users/sso mode the request guard knows WHO acted; call sites still pass the
+        # generic "dashboard", so the person is filled in here, once, for all of them.
+        if actor in ("", "dashboard"):
+            from ai_autopilot.user_auth import current_actor
+
+            actor = current_actor.get() or actor
         try:
             async with self._db.session() as session:
                 session.add(AuditEvent(
@@ -3007,3 +3014,54 @@ class ReviewRepository:
                 select(ReviewMessage).where(ReviewMessage.review_id == review_id)
                 .order_by(ReviewMessage.id))
             return list(rows.scalars().all())
+
+
+class UserRepository:
+    """Dashboard accounts (local and SSO)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def get(self, user_id: int) -> DashboardUser | None:
+        async with self._db.session() as session:
+            return await session.get(DashboardUser, user_id)
+
+    async def by_email(self, email: str) -> DashboardUser | None:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(DashboardUser).where(func.lower(DashboardUser.email) == email.strip().lower()))
+            return rows.scalars().first()
+
+    async def all(self) -> list[DashboardUser]:
+        async with self._db.session() as session:
+            rows = await session.execute(select(DashboardUser).order_by(DashboardUser.email))
+            return list(rows.scalars().all())
+
+    async def create(self, *, email: str, name: str = "", source: str = "local",
+                     subject: str = "", roles: list[str] | None = None, status: str = "active",
+                     password_hash: str | None = None, approved_by: str = "") -> int:
+        row = DashboardUser(
+            email=email.strip().lower()[:320], name=name[:200], source=source, subject=subject[:200],
+            roles_json=json.dumps(list(roles or [])), status=status, password_hash=password_hash,
+            created_at=datetime.now(UTC), approved_by=approved_by[:320])
+        async with self._db.session() as session:
+            session.add(row)
+            await session.commit()
+            return int(row.id)
+
+    async def update(self, user_id: int, **fields) -> None:
+        if "roles" in fields:
+            fields["roles_json"] = json.dumps(list(fields.pop("roles") or []))
+        async with self._db.session() as session:
+            await session.execute(
+                update(DashboardUser).where(DashboardUser.id == user_id).values(**fields))
+            await session.commit()
+
+    async def delete(self, user_id: int) -> None:
+        async with self._db.session() as session:
+            await session.execute(delete(DashboardUser).where(DashboardUser.id == user_id))
+            await session.commit()
+
+    async def active_admins(self) -> int:
+        return sum(1 for u in await self.all()
+                   if u.status == "active" and "admin" in json.loads(u.roles_json or "[]"))

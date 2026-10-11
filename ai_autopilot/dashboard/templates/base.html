@@ -332,7 +332,8 @@
             .cmdk { padding-top: 8vh; }
         }
         @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
-    </style>
+        .whoami { font-size:11.5px; color:var(--text-muted); max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style>
 </head>
 <body>
 <div class="layout" id="layout">
@@ -401,7 +402,10 @@
         </div>
         <div class="sidebar-foot">
             <span class="live-dot"></span> autopilot online · v{{ version }}
-            {% if dashboard_locked %}
+            {% if current_user %}
+            <span class="whoami" title="{{ current_user.email }}">👤 {{ current_user.label }}</span>
+            {% endif %}
+            {% if dashboard_locked or current_user %}
             <!-- POST, not a link: a GET logout can be triggered by any embedded image. -->
             <form method="post" action="/dashboard/logout" class="logout-form">
                 <button type="submit" title="Đăng xuất">Đăng xuất</button>

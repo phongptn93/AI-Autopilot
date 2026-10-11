@@ -30,9 +30,14 @@ def _ctx(request: Request, active: str, **extra) -> dict:
     current = selected_workspace(request)
     if current != "all" and not any(w.id == current for w in all_workspaces):
         current = "all"   # a renamed or deleted workspace must not strand the view
+    user = getattr(request.state, "user", None)
     return {
         "request": request,
         "active": active,
+        # Who is signed in (users/sso mode) and what they may do. In password mode
+        # there is no person, so every action stays visible, as before.
+        "current_user": user,
+        "can": (lambda perm: user is None or user.can(perm)),
         "workspaces": all_workspaces,
         "current_workspace": current,
         # Only worth showing a selector when there is something to choose between.

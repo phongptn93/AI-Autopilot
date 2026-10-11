@@ -50,6 +50,12 @@
     background:var(--bg-input); color:var(--text-muted); cursor:pointer; }
   .rv-sug:hover { border-color:var(--accent); color:var(--text); }
 
+  .rv-wstabs { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 14px; }
+  .rv-wstabs a { display:inline-flex; gap:8px; align-items:baseline; padding:8px 14px; border-radius:10px; text-decoration:none;
+    border:1px solid var(--border); background:var(--bg-card); color:var(--text-muted); font-size:13.5px; font-weight:600; }
+  .rv-wstabs a small { font-size:11px; font-weight:500; color:var(--text-dim); }
+  .rv-wstabs a.on { border-color:var(--accent); background:var(--accent-bg); color:var(--accent-hover); box-shadow:0 0 0 1px var(--accent) inset; }
+  .rv-wstabs a:hover { border-color:rgba(99,102,241,.5); }
   .rv-ws { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
   .rv-ws select { height:38px; padding:0 10px; border-radius:9px; font:inherit; font-size:13px; background:var(--bg-input);
     color:var(--text); border:1px solid var(--border); max-width:220px; }
@@ -121,12 +127,7 @@
 
 {% macro score_tone(s) %}{{ 'green' if s >= 80 else ('amber' if s >= 50 else 'red') }}{% endmacro %}
 {# Which workspace a review reads. Hidden when there is only one to choose. #}
-{% macro ws_select() %}{% if review_workspaces|length > 1 %}
-  <label class="rv-ws" title="Workspace (thư mục + repo) mà phiên rà sẽ đọc">🗂
-    <select name="workspace" aria-label="Workspace">
-      {% for w in review_workspaces %}<option value="{{ w.id }}" {{ 'selected' if current_ws and w.id == current_ws.id }}>{{ w.label }}</option>{% endfor %}
-    </select></label>
-{% elif review_workspaces %}<input type="hidden" name="workspace" value="{{ review_workspaces[0].id }}">{% endif %}{% endmacro %}
+{% macro ws_select() %}{% if current_ws %}<input type="hidden" name="workspace" value="{{ current_ws.id }}">{% endif %}{% endmacro %}
 
 <div class="page-header">
   <h2 class="page-title">{{ page_title("review") }}</h2>
@@ -135,6 +136,13 @@
 
 {% if flash %}<div class="rv-card" style="border-color:var(--{{ flash[0] }});padding:12px 18px;font-size:13px">{{ flash[1]|safe }}</div>{% endif %}
 
+{% if review_workspaces|length > 1 %}
+<nav class="rv-wstabs" aria-label="Workspace">
+  {% for w in review_workspaces %}
+  <a href="?ws={{ w.id }}" class="{{ 'on' if current_ws and w.id == current_ws.id }}">🗂 {{ w.label }}<small>{{ ws_counts.get(w.id, 0) }} phiên</small></a>
+  {% endfor %}
+</nav>
+{% endif %}
 <div class="rv-safe {{ 'on' if safe else 'off' }}">
   <b>{{ '🔒 Chế độ an toàn đang bật' if safe else '⚠️ Chế độ an toàn đang TẮT' }}</b>
   <span>Agent <b>chỉ đọc</b> (không sửa file, không chạy lệnh, không truy cập Internet).
@@ -167,7 +175,7 @@
 {% endif %}
 
 <div class="rv-kpis">
-  <div class="rv-kpi"><div class="k">📄 Spec workspace đã rà</div>
+  <div class="rv-kpi"><div class="k">📄 Spec đã rà</div>
     <div class="v">{{ kpi.reviewed }}<small> / {{ kpi.specs }}</small></div><div class="h">spec trong workspace</div></div>
   <div class="rv-kpi"><div class="k">📈 Độ bao phủ TB</div>
     <div class="v {% if kpi.avg is not none %}tone-{{ score_tone(kpi.avg) }}{% endif %}">{{ kpi.avg if kpi.avg is not none else '—' }}{% if kpi.avg is not none %}<small>%</small>{% endif %}</div>
@@ -179,7 +187,7 @@
 </div>
 
 <div class="rv-card">
-  <div class="rv-hd"><h3>🧭 Bắt đầu rà soát</h3><span>Chọn đối tượng — mỗi lần rà thường mất 3–10 phút.</span></div>
+  <div class="rv-hd"><h3>🧭 Bắt đầu rà soát{% if current_ws and review_workspaces|length > 1 %} · {{ current_ws.label }}{% endif %}</h3><span>Chọn đối tượng — mỗi lần rà thường mất 3–10 phút.</span></div>
   <div class="rv-tabs" role="tablist">
     <button type="button" class="rv-tab on" data-pane="p-spec" role="tab">📄 Tài liệu yêu cầu ↔ code</button>
     <button type="button" class="rv-tab" data-pane="p-report" role="tab">🛡️ Kiểm chứng báo cáo</button>
@@ -224,7 +232,7 @@
         <label class="rv-opt" data-text="{{ (s.title ~ ' ' ~ s.rel ~ ' ' ~ s.item_id)|lower }}">
           <input type="radio" name="target" value="{{ r.ws }}|{{ s.rel }}" {{ 'checked' if loop.first }} required>
           <b title="{{ s.title }}">{{ s.title }}{% if s.item_id %} <span style="color:var(--text-dim);font-weight:500">· #{{ s.item_id }}</span>{% endif %}</b>
-          <span class="p" title="{{ s.rel }}">{% if review_workspaces|length > 1 %}<span class="wsb">{{ r.ws_label }}</span> {% endif %}{{ s.rel }}</span>
+          <span class="p" title="{{ s.rel }}">{{ s.rel }}</span>
           <span class="last">{% if last and last.score is not none %}
             <b class="tone-{{ score_tone(last.score) }}">{{ last.score|round|int }}%</b>{{ ago(last.finished_at) }}
             {% else %}chưa rà{% endif %}</span>
@@ -300,7 +308,7 @@
 </div>
 
 <div class="rv-card">
-  <div class="rv-hd"><h3>🗂 Lịch sử rà soát</h3><span>{{ history|length }} phiên gần nhất</span></div>
+  <div class="rv-hd"><h3>🗂 Lịch sử rà soát{% if current_ws and review_workspaces|length > 1 %} · {{ current_ws.label }}{% endif %}</h3><span>{{ history|length }} phiên gần nhất</span></div>
   {% if history %}
   <table class="rv-tbl">
     <tr><th>Phiên</th><th>Kết luận</th><th>Điểm</th><th class="hide-sm">Trạng thái</th><th class="hide-sm">Khi nào</th></tr>

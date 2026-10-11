@@ -57,19 +57,31 @@ def create_router() -> APIRouter:
         flash = _take_flash(request)
         studio = studio_for(c)
         wss = studio.workspaces()
-        # Default to the workspace the sidebar is showing; "all" → the first one.
-        picked = selected_workspace(request)
+        # One workspace at a time: its specs, its code, its history. Picked from the
+        # page's own tabs (?ws=), else the workspace the sidebar is showing, else the
+        # first. Reviews saved before workspaces existed belong to the default one.
+        picked = request.query_params.get("ws") or selected_workspace(request)
         current = next((w for w in wss if w.id == picked), wss[0] if wss else None)
-        last = await c.review_repo.latest_by_target(rs.KIND_SPEC)
-        spec_rows = []
-        for ws in wss or [None]:
-            folder = ws.directory if ws else c.config.workspace_directory
-            for s in spec_library.discover(folder):
-                spec_rows.append({"spec": s, "last": last.get(s.rel),
-                                  "ws": ws.id if ws else "", "ws_label": ws.label if ws else ""})
+        cur_id = current.id if current else ""
+        default_id = wss[0].id if wss else ""
+
+        def mine(row) -> bool:
+            return not wss or (row.workspace or default_id) == cur_id
+
+        everything = await c.review_repo.recent(400)
+        history = [r for r in everything if mine(r)][:60]
+        last: dict = {}
+        for r in everything:
+            if mine(r) and r.kind == rs.KIND_SPEC and r.status == "done" and r.target not in last:
+                last[r.target] = r
+        folder = current.directory if current else c.config.workspace_directory
+        spec_rows = [{"spec": s, "last": last.get(s.rel), "ws": cur_id,
+                      "ws_label": current.label if current else ""}
+                     for s in spec_library.discover(folder)]
         specs = [r["spec"] for r in spec_rows]
+        ws_counts = {w.id: sum(1 for r in everything if (r.workspace or default_id) == w.id)
+                     for w in wss}
         reports = await c.loop_report_repo.recent(15)
-        history = await c.review_repo.recent(60)
         done = [r for r in history if r.status == "done"]
         scored = [r.score for r in done if r.kind == rs.KIND_SPEC and r.score is not None]
         open_q = 0
@@ -98,7 +110,7 @@ def create_router() -> APIRouter:
             accept=",".join(review_docs.ALLOWED), safe=c.config.review_safe_mode,
             upload_error=request.query_params.get("upload_error", ""),
             repos=repos, code_source=c.config.review_code_source,
-            review_workspaces=wss, current_ws=current,
+            review_workspaces=wss, current_ws=current, ws_counts=ws_counts,
         ))
         if flash:
             response.delete_cookie(_FLASH_COOKIE, path="/dashboard")

@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width:none; }
+  .us-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; margin-bottom:16px; overflow:hidden; }
+  .us-hd { display:flex; gap:8px 14px; align-items:baseline; flex-wrap:wrap; padding:14px 18px; border-bottom:1px solid var(--border-soft); }
+  .us-hd h3 { margin:0; font-size:14.5px; font-weight:700; }
+  .us-hd span { font-size:12px; color:var(--text-dim); }
+  .us-body { padding:14px 18px; }
+  .modes { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+  @media (max-width:900px) { .modes { grid-template-columns:1fr; } }
+  .mode { border:1px solid var(--border); border-radius:12px; padding:14px 16px; background:var(--bg-input); display:flex; flex-direction:column; gap:6px; }
+  .mode.on { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; background:var(--accent-bg); }
+  .mode b { font-size:14px; } .mode p { margin:0; font-size:12.5px; color:var(--text-muted); line-height:1.55; flex:1; }
+  .mode form { margin:0; }
+  .tagl { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; border:1px solid var(--border); background:var(--bg-input); color:var(--text-muted); white-space:nowrap; }
+  .tagl.green { color:var(--green); border-color:rgba(46,204,113,.45); }
+  .tagl.amber { color:var(--amber); border-color:rgba(245,166,35,.5); }
+  .tagl.red { color:var(--red); border-color:rgba(240,82,106,.5); }
+  .stats { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .ut { width:100%; border-collapse:collapse; }
+  .ut th { text-align:left; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); padding:9px 12px; border-bottom:1px solid var(--border-soft); }
+  .ut td { padding:11px 12px; border-bottom:1px solid var(--border-soft); font-size:13px; vertical-align:top; }
+  .ut tr.pending td { background:rgba(245,166,35,.05); }
+  .ut .who b { display:block; } .ut .who span { font-size:12px; color:var(--text-dim); }
+  .rolechips { display:flex; flex-wrap:wrap; gap:5px; }
+  .rolechips label { display:inline-flex; gap:5px; align-items:center; font-size:12px; padding:3px 9px; border-radius:14px; border:1px solid var(--border); background:var(--bg-input); cursor:pointer; }
+  .rolechips label:has(input:checked) { border-color:var(--accent); background:var(--accent-bg); color:var(--accent-hover); }
+  .rolechips input { margin:0; }
+  .acts { display:flex; gap:6px; flex-wrap:wrap; }
+  .acts button { font-size:12px; padding:5px 10px; }
+  .danger { color:var(--red) !important; border-color:rgba(240,82,106,.45) !important; }
+  .add { display:grid; grid-template-columns:1.3fr 1fr 1fr auto; gap:10px; align-items:end; }
+  @media (max-width:900px) { .add { grid-template-columns:1fr; } }
+  .add label > span { display:block; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:4px; }
+  .add input:not([type=checkbox]) { width:100%; box-sizing:border-box; }
+  .mx-wrap { overflow-x:auto; }
+  .mx { border-collapse:collapse; width:100%; min-width:720px; }
+  .mx th, .mx td { padding:8px 10px; border-bottom:1px solid var(--border-soft); font-size:12.5px; text-align:center; }
+  .mx th:first-child, .mx td:first-child { text-align:left; }
+  .mx td:first-child b { display:block; } .mx td:first-child small { color:var(--text-dim); }
+  .mx thead th { position:sticky; top:0; background:var(--bg-card); vertical-align:bottom; }
+  .mx thead input { width:140px; font-size:12px; text-align:center; }
+  .mx .grp td { text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim); background:var(--bg-input); }
+  .steps { margin:0; padding-left:20px; font-size:13px; line-height:1.8; color:var(--text-muted); }
+  .steps b, .steps code { color:var(--text); }
+  .copy { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:10px 0; }
+  .copy code { font-family:var(--mono); font-size:12.5px; padding:6px 10px; border-radius:8px; background:var(--bg-input); border:1px solid var(--border); overflow-wrap:anywhere; }
+  .kv { display:grid; grid-template-columns:180px 1fr; gap:6px 14px; font-size:13px; margin:12px 0; }
+  .kv span:nth-child(odd) { color:var(--text-dim); }
+  .note { font-size:12px; color:var(--text-dim); margin-top:8px; line-height:1.6; }
+</style>
+
+<div class="page-header">
+  <h2 class="page-title">{{ page_title("users") }}</h2>
+  <p>Ai được vào dashboard, mỗi người làm được gì — đăng nhập bằng tài khoản công ty (SSO).</p>
+</div>
+{% if flash %}<div class="us-card" style="border-color:var(--{{ flash[0] }});padding:12px 18px;font-size:13px">{{ flash[1]|safe }}</div>{% endif %}
+
+{% set mode = cfg.auth_mode %}
+<div class="us-card">
+  <div class="us-hd"><h3>🔐 Cách đăng nhập</h3><span>Bật / tắt bất kỳ lúc nào — luôn giữ một đường vào khẩn cấp.</span></div>
+  <div class="us-body">
+    <div class="modes">
+      {% for key, title, desc in [
+        ('password', '🔑 Mật khẩu chung', 'Như trước: một mật khẩu cho cả nhóm. Không biết ai đã làm gì, ai cũng toàn quyền.'),
+        ('users', '👤 Tài khoản cá nhân', 'Mỗi người một email + mật khẩu, quyền theo vai. Hợp với nhóm nhỏ không có SSO.'),
+        ('sso', '🏢 SSO công ty', 'Đăng nhập Microsoft Entra ID. Người mới chờ Admin duyệt; vai tự gán theo nhóm / app role.')] %}
+      <div class="mode {{ 'on' if mode == key }}">
+        <b>{{ title }}</b><p>{{ desc }}</p>
+        {% if mode == key %}<span class="tagl green">● Đang dùng</span>
+        {% else %}
+        <form method="post" action="/dashboard/users/mode"
+              onsubmit="return confirm('Chuyển sang «{{ title }}»? Mọi người sẽ phải đăng nhập lại theo cách mới.')">
+          <input type="hidden" name="mode" value="{{ key }}">
+          <button class="btn-ghost" type="submit">Bật {{ title.split(' ', 1)[1] }}</button>
+        </form>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="stats">
+      <span class="tagl {{ 'green' if admins else 'red' }}">👑 {{ admins }} Admin đang hoạt động</span>
+      {% if pending %}<span class="tagl amber">⏳ {{ pending }} chờ duyệt</span>{% endif %}
+      <span class="tagl {{ 'green' if breakglass_ready else 'amber' }}">🆘 Đăng nhập khẩn cấp: {{ 'sẵn sàng' if breakglass_ready else 'chưa có (đặt mật khẩu dashboard)' }}</span>
+      {% if current_user %}<span class="tagl">Bạn: {{ current_user.label }}</span>{% endif %}
+    </div>
+    {% if mode == 'password' and not admins %}
+    <div class="note">👉 Bước đầu: thêm ít nhất một tài khoản <b>Admin</b> (email công ty) ở dưới, rồi bật <b>SSO công ty</b>. Admin vào bằng SSO như mọi người.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="us-card" id="people">
+  <div class="us-hd"><h3>👥 Người dùng</h3><span>{{ users|length }} tài khoản{% if pending %} · {{ pending }} chờ duyệt (lên đầu){% endif %}</span></div>
+  {% if users %}
+  <div class="mx-wrap"><table class="ut">
+    <tr><th>Người dùng</th><th>Vai</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th><th></th></tr>
+    {% for u in users %}{% set ur = roles_of(u) %}
+    <tr class="{{ u.status }}">
+      <td class="who"><b>{{ u.name or u.email }}</b><span>{{ u.email }} · {{ 'SSO' if u.source == 'sso' else 'nội bộ' }}</span></td>
+      <td><form id="u{{ u.id }}" method="post" action="/dashboard/users/{{ u.id }}/update">
+        <div class="rolechips">
+          {% for key, role in role_table.items() %}
+          <label title="{{ role.permissions|length if role.permissions != ['*'] else 'mọi' }} quyền"><input type="checkbox" name="roles" value="{{ key }}" {{ 'checked' if key in ur }}>{{ role.label }}</label>
+          {% endfor %}
+        </div></form></td>
+      <td>{% if u.status == 'pending' %}<span class="tagl amber">⏳ Chờ duyệt</span>
+        {% elif u.status == 'active' %}<span class="tagl green">● Hoạt động</span>
+        {% else %}<span class="tagl red">⛔ Đã khoá</span>{% endif %}</td>
+      <td style="white-space:nowrap;color:var(--text-dim);font-size:12px">{{ u.last_login_at.strftime('%d/%m %H:%M') if u.last_login_at else '—' }}</td>
+      <td><div class="acts">
+        {% if u.status == 'pending' %}
+        <button class="btn-save" form="u{{ u.id }}" name="action" value="approve" type="submit">✓ Duyệt</button>
+        <button class="btn-ghost danger" form="u{{ u.id }}" name="action" value="disable" type="submit">Từ chối</button>
+        {% else %}
+        <button class="btn-ghost" form="u{{ u.id }}" name="action" value="save" type="submit">Lưu vai</button>
+        {% if u.status == 'active' %}<button class="btn-ghost" form="u{{ u.id }}" name="action" value="disable" type="submit">Khoá</button>
+        {% else %}<button class="btn-ghost" form="u{{ u.id }}" name="action" value="enable" type="submit">Mở khoá</button>{% endif %}
+        {% endif %}
+        <button class="btn-ghost danger" form="u{{ u.id }}" name="action" value="delete" type="submit"
+                onclick="return confirm('Xoá tài khoản {{ u.email }}?')">Xoá</button>
+      </div></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}
+  <div class="us-body" style="color:var(--text-dim);font-size:13px">Chưa có tài khoản nào. Thêm Admin đầu tiên ở dưới.</div>
+  {% endif %}
+  <div class="us-body" style="border-top:1px solid var(--border-soft)">
+    <form class="add" method="post" action="/dashboard/users/add">
+      <label><span>Email</span><input name="email" type="email" required placeholder="ten@congty.vn"></label>
+      <label><span>Tên hiển thị</span><input name="name" placeholder="Nguyễn Văn A"></label>
+      <label><span>Mật khẩu <small>(bỏ trống nếu đăng nhập SSO)</small></span><input name="password" type="password" minlength="10" autocomplete="new-password"></label>
+      <button class="btn-save" type="submit">＋ Thêm</button>
+      <div class="rolechips" style="grid-column:1/-1">
+        {% for key, role in role_table.items() %}<label><input type="checkbox" name="roles" value="{{ key }}" {{ 'checked' if key == 'viewer' }}>{{ role.label }}</label>{% endfor %}
+      </div>
+    </form>
+  </div>
+</div>
+
+<form class="us-card" id="roles" method="post" action="/dashboard/users/roles">
+  <div class="us-hd"><h3>🧩 Vai &amp; quyền</h3><span>Tick để cấp quyền. Admin luôn toàn quyền. Áp dụng ngay cho mọi người có vai đó.</span></div>
+  <div class="mx-wrap"><table class="mx">
+    <thead><tr><th>Quyền</th>
+      {% for key, role in role_table.items() %}
+      <th>{% if key == 'admin' %}{{ role.label }}{% else %}<input name="label_{{ key }}" value="{{ role.label }}" aria-label="Tên vai {{ key }}">
+        {% if not role.builtin %}<br><label style="font-size:11px;color:var(--red)"><input type="checkbox" name="delete_{{ key }}"> xoá</label>{% endif %}{% endif %}</th>
+      {% endfor %}</tr></thead>
+    {% set groups = [] %}
+    {% for pkey, p in permissions.items() %}
+    {% if p[1] not in groups %}{% set _ = groups.append(p[1]) %}<tr class="grp"><td colspan="{{ role_table|length + 1 }}">{{ p[1] }}</td></tr>{% endif %}
+    <tr><td><b>{{ p[0] }}</b><small>{{ p[2] }}</small></td>
+      {% for key, role in role_table.items() %}
+      <td>{% if key == 'admin' %}✔{% else %}<input type="checkbox" name="perm_{{ key }}_{{ pkey }}" {{ 'checked' if pkey in role.permissions }} aria-label="{{ role.label }} — {{ p[0] }}">{% endif %}</td>
+      {% endfor %}</tr>
+    {% endfor %}
+  </table></div>
+  <div class="us-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border-soft)">
+    <input name="new_key" placeholder="mã vai mới (vd pm)" pattern="[a-zA-Z0-9_-]*" style="width:170px">
+    <input name="new_label" placeholder="Tên hiển thị (vd 📈 PM)" style="width:200px">
+    <span style="flex:1"></span>
+    <button class="btn-save" type="submit">Lưu ma trận quyền</button>
+  </div>
+</form>
+
+<div class="us-card" id="sso">
+  <div class="us-hd"><h3>🏢 Cấu hình SSO — Microsoft Entra ID</h3><span>Làm một lần, khoảng 5 phút, cần quyền tạo App registration.</span></div>
+  <div class="us-body">
+    <ol class="steps">
+      <li><b>Entra admin center → App registrations → New registration.</b> Tên: <code>AI Autopilot</code>; loại tài khoản: <i>Accounts in this organizational directory only</i>.</li>
+      <li><b>Redirect URI</b> (loại <i>Web</i>) — dán đúng địa chỉ này:
+        <div class="copy"><code id="ruri">{{ redirect_uri }}</code><button class="btn-ghost" type="button" onclick="navigator.clipboard&&navigator.clipboard.writeText(document.getElementById('ruri').textContent).then(()=>this.textContent='✓ đã copy')">Copy</button></div>
+        Chạy sau proxy/HTTPS thì đặt <i>Địa chỉ public của dashboard</i> trong Thiết lập trước.</li>
+      <li><b>Certificates &amp; secrets → New client secret</b> → copy cột <i>Value</i>.</li>
+      <li>(Tuỳ chọn) <b>App roles</b>: tạo <code>AIAutopilot.Admin</code>, <code>AIAutopilot.BA</code>… rồi gán người/nhóm ở <i>Enterprise applications</i>; hoặc bật <b>groups claim</b> ở <i>Token configuration</i>.</li>
+      <li>Điền <b>Tenant ID, Client ID, Client secret</b> và bảng map vai ở <a href="/dashboard/settings#sec-users" style="color:var(--accent-hover)">Thiết lập → 👥 Người dùng &amp; SSO</a>, bấm <b>Thử kết nối</b>, rồi bật <b>SSO công ty</b> ở trên.</li>
+    </ol>
+    <div class="kv">
+      <span>Nhà cung cấp</span><span>{{ cfg.sso_provider }}</span>
+      <span>Tenant ID</span><span>{{ cfg.sso_tenant_id or '— chưa đặt' }}</span>
+      <span>Client ID</span><span>{{ cfg.sso_client_id or '— chưa đặt' }}</span>
+      <span>Client secret</span><span>{{ '●●●● đã đặt' if cfg.sso_client_secret else '— chưa đặt' }}</span>
+      <span>Domain cho phép</span><span>{{ cfg.sso_allowed_domains|join(', ') or 'mọi email trong tenant' }}</span>
+      <span>Người mới</span><span>{{ 'chờ Admin duyệt' if cfg.sso_new_users != 'viewer' else 'vào ngay với quyền xem' }}</span>
+      <span>Map vai</span><span>{% for k, v in cfg.sso_role_map.items() %}<code>{{ k }}</code> → {{ v }}{{ ', ' if not loop.last }}{% else %}— chưa có (Admin gán vai thủ công){% endfor %}</span>
+    </div>
+    <form method="post" action="/dashboard/users/sso-test" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn-ghost" type="submit">🧪 Thử kết nối SSO</button>
+      {% if sso_test %}{% set ok = sso_test.startswith('ok|') %}
+      <span class="tagl {{ 'green' if ok else 'red' }}">{{ '✓' if ok else '✕' }} {{ sso_test.split('|', 1)[1] }}</span>{% endif %}
+    </form>
+    <div class="note">🔒 Mọi đăng nhập, duyệt tài khoản, đổi vai đều ghi vào <a href="/dashboard/audit" style="color:var(--accent-hover)">Nhật ký thao tác</a> với email người thực hiện.</div>
+  </div>
+</div>
+{% endblock %}

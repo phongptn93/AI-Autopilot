@@ -2096,6 +2096,32 @@ class Settings(BaseSettings):
     #     unauthenticated request. Header only: a `?secret=` query string lands in
     #     every proxy and access log on the way.
     dashboard_auth_token: str = ""
+    # ── 👥 Users & SSO ── How people sign in to the dashboard.
+    #   password — one shared password (dashboard_auth_password_hash), as always. Default.
+    #   users    — personal accounts with roles (local email + password).
+    #   sso      — company sign-in (OpenID Connect; Microsoft Entra ID preset) + roles.
+    # In users/sso mode every request belongs to a person, permissions come from their
+    # roles (ai_autopilot.rbac) and the audit log records who did what.
+    auth_mode: str = "password"
+    # The shared dashboard password keeps working as an emergency admin login in
+    # users/sso mode, so a broken SSO setup can never lock everyone out.
+    auth_breakglass: bool = True
+    sso_provider: str = "entra"          # entra | google | oidc
+    sso_tenant_id: str = ""              # Entra: Directory (tenant) ID
+    sso_client_id: str = ""              # Application (client) ID
+    sso_client_secret: str = ""          # client secret value (secret)
+    sso_issuer: str = ""                 # generic OIDC only
+    sso_allowed_domains: list[str] = Field(default_factory=list)
+    # First SSO sign-in: "pending" waits for an admin to approve; "viewer" gets in
+    # read-only. Mapped roles (below) apply either way once the account is active.
+    sso_new_users: str = "pending"
+    # IdP group object id / app role value → dashboard role, one per line "key=role".
+    sso_role_map: dict[str, str] = Field(default_factory=dict)
+    # Public base URL of this dashboard, for the redirect URI behind a proxy. Blank =
+    # taken from the request.
+    sso_redirect_base: str = ""
+    # Role edits and custom roles: {key: {"label": "...", "permissions": [...]}}.
+    user_roles: dict[str, Any] = Field(default_factory=dict)
     dashboard_auth_password_hash: str = ""
     webhook_secret: str = ""
     # With no dashboard password, /dashboard answers loopback clients only — anyone

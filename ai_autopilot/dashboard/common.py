@@ -310,6 +310,22 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
         "⛔ Chưa lưu — một <b>Run-now tag</b> của vai trò trùng tag đã có nghĩa khác "
         "(xem log). Đặt tên riêng cho nó rồi lưu lại.",
     ),
+    "user_added": ("green", "✅ Đã thêm người dùng."),
+    "user_saved": ("green", "✅ Đã lưu."),
+    "user_roles_saved": ("green", "✅ Đã lưu ma trận quyền — áp dụng ngay cho mọi người."),
+    "user_bad_email": ("red", "⛔ Email không hợp lệ."),
+    "user_exists": ("amber", "Email này đã có tài khoản."),
+    "user_weak_password": ("red", "⛔ Mật khẩu cần ít nhất 10 ký tự."),
+    "user_last_admin": ("red", "⛔ Không thể bỏ quyền / khoá / xoá Admin cuối cùng — thêm Admin "
+                               "khác trước."),
+    "user_need_admin": ("red", "⛔ Chưa bật được: cần ít nhất một tài khoản Admin đang hoạt động "
+                               "(hoặc mật khẩu khẩn cấp) để không ai bị khoá ngoài."),
+    "user_sso_incomplete": ("red", "⛔ Chưa bật được SSO: thiếu Tenant ID / Client ID / Client "
+                                   "secret — điền ở phần Cấu hình SSO."),
+    "user_bad_mode": ("red", "⛔ Chế độ không hợp lệ."),
+    "auth_mode_password": ("green", "✅ Đã chuyển về mật khẩu chung."),
+    "auth_mode_users": ("green", "✅ Đã bật tài khoản cá nhân — mọi người đăng nhập bằng email."),
+    "auth_mode_sso": ("green", "✅ Đã bật đăng nhập SSO công ty."),
     "review_bad_target": ("red", "⛔ Chưa bắt đầu được — spec/báo cáo không còn, "
                                  "hoặc câu hỏi trống."),
     "review_sweep": ("green", "🧭 Đã xếp hàng rà toàn bộ spec — mỗi spec một phiên, xem tiến độ ở "

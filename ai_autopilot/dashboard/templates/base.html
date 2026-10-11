@@ -402,7 +402,7 @@
             <summary class="nav-section">{{ g.label }}</summary>
             <nav>
             {% for i in g["items"] %}
-                <a class="nav-link {{ 'active' if active == i.key else '' }}" href="{{ i.href }}" {{ 'aria-current="page"' if active == i.key }}
+                <a class="nav-link {{ 'active' if active == i.key else '' }}" href="{{ i.href }}" {% if active == i.key %}aria-current="page"{% endif %}
                    title="{{ i.hint }}"><span class="ico">{{ i.icon }}</span> {{ i.label }}{% if i.key == 'inbox' %}<span class="nav-badge" id="inbox-badge" hidden></span>{% endif %}</a>
             {% endfor %}
             </nav>
@@ -495,7 +495,7 @@
         {% if sib.items|length > 1 %}
         <nav class="subnav" aria-label="{{ sib.label }}">
           <span class="subnav-grp">{{ sib.label }}</span>
-          {% for i in sib.items %}<a href="{{ i.href }}" class="{{ 'on' if i.key == active }}" {{ 'aria-current="page"' if i.key == active }} title="{{ i.hint }}">{{ i.icon }} {{ i.label }}</a>{% endfor %}
+          {% for i in sib.items %}<a href="{{ i.href }}" class="{{ 'on' if i.key == active }}" {% if i.key == active %}aria-current="page"{% endif %} title="{{ i.hint }}">{{ i.icon }} {{ i.label }}</a>{% endfor %}
         </nav>
         {% endif %}
         {% endif %}

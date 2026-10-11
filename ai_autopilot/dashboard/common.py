@@ -930,17 +930,29 @@ async def _scan_pr_outcomes(c: Container) -> dict:
     """
     counts: dict = {"merged": 0, "active": 0, "abandoned": 0, "ok": True, "pending": False}
     ours = await c.execution_repo.work_item_ids()
-    repo_ids = [r["id"] for r in await c.ado.get_repositories() if r.get("id")]
+    # Every code project this machine works in, not only the default one: a workspace
+    # bound to a second project keeps its repos (and the autopilot's PRs) there, and
+    # those were never counted. De-duplicated by repo id — two work-item projects often
+    # share one code project.
+    cfg = c.config
+    work_projects = ["", *(getattr(cfg, "effective_ado_projects", None) or [])]
+    code_projects = list(dict.fromkeys(cfg.code_project_for(p) for p in work_projects))
+    repo_lists = await _gather_scan(c.ado.get_repositories(p) for p in code_projects)
+    repos: dict[str, str] = {}
+    for project, found in zip(code_projects, repo_lists, strict=True):
+        for r in found or []:
+            if r.get("id") and r["id"] not in repos:
+                repos[r["id"]] = project
     jobs = [
         (key, rid, fetch)
-        for rid in repo_ids
+        for rid in repos
         for key, fetch in (
             ("merged", c.ado.get_completed_pull_requests),
             ("active", c.ado.get_active_pull_requests),
             ("abandoned", c.ado.get_abandoned_pull_requests),
         )
     ]
-    lists = await _gather_scan(fetch(rid) for _, rid, fetch in jobs)
+    lists = await _gather_scan(fetch(rid, repos[rid]) for _, rid, fetch in jobs)
 
     # Pass 1 — everything the branch name already answers, for free. Branch name FIRST
     # here, unlike everywhere else: every PR the autopilot opened is named
@@ -960,7 +972,7 @@ async def _scan_pr_outcomes(c: Container) -> dict:
     # AdoClient.get_pull_request_work_items), so a warm process mostly skips this.
     if unresolved:
         linked = await _gather_scan(
-            c.ado.get_pull_request_work_items(rid, pid) for _, rid, pid in unresolved
+            c.ado.get_pull_request_work_items(rid, pid, repos[rid]) for _, rid, pid in unresolved
         )
         for (key, _, _), ids in zip(unresolved, linked, strict=True):
             if ids and ids[0] in ours:

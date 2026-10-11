@@ -899,7 +899,7 @@ class _FakeAdoPRs:
         # whose name carries no id (see _pr_outcomes), so most tests need none.
         self._links = dict(links or {})
 
-    async def get_repositories(self):
+    async def get_repositories(self, _project=""):
         if self._boom:
             raise RuntimeError("ADO throttled")
         return [{"id": "r1"}]
@@ -911,16 +911,16 @@ class _FakeAdoPRs:
             for i, r in enumerate(refs, start=1)
         ]
 
-    async def get_pull_request_work_items(self, _rid, pr_id):
+    async def get_pull_request_work_items(self, _rid, pr_id, _project=""):
         return self._links.get(pr_id, [])
 
-    async def get_completed_pull_requests(self, _rid):
+    async def get_completed_pull_requests(self, _rid, _project=""):
         return self._prs(self._sets["c"])
 
-    async def get_active_pull_requests(self, _rid):
+    async def get_active_pull_requests(self, _rid, _project=""):
         return self._prs(self._sets["a"])
 
-    async def get_abandoned_pull_requests(self, _rid):
+    async def get_abandoned_pull_requests(self, _rid, _project=""):
         return self._prs(self._sets["x"])
 
 
@@ -938,7 +938,7 @@ async def _outcomes(ado, ids) -> dict:
     below are tested where the counting actually happens."""
     from types import SimpleNamespace
     return await dashboard._scan_pr_outcomes(
-        SimpleNamespace(ado=ado, execution_repo=_FakeExecRepoIds(ids))
+        SimpleNamespace(ado=ado, execution_repo=_FakeExecRepoIds(ids), config=Settings())
     )
 
 
@@ -994,7 +994,7 @@ async def test_a_failed_scan_is_never_published_as_data():
     dashboard._PR_OUTCOMES.reset()
     try:
         c = SimpleNamespace(ado=_FakeAdoPRs(boom=True),
-                            execution_repo=_FakeExecRepoIds({1}))
+                            execution_repo=_FakeExecRepoIds({1}), config=Settings())
         await dashboard._PR_OUTCOMES._run(lambda: dashboard._scan_pr_outcomes(c))
         assert dashboard._PR_OUTCOMES.failed is True
         assert dashboard._PR_OUTCOMES.value is None     # nothing published...
@@ -1010,7 +1010,7 @@ async def test_a_successful_scan_is_cached():
     dashboard._PR_OUTCOMES.reset()
     try:
         c = SimpleNamespace(ado=_FakeAdoPRs(completed=["feature/1-a"]),
-                            execution_repo=_FakeExecRepoIds({1}))
+                            execution_repo=_FakeExecRepoIds({1}), config=Settings())
         await dashboard._PR_OUTCOMES._run(lambda: dashboard._scan_pr_outcomes(c))
         assert dashboard._PR_OUTCOMES.value["merged"] == 1
         # A second read must not re-scan - swap in an ADO that would raise.
@@ -1124,7 +1124,7 @@ async def test_reviews_scan_asks_for_each_pr_link_once_and_concurrently():
             self.max_in_flight = 0
             self._in_flight = 0
 
-        async def get_pull_request_work_items(self, _rid, pr_id):
+        async def get_pull_request_work_items(self, _rid, pr_id, _project=""):
             self.link_calls += 1
             self._in_flight += 1
             self.max_in_flight = max(self.max_in_flight, self._in_flight)

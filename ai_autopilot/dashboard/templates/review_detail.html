@@ -50,7 +50,7 @@
   .mx { width:100%; border-collapse:collapse; min-width:860px; }
   .mx th { text-align:left; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim);
     padding:9px 12px; border-bottom:1px solid var(--border-soft); white-space:nowrap; position:sticky; top:0; background:var(--bg-card); }
-  .mx td { padding:11px 12px; border-bottom:1px solid var(--border-soft); font-size:13px; vertical-align:top; line-height:1.5; }
+  .mx td { padding:11px 12px; border-bottom:1px solid var(--border-soft); font-size:13px; vertical-align:top; line-height:1.5; overflow-wrap:break-word; }
   .mx tr.gap td:first-child { box-shadow:inset 3px 0 0 var(--amber); }
   .mx tr.bad td:first-child { box-shadow:inset 3px 0 0 var(--red); }
   .mx .ref { font-family:var(--mono); font-weight:700; font-size:12px; white-space:nowrap; }
@@ -66,9 +66,9 @@
   .st.red { color:var(--red); background:var(--red-bg); border-color:rgba(240,82,106,.45); }
   .st.muted { color:var(--text-dim); background:var(--bg-input); }
   .ev { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
-  .ev code { font-family:var(--mono); font-size:11px; padding:2px 7px; border-radius:5px; background:var(--bg-input);
+  .ev code { font-family:var(--mono); font-size:11px; padding:2px 7px; border-radius:5px; background:var(--bg-input); max-width:100%; overflow-wrap:anywhere;
     border:1px solid var(--border); color:var(--accent-hover); cursor:copy; }
-  .sev { font-size:10px; font-family:var(--mono); font-weight:700; padding:1px 6px; border-radius:5px; border:1px solid var(--border); color:var(--text-dim); }
+  .sev { white-space:nowrap; font-size:10px; font-family:var(--mono); font-weight:700; padding:1px 6px; border-radius:5px; border:1px solid var(--border); color:var(--text-dim); }
   .sev.critical, .sev.high { color:var(--red); border-color:rgba(240,82,106,.45); }
   .sev.medium { color:var(--amber); border-color:rgba(245,166,35,.4); }
   .filed a { color:var(--accent-hover); font-size:12px; }
@@ -291,7 +291,7 @@
         <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span>
           {% if t.filed_as %}<div class="filed"><a href="#" title="work item">#{{ t.filed_as }}</a></div>{% endif %}</td>
         <td class="code">{{ t.code or '—' }}
-          {% if t.evidence %}<div class="ev">{% for e in t.evidence %}{% if e.where %}<code title="{{ e.note }} — bấm để copy" data-copy="{{ e.where }}">{{ e.where }}</code>{% endif %}{% endfor %}</div>{% endif %}</td>
+          {% if t.evidence %}<div class="ev">{% for e in t.evidence %}{% if e.where %}<code title="{{ e.where }}{{ ' — ' ~ e.note if e.note }} · bấm để copy" data-copy="{{ e.where }}">{{ e.where|short_path(3) }}</code>{% endif %}{% endfor %}</div>{% endif %}</td>
         <td class="fix">{{ t.fix or '—' }}</td>
       </tr>
       {% endfor %}

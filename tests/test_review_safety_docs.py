@@ -253,3 +253,12 @@ def test_report_page_internal_vs_external(tmp_path, monkeypatch):
 def test_bracketed_paths_do_not_double_brackets():
     out = rs.hide_locations("Có API xuất Excel (src/Inventory/ReceiptExport.cs:15) — ngoài spec")
     assert out == "Có API xuất Excel (vị trí trong code) — ngoài spec"
+
+
+def test_long_paths_are_shortened_for_display():
+    from ai_autopilot.dashboard.common import _short_path
+
+    long = "Backend-Fresh/Plugins/Nois.Plugin.CMMS/Modules/Services/X/XService.cs:222"
+    assert _short_path(long) == "…/X/XService.cs:222"
+    assert _short_path(long, 3) == "…/Services/X/XService.cs:222"
+    assert _short_path("src\A\B.cs:3") == "…/A/B.cs:3" and _short_path("B.cs:1") == "B.cs:1"

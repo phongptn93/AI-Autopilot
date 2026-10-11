@@ -29,9 +29,6 @@
     padding:8px 10px; font-size:13px; font-family:inherit; min-height:90px; resize:vertical; }
   .sp-body input[type=number] { background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border);
     border-radius:8px; padding:7px 9px; font-size:13px; width:140px; }
-  .sp-btn { border:none; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
-  .sp-btn.ok { background:#2ea043; color:#fff; }
-  .sp-btn.fb { background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border); }
   .sp-btns { display:flex; gap:8px; flex-wrap:wrap; }
   .sp-hint { font-size:11.5px; color:var(--text-dim); line-height:1.5; }
   .sp-sib a { display:block; font-family:var(--mono,monospace); font-size:12px; color:var(--accent-hover); text-decoration:none; padding:3px 0; }
@@ -85,8 +82,8 @@
         <label style="display:flex;gap:7px;align-items:center;font-size:12.5px">
           <input type="checkbox" name="start_dev" checked> Duyệt xong giao luôn cho vai Dev</label>
         <div class="sp-btns">
-          <button class="sp-btn ok" name="decision" value="approve" type="submit">✅ Duyệt spec</button>
-          <button class="sp-btn fb" name="decision" value="feedback" type="submit">💬 Gửi góp ý</button>
+          <button class="btn-success" name="decision" value="approve" type="submit">✅ Duyệt spec</button>
+          <button class="btn-ghost" name="decision" value="feedback" type="submit">💬 Gửi góp ý</button>
         </div>
         <div class="sp-hint">Cả hai đều ghi comment lên work item (<code>SPEC APPROVED</code> / <code>SPEC FEEDBACK</code>) —
           nơi QC và khách đọc. Góp ý không đổi trạng thái item.</div>

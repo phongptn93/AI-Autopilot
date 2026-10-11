@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 import pytest
 from starlette.testclient import TestClient
@@ -122,3 +123,27 @@ def test_pr_cards_say_not_connected_instead_of_an_outage(tmp_path, monkeypatch):
     with TestClient(app) as client:
         home = client.get("/dashboard").text
         assert "chưa kết nối tracker" in home and "chưa đọc được Azure DevOps" not in home
+
+
+def test_one_button_system_and_no_bespoke_button_classes_left():
+    from pathlib import Path
+    tpl = Path(__file__).resolve().parents[1] / "ai_autopilot" / "dashboard" / "templates"
+    base = (tpl / "base.html").read_text(encoding="utf-8")
+    for cls in (".btn-primary", ".btn-secondary", ".btn-soft", ".btn-success", ".btn-danger",
+                ".btn-quiet", ".btn-sm", ".btn-lg", ".actions-sm"):
+        assert cls in base, cls
+    retired = ("fl-btn", "ib-btn", "s-btn", "sp-btn", "own-btn", "danger-btn", "promote-btn",
+               "btn-go", "tr-act", "wz-next", "fl-sync", "rs-go", "fl-forget")
+    for f in tpl.glob("*.html"):
+        text = f.read_text(encoding="utf-8")
+        tokens = {t for attr in re.findall(r'class="([^"]*)"', text) for t in attr.split()}
+        tokens |= set(re.findall(r"\.([\w-]+)\s*[{:]", text))
+        assert not tokens & set(retired), (f.name, tokens & set(retired))
+
+
+def test_loading_states_progress_bar_and_skeleton(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    with TestClient(app) as client:
+        page = client.get("/dashboard").text
+        assert 'id="ap-progress"' in page and "window.apProgress" in page
+        assert ".skel {" in page and ".ap-stamp.stale" in page

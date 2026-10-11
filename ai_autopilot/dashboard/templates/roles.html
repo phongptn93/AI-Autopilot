@@ -126,8 +126,7 @@
   .ps-chain .h { font-size:9.5px; font-weight:700; text-transform:uppercase; color:var(--text-dim); }
   .ps-chain .who { grid-column:1 / -1; margin-top:6px; }
   .ps-cav { font-size:11px; color:var(--amber); }
-  .ps-apply { align-self:flex-start; background:var(--accent); color:#fff; border:none; border-radius:var(--radius-sm);
-    padding:7px 14px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit; }
+  .ps-apply { align-self:flex-start; }
 </style>
 
 <div class="rl-top"><h2 class="page-title">{{ page_title("roles") }}</h2></div>
@@ -191,7 +190,7 @@
         </table>
         {% else %}<div class="ps-good">Máy này đã khớp mọi thiết lập của preset.</div>{% endif %}
       </details>
-      <button class="ps-apply" type="submit">Áp dụng</button>
+      <button class="btn-save btn-sm ps-apply" type="submit">Áp dụng</button>
     </form>
     {% endfor %}
   </div>

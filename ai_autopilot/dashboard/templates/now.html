@@ -16,7 +16,6 @@
     animation:nw-pulse 2s infinite; }
   .nw-live.paused .dot { background:var(--text-dim); animation:none; }
   @keyframes nw-pulse { 0% { box-shadow:0 0 0 0 rgba(46,204,113,.55); } 70% { box-shadow:0 0 0 7px rgba(46,204,113,0); } 100% { box-shadow:0 0 0 0 rgba(46,204,113,0); } }
-  .nw-live button { font-size:11px; padding:3px 9px; }
   .nw-lede { color:var(--text-muted); font-size:13px; margin:0 0 14px; max-width:110ch; }
   .nw-flash { padding:11px 16px; margin-bottom:14px; border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-card); font-size:12.5px; }
   .nw-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); } .nw-flash.warn { border-color:rgba(245,166,35,.45); color:var(--amber); }
@@ -68,7 +67,6 @@
   .rows .t { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); }
   .rows .m { font-family:var(--mono); font-size:11px; color:var(--text-dim); white-space:nowrap; }
   .rows form { margin:0; }
-  .rows button { font-size:11px; padding:3px 9px; }
   .empty-row { padding:16px; color:var(--text-dim); font-size:12.5px; }
   .idle { background:var(--bg-card); border:1px dashed var(--border); border-radius:var(--radius); padding:18px 20px; margin-bottom:22px;
     display:flex; align-items:center; gap:14px; }
@@ -80,7 +78,7 @@
 <div class="nw-top">
   <h2 class="page-title">{{ page_title("now") }}</h2>
   <div class="nw-live" id="nw-live"><span class="dot"></span><span id="nw-live-t">cập nhật {{ refreshed }} · tự làm mới mỗi 15 giây</span>
-    <button type="button" class="btn-ghost" id="nw-pause">Tạm dừng</button></div>
+    <button type="button" class="btn-ghost btn-sm" id="nw-pause">Tạm dừng</button></div>
 </div>
 <p class="nw-lede">Việc autopilot đang làm ngay lúc này. Chỉ số <b>Im lặng</b> cho biết có bị treo không:
   quá {{ quiet_warn_seconds // 60 }} phút là đáng xem, quá {{ quiet_stuck_seconds // 60 }} phút là nên xem trước tiên.</p>
@@ -168,7 +166,7 @@
       <span class="t" title="{{ s.title }}">{{ s.title }} <span class="m">· {{ s.repo }} · {{ s.branch }}</span></span>
       <code class="m" title="Tên phiên để attach">{{ s.session }}</code>
       <span class="m">{% if s.elapsed is not none %}{{ s.elapsed // 3600 }}h {{ '%02d'|format((s.elapsed % 3600) // 60) }}m{% endif %}</span>
-      <form method="post" action="{{ s.cancel }}" onsubmit="return confirm('Đóng phiên? Branch giữ nguyên, thay đổi trong phiên bị bỏ.');"><button class="btn-ghost" type="submit">✕ Đóng</button></form>
+      <form method="post" action="{{ s.cancel }}" onsubmit="return confirm('Đóng phiên? Branch giữ nguyên, thay đổi trong phiên bị bỏ.');"><button class="btn-ghost btn-sm" type="submit">✕ Đóng</button></form>
     </li>
     {% endfor %}
   </ul>

@@ -152,15 +152,51 @@
         .config-bool-true { color: var(--green); font-weight: 600; }
         .config-bool-false { color: var(--text-dim); }
 
-        /* ── Buttons ── */
-        .btn-save { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
-            padding: 10px 20px; font-size: 13.5px; font-weight: 650; cursor: pointer; font-family: inherit;
-            box-shadow: var(--shadow-sm); transition: background .12s, transform .08s; }
-        .btn-save:hover { background: var(--accent-hover); transform: translateY(-1px); }
-        .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-muted);
-            border-radius: var(--radius-sm); padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
-            font-family: inherit; transition: border-color .12s, color .12s; }
-        .btn-ghost:hover { border-color: var(--accent); color: var(--text); }
+        /* ── Buttons: ONE system for the whole app ──────────────────────────────
+           Variants   .btn-primary  filled accent — the one main action of a place
+                      .btn-secondary outlined     — everything else
+                      .btn-soft     tinted accent — a highlighted secondary (first of a row)
+                      .btn-success  filled green  — approve / go
+                      .btn-danger   outlined red  — destructive
+                      .btn-quiet    no border     — icon / inline actions
+           Sizes      default 36px · .btn-sm 28px · .btn-lg 42px
+           Aliases    .btn-save = primary, .btn-ghost = secondary (the names most pages
+                      already use — kept so nothing had to be renamed to look right).
+           Works the same on <button> and <a>; disabled, busy and keyboard focus are
+           styled here once instead of per page. */
+        .btn, .btn-save, .btn-primary, .btn-ghost, .btn-secondary, .btn-soft, .btn-success, .btn-danger, .btn-quiet {
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            min-height: 36px; padding: 0 14px; border-radius: var(--radius-sm); border: 1px solid transparent;
+            font: inherit; font-size: 13px; font-weight: 600; line-height: 1.2; white-space: nowrap;
+            text-decoration: none; cursor: pointer; box-sizing: border-box; vertical-align: middle;
+            transition: background .12s, border-color .12s, color .12s, box-shadow .12s, transform .08s;
+        }
+        .btn-ghost, .btn-secondary, .btn { background: transparent; border-color: var(--border); color: var(--text-muted); }
+        .btn-ghost:hover, .btn-secondary:hover, .btn:hover { border-color: var(--accent); color: var(--text); }
+        .btn-save, .btn-primary { background: var(--accent); color: #fff; font-weight: 650; box-shadow: var(--shadow-sm); }
+        .btn-save:hover, .btn-primary:hover { background: var(--accent-hover); color: #fff; transform: translateY(-1px); }
+        .btn-soft { background: var(--accent-bg); border-color: rgba(99,102,241,.45); color: var(--accent-hover); }
+        .btn-soft:hover { border-color: var(--accent); color: var(--text); }
+        .btn-success { background: var(--green); color: #04140b; font-weight: 650; }
+        .btn-success:hover { filter: brightness(1.08); color: #04140b; }
+        .btn-danger { background: transparent; border-color: rgba(240,82,106,.45); color: var(--red); }
+        .btn-danger:hover { background: var(--red-bg); border-color: var(--red); color: var(--red); }
+        .btn-quiet { background: transparent; color: var(--text-muted); min-height: 28px; padding: 0 6px; }
+        .btn-quiet:hover { color: var(--text); background: var(--bg-hover); }
+        .btn-sm { min-height: 28px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
+        .btn-lg { min-height: 42px; padding: 0 20px; font-size: 14px; }
+        /* A compact action cell (table rows, cards): every button inside is .btn-sm, and a
+           bare <button> gets the secondary look — so a page never restyles buttons itself. */
+        .actions-sm :is(button, .btn, .btn-save, .btn-primary, .btn-ghost, .btn-secondary, .btn-soft, .btn-success, .btn-danger) {
+            min-height: 28px; padding: 0 10px; font-size: 12px; border-radius: 7px; }
+        .actions-sm button:not([class]) { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font: inherit;
+            font-size: 12px; font-weight: 600; background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+        .actions-sm button:not([class]):hover { border-color: var(--accent); color: var(--text); }
+        :is(.btn, .btn-save, .btn-primary, .btn-ghost, .btn-secondary, .btn-soft, .btn-success, .btn-danger, .btn-quiet):focus-visible {
+            outline: none; box-shadow: 0 0 0 3px rgba(99,102,241,.45); }
+        :is(.btn, .btn-save, .btn-primary, .btn-ghost, .btn-secondary, .btn-soft, .btn-success, .btn-danger, .btn-quiet):disabled,
+        :is(.btn, .btn-save, .btn-primary, .btn-ghost, .btn-secondary, .btn-soft, .btn-success, .btn-danger, .btn-quiet)[aria-disabled="true"] {
+            opacity: .5; cursor: not-allowed; transform: none; filter: none; pointer-events: none; }
 
         /* ── Settings form ── */
         .form-row { display: grid; grid-template-columns: 240px 1fr; gap: 18px; align-items: start;
@@ -301,6 +337,25 @@
                   font-size: 11px; font-weight: 650; text-decoration: none !important; white-space: nowrap; vertical-align: 1px;
                   color: var(--accent-hover) !important; border: 1px solid rgba(99,102,241,.4); background: var(--accent-bg); }
         .wi-ado:hover { border-color: var(--accent); }
+        /* ── Loading ── one vocabulary for "this is coming":
+           #ap-progress  thin bar at the top while the NEXT page is being built (many
+                         pages wait on Azure DevOps before a byte is sent)
+           .skel         shimmering placeholder where a value is still on its way
+           [aria-busy]   a region being refreshed in place */
+        #ap-progress { position: fixed; top: 0; left: 0; height: 3px; width: 0; z-index: 200; opacity: 0;
+                       background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+                       box-shadow: 0 0 8px rgba(99,102,241,.6); transition: width .25s ease, opacity .2s; pointer-events: none; }
+        #ap-progress.run { opacity: 1; width: 80%; transition: width 8s cubic-bezier(.1,.7,.2,1), opacity .1s; }
+        .skel { display: inline-block; min-height: 1em; border-radius: 6px; vertical-align: middle;
+                background: linear-gradient(90deg, var(--bg-input) 25%, var(--bg-hover) 37%, var(--bg-input) 63%);
+                background-size: 400% 100%; animation: ap-shimmer 1.3s ease infinite; }
+        @keyframes ap-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        [aria-busy="true"].ap-region { position: relative; }
+        [aria-busy="true"].ap-region::after { content: ""; position: absolute; inset: 0; border-radius: inherit;
+                background: rgba(13,15,20,.35); pointer-events: none; }
+        .ap-stamp.refreshing::before { content: "⟳ "; display: inline-block; animation: ap-spin .8s linear infinite; }
+        .ap-stamp.stale { color: var(--amber); }
+        @media (prefers-reduced-motion: reduce) { .skel, .ap-stamp.refreshing::before { animation: none; } }
         .kbd-help { position: fixed; inset: 0; z-index: 110; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 16px; }
         .kbd-help[hidden] { display: none; }
         .kbd-box { width: 100%; max-width: 520px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px;
@@ -513,6 +568,7 @@
 </div>
 <div class="ap-toast" id="ap-toast" role="status" aria-live="polite" hidden><span id="ap-toast-text"></span>
   <button type="button" aria-label="Đóng" onclick="this.parentElement.classList.remove('show')">✕</button></div>
+<div id="ap-progress" aria-hidden="true"></div>
 <div class="kbd-help" id="kbd-help" role="dialog" aria-modal="true" aria-label="Phím tắt" hidden>
   <div class="kbd-box">
     <h3>⌨️ Phím tắt</h3>
@@ -530,6 +586,33 @@
     </div>
   </div>
 </div>
+<script>
+// Navigation progress: a click on a same-site link (or a form submit) starts the bar;
+// the next page replaces this one, so it never needs stopping — except when the user
+// comes back via the history cache, or the navigation is cancelled.
+(function () {
+  var bar = document.getElementById('ap-progress');
+  function start() { bar.classList.remove('run'); void bar.offsetWidth; bar.classList.add('run'); }
+  function stop() { bar.classList.remove('run'); }
+  window.apProgress = { start: start, stop: stop };
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    if (a.target && a.target !== '_self') return;
+    if (a.hasAttribute('download')) return;
+    var url;
+    try { url = new URL(a.href, location.href); } catch (err) { return; }
+    if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search && url.hash)) return;
+    if (/\.(md|json|csv|html)$/.test(url.pathname) && url.pathname.indexOf('/dashboard/review/') === -1) return;
+    start();
+  });
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (!e.defaultPrevented && f && f.target !== '_blank') setTimeout(start, 0);
+  });
+  window.addEventListener('pageshow', stop);
+})();
+</script>
 <script>
 // Go-to shortcuts ("g" then a letter) and "?" for help — only when nobody is typing.
 (function () {

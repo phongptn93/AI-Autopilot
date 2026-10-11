@@ -244,12 +244,14 @@
     async function refresh() {
       if (busy || document.hidden) return;
       busy = true;
+      stamp.classList.add('ap-stamp', 'refreshing'); stamp.textContent = 'đang cập nhật…';
       try {
         const r = await fetch(partialUrl, { headers: { 'X-Requested-With': 'fetch' } });
         // autopilot:ignore[ts-innerhtml-dynamic] same-origin partial, rendered by Jinja with autoescape
-        if (r.ok) { mount.innerHTML = await r.text(); stamp.textContent = 'vừa cập nhật'; }
-      } catch (e) { /* keep last view */ }
-      finally { busy = false; }
+        if (r.ok) { mount.innerHTML = await r.text(); stamp.classList.remove('stale'); stamp.textContent = 'vừa cập nhật'; }
+        else { stamp.classList.add('stale'); stamp.textContent = '⚠ chưa cập nhật được — đang giữ dữ liệu cũ'; }
+      } catch (e) { stamp.classList.add('stale'); stamp.textContent = '⚠ mất kết nối — sẽ thử lại'; }
+      finally { busy = false; stamp.classList.remove('refreshing'); }
     }
     setInterval(refresh, 15000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

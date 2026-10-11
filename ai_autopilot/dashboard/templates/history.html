@@ -65,9 +65,6 @@
   .pager span.off { opacity:.35; border:1px solid var(--border); }
   .pager .per { margin-left:auto; display:flex; gap:4px; align-items:center; }
   .danger-zone { display:flex; justify-content:flex-end; margin-top:12px; }
-  .danger-zone button { font-size:12px; padding:5px 10px; background:transparent; border:1px solid rgba(240,82,106,.45);
-    color:var(--red); border-radius:7px; cursor:pointer; }
-  .danger-zone button:hover { background:var(--red-bg); }
   .hs-empty { padding:26px 18px; color:var(--text-dim); font-size:12.5px; }
   .hf-date { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); }
 </style>
@@ -98,7 +95,7 @@
       </select>
       <label class="hf-date">Từ <input class="hf" type="date" name="from" value="{{ date_from }}" aria-label="Từ ngày" onchange="this.form.submit()"></label>
       <label class="hf-date">Đến <input class="hf" type="date" name="to" value="{{ date_to }}" aria-label="Đến ngày" onchange="this.form.submit()"></label>
-      <button type="submit" class="btn-ghost" style="padding:6px 12px;font-size:12.5px">Lọc</button>
+      <button type="submit" class="btn-ghost btn-sm">Lọc</button>
       {% if filtered %}<a class="hs-reset" href="/dashboard/history">✕ Bỏ lọc</a>{% endif %}
     </form>
   </div>
@@ -173,7 +170,7 @@
 {% if pager.total %}
 <div class="danger-zone">
   <form method="post" action="/dashboard/history/clear" onsubmit="return confirm('Xoá TOÀN BỘ lịch sử chạy? Không hoàn tác được.');" style="margin:0">
-    <button type="submit">🗑 Xoá toàn bộ lịch sử</button>
+    <button class="btn-danger btn-sm" type="submit">🗑 Xoá toàn bộ lịch sử</button>
   </form>
 </div>
 {% endif %}

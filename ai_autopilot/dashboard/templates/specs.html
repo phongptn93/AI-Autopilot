@@ -12,8 +12,6 @@
     text-decoration:none; background:var(--bg-card); }
   .s-chip.on { border-color:var(--accent); color:var(--text); background:var(--accent-bg,rgba(99,102,241,.12)); }
   .s-spacer { flex:1; }
-  .s-btn { font-size:12.5px; padding:6px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg-card);
-    color:var(--text); text-decoration:none; cursor:pointer; font-family:inherit; }
   .s-card { background:var(--bg-card); border:1px solid var(--border,#23232b); border-radius:12px; margin-bottom:14px; overflow:hidden; }
   .s-card.old { border-color:rgba(210,153,34,.5); } .s-card.stale { border-color:rgba(229,72,77,.55); }
   .s-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:12px 16px;
@@ -39,9 +37,6 @@
   .s-decide input { background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border);
     border-radius:7px; padding:5px 8px; font-size:12px; font-family:inherit; }
   .s-decide .row { display:flex; gap:5px; flex-wrap:wrap; }
-  .s-decide button { font-size:11.5px; padding:4px 8px; border-radius:6px; border:1px solid var(--border);
-    background:var(--bg); color:var(--text); cursor:pointer; font-family:inherit; white-space:nowrap; }
-  .s-decide button:hover { border-color:var(--accent); }
   .s-empty { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:26px 22px;
     color:var(--text-muted); font-size:13.5px; line-height:1.7; }
   .s-done { width:100%; border-collapse:collapse; font-size:13px; }
@@ -74,7 +69,7 @@
   <a class="s-chip {{ 'on' if kind == k }}" href="/dashboard/specs?kind={{ k }}">{{ icon(k) }} {{ label(k) }} · {{ n }}</a>
   {% endfor %}
   <span class="s-spacer"></span>
-  <a class="s-btn" href="/dashboard/specs/export.md" title="Bảng Markdown để dán vào tài liệu / email cho BA">⬇ Xuất bảng cho BA</a>
+  <a class="btn-ghost btn-sm" href="/dashboard/specs/export.md" title="Bảng Markdown để dán vào tài liệu / email cho BA">⬇ Xuất bảng cho BA</a>
 </div>
 {% endif %}
 
@@ -115,7 +110,7 @@
       <form method="post" action="/dashboard/specs/resolve"
             onsubmit="return confirm('Đánh dấu TẤT CẢ điểm của #{{ group.work_item_id }} là đã cập nhật spec?')">
         <input type="hidden" name="work_item_id" value="{{ group.work_item_id }}">
-        <button type="submit" class="s-btn" title="Mọi điểm của item này: spec đã được cập nhật theo code">📝 Đã cập nhật spec (tất cả)</button>
+        <button type="submit" class="btn-ghost btn-sm" title="Mọi điểm của item này: spec đã được cập nhật theo code">📝 Đã cập nhật spec (tất cả)</button>
       </form>
     </div>
     <table class="s-tbl">
@@ -130,7 +125,7 @@
           <td>{{ row.code_does or row.summary }}
               {% if row.detail %}<span class="s-why">Lý do: {{ row.detail }}</span>{% endif %}</td>
           <td>
-            <form class="s-decide" method="post" action="/dashboard/specs/decide">
+            <form class="s-decide actions-sm" method="post" action="/dashboard/specs/decide">
               <input type="hidden" name="row_id" value="{{ row.id }}">
               <input type="hidden" name="back" value="{{ kind }}">
               <input name="note" placeholder="Ghi chú (tuỳ chọn)" maxlength="400">

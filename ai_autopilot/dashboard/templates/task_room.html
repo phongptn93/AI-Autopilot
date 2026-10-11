@@ -60,12 +60,6 @@
   .tr-num { font-family:var(--mono); color:var(--accent-hover); margin-right:6px; }
   .tr-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .tr-actions form { margin:0; }
-  .tr-act { display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:9px; font:inherit; font-size:12.5px;
-    font-weight:650; text-decoration:none; cursor:pointer; border:1px solid var(--border); background:var(--bg-card); color:var(--text); }
-  .tr-act:hover { border-color:var(--accent); color:var(--accent-hover); }
-  .tr-act.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .tr-act.primary:hover { color:#fff; filter:brightness(1.08); }
-  .tr-act small { font-weight:500; opacity:.75; }
   .tr-now { display:flex; gap:12px; align-items:center; padding:11px 16px; border-radius:11px; margin:0 0 14px;
     border:1px solid var(--border); background:var(--bg-card); font-size:13.5px; }
   .tr-now .ico { font-size:18px; } .tr-now span { color:var(--text-muted); }
@@ -115,22 +109,22 @@
     </div>
   </div>
   <div class="tr-actions">
-    {% if item_url %}<a class="tr-act primary" href="{{ item_url }}" target="_blank" rel="noopener" title="Mở work item trên Azure DevOps (tab mới)">Mở trên ADO ↗</a>{% endif %}
-    {% if latest_pr %}<a class="tr-act" href="{{ latest_pr.url }}" target="_blank" rel="noopener" title="{{ latest_pr.title or latest_pr.url }}">PR{% if latest_pr.pr_id %} !{{ latest_pr.pr_id }}{% endif %} ↗{% if latest_pr.status %} <small>{{ latest_pr.status }}</small>{% endif %}</a>{% endif %}
+    {% if item_url %}<a class="btn-save btn-sm" href="{{ item_url }}" target="_blank" rel="noopener" title="Mở work item trên Azure DevOps (tab mới)">Mở trên ADO ↗</a>{% endif %}
+    {% if latest_pr %}<a class="btn-ghost btn-sm" href="{{ latest_pr.url }}" target="_blank" rel="noopener" title="{{ latest_pr.title or latest_pr.url }}">PR{% if latest_pr.pr_id %} !{{ latest_pr.pr_id }}{% endif %} ↗{% if latest_pr.status %} <small>{{ latest_pr.status }}</small>{% endif %}</a>{% endif %}
     {% if ps == 'Needs human' %}
     <form method="post" action="/dashboard/queue/resume" onsubmit="return confirm('Trả #{{ room.work_item_id }} lại cho autopilot làm tiếp?')">
-      <input type="hidden" name="ids" value="{{ room.work_item_id }}"><button class="tr-act" type="submit">▶ Tiếp tục</button></form>
+      <input type="hidden" name="ids" value="{{ room.work_item_id }}"><button class="btn-ghost btn-sm" type="submit">▶ Tiếp tục</button></form>
     {% elif ps not in ('In progress', 'Queued') %}
     <form method="post" action="/dashboard/board/run" onsubmit="return confirm('Chạy agent cho #{{ room.work_item_id }} ngay bây giờ?')">
-      <input type="hidden" name="item_id" value="{{ room.work_item_id }}"><button class="tr-act" type="submit">▶ Chạy ngay</button></form>
+      <input type="hidden" name="item_id" value="{{ room.work_item_id }}"><button class="btn-ghost btn-sm" type="submit">▶ Chạy ngay</button></form>
     {% endif %}
-    <a class="tr-act" href="/dashboard/trigger-check?id={{ room.work_item_id }}" title="Kiểm tra máy có nhận việc này không, và vì sao">🔎 Vì sao (không) chạy?</a>
+    <a class="btn-ghost btn-sm" href="/dashboard/trigger-check?id={{ room.work_item_id }}" title="Kiểm tra máy có nhận việc này không, và vì sao">🔎 Vì sao (không) chạy?</a>
     {% for sp in item_specs %}
     <form method="post" action="/dashboard/review/start" title="Đối chiếu spec «{{ sp.title }}» với code mới nhất">
       <input type="hidden" name="kind" value="spec"><input type="hidden" name="target" value="{{ sp.rel }}">
-      <button class="tr-act" type="submit">🧭 Rà spec{{ ' ' ~ loop.index if item_specs|length > 1 }}</button></form>
+      <button class="btn-ghost btn-sm" type="submit">🧭 Rà spec{{ ' ' ~ loop.index if item_specs|length > 1 }}</button></form>
     {% endfor %}
-    <button class="tr-act" type="button" id="tr-copy" title="Copy link phòng task này">🔗 Copy link</button>
+    <button class="btn-ghost btn-sm" type="button" id="tr-copy" title="Copy link phòng task này">🔗 Copy link</button>
   </div>
 </div>
 

@@ -263,3 +263,23 @@ def test_detail_and_report_pages_show_reasonableness(tmp_path, monkeypatch):
     for page in (detail, report):
         assert "2 điểm bất hợp lý" in page and "Mất chứng từ kế toán" in page
     assert "🧠 Hợp lý nghiệp vụ <b>100/100</b>" in detail
+
+
+def test_hub_shows_each_workspace_as_a_card_and_says_which_one_is_in_scope(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    for d in (a, b):
+        (d / "specs").mkdir(parents=True)
+    (b / "specs" / "s.md").write_text("# Spec B\nFR-1 ...", "utf-8")
+    cfg = Settings(dry_run=True, workspace_directory=str(a), ado_projects=["PA"],
+                   workspaces=[{"name": "Team B", "workspace_directory": str(b),
+                                "ado_projects": ["PB"]}],
+                   database_url=f"sqlite+aiosqlite:///{tmp_path / 'c.db'}")
+    with TestClient(create_app(cfg)) as client:
+        ws_b = next(w.id for w in svc_mod.studio_for(client.app.state.container).workspaces()
+                    if w.directory == str(b))
+        page = client.get(f"/dashboard/review?ws={ws_b}").text
+    assert page.count('class="rv-wscard ') == 2
+    assert "ADO · PB" in page and "ADO · PA" in page
+    assert "Đang làm việc trong <b>🗂 Team B</b>" in page and str(b) in page
+    on = page.split('class="rv-wscard on', 1)[1].split("</a>", 1)[0]
+    assert "<b>1</b> spec" in on                                   # Team B's own spec count

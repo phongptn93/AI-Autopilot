@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request
@@ -81,6 +82,21 @@ def create_router() -> APIRouter:
         specs = [r["spec"] for r in spec_rows]
         ws_counts = {w.id: sum(1 for r in everything if (r.workspace or default_id) == w.id)
                      for w in wss}
+        # One card per workspace: which folder and tracker it is, and what is in it. A
+        # row of bare names ("Workspace mặc định · 7 phiên") never said what a review
+        # there would actually read, so people ran one against the wrong code.
+        ws_cards = []
+        for w in wss:
+            rows = [r for r in everything if (r.workspace or default_id) == w.id]
+            n_specs = len(specs) if w.id == cur_id else len(spec_library.discover(w.directory))
+            ws_cards.append({
+                "ws": w, "specs": n_specs, "sessions": len(rows),
+                "running": sum(1 for r in rows if r.status in ("queued", "running")),
+                "last": _ago(rows[0].started_at) if rows else "",
+                "tracker": (f"Jira · {w.jira_project}" if w.provider == "jira" and w.jira_project
+                            else "ADO · " + ", ".join(w.projects) if w.projects else ""),
+                "folder": Path(w.directory).name or w.directory,
+            })
         reports = await c.loop_report_repo.recent(15)
         done = [r for r in history if r.status == "done"]
         scored = [r.score for r in done if r.kind == rs.KIND_SPEC and r.score is not None]
@@ -110,7 +126,7 @@ def create_router() -> APIRouter:
             accept=",".join(review_docs.ALLOWED), safe=c.config.review_safe_mode,
             upload_error=request.query_params.get("upload_error", ""),
             repos=repos, code_source=c.config.review_code_source,
-            review_workspaces=wss, current_ws=current, ws_counts=ws_counts,
+            review_workspaces=wss, current_ws=current, ws_counts=ws_counts, ws_cards=ws_cards,
         ))
         if flash:
             response.delete_cookie(_FLASH_COOKIE, path="/dashboard")

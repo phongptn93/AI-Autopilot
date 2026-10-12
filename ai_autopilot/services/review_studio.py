@@ -67,11 +67,29 @@ class ReviewStudio:
                 out.append(ws)
         return out
 
+    def all_workspaces(self) -> list:
+        """Every enabled workspace — what the sidebar lists — folder or not.
+
+        :meth:`workspaces` is the RUNNABLE set (has a folder, one per folder) and stays
+        that for sweeps; the hub shows this one, because a workspace that silently
+        vanished from the page read as "the studio does not support it".
+        """
+        from ai_autopilot import workspaces as workspaces_mod
+
+        return [ws for ws in workspaces_mod.resolve(self._c.config) if ws.enabled]
+
     def workspace_dir(self, ws_id: str | None) -> str:
         """The folder a review of workspace ``ws_id`` reads; the default one when blank
-        or unknown (a renamed workspace must not make an old review unrunnable)."""
-        for ws in self.workspaces():
+        or unknown (a renamed workspace must not make an old review unrunnable).
+
+        A KNOWN workspace without a folder raises: falling back to the default folder
+        would review some other team's code and present it as this one's.
+        """
+        for ws in self.all_workspaces():
             if ws_id and ws.id == ws_id:
+                if not (ws.directory or "").strip():
+                    raise ValueError(f"Workspace «{ws.label}» chưa đặt thư mục code — "
+                                     "đặt ở trang Workspaces trước khi rà soát.")
                 return ws.directory
         return self._c.config.workspace_directory
 
@@ -101,6 +119,7 @@ class ReviewStudio:
         The text is extracted and stored; the file itself is not kept and never placed in
         the workspace, so nothing a BA uploads becomes readable to other runs.
         """
+        self.workspace_dir(workspace)               # refuse a workspace with no code folder
         body = text if text is not None else review_docs.extract(filename, data or b"")
         title = review_docs.title_of(body, filename)
         item_id = item_id or spec_library.item_ref(body[:6000])
@@ -116,6 +135,7 @@ class ReviewStudio:
 
     async def start_report(self, report_id: int, *, focus: str = "", by: str = "",
                            workspace: str = "") -> int:
+        self.workspace_dir(workspace)
         row = await self._c.loop_report_repo.get(report_id)
         if row is None:
             raise ValueError(f"Không có báo cáo #{report_id}")
@@ -134,6 +154,7 @@ class ReviewStudio:
         q = question.strip()
         if not q:
             raise ValueError("Câu hỏi trống")
+        self.workspace_dir(workspace)
         rid = await self._c.review_repo.create(
             kind=rs.KIND_QUESTION, target=q[:1000], title=q[:400], requested_by=by,
             workspace=workspace)
@@ -170,7 +191,9 @@ class ReviewStudio:
         """Queue a review of every spec in every workspace — the scheduled sweep."""
         ids = []
         for ws in self.workspaces() or [None]:
-            folder = ws.directory if ws else self._c.config.workspace_directory
+            folder = ((ws.directory if ws else self._c.config.workspace_directory) or "").strip()
+            if not folder:      # Path("") would sweep the autopilot's own source tree
+                continue
             for spec in spec_library.discover(folder):
                 with contextlib.suppress(Exception):
                     ids.append(await self.start_spec(spec.rel, by=by,
@@ -204,7 +227,10 @@ class ReviewStudio:
         path = getattr(row, "tree_path", None)
         if path and Path(path).is_dir():
             return path
-        return self.workspace_dir(getattr(row, "workspace", None)) or None
+        try:
+            return self.workspace_dir(getattr(row, "workspace", None)) or None
+        except ValueError:
+            return None
 
     async def _agent(self, prompt: str, *, resume: str | None = None, turns: int | None = None,
                      cwd: str | None = None):
@@ -237,7 +263,11 @@ class ReviewStudio:
             t0 = time.monotonic()
             cwd = None
             row = await repo.get(rid)
-            ws = self.workspace_dir(getattr(row, "workspace", None))
+            try:
+                ws = self.workspace_dir(getattr(row, "workspace", None))
+            except ValueError as exc:   # its folder was cleared after it was queued
+                await repo.update(rid, status="failed", error=str(exc)[:2000])
+                return
             cwd = ws
             if ws:
                 await repo.update(rid, status="preparing")

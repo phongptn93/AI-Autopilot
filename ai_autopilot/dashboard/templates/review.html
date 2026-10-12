@@ -68,6 +68,9 @@
     border-left:3px solid var(--accent); border-radius:8px; background:var(--bg-card); font-size:13px; }
   .rv-scope-dir { min-width:0; overflow-wrap:anywhere; color:var(--text-dim); }
   .rv-scope-note { color:var(--text-dim); font-size:12px; }
+  .rv-scope-note.warn, .rv-wsc-meta.warn { color:var(--amber); }
+  .rv-scope-note.warn a { color:var(--accent-hover); }
+  .rv-wscard.nodir:not(.on) { opacity:.75; }
     border:1px solid var(--border); background:var(--bg-card); color:var(--text-muted); font-size:13.5px; font-weight:600; }
   .rv-ws { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
   .rv-ws select { height:38px; padding:0 10px; border-radius:9px; font:inherit; font-size:13px; background:var(--bg-input);
@@ -151,14 +154,15 @@
 
 {# One card per workspace — which folder and tracker a review there reads — then a
    scope line, so "everything below belongs to X" is said, not implied by a tab colour. #}
-{% if ws_cards|length > 1 %}
+{% if ws_cards %}
 <nav class="rv-wscards" aria-label="Chọn workspace">
   {% for c in ws_cards %}{% set w = c.ws %}{% set on = current_ws and w.id == current_ws.id %}
-  <a href="?ws={{ w.id }}" class="rv-wscard {{ 'on' if on }}" {% if on %}aria-current="page"{% endif %}>
+  <a href="?ws={{ w.id }}" class="rv-wscard {{ 'on' if on }} {{ 'nodir' if not c.folder }}" {% if on %}aria-current="page"{% endif %}>
     <div class="rv-wsc-hd"><b>🗂 {{ w.label }}</b>
       {% if w.is_default and 'mặc định' not in w.label|lower %}<span class="rv-wsc-tag">mặc định</span>{% endif %}
       {% if on %}<span class="rv-wsc-on">● Đang xem</span>{% endif %}</div>
-    <div class="rv-wsc-meta" title="{{ w.directory }}">📁 {{ c.folder }}</div>
+    {% if c.folder %}<div class="rv-wsc-meta" title="{{ w.directory }}">📁 {{ c.folder }}{% if c.shared_with %} <i>· dùng chung với {{ c.shared_with|join(', ') }}</i>{% endif %}</div>
+    {% else %}<div class="rv-wsc-meta warn">⚠️ Chưa đặt thư mục code</div>{% endif %}
     <div class="rv-wsc-meta">🎫 {{ c.tracker or 'chưa gắn dự án tracker' }}</div>
     <div class="rv-wsc-num">
       <span><b>{{ c.specs }}</b> spec</span><span><b>{{ c.sessions }}</b> phiên</span>
@@ -172,8 +176,13 @@
 {% if current_ws %}
 <div class="rv-scope">
   <span>Đang làm việc trong <b>🗂 {{ current_ws.label }}</b></span>
+  {% if current_ws.directory %}
   <span class="rv-scope-dir" title="{{ current_ws.directory }}">📁 <code>{{ current_ws.directory }}</code></span>
   <span class="rv-scope-note">Spec, code được rà và lịch sử bên dưới chỉ thuộc workspace này.</span>
+  {% else %}
+  <span class="rv-scope-note warn">⚠️ Workspace này chưa có thư mục code nên chưa rà soát được —
+    <a href="/dashboard/workspaces">đặt thư mục ở trang Workspaces</a>. Lịch sử cũ (nếu có) vẫn xem bên dưới.</span>
+  {% endif %}
 </div>
 {% endif %}
 <div class="rv-safe {{ 'on' if safe else 'off' }}">
@@ -219,6 +228,8 @@
     <div class="v {{ 'tone-amber' if kpi.running }}">{{ kpi.running }}</div><div class="h">phiên đang rà / xếp hàng</div></div>
 </div>
 
+{# No folder = no code to read: the start forms would review some other workspace's code. #}
+{% if not current_ws or current_ws.directory %}
 <div class="rv-card">
   <div class="rv-hd"><h3>🧭 Bắt đầu rà soát{% if current_ws and review_workspaces|length > 1 %} · {{ current_ws.label }}{% endif %}</h3><span>Chọn đối tượng — mỗi lần rà thường mất 3–10 phút.</span></div>
   <div class="rv-tabs" role="tablist">
@@ -339,6 +350,7 @@
     </form>
   </div>
 </div>
+{% endif %}
 
 <div class="rv-card">
   <div class="rv-hd"><h3>🗂 Lịch sử rà soát{% if current_ws and review_workspaces|length > 1 %} · {{ current_ws.label }}{% endif %}</h3><span>{{ history|length }} phiên gần nhất</span></div>

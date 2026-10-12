@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
 import json
 import subprocess
 from pathlib import Path
@@ -283,3 +285,37 @@ def test_hub_shows_each_workspace_as_a_card_and_says_which_one_is_in_scope(tmp_p
     assert "Đang làm việc trong <b>🗂 Team B</b>" in page and str(b) in page
     on = page.split('class="rv-wscard on', 1)[1].split("</a>", 1)[0]
     assert "<b>1</b> spec" in on                                   # Team B's own spec count
+
+
+def test_hub_lists_every_enabled_workspace_even_without_or_sharing_a_folder(tmp_path):
+    """The sidebar listed four workspaces and the studio showed two: one shared the
+    default's folder (deduplicated away), one had no folder (filtered away)."""
+    a = tmp_path / "a"
+    (a / "specs").mkdir(parents=True)
+    (a / "specs" / "s.md").write_text("# Spec A\nFR-1 ...", "utf-8")
+    cfg = Settings(dry_run=True, workspace_directory=str(a), ado_projects=["PA"],
+                   workspaces=[{"name": "DxFac", "workspace_directory": str(a),
+                                "ado_projects": ["PD"]},
+                               {"name": "Ngân Sơn", "ado_projects": ["PN"]},
+                               {"name": "WsDisabledQ", "enabled": False, "ado_projects": ["PX"]}],
+                   database_url=f"sqlite+aiosqlite:///{tmp_path / 'e.db'}")
+    with TestClient(create_app(cfg)) as client:
+        studio = svc_mod.studio_for(client.app.state.container)
+        ns = next(w.id for w in studio.all_workspaces() if w.label == "Ngân Sơn")
+        page = client.get("/dashboard/review").text
+        empty = client.get(f"/dashboard/review?ws={ns}").text
+        up = client.post("/dashboard/review/upload", data={"workspace": ns},
+                         files={"file": ("b.md", "# BRD\nBR-1 duyệt phiếu nhập kho".encode(),
+                                         "text/markdown")}, follow_redirects=False)
+        ask = client.post("/dashboard/review/start", data={
+            "kind": "question", "question": "API nào chưa phân quyền?", "workspace": ns},
+            follow_redirects=False)
+    cards = page.split("<nav class=\"rv-wscards\"", 1)[1].split("</nav>", 1)[0]
+    assert page.count('class="rv-wscard ') == 3 and "WsDisabledQ" not in cards
+    assert "dùng chung với DxFac" in page and "⚠️ Chưa đặt thư mục code" in page
+    assert "chưa có thư mục code nên chưa rà soát được" in empty
+    assert "Bắt đầu rà soát" not in empty and "Spec A" not in empty
+    assert "upload_error=" in up.headers["location"]                  # refused, not queued
+    assert ask.headers["location"].endswith("/dashboard/review")      # refused, flashed
+    with pytest.raises(ValueError):
+        studio.workspace_dir(ns)

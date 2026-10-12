@@ -57,7 +57,7 @@ def create_router() -> APIRouter:
         c: Container = request.app.state.container
         flash = _take_flash(request)
         studio = studio_for(c)
-        wss = studio.workspaces()
+        wss = studio.all_workspaces()
         # One workspace at a time: its specs, its code, its history. Picked from the
         # page's own tabs (?ws=), else the workspace the sidebar is showing, else the
         # first. Reviews saved before workspaces existed belong to the default one.
@@ -75,10 +75,12 @@ def create_router() -> APIRouter:
         for r in everything:
             if mine(r) and r.kind == rs.KIND_SPEC and r.status == "done" and r.target not in last:
                 last[r.target] = r
-        folder = current.directory if current else c.config.workspace_directory
+        folder = ((current.directory if current else c.config.workspace_directory) or "").strip()
+        # Path("") is the process's cwd: a workspace with no folder must list nothing,
+        # not this machine's own source tree.
         spec_rows = [{"spec": s, "last": last.get(s.rel), "ws": cur_id,
                       "ws_label": current.label if current else ""}
-                     for s in spec_library.discover(folder)]
+                     for s in (spec_library.discover(folder) if folder else [])]
         specs = [r["spec"] for r in spec_rows]
         ws_counts = {w.id: sum(1 for r in everything if (r.workspace or default_id) == w.id)
                      for w in wss}
@@ -88,14 +90,19 @@ def create_router() -> APIRouter:
         ws_cards = []
         for w in wss:
             rows = [r for r in everything if (r.workspace or default_id) == w.id]
-            n_specs = len(specs) if w.id == cur_id else len(spec_library.discover(w.directory))
+            d = (w.directory or "").strip()
+            n_specs = (len(specs) if w.id == cur_id
+                       else len(spec_library.discover(d)) if d else 0)
+            twins = [o.label for o in wss
+                     if o.id != w.id and d and (o.directory or "").strip().lower() == d.lower()]
             ws_cards.append({
                 "ws": w, "specs": n_specs, "sessions": len(rows),
                 "running": sum(1 for r in rows if r.status in ("queued", "running")),
                 "last": _ago(rows[0].started_at) if rows else "",
                 "tracker": (f"Jira · {w.jira_project}" if w.provider == "jira" and w.jira_project
                             else "ADO · " + ", ".join(w.projects) if w.projects else ""),
-                "folder": Path(w.directory).name or w.directory,
+                "folder": Path(d).name or d if d else "",
+                "shared_with": twins,
             })
         reports = await c.loop_report_repo.recent(15)
         done = [r for r in history if r.status == "done"]
@@ -115,8 +122,7 @@ def create_router() -> APIRouter:
         # anyone reads a review of it. The run itself fetches.
         try:
             repos = await asyncio.wait_for(asyncio.to_thread(
-                review_snapshot.inspect,
-                current.directory if current else c.config.workspace_directory), timeout=15)
+                review_snapshot.inspect, folder), timeout=15) if folder else []
         except Exception:  # noqa: BLE001 — the hub renders without it
             repos = []
         response = _TEMPLATES.TemplateResponse(request, "review.html", _ctx(
@@ -178,7 +184,7 @@ def create_router() -> APIRouter:
                 focus=str(form.get("focus") or "").strip(),
                 item_id=int(raw_item) if raw_item.isdigit() else 0, by="dashboard",
                 workspace=str(form.get("workspace") or "").strip())
-        except review_docs.DocumentError as exc:
+        except (review_docs.DocumentError, ValueError) as exc:
             return RedirectResponse("/dashboard/review?upload_error=" + quote(str(exc)),
                                     status_code=303)
         await c.audit_repo.record(actor="dashboard", source="dashboard", action="review.upload",

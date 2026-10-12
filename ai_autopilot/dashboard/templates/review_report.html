@@ -161,13 +161,21 @@
     <div><b>{{ dq.verdict }}</b>
       {% if dq.strengths %}<div style="color:var(--muted);font-size:12.5px;margin-top:4px">👍 {{ dq.strengths|join(' · ') }}</div>{% endif %}</div>
   </div>
+  {% if dq.get('sanity') is not none or dq.sanity_verdict %}{% set bad = unreasonable(dq) %}
+  <div class="dq">
+    <div class="n">{% if dq.get('sanity') is not none %}{{ dq.sanity }}<small>/100</small>{% else %}—{% endif %}</div>
+    <div><b>🧠 Mức hợp lý nghiệp vụ — {{ dq.sanity_verdict }}</b>
+      <div style="color:var(--muted);font-size:12.5px;margin-top:4px">{% if bad %}{{ bad|length }} điểm bất hợp lý (phi logic / không khả thi / gây hại / trái hệ thống) — cần nghiệp vụ chốt trước khi làm.{% else %}Không phát hiện điểm bất hợp lý.{% endif %}</div></div>
+  </div>
+  {% endif %}
   {% if dq.issues %}
   <table class="mx">
     <colgroup><col style="width:12%"><col style="width:16%"><col style="width:38%"><col style="width:34%"></colgroup>
     <tr><th>Mục</th><th>Loại</th><th>Vấn đề</th><th>Gợi ý viết lại</th></tr>
     {% for i in dq.issues %}
-    <tr><td><span class="ref">{{ i.ref or '—' }}</span></td><td><span class="kindtag">{{ doc_issues.get(i.kind, i.kind) }}</span></td>
-      <td>{{ i.text }}</td><td>{{ i.suggestion or '—' }}</td></tr>
+    <tr><td><span class="ref">{{ i.ref or '—' }}</span></td><td><span class="kindtag">{{ doc_issues.get(i.kind, i.kind) }}</span>
+      {% if i.severity %}<br><span class="sev {{ i.severity }}">{{ i.severity }}</span>{% endif %}</td>
+      <td>{{ i.text }}{% if i.impact %}<div style="margin-top:4px;font-size:12px;color:var(--red)">⚠️ Nếu làm đúng y văn bản: {{ i.impact }}</div>{% endif %}</td><td>{{ i.suggestion or '—' }}</td></tr>
     {% endfor %}
   </table>
   {% endif %}

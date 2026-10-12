@@ -193,3 +193,73 @@ def test_an_accepted_challenge_clears_the_stale_fix():
     rs.apply_challenge(r, 0, '```json\n{"verdict": "accept", "status": "done"}\n```',
                        rs.KIND_SPEC, note="đã có")
     assert r.traces[0].status == "done" and r.traces[0].fix == ""
+
+
+# ── reasonableness: a clearly written document can still ask for the wrong thing ──
+
+_UNREASONABLE = '''```json
+{"verdict": "v", "traces": [{"ref": "BR-1", "status": "done", "kind": "BR"}],
+ "doc_quality": {"score": 85, "verdict": "Viết rõ", "sanity": 140,
+   "sanity_verdict": "Có quy tắc trái nghiệp vụ",
+   "issues": [{"ref": "AC-2", "kind": "ambiguous", "text": "mơ hồ"},
+              {"ref": "BR-3", "kind": "illogical", "severity": "medium",
+               "text": "Hạn chót có thể trước ngày bắt đầu"},
+              {"ref": "BR-4", "kind": "harmful", "severity": "CRITICAL",
+               "text": "Cho xoá phiếu đã hạch toán", "impact": "Mất chứng từ kế toán",
+               "suggestion": "Chỉ cho huỷ bằng phiếu điều chỉnh"}]}}
+```'''
+
+
+def test_unreasonable_issues_are_parsed_and_listed_first_worst_first():
+    r, _ = rs.parse(_UNREASONABLE, rs.KIND_SPEC)
+    dq = r.doc_quality
+    assert dq["sanity"] == 100 and dq["sanity_verdict"].startswith("Có quy tắc")
+    assert [i["ref"] for i in dq["issues"]] == ["BR-4", "BR-3", "AC-2"]
+    assert dq["issues"][0]["severity"] == "critical"
+    assert [i["ref"] for i in rs.unreasonable(dq)] == ["BR-4", "BR-3"]
+    md = rs.render_markdown("T", rs.KIND_SPEC, r)
+    assert "Mức hợp lý nghiệp vụ 100/100" in md and "2 điểm bất hợp lý" in md
+    assert "[Gây hại] `critical`" in md and "Nếu làm đúng y văn bản: Mất chứng từ" in md
+    html = rs.render_ado_comment("T", r)
+    assert "Mức hợp lý nghiệp vụ" in html and "Mất chứng từ kế toán" in html
+
+
+def test_reasonableness_is_asked_for_in_the_spec_prompt():
+    p = rs.spec_prompt("spec.md", "FR-1 x")
+    assert "THẨM ĐỊNH TÍNH HỢP LÝ" in p and '"sanity"' in p and "conflicts_system" in p
+
+
+def test_a_result_saved_before_sanity_existed_still_renders(tmp_path):
+    old = rs.ReviewResult(doc_quality={"score": 70, "verdict": "ok", "strengths": [],
+                                       "issues": [{"ref": "A", "kind": "ambiguous",
+                                                   "text": "t", "suggestion": ""}]})
+    back = rs.load(old.to_json())
+    assert rs.unreasonable(back.doc_quality) == []
+    assert "Mức hợp lý" not in rs.render_markdown("T", rs.KIND_SPEC, back)
+
+
+def test_detail_and_report_pages_show_reasonableness(tmp_path, monkeypatch):
+    cfg = Settings(dry_run=True, workspace_directory=str(tmp_path),
+                   database_url=f"sqlite+aiosqlite:///{tmp_path / 'u.db'}")
+
+    async def fake_run_claude(prompt, cwd, **kw):
+        return SimpleNamespace(text=_UNREASONABLE, session_id="s", cost_usd=0.1,
+                               is_error=False)
+
+    from ai_autopilot.execution import claude_client
+    monkeypatch.setattr(claude_client, "run_claude", fake_run_claude)
+    with TestClient(create_app(cfg)) as client:
+        r = client.post("/dashboard/review/upload", data={"doc_type": "brd"},
+                        files={"file": ("brd.md", "# BRD\nBR-1 duyệt phiếu nhập kho".encode(),
+                                                "text/markdown")},
+                        follow_redirects=False)
+        rid = int(r.headers["location"].rsplit("/", 1)[1])
+        for _ in range(100):
+            if client.get(f"/dashboard/review/{rid}/status").json()["status"] == "done":
+                break
+            asyncio.run(asyncio.sleep(0.02))
+        detail = client.get(f"/dashboard/review/{rid}").text
+        report = client.get(f"/dashboard/review/{rid}/report.html").text
+    for page in (detail, report):
+        assert "2 điểm bất hợp lý" in page and "Mất chứng từ kế toán" in page
+    assert "🧠 Hợp lý nghiệp vụ <b>100/100</b>" in detail

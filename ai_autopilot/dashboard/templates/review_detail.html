@@ -91,6 +91,8 @@
   .dq-k { display:inline-block; font-size:11px; font-weight:650; padding:2px 8px; border-radius:6px; background:var(--bg-input);
     border:1px solid var(--border); white-space:nowrap; }
   .dq-k.code_better { color:#5aa9ff; border-color:rgba(90,169,255,.45); }
+  .dq-k.illogical, .dq-k.infeasible, .dq-k.harmful, .dq-k.conflicts_system { color:#fff; background:var(--red); border-color:var(--red); }
+  .dq-impact { margin-top:5px; font-size:12px; color:var(--red); }
   .dq-k.ambiguous, .dq-k.untestable { color:var(--amber); } .dq-k.contradictory, .dq-k.incomplete { color:var(--red); }
   .snap { padding:0; }
   .snap > summary { display:flex; gap:6px 12px; flex-wrap:wrap; align-items:baseline; padding:11px 18px; cursor:pointer; font-size:12.5px;
@@ -279,6 +281,11 @@
       <button type="button" class="dq-chip {{ 'green' if dq.score >= 80 else ('amber' if dq.score >= 55 else 'red') }}" data-goto="t-dq">
         📝 Chất lượng tài liệu <b>{{ dq.score }}/100</b>{% if dq.issues %} · {{ dq.issues|length }} vấn đề{% endif %}</button>
       {% endif %}
+      {% if dq and dq.get('sanity') is not none %}{% set bad = unreasonable(dq) %}
+      <button type="button" class="dq-chip {{ 'green' if dq.sanity >= 80 else ('amber' if dq.sanity >= 55 else 'red') }}" data-goto="t-dq"
+              title="Tài liệu có yêu cầu điều phi logic, không khả thi, gây hại hay trái hệ thống hiện có không">
+        🧠 Hợp lý nghiệp vụ <b>{{ dq.sanity }}/100</b>{% if bad %} · {{ bad|length }} điểm bất hợp lý{% endif %}</button>
+      {% endif %}
       {% if result.summary and result.summary != result.verdict %}<div class="summary">{{ result.summary }}</div>{% endif %}
       {% if prev and prev.score is not none and score is not none %}
       {% set d = (score - prev.score)|round(1) %}
@@ -424,14 +431,24 @@
       <div><div class="verdict" style="font-size:14.5px">{{ dq.verdict or 'Đánh giá chất lượng tài liệu' }}</div>
         <div class="act-help">Tài liệu không mặc nhiên đúng: chấm độ rõ ràng, đầy đủ, kiểm thử được — và nói thẳng khi hệ thống đã làm tốt hơn tài liệu.</div></div>
     </div>
+    {% if dq.get('sanity') is not none or dq.sanity_verdict %}{% set bad = unreasonable(dq) %}
+    <div class="dq-hd">
+      {% if dq.get('sanity') is not none %}<div class="dq-score {{ 'green' if dq.sanity >= 80 else ('amber' if dq.sanity >= 55 else 'red') }}"><b>{{ dq.sanity }}</b><small>/100</small></div>{% endif %}
+      <div><div class="verdict" style="font-size:14.5px">🧠 {{ dq.sanity_verdict or 'Mức hợp lý nghiệp vụ' }}</div>
+        <div class="act-help">Viết rõ vẫn có thể yêu cầu điều vô lý — phi logic, không khả thi, gây hại, trái hệ thống hiện có.
+          {% if bad %}<b>{{ bad|length }} điểm bất hợp lý</b> — đừng làm đúng y văn bản khi nghiệp vụ chưa chốt.{% else %}Không phát hiện điểm bất hợp lý.{% endif %}</div></div>
+    </div>
+    {% endif %}
     {% if dq.strengths %}<div class="list"><div class="q"><div class="t">👍 Điểm tốt</div><ul>{% for x in dq.strengths %}<li>{{ x }}</li>{% endfor %}</ul></div></div>{% endif %}
     {% if dq.issues %}
     <div class="mx-wrap"><table class="mx" style="min-width:700px">
       <tr><th>Mục</th><th>Loại vấn đề</th><th>Vấn đề</th><th>Gợi ý viết lại</th></tr>
       {% for i in dq.issues %}
       <tr><td><span class="ref">{{ i.ref or '—' }}</span></td>
-        <td><span class="dq-k {{ i.kind }}">{{ doc_issues.get(i.kind, i.kind) }}</span></td>
-        <td class="spec">{{ i.text }}</td><td class="fix">{{ i.suggestion or '—' }}</td></tr>
+        <td><span class="dq-k {{ i.kind }}">{{ doc_issues.get(i.kind, i.kind) }}</span>
+          {% if i.severity %}<br><span class="sev {{ i.severity }}">{{ i.severity }}</span>{% endif %}</td>
+        <td class="spec">{{ i.text }}{% if i.impact %}<div class="dq-impact">⚠️ Nếu làm đúng y văn bản: {{ i.impact }}</div>{% endif %}</td>
+        <td class="fix">{{ i.suggestion or '—' }}</td></tr>
       {% endfor %}
     </table></div>
     {% endif %}

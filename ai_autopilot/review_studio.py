@@ -50,7 +50,13 @@ DOC_ISSUES = {
     "ambiguous": "Mơ hồ", "incomplete": "Thiếu", "untestable": "Không kiểm thử được",
     "contradictory": "Mâu thuẫn", "outdated": "Lỗi thời", "over_specified": "Quá chi tiết kỹ thuật",
     "code_better": "Code đã làm tốt hơn", "other": "Khác",
+    # The document is clear and complete, and still asks for the wrong thing.
+    "illogical": "Phi logic", "infeasible": "Không khả thi",
+    "harmful": "Gây hại", "conflicts_system": "Trái hệ thống hiện có",
 }
+# Issue kinds that say the requirement is UNREASONABLE, not merely badly written — the
+# ones a team must not implement as written without a business decision.
+UNREASONABLE = ("harmful", "illogical", "infeasible", "conflicts_system")
 REPORT_STATUSES: dict[str, tuple[str, str, str]] = {
     "confirmed": ("🔴", "Vẫn còn", "red"),
     "fixed": ("✅", "Đã sửa", "green"),
@@ -229,7 +235,14 @@ _SPEC_SCHEMA = """\
      "issues": [{"ref": "FR-02",
                  "kind": "ambiguous|incomplete|untestable|contradictory|outdated|"
                          "over_specified|code_better|other",
-                 "text": "vấn đề", "suggestion": "viết lại thế nào"}]},
+                 "text": "vấn đề", "suggestion": "viết lại thế nào"},
+                {"ref": "BR-04",
+                 "kind": "illogical|infeasible|harmful|conflicts_system",
+                 "severity": "critical|high|medium|low",
+                 "text": "vì sao bất hợp lý (lý do cụ thể, có số liệu/ví dụ)",
+                 "impact": "chuyện gì xảy ra nếu code làm ĐÚNG Y văn bản",
+                 "suggestion": "phương án hợp lý thay thế"}],
+     "sanity": 0-100, "sanity_verdict": "1 câu: tài liệu có hợp lý về nghiệp vụ không"},
   "questions": [
     {"ref": "AC-03", "text": "câu hỏi cho BA", "why": "vì sao spec chưa đủ để quyết",
      "options": ["phương án A", "phương án B"]}
@@ -268,6 +281,20 @@ Cách làm:
    đúng. Chấm "doc_quality": mục nào mơ hồ, thiếu, không kiểm thử được, mâu thuẫn,
    lỗi thời so với hệ thống, quá sa vào kỹ thuật, hoặc kém hơn cách code đã làm. Nêu
    cả điểm mạnh. Mỗi vấn đề kèm gợi ý viết lại cụ thể.
+3b. THẨM ĐỊNH TÍNH HỢP LÝ — tài liệu viết rõ ràng vẫn có thể yêu cầu điều VÔ LÝ. Với
+   từng mục, tự hỏi "nếu làm đúng y văn bản thì sao?" và báo khi:
+   - illogical: phi logic — số học/công thức sai, quy tắc tự triệt tiêu, trạng thái
+     không bao giờ đạt được hoặc không có lối ra, điều kiện chồng lấn/bỏ trống, trái
+     lẽ thường của nghiệp vụ (vd duyệt sau khi đã chi, hạn chót trước ngày bắt đầu).
+   - infeasible: không khả thi — khối lượng/thời gian thực/hiệu năng phi thực tế, phụ
+     thuộc dữ liệu hay hệ thống không tồn tại.
+   - harmful: gây hại — lộ dữ liệu cá nhân, bỏ qua phân quyền, xoá không hoàn tác,
+     sai chuẩn kế toán/thuế/pháp lý, dễ bị lạm dụng.
+   - conflicts_system: trái mô hình dữ liệu/kiến trúc ĐANG CÓ — dẫn file:line chứng minh.
+   Chỉ báo khi có LÝ DO CỤ THỂ (số liệu, ví dụ phản chứng, vị trí code) — không bắt bẻ
+   câu chữ. Ghi "severity" và "impact" (hệ quả khi làm đúng y văn bản). Chấm "sanity"
+   (100 = hoàn toàn hợp lý) riêng với "score" (chất lượng viết). Mục severity high/
+   critical ⇒ thêm một câu hỏi cho BA kèm phương án, KHÔNG tự sửa yêu cầu thay nghiệp vụ.
 4. Ghi câu hỏi cho BA ở chỗ cần nghiệp vụ chốt. Đừng tự quyết thay nghiệp vụ — nêu
    phương án và hệ quả.
 5. Ghi rủi ro (bảo mật, dữ liệu, hiệu năng, migration không rollback được) nếu thấy.
@@ -439,8 +466,10 @@ def redact_result(result: ReviewResult) -> ReviewResult:
     if dq:
         dq["verdict"] = redact(dq.get("verdict", ""))
         dq["strengths"] = [redact(x) for x in dq.get("strengths", [])]
+        dq["sanity_verdict"] = redact(dq.get("sanity_verdict", ""))
         for i in dq.get("issues", []):
             i["text"], i["suggestion"] = redact(i.get("text", "")), redact(i.get("suggestion", ""))
+            i["impact"] = redact(i.get("impact", ""))
     for q in result.questions:
         q.text, q.why, q.options = redact(q.text), redact(q.why), [redact(o) for o in q.options]
     for r in result.risks:
@@ -491,17 +520,35 @@ def _doc_quality(raw: object) -> dict:
         score = max(0, min(100, int(float(raw.get("score")))))
     except (TypeError, ValueError):
         score = None
+    try:
+        sanity = max(0, min(100, int(float(raw.get("sanity")))))
+    except (TypeError, ValueError):
+        sanity = None
     issues = []
     for i in raw.get("issues") or []:
         if isinstance(i, dict) and str(i.get("text") or "").strip():
             kind = str(i.get("kind") or "other").strip().lower()
+            sev = str(i.get("severity") or "").strip().lower()
             issues.append({"ref": str(i.get("ref") or "").strip()[:40],
                            "kind": kind if kind in DOC_ISSUES else "other",
+                           "severity": sev if sev in SEVERITIES else "",
                            "text": str(i["text"]).strip(),
+                           "impact": str(i.get("impact") or "").strip(),
                            "suggestion": str(i.get("suggestion") or "").strip()})
+    # Unreasonable first, worst first: "this asks for the wrong thing" outranks "this
+    # is worded vaguely", and a reader who stops after three rows must see it.
+    rank = {s: n for n, s in enumerate(SEVERITIES)}
+    issues.sort(key=lambda i: (i["kind"] not in UNREASONABLE,
+                               rank.get(i["severity"], len(SEVERITIES))))
     return {"score": score, "verdict": str(raw.get("verdict") or "").strip(),
             "strengths": [str(x).strip() for x in raw.get("strengths") or [] if str(x).strip()],
-            "issues": issues}
+            "issues": issues, "sanity": sanity,
+            "sanity_verdict": str(raw.get("sanity_verdict") or "").strip()}
+
+
+def unreasonable(dq: dict) -> list[dict]:
+    """The issues that say the document asks for the wrong thing (not just badly)."""
+    return [i for i in (dq or {}).get("issues", []) if i.get("kind") in UNREASONABLE]
 
 
 def split_body(text: str) -> tuple[str, dict | None]:
@@ -796,13 +843,19 @@ def render_markdown(title: str, kind: str, result: ReviewResult, *,
         out += [head, ""]
         if dq.get("verdict"):
             out += [dq["verdict"], ""]
+        if dq.get("sanity") is not None or dq.get("sanity_verdict"):
+            sane = f" {dq['sanity']}/100" if dq.get("sanity") is not None else ""
+            out += [f"**🧠 Mức hợp lý nghiệp vụ{sane}** — {dq.get('sanity_verdict', '')}"
+                    f" ({len(unreasonable(dq))} điểm bất hợp lý)", ""]
         for x in dq.get("strengths", []):
             out.append(f"- 👍 {x}")
         for i in dq.get("issues", []):
             kind = DOC_ISSUES.get(i.get("kind", ""), "Khác")
+            sev = f" `{i['severity']}`" if i.get("severity") else ""
             ref = f"**{i['ref']}** — " if i.get("ref") else ""
+            imp = f" ⚠️ Nếu làm đúng y văn bản: {i['impact']}" if i.get("impact") else ""
             sug = f" → _{i['suggestion']}_" if i.get("suggestion") else ""
-            out.append(f"- [{kind}] {ref}{i.get('text', '')}{sug}")
+            out.append(f"- [{kind}]{sev} {ref}{i.get('text', '')}{imp}{sug}")
         out.append("")
     if result.questions:
         out += ["## Câu hỏi cho BA", ""]
@@ -872,10 +925,18 @@ def render_ado_comment(title: str, result: ReviewResult, *, link: str = "") -> s
             "<p><b>Đánh giá tài liệu</b>"
             + (f" ({dq['score']}/100)" if dq.get("score") is not None else "") + ": "
             + escape(dq.get("verdict") or "") + "</p>"
+            + (f"<p><b>🧠 Mức hợp lý nghiệp vụ</b>"
+               + (f" ({dq['sanity']}/100)" if dq.get("sanity") is not None else "") + ": "
+               + escape(dq.get("sanity_verdict") or "")
+               + f" — {len(unreasonable(dq))} điểm bất hợp lý.</p>"
+               if dq.get("sanity") is not None or dq.get("sanity_verdict") else "")
             + ("<ul>" + "".join(
-                f"<li>[{escape(DOC_ISSUES.get(i.get('kind', ''), 'Khác'))}] "
+                f"<li>[{escape(DOC_ISSUES.get(i.get('kind', ''), 'Khác'))}"
+                + (f" · {escape(i['severity'])}" if i.get("severity") else "") + "] "
                 f"{('<b>' + escape(i['ref']) + '</b> — ') if i.get('ref') else ''}"
                 f"{escape(i.get('text', ''))}"
+                + (f" ⚠️ <i>Nếu làm đúng y văn bản:</i> {escape(i['impact'])}"
+                   if i.get("impact") else "")
                 + (f" → <i>{escape(i['suggestion'])}</i>" if i.get("suggestion") else "")
                 + "</li>"
                 for i in dq.get("issues", [])) + "</ul>" if dq.get("issues") else ""))

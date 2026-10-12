@@ -198,6 +198,7 @@ def create_router() -> APIRouter:
             ws_label=next((w.label for w in studio_for(c).workspaces()
                            if w.id == (row.workspace or "")), ""),
             sides=rs.SIDES, confidence=rs.CONFIDENCE, doc_issues=rs.DOC_ISSUES,
+            unreasonable=rs.unreasonable,
             groups=rs.by_kind(result) if row.kind == rs.KIND_SPEC else [], changes=changes,
             started_iso=(row.started_at.replace(tzinfo=UTC) if row.started_at.tzinfo is None
                          else row.started_at).isoformat(),
@@ -279,7 +280,7 @@ def create_router() -> APIRouter:
         snapshot = review_snapshot.from_json(row.snapshot_json or "")
         return _TEMPLATES.TemplateResponse(request, "review_report.html", {
             "snapshot": [] if external else snapshot, "sides": rs.SIDES,
-            "doc_issues": rs.DOC_ISSUES,
+            "doc_issues": rs.DOC_ISSUES, "unreasonable": rs.unreasonable,
             "row": row, "result": result, "external": external, "prev": prev,
             "statuses": rs.statuses_for(row.kind), "counts": result.counts(row.kind),
             "groups": rs.by_kind(result) if row.kind == rs.KIND_SPEC else [],

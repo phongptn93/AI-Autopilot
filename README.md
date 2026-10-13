@@ -533,10 +533,26 @@ legacy-dotnet/               # original .NET 8 implementation (reference)
 ## 🛠️ Development
 
 ```bash
-pytest              # run unit tests
-ruff check .        # lint
-mypy ai_autopilot   # type-check
+pip install -c requirements-lock.txt -e ".[dev,docs]"   # same pinned versions as CI
+
+pytest                                  # run unit tests
+ruff check ai_autopilot tests scripts   # lint
+python scripts/mypy_gate.py             # type-check: fails only on errors not in mypy-baseline.txt
 ```
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push and PR:
+ruff, the mypy gate, pytest with an 80% coverage floor (Windows + Linux), `pip-audit`
+over the lockfile, and a Docker build.
+
+- **Fixed some old mypy errors?** Run `python scripts/mypy_gate.py --update` and commit
+  the smaller `mypy-baseline.txt`. Never add to it to make a new error pass.
+- **Changed dependencies in `pyproject.toml`?** Regenerate the lock (Dependabot keeps it
+  current otherwise):
+  `uv pip compile pyproject.toml --extra dev --extra docs --universal --python-version 3.11 --no-header --annotation-style line -o requirements-lock.txt`
+- There is no `ruff format` gate on purpose: the code uses aligned hanging indents the
+  formatter would rewrite wholesale.
+- Tests never write to `logs/` (`tests/conftest.py` sets `AUTOPILOT_LOG_DIR=""`). The
+  same variable moves the app's log folder; empty turns the file sink off.
 
 ## 📦 Deployment
 

@@ -155,7 +155,8 @@ class PrMonitorService:
             await self._inspect_pr(repo_id, repo_name, pr)
         except Exception as exc:  # noqa: BLE001 — a background task must not die silently
             self._log.error(
-                "webhook-kicked inspection failed", pr=pr.get("pullRequestId"), error=describe_exc(exc)
+                "webhook-kicked inspection failed",
+                pr=pr.get("pullRequestId"), error=describe_exc(exc),
             )
 
     # ── Restart-proof command state (memory cache over PrCommandRepository) ──

@@ -40,8 +40,8 @@ def _run_helper(tmp_path: Path, *, pip_script: str, version: str, target: str,
         "pip": [sys.executable, "-c", pip_script],
         "verify": [sys.executable, "-c", f"print('{version}')"],
         "relaunch": [sys.executable, "-c",
-                     "import os; open(r'%s', 'w').write(os.environ.get('AUTOPILOT_CONFIG_FILE', ''))"
-                     % marker],
+                     f"import os; open(r'{marker}', 'w')"
+                     ".write(os.environ.get('AUTOPILOT_CONFIG_FILE', ''))"],
         "config_file": str(tmp_path / "real" / "config.yaml"),
         "cwd": str(tmp_path), "wait_seconds": 20, "attempts": 4, "retry_seconds": 0.2,
         "console": False,

@@ -9,15 +9,21 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import os
 from pathlib import Path
 
 import structlog
 
 
-def configure_logging(level: str = "INFO", log_dir: str = "logs") -> None:
-    """Configure stdlib + structlog logging once at startup."""
-    log_path = Path(log_dir)
-    log_path.mkdir(parents=True, exist_ok=True)
+def configure_logging(level: str = "INFO", log_dir: str | None = None) -> None:
+    """Configure stdlib + structlog logging once at startup.
+
+    ``log_dir`` defaults to ``AUTOPILOT_LOG_DIR`` (else ``logs``); an empty value turns
+    the file sink off. The test suite sets it empty — every ``create_app()`` in a test
+    would otherwise append to the real ``logs/`` and bury production lines in noise.
+    """
+    if log_dir is None:
+        log_dir = os.environ.get("AUTOPILOT_LOG_DIR", "logs")
 
     timestamper = structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S")
     shared_processors: list = [
@@ -54,15 +60,19 @@ def configure_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     console = logging.StreamHandler()
     console.setFormatter(console_formatter)
 
-    file_handler = logging.handlers.TimedRotatingFileHandler(
-        log_path / "autopilot.log", when="midnight", backupCount=30, encoding="utf-8"
-    )
-    file_handler.setFormatter(file_formatter)
-
     root = logging.getLogger()
+    for old in root.handlers:
+        old.close()  # each create_app() reconfigures; don't leak the previous file handle
     root.handlers.clear()
     root.addHandler(console)
-    root.addHandler(file_handler)
+    if log_dir:
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.TimedRotatingFileHandler(
+            log_path / "autopilot.log", when="midnight", backupCount=30, encoding="utf-8"
+        )
+        file_handler.setFormatter(file_formatter)
+        root.addHandler(file_handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
     # Quiet noisy third-party loggers (parity with Serilog overrides).

@@ -1,0 +1,52 @@
+# Only pyproject.toml, README.md, requirements-lock.txt and ai_autopilot/ are needed.
+# Everything else stays out of the build context — notably secrets and local state.
+
+# Secrets / local config
+config.yaml
+config.*.yaml
+!config.example.yaml
+config.yaml.*
+*.bak
+.env
+.env.*
+!.env.example
+.ado-autopilot-token.json
+
+# Local state and output
+*.db
+*.db-*
+logs/
+data/
+dist/
+build/
+.autopilot/
+*.stackdump
+
+# Tooling
+.git/
+.github/
+.venv/
+venv/
+.claude/
+.mcp.json
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+
+# Not part of the image
+tests/
+evals/
+docs/
+legacy-dotnet/
+teams-app/
+k8s/
+scripts/
+*.pptx
+*.md
+!README.md

@@ -932,12 +932,15 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "auto = chỉ khi máy thuộc fleet; on / off = ép bật / tắt. Nhiều máy cùng thấy tag "
           "chạy-ngay thì chỉ máy nhận việc trước mới chạy.", ("auto", "on", "off"),
           show_when_key="fleet_role", show_when_values=("central", "worker")),
-    Field("run_now_claim_settle_seconds", "↳ Chờ trước khi chốt máy chạy (giây)", "int", "⚖️ Tự chủ & an toàn",
+    Field("run_now_claim_settle_seconds",
+          "↳ Chờ trước khi chốt máy chạy (giây)", "int", "⚖️ Tự chủ & an toàn",
           "Chờ comment nhận việc của máy khác đến rồi mới xem máy nào chạy.",
           show_when_key="fleet_role", show_when_values=("central", "worker")),
-    Field("pr_session_watch_seconds", "Kiểm tra phiên giải conflict mỗi (giây)", "int", "⚖️ Tự chủ & an toàn",
+    Field("pr_session_watch_seconds",
+          "Kiểm tra phiên giải conflict mỗi (giây)", "int", "⚖️ Tự chủ & an toàn",
           "Phiên interactive giải conflict xong được kiểm tra và push trong vòng chừng này giây."),
-    Field("pr_conflict_claim_settle_seconds", "Chờ chốt máy giải PR conflict (giây)", "int", "⚖️ Tự chủ & an toàn",
+    Field("pr_conflict_claim_settle_seconds",
+          "Chờ chốt máy giải PR conflict (giây)", "int", "⚖️ Tự chủ & an toàn",
           "Nhiều máy cùng thấy một PR conflict: chờ chừng này giây rồi comment nhận việc "
           "sớm nhất thắng — một PR chỉ một phiên.",
           show_when_key="fleet_role", show_when_values=("central", "worker")),

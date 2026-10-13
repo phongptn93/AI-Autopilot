@@ -248,7 +248,8 @@ class AdoPollerService:
             "polling starts on its own, no restart needed.",
             recheck_seconds=max(5, min(int(cfg.poll_interval_seconds or 30), 60)),
         )
-        while not cfg.has_tracker_auth:
+        # Credentials arrive through the dashboard (a config mutation, no event to await).
+        while not cfg.has_tracker_auth:  # noqa: ASYNC110
             await asyncio.sleep(max(5, min(int(cfg.poll_interval_seconds or 30), 60)))
         self._log.info(
             "tracker credentials configured — polling starts now",
@@ -429,7 +430,8 @@ class AdoPollerService:
         try:
             preds, related = await c.ado.get_work_item_links(list(candidate_ids))
         except Exception as exc:  # noqa: BLE001 — never let scheduling break the poll
-            self._log.warning("link-graph fetch failed — plain priority order", error=describe_exc(exc))
+            self._log.warning("link-graph fetch failed — plain priority order",
+                              error=describe_exc(exc))
             return sort_by_priority(new_items)
 
         related = _symmetrize(related)
@@ -2013,7 +2015,8 @@ class AdoPollerService:
         try:
             await self._c.executor.close_interactive(run_dir, item_id)
         except Exception as exc:  # noqa: BLE001 — never block finalise on cleanup
-            self._log.warning("could not close interactive session", id=item_id, error=describe_exc(exc))
+            self._log.warning("could not close interactive session",
+                              id=item_id, error=describe_exc(exc))
         return True
 
     async def _remove_live_tag(self, item_id: int) -> None:

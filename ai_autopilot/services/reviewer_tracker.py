@@ -777,7 +777,8 @@ class ReviewerTrackerService:
                 continue
             if cfg.dry_run:
                 # Dry-run: acknowledge in the log, mark handled so we don't re-log, no ADO write.
-                self._log.info("[DRY-RUN] would handle PR command", pr=pr_id, cmd=cmd["instruction"][:60])
+                self._log.info("[DRY-RUN] would handle PR command",
+                               pr=pr_id, cmd=cmd["instruction"][:60])
                 await cmd_repo.mark_handled(pr_id, ctid, cid)
                 continue
             if not matches_any_user(cmd["author_email"], cmd["author_name"], claimed):

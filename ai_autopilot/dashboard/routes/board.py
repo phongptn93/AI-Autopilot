@@ -73,9 +73,7 @@ def _filter_board_items(items: list, q: str, cat: str, dfrom: str, dto: str) -> 
             d = cd.date().isoformat()
             if dfrom and d < dfrom:
                 return False
-            if dto and d > dto:
-                return False
-            return True
+            return not dto or d <= dto
         out = [i for i in out if _in_range(i)]
     return out
 

@@ -39,7 +39,8 @@ class PluginManager:
                 await plugin.initialize(services)
                 self._plugins.append(plugin)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("plugin failed to initialize", name=plugin.name, error=describe_exc(exc))
+                self._log.warning("plugin failed to initialize",
+                                  name=plugin.name, error=describe_exc(exc))
         self._log.info("plugin manager ready", count=len(self._plugins))
 
     def _discover(self, plugins_directory: str) -> list[Plugin]:
@@ -55,7 +56,8 @@ class PluginManager:
             try:
                 module = self._import_file(file)
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("failed to load plugin file", file=str(file), error=describe_exc(exc))
+                self._log.warning("failed to load plugin file",
+                                  file=str(file), error=describe_exc(exc))
                 continue
             for _, obj in inspect.getmembers(module, inspect.isclass):
                 if (

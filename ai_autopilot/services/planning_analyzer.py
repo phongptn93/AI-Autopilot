@@ -61,7 +61,8 @@ async def analyze(container, ids: list[int]) -> dict:
                 )
                 verdict = parse_verdict(run.text)
             except Exception as exc:  # noqa: BLE001 — one bad judge must not fail Analyze
-                _log.warning("planning analyze: judge failed", a=a_id, b=b_id, error=describe_exc(exc))
+                _log.warning("planning analyze: judge failed",
+                             a=a_id, b=b_id, error=describe_exc(exc))
                 verdict = None
             if verdict and verdict["score"] >= cfg.planning_ai_min_score:
                 ai.append({"a": a_id, "b": b_id, "shared": shared, **verdict})

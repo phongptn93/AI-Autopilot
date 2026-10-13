@@ -320,7 +320,8 @@ def _help_text(config: Settings) -> str:
     return text
 
 # ADO reviewer vote → short label (mirrors reviewer_tracker.VOTE_LABELS, compact form).
-_VOTE_SHORT = {10: "✅ approved", 5: "✅ suggestions", 0: "⏳ chưa vote", -5: "⏸️ waiting", -10: "❌ rejected"}
+_VOTE_SHORT = {10: "✅ approved", 5: "✅ suggestions", 0: "⏳ chưa vote",
+               -5: "⏸️ waiting", -10: "❌ rejected"}
 
 
 def build_agent(config: Settings, container: Container, reviewer_tracker: ReviewerTrackerService):
@@ -1779,7 +1780,8 @@ có bước xác nhận trước khi tạo). Bot KHÔNG được sửa code, vot
 
 Phân loại tin nhắn của người dùng vào ĐÚNG MỘT trong các intent sau, và trả về \
 CHÍNH XÁC một dòng JSON, không kèm giải thích, không markdown:
-{{"intent": "items|prs|pr_lookup|item_lookup|team_overview|status|help|create_ticket|queue|resume|unknown", \
+{{"intent": "items|prs|pr_lookup|item_lookup|team_overview|status|help|\
+create_ticket|queue|resume|unknown", \
 "filter": null hoặc giá trị tương ứng bên dưới}}
 
 - "items": người dùng muốn xem WORK ITEM CỦA CHÍNH HỌ. filter = null hoặc từ khoá \
@@ -2283,7 +2285,8 @@ async def _classify_and_reply(
             await context.send_activity("Không nhận diện được số PR — gõ rõ hơn nhé.")
             return
         detail = await reviewer_tracker.find_pr_by_id(pr_id)
-        bullets = _format_pr_detail(detail) if detail else f"(không tìm thấy PR !{pr_id} đang active)"
+        bullets = (_format_pr_detail(detail) if detail
+                   else f"(không tìm thấy PR !{pr_id} đang active)")
         await context.send_activity(await _phrase_natural(config, text, bullets))
     elif intent == "item_lookup":
         wid = _as_int(flt)

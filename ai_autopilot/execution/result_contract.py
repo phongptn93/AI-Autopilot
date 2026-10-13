@@ -33,6 +33,7 @@ can be reported back on its own work item.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -217,10 +218,8 @@ def clear_result(workspace: str, item_id: int | str) -> None:
     run would be picked up by ``find_result`` as if it were this run's outcome.
     """
     for path in [_result_path(workspace, item_id), *_stray_paths(workspace, item_id)]:
-        try:
+        with contextlib.suppress(OSError):  # FileNotFoundError is an OSError
             path.unlink()
-        except (FileNotFoundError, OSError):
-            pass
 
 
 def _as_id(value: object) -> int:

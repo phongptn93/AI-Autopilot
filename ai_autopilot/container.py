@@ -34,7 +34,6 @@ from ai_autopilot.data import (
     PrSessionRepository,
     QualityRepository,
     ReviewRepository,
-    UserRepository,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
     SecurityRepository,
@@ -42,6 +41,7 @@ from ai_autopilot.data import (
     StateHistoryRepository,
     StateRepository,
     SyncStateRepository,
+    UserRepository,
 )
 from ai_autopilot.execution import (
     AutoReviewer,

@@ -154,7 +154,8 @@ def score_run(inp: ScoreInput, *, auto_min: int = 85, review_min: int = 60) -> R
 
 def score_badge_html(rs: RunScore) -> str:
     """Small HTML snippet for the ADO comment — grade pill + breakdown + reasons."""
-    color = {"A": "#16a34a", "B": "#16a34a", "C": "#d97706", "D": "#d97706", "F": "#dc2626"}[rs.grade]
+    color = {"A": "#16a34a", "B": "#16a34a", "C": "#d97706", "D": "#d97706",
+             "F": "#dc2626"}[rs.grade]
     parts = " · ".join(f"{k} {v}" for k, v in rs.components.items())
     reasons = ("<br/>" + "; ".join(rs.reasons)) if rs.reasons else ""
     return (

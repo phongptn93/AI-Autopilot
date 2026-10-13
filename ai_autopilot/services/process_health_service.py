@@ -126,7 +126,8 @@ class ProcessHealthService:
                     project, cfg.process_health_window_days
                 )
             except Exception as exc:  # noqa: BLE001
-                self._log.warning("process-health fetch failed", project=project, error=describe_exc(exc))
+                self._log.warning("process-health fetch failed",
+                                  project=project, error=describe_exc(exc))
                 continue
             items = [i for i in (to_health_item(f) for f in raw) if i is not None]
             out.append(build_report(

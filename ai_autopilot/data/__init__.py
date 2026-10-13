@@ -51,7 +51,6 @@ from ai_autopilot.data.repository import (
     QualityRepository,
     ReviewerSnapshot,
     ReviewRepository,
-    UserRepository,
     ReworkRow,
     SchedulerHistoryRepository,
     SdlcLoopStateRepository,
@@ -60,6 +59,7 @@ from ai_autopilot.data.repository import (
     StateHistoryRepository,
     StateRepository,
     SyncStateRepository,
+    UserRepository,
 )
 
 __all__ = [

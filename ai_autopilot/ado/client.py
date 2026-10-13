@@ -657,7 +657,8 @@ class AdoClient:
         try:
             resp = await self._http.get(url, headers=await self._headers())
         except httpx.HTTPError as exc:
-            self._log.warning("get_work_item_comments error", id=work_item_id, error=describe_exc(exc))
+            self._log.warning("get_work_item_comments error",
+                              id=work_item_id, error=describe_exc(exc))
             return []
         if resp.status_code >= 400:
             self._log.warning(
@@ -724,7 +725,8 @@ class AdoClient:
             if presp.status_code < 400:
                 return True
             if presp.status_code in (409, 412):  # someone else won the race — re-read + retry
-                self._log.info(f"{what}: tag conflict, retrying", id=work_item_id, attempt=attempt + 1)
+                self._log.info(f"{what}: tag conflict, retrying",
+                               id=work_item_id, attempt=attempt + 1)
                 continue
             self._log.warning(f"{what} failed", id=work_item_id, status=presp.status_code)
             return False
@@ -1119,7 +1121,8 @@ class AdoClient:
         )
         if definition_id:
             query += f"&definitions={definition_id}"
-        resp = await self._http.get(self._git_url(query), headers=await self._auth.get_auth_header())
+        resp = await self._http.get(self._git_url(query),
+                                    headers=await self._auth.get_auth_header())
         if resp.status_code >= 400:
             self._log.warning("get_successful_builds failed", status=resp.status_code)
             return []

@@ -78,7 +78,8 @@ class SpecGuard:
                 if await self._link_one(repo_name, pr_id, target):
                     fixed.append(url)
             except Exception as exc:  # noqa: BLE001 — never fail a delivered run on this
-                self._log.warning("pr link check failed", id=item.id, pr=url, error=describe_exc(exc))
+                self._log.warning("pr link check failed",
+                                  id=item.id, pr=url, error=describe_exc(exc))
         return fixed
 
     async def _source_ref(self, repo_name: str, pr_id: int) -> str:

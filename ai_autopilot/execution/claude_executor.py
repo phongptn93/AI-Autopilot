@@ -422,7 +422,8 @@ class ClaudeExecutor:
         pretrust_claude_dir(run_dir)
         try:
             clear_result(run_dir, item.id)
-            activity.clear(workspace, item.id)  # activity stays in the real workspace (dashboard reads it)
+            # activity stays in the real workspace (dashboard reads it)
+            activity.clear(workspace, item.id)
             isolated = " (isolated worktree)" if scratch else ""
             activity.append(
                 workspace, item.id, f"🚀 agent started{isolated} — repos: {', '.join(repos) or '-'}"
@@ -434,7 +435,8 @@ class ClaudeExecutor:
                 activity.append(
                     workspace, item.id, f"🧠 {injected} lesson(s) from past runs injected"
                 )
-            self._log.info("running agent", id=item.id, cwd=run_dir, repos=repos, isolated=bool(scratch))
+            self._log.info("running agent",
+                           id=item.id, cwd=run_dir, repos=repos, isolated=bool(scratch))
             claude_run = await self._run_claude(
                 brief, run_dir, on_event=lambda line: activity.append(workspace, item.id, line)
             )
@@ -924,7 +926,8 @@ class ClaudeExecutor:
                     await self._git(["worktree", "add", "--detach", worktree, base_ref], src_repo)
                     worktreed.append(repo)
             if not worktreed:  # nothing isolated → fall back to the shared workspace
-                self._log.warning("scratch: no repos worktreed — using shared workspace", id=item_id)
+                self._log.warning("scratch: no repos worktreed — using shared workspace",
+                                  id=item_id)
                 await self.release_scratch(scratch)
                 return None
             self._log.info("created agent scratch", id=item_id, path=scratch, repos=worktreed)
@@ -1079,7 +1082,8 @@ class ClaudeExecutor:
         brief_path.write_text(brief, encoding="utf-8")
 
         session = f"autopilot-{item.id}"
-        prompt = f"Read and follow the instructions in {brief_rel}, then write the result JSON as instructed there."
+        prompt = (f"Read and follow the instructions in {brief_rel}, "
+                  "then write the result JSON as instructed there.")
         # NOTE: keep the trailing positional prompt clear of any *variadic* flag
         # (e.g. --mcp-config <configs...>, --add-dir <dirs...>) — a variadic option
         # greedily swallows the prompt as one of its values. The interactive CLI
@@ -1231,7 +1235,8 @@ class ClaudeExecutor:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(handle), encoding="utf-8")
         except OSError as exc:  # noqa: BLE001 — never fail a launch on bookkeeping
-            self._log.warning("could not record session handle", id=item_id, error=describe_exc(exc))
+            self._log.warning("could not record session handle",
+                              id=item_id, error=describe_exc(exc))
 
     def _read_session_handle(self, run_dir: str, item_id: int) -> dict | None:
         try:
@@ -1597,7 +1602,8 @@ class ClaudeExecutor:
             )
         else:
             ambiguity = (
-                "- Work autonomously and DECISIVELY. Do NOT ask the human clarifying questions, and "
+                "- Work autonomously and DECISIVELY. "
+                "Do NOT ask the human clarifying questions, and "
                 "do NOT wait for confirmation before acting — you will not get an answer. When "
                 "something is ambiguous, choose the most reasonable interpretation from the work "
                 "item, its acceptance criteria, the latest human comment, and the existing "
@@ -1776,7 +1782,8 @@ class ClaudeExecutor:
             "# Repositories you may edit (subfolders of this workspace)",
             repo_list,
             "Use the description of each repo to pick ONLY the one(s) this work actually needs — "
-            "it may touch one or several. Leave infra/docs repos alone unless the task requires them. "
+            "it may touch one or several. "
+            "Leave infra/docs repos alone unless the task requires them. "
             "Do NOT edit anything outside these repos.",
             "",
             "# How to proceed",
@@ -1805,9 +1812,11 @@ class ClaudeExecutor:
             '  {"status":"completed|failed|needs_human","summary":"<what you did>",',
             '   "artifacts":[{"repo":"<name>","branch":"<branch>","pr_url":"<url>"}],',
             '   "needs_human":false,"reason":"<why, if failed/needs_human>",',
-            '   "deviations":[{"kind":"spec_unclear|logic_differs|spec_gap|out_of_scope|assumption",',
+            '   "deviations":[{"kind":'
+            '"spec_unclear|logic_differs|spec_gap|out_of_scope|assumption",',
             '                  "summary":"<one line: what differs from the item>",',
-            '                  "detail":"<why you chose this>","where":"<AC id / file / endpoint>",',
+            '                  "detail":"<why you chose this>",'
+            '"where":"<AC id / file / endpoint>",',
             '                  "spec_says":"<QUOTE the item\'s sentence/AC as written, or empty>",',
             '                  "code_does":"<what the code now does instead>",',
             '                  "needs_decision":false}],',
@@ -1830,7 +1839,8 @@ class ClaudeExecutor:
             "because the description was wrong, impossible, or inconsistent with the code "
             "(`logic_differs`)",
             "- you hit a case the item never covers and had to define the behaviour (`spec_gap`)",
-            "- you found a real problem this item does not cover and left it alone (`out_of_scope`)",
+            "- you found a real problem this item does not cover and left it alone "
+            "(`out_of_scope`)",
             "- you proceeded on an assumption a human should confirm (`assumption`)",
             "Write what a BA needs to update the spec: the specific rule/field/case, not "
             "\"clarified requirements\". Leave the list EMPTY when the item described the work "
@@ -2448,10 +2458,8 @@ class ClaudeExecutor:
             if ws.keep:
                 # Cached for the next /ai round on this branch; the branch stays
                 # checked out here. Touch the dir so the TTL sweep sees it as live.
-                try:
+                with contextlib.suppress(OSError):
                     os.utime(ws.path)
-                except OSError:
-                    pass
                 return
             await self._git(["worktree", "remove", "--force", ws.path], ws.repo, check=False)
             shutil.rmtree(ws.path, ignore_errors=True)

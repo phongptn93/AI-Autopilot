@@ -16,6 +16,8 @@ os.environ["AUTOPILOT_CONFIG_FILE"] = str(Path(__file__).parent / "__no_such_con
 # dashboard test would meet the no-password localhost-only gate. Tests of that gate
 # pass dashboard_allow_remote_without_auth=False explicitly.
 os.environ.setdefault("AUTOPILOT_DASHBOARD_ALLOW_REMOTE_WITHOUT_AUTH", "true")
+# create_app() configures logging; keep the suite out of the real logs/ folder.
+os.environ["AUTOPILOT_LOG_DIR"] = ""
 
 from collections.abc import Callable  # noqa: E402 — must follow the env var above
 from dataclasses import dataclass, field  # noqa: E402

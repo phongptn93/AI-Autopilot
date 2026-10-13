@@ -925,7 +925,7 @@ def render_ado_comment(title: str, result: ReviewResult, *, link: str = "") -> s
             "<p><b>Đánh giá tài liệu</b>"
             + (f" ({dq['score']}/100)" if dq.get("score") is not None else "") + ": "
             + escape(dq.get("verdict") or "") + "</p>"
-            + (f"<p><b>🧠 Mức hợp lý nghiệp vụ</b>"
+            + ("<p><b>🧠 Mức hợp lý nghiệp vụ</b>"
                + (f" ({dq['sanity']}/100)" if dq.get("sanity") is not None else "") + ": "
                + escape(dq.get("sanity_verdict") or "")
                + f" — {len(unreasonable(dq))} điểm bất hợp lý.</p>"

@@ -15,6 +15,7 @@ from ai_autopilot.data.entities import (
     AlertState,
     AuditEvent,
     ClaudeSession,
+    DashboardUser,
     DeferredVerification,
     ExecutionRecord,
     ExecutionStatus,
@@ -35,7 +36,6 @@ from ai_autopilot.data.entities import (
     PrSession,
     QualityEvent,
     QualityKind,
-    DashboardUser,
     Review,
     ReviewMessage,
     SchedulerDecision,
@@ -247,10 +247,8 @@ class ExecutionRepository:
         """
         conds = []
         if status:
-            try:
+            with contextlib.suppress(ValueError):
                 conds.append(ExecutionRecord.status == ExecutionStatus(status))
-            except ValueError:
-                pass
         if category:
             conds.append(ExecutionRecord.category == category)
         if trigger_tag:
@@ -3029,7 +3027,8 @@ class UserRepository:
     async def by_email(self, email: str) -> DashboardUser | None:
         async with self._db.session() as session:
             rows = await session.execute(
-                select(DashboardUser).where(func.lower(DashboardUser.email) == email.strip().lower()))
+                select(DashboardUser)
+                .where(func.lower(DashboardUser.email) == email.strip().lower()))
             return rows.scalars().first()
 
     async def all(self) -> list[DashboardUser]:
@@ -3041,7 +3040,8 @@ class UserRepository:
                      subject: str = "", roles: list[str] | None = None, status: str = "active",
                      password_hash: str | None = None, approved_by: str = "") -> int:
         row = DashboardUser(
-            email=email.strip().lower()[:320], name=name[:200], source=source, subject=subject[:200],
+            email=email.strip().lower()[:320], name=name[:200], source=source,
+            subject=subject[:200],
             roles_json=json.dumps(list(roles or [])), status=status, password_hash=password_hash,
             created_at=datetime.now(UTC), approved_by=approved_by[:320])
         async with self._db.session() as session:

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-
-import pytest
 import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from starlette.testclient import TestClient
 
 from ai_autopilot import review_snapshot

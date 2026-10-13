@@ -63,11 +63,18 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "SIM"]
-ignore = ["B008"]  # FastAPI Depends() in defaults
+ignore = [
+    "B008",      # FastAPI Depends() in defaults
+    "ASYNC240",  # Path.exists()/is_dir() on local disk is a stat call, not worth to_thread;
+                 # the genuinely blocking calls (rmtree, copytree) are not what this rule catches
+]
 
 [tool.ruff.lint.per-file-ignores]
-# Sync filesystem checks inside async tests are fine.
-"tests/**" = ["ASYNC240"]
+# Table-driven tests keep one case per line even when it runs long.
+"tests/**" = ["E501"]
+
+# No `ruff format` gate: the codebase uses aligned hanging indents that the formatter
+# would rewrite wholesale (~22k changed lines). `ruff check` is the CI gate.
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -22,10 +22,9 @@ from datetime import UTC, datetime
 
 import httpx
 
-from ai_autopilot import fleet, lessons
+from ai_autopilot import fleet, lessons, settings_form
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import settings_form
 from ai_autopilot.logging_config import describe_exc, get_logger
 
 

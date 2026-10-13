@@ -8,9 +8,8 @@ from pathlib import Path
 
 import uvicorn
 
-from ai_autopilot import security
+from ai_autopilot import security, settings_form
 from ai_autopilot.config import config_file_path, load_settings
-from ai_autopilot.dashboard import settings_form
 
 
 def _ensure_dashboard_password() -> None:

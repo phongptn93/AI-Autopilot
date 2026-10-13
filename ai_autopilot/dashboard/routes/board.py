@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from ai_autopilot import lenses as lenses_mod
+from ai_autopilot import settings_form
 from ai_autopilot.board import (
     COL_READY_DEPLOY,
     COL_READY_REVIEW,
@@ -23,7 +24,6 @@ from ai_autopilot.board import (
 )
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import settings_form
 from ai_autopilot.dashboard.common import (
     _BOARD_ITEMS,
     _FLASH_COOKIE,

@@ -361,6 +361,6 @@ def test_the_state_files_are_never_mistaken_for_a_repo(tmp_path):
 
 
 def test_accept_mode_is_the_machines_own_call():
-    from ai_autopilot.dashboard import settings_form as sf
+    from ai_autopilot import settings_form as sf
 
     assert "fleet_knowledge_accept" in sf.MACHINE_LOCAL

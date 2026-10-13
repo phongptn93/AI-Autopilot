@@ -31,7 +31,7 @@ import yaml
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ai_autopilot.dashboard import settings_form
+from ai_autopilot import settings_form
 from ai_autopilot.logging_config import get_logger
 
 _log = get_logger("fleet")

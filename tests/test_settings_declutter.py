@@ -30,7 +30,7 @@ def test_a_configured_legacy_rollup_stays_editable(tmp_path, monkeypatch):
 
 
 def test_saving_the_page_does_not_touch_a_hidden_empty_rollup(tmp_path, monkeypatch):
-    from ai_autopilot.dashboard import settings_form
+    from ai_autopilot import settings_form
 
     assert settings_form.parse_form({})["parent_rollup_map"] == []
 

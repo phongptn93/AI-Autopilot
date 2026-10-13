@@ -9,10 +9,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from ai_autopilot import fleet as fleet_mod
-from ai_autopilot import sdlc_presets, security, trigger_check
+from ai_autopilot import sdlc_presets, security, settings_form, trigger_check
 from ai_autopilot.config import SdlcRole, config_file_path
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import settings_form
 from ai_autopilot.dashboard.common import (
     _FLASH_COOKIE,
     _TEMPLATES,

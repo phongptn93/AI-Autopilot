@@ -18,9 +18,9 @@ import pytest
 from starlette.testclient import TestClient
 
 from ai_autopilot import fleet
+from ai_autopilot import settings_form as sf
 from ai_autopilot.app import create_app
 from ai_autopilot.config import Settings
-from ai_autopilot.dashboard import settings_form as sf
 
 
 @pytest.fixture
@@ -719,8 +719,8 @@ def test_a_worker_is_not_offered_settings_its_central_serves():
     """On a worker, trigger_states and stage_entry_tag are central-owned: a step
     offering them would save nothing and the next heartbeat would put the central's
     values back. A green "saved" for a change that vanishes is worse than no box."""
+    from ai_autopilot import settings_form
     from ai_autopilot.config import Settings
-    from ai_autopilot.dashboard import settings_form
 
     worker = Settings(fleet_role="worker", fleet_central_url="http://c", fleet_token="t")
     assert not settings_form.writable_here("trigger_states", worker)

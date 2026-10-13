@@ -178,8 +178,8 @@ def check_run_now_tags(config: Settings) -> list[Finding]:
     Also names two roles sharing a run-now tag — the tag maps to ONE role, so the loser
     is simply never reachable by tag.
     """
-    from ai_autopilot.dashboard.settings_form import run_now_tag_conflict
     from ai_autopilot.execution import sdlc_plan
+    from ai_autopilot.settings_form import run_now_tag_conflict
 
     out: list[Finding] = []
     shared = (config.stage_entry_tag or "").strip()
@@ -562,7 +562,7 @@ def check_fleet(config: Settings) -> list[Finding]:
 
     Offline: every value is config.
     """
-    from ai_autopilot.dashboard.settings_form import EXPORT_EXCLUDE
+    from ai_autopilot.settings_form import EXPORT_EXCLUDE
 
     role = (config.fleet_role or "").strip().lower()
     if not role:

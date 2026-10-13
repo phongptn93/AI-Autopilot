@@ -17,9 +17,9 @@ import re
 import pytest
 from starlette.testclient import TestClient
 
+from ai_autopilot import settings_form
 from ai_autopilot.app import create_app
 from ai_autopilot.config import Settings
-from ai_autopilot.dashboard import settings_form
 
 
 def _field(key: str) -> settings_form.Field:

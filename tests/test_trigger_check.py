@@ -9,10 +9,9 @@ from __future__ import annotations
 
 from starlette.testclient import TestClient
 
-from ai_autopilot import trigger_check
+from ai_autopilot import settings_form, trigger_check
 from ai_autopilot.app import create_app
 from ai_autopilot.config import SdlcRole, Settings
-from ai_autopilot.dashboard import settings_form
 from ai_autopilot.models import WorkItemInfo
 
 _ROLES = {

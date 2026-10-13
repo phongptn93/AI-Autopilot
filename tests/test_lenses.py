@@ -799,7 +799,7 @@ def test_a_lane_can_claim_several_states_at_once():
 def test_every_map_field_shows_its_own_example():
     """One placeholder for all of them told the tag map and the type map to type a
     state — the fields hardest to tell apart were the ones giving wrong examples."""
-    from ai_autopilot.dashboard.settings_form import FIELDS
+    from ai_autopilot.settings_form import FIELDS
 
     maps = [(f.key, f.placeholder) for f in FIELDS if f.kind == "map"]
     assert maps, "no map fields — this test is watching the wrong thing"
@@ -813,7 +813,7 @@ def test_every_map_field_shows_its_own_example():
 def test_profile_resolution_order_is_stated_where_it_is_chosen():
     """Four knobs pick the profile (item tag, machine, type, default). The field that
     starts that chain has to say the order, or the other three read as alternatives."""
-    from ai_autopilot.dashboard.settings_form import FIELDS
+    from ai_autopilot.settings_form import FIELDS
 
     pinned = next(f for f in FIELDS if f.key == "sdlc_profile")
     assert "sdlc:" in pinned.help and "map theo loại" in pinned.help and "mặc định" in pinned.help
@@ -827,7 +827,7 @@ def test_the_hand_offs_are_not_editable_here_any_more():
     two facts that only mean something side by side, which is why they moved to the
     Roles page. Left here they were also filed under a loop that does not gate them:
     the hand-off applies with sdlc_loop_enabled off."""
-    from ai_autopilot.dashboard.settings_form import FIELDS
+    from ai_autopilot.settings_form import FIELDS
 
     keys = {f.key for f in FIELDS}
     assert "sdlc_profile_states" not in keys

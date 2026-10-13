@@ -240,7 +240,7 @@ async def test_a_blocked_install_is_refused_before_anything_is_touched(monkeypat
 def test_the_settings_belong_to_the_machine():
     """How this install was made and how it comes back are properties of THIS disk — a
     central serving one answer would be serving the wrong one to most of a fleet."""
-    from ai_autopilot.dashboard import settings_form as sf
+    from ai_autopilot import settings_form as sf
 
     for key in ("update_check_enabled", "update_repo", "update_check_interval_hours",
                 "update_drain_timeout_minutes", "update_restart_mode"):

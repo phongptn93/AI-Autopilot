@@ -12,12 +12,11 @@ from urllib.parse import quote
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
-from ai_autopilot import activity, markdown_lite
+from ai_autopilot import activity, markdown_lite, settings_form
 from ai_autopilot import reports as reports_mod
 from ai_autopilot import workspaces as workspaces_mod
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import settings_form
 from ai_autopilot.dashboard.common import (
     _BACKGROUND_RUNS,
     _FLASH_COOKIE,

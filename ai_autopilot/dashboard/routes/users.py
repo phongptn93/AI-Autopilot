@@ -17,10 +17,9 @@ import re
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ai_autopilot import oidc, rbac, security, user_auth
+from ai_autopilot import oidc, rbac, security, settings_form, user_auth
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import settings_form
 from ai_autopilot.dashboard.common import _FLASH_COOKIE, _TEMPLATES, _flash, _take_flash
 from ai_autopilot.dashboard.routes._shared import _ctx
 from ai_autopilot.dashboard.routes.auth import redirect_uri

@@ -7,11 +7,11 @@ import asyncio
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
-from ai_autopilot import activity, cron_text
+from ai_autopilot import activity, cron_text, settings_form
 from ai_autopilot import workspaces as workspaces_mod
 from ai_autopilot.config import ScheduledLoop, config_file_path
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import loop_presets, settings_form
+from ai_autopilot.dashboard import loop_presets
 from ai_autopilot.dashboard.common import (
     _BACKGROUND_RUNS,
     _FLASH_COOKIE,

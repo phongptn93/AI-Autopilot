@@ -9,11 +9,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from ai_autopilot import fleet as fleet_mod
-from ai_autopilot import sdlc_presets, security
+from ai_autopilot import sdlc_presets, security, settings_form
 from ai_autopilot import workspaces as workspaces_mod
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import settings_form
 from ai_autopilot.dashboard.common import (
     _FLASH_COOKIE,
     _TEMPLATES,

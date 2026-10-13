@@ -6,9 +6,9 @@ import re
 
 from starlette.testclient import TestClient
 
+from ai_autopilot import settings_form
 from ai_autopilot.app import create_app
 from ai_autopilot.config import Settings
-from ai_autopilot.dashboard import settings_form
 
 
 def _page(tmp_path) -> str:

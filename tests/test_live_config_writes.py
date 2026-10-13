@@ -16,10 +16,9 @@ from types import SimpleNamespace
 
 from starlette.testclient import TestClient
 
-from ai_autopilot import fleet
+from ai_autopilot import fleet, settings_form
 from ai_autopilot.app import create_app
 from ai_autopilot.config import SdlcRole, Settings, WorkspaceConfig
-from ai_autopilot.dashboard import settings_form
 
 TOKEN = "s3cret-fleet"
 

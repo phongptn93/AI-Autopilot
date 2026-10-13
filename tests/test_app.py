@@ -15,10 +15,9 @@ import pytest
 import yaml
 from starlette.testclient import TestClient
 
-from ai_autopilot import dashboard
+from ai_autopilot import dashboard, settings_form
 from ai_autopilot.app import create_app
 from ai_autopilot.config import Settings
-from ai_autopilot.dashboard import settings_form
 
 
 @pytest.fixture

@@ -8,9 +8,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from ai_autopilot import flows as flows_mod
+from ai_autopilot import settings_form
 from ai_autopilot.config import config_file_path
 from ai_autopilot.container import Container
-from ai_autopilot.dashboard import settings_form
 from ai_autopilot.dashboard.common import (
     _FLASH_COOKIE,
     _FLOW_ERROR_COOKIE,

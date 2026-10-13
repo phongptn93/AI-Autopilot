@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from ai_autopilot import settings_form
 from ai_autopilot.config import Settings
-from ai_autopilot.dashboard import settings_form
 
 
 def test_parse_form_coerces_types():
@@ -390,7 +390,7 @@ def test_save_to_yaml_is_atomic_and_keeps_a_backup(tmp_path, monkeypatch):
     holds the PAT). Now the old file survives a failed write and a .bak is kept."""
     import pytest
 
-    from ai_autopilot.dashboard import settings_form as sf
+    from ai_autopilot import settings_form as sf
 
     path = tmp_path / "config.yaml"
     sf.save_to_yaml(path, {"poll_interval_seconds": 30})

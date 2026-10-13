@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -1086,6 +1086,25 @@ class Settings(BaseSettings):
         if isinstance(raw, str):
             raw = [part for line in raw.splitlines() for part in line.split(",")]
         return [str(s).strip() for s in raw if str(s).strip()]
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _numbers_in_range(cls, value: Any, info: ValidationInfo) -> Any:
+        """No numeric knob takes a negative value, and the run gate needs at least one slot.
+
+        Every int/float setting here is a duration, a count, a port or a threshold, with
+        0 reserved for "off"/"default". A negative used to be accepted and then misread
+        deep in a service; ``max_concurrent: 0`` built a zero-slot semaphore that blocked
+        every run forever, silently. Runs on assignment too (``validate_assignment``), so
+        the Settings page and a fleet sync are refused the same way a bad YAML is.
+        """
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return value
+        if value < 0:
+            raise ValueError(f"{info.field_name} must not be negative (got {value})")
+        if info.field_name == "max_concurrent" and value < 1:
+            raise ValueError("max_concurrent must be at least 1 — 0 would block every run")
+        return value
 
     # ADO states that count as Done on the board (e.g. a human moved the item to
     # "Ready to Testing" / "Closed"). Items in any of these states show in the Done

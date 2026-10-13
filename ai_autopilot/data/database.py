@@ -93,6 +93,7 @@ class Database:
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             await self._apply_column_migrations(conn)
+            await conn.run_sync(self._create_missing_indexes)
         self._log.info("database ready")
 
     async def _apply_column_migrations(self, conn) -> None:
@@ -114,6 +115,17 @@ class Database:
                 # autopilot:ignore[py-sql-format] identifiers validated just above
                 await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
                 self._log.info("db migration: added column", table=table, column=column)
+
+    def _create_missing_indexes(self, sync_conn) -> None:
+        """Create every declared index that an existing table is missing.
+
+        ``create_all`` only builds indexes together with a NEW table, so an ``Index``
+        added to an entity later never reached a database created before it. Each is
+        checked first, so this is a no-op once they exist.
+        """
+        for table in Base.metadata.sorted_tables:
+            for index in table.indexes:
+                index.create(sync_conn, checkfirst=True)
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:

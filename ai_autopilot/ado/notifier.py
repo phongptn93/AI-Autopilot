@@ -17,15 +17,9 @@ from ai_autopilot.notifications.base import (
     NotificationChannel,
     NotificationMessage,
     NotificationType,
+    mmss,
 )
 from ai_autopilot.scheduling import QuietHours, render_held_summary
-
-
-def _mmss(seconds: float) -> str:
-    total = max(0, int(seconds))
-    h, rem = divmod(total, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
 class AdoNotifier:
@@ -105,7 +99,7 @@ class AdoNotifier:
                 "<div><b>✅ Hoàn tất</b><br/><ul>"
                 f"{role_html}"
                 f"<li><b>Skill:</b> <code>{result.skill_used}</code></li>"
-                f"<li><b>Duration:</b> {_mmss(result.duration_seconds)}</li>"
+                f"<li><b>Duration:</b> {mmss(result.duration_seconds)}</li>"
                 f"<li><b>Branch:</b> <code>{result.branch_name}</code></li>"
                 f"{files_html}{pr_html}</ul></div>"
             )
@@ -113,7 +107,7 @@ class AdoNotifier:
             comment = (
                 "<div><b>❌ Chưa hoàn tất</b><br/><ul>"
                 f"<li><b>Skill:</b> <code>{result.skill_used}</code></li>"
-                f"<li><b>Duration:</b> {_mmss(result.duration_seconds)}</li>"
+                f"<li><b>Duration:</b> {mmss(result.duration_seconds)}</li>"
                 f"<li><b>Error:</b> {result.error}</li>"
                 "</ul></div>"
             )

@@ -33,6 +33,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -537,7 +538,12 @@ def _rm_tree(path: Path) -> None:
         with contextlib.suppress(OSError):
             os.chmod(p, stat.S_IWRITE)
             func(p)
-    shutil.rmtree(path, onexc=_force)
+    # ``onexc`` is 3.12+. On 3.11 (the Docker image) passing it raised TypeError, which
+    # the caller's suppress() swallowed — so every replay left its worktree on disk.
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_force)
+    else:
+        shutil.rmtree(path, onerror=lambda func, p, exc_info: _force(func, p, exc_info[1]))
 
 
 def _remove_worktree(repo_dir: Path, wt: Path, tmp: Path) -> None:
@@ -625,7 +631,7 @@ async def run_replay_case(
             test_output=output,
         )
     finally:
-        _remove_worktree(repo_dir, wt, tmp)
+        await asyncio.to_thread(_remove_worktree, repo_dir, wt, tmp)
 
 
 async def run_replay_suite(cases: list[ReplayCase], **kwargs: Any) -> list[ReplayScore]:

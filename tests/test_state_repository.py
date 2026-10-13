@@ -134,3 +134,24 @@ async def test_all(repo):
     await repo.set(2, PipelineState.DONE)
     states = {s.work_item_id: s.state for s in await repo.all()}
     assert states == {1: PipelineState.QUEUED, 2: PipelineState.DONE}
+
+
+async def test_concurrent_first_writes_for_one_item_do_not_collide(repo):
+    """Read-then-insert let the poll loop and a webhook run both see "no row" and the
+    second INSERT fail with an IntegrityError."""
+    import asyncio
+
+    await asyncio.gather(*(
+        repo.set(42, PipelineState.IN_PROGRESS, title=f"t{i}", detail=f"d{i}") for i in range(8)))
+
+    row = await repo.get(42)
+    assert row is not None and row.state == PipelineState.IN_PROGRESS
+
+
+async def test_set_only_overwrites_the_fields_it_is_given(repo):
+    await repo.set(7, PipelineState.IN_PROGRESS, title="Title", detail="first", pr_url="u")
+    await repo.set(7, PipelineState.DONE)  # no title/detail/pr_url → keep them
+
+    row = await repo.get(7)
+    assert (row.state, row.title, row.detail, row.pr_url) == (
+        PipelineState.DONE, "Title", "first", "u")

@@ -230,5 +230,7 @@ def test_build_prompt_mentions_idor_and_constraints():
     t = _target(auth_env_var="TOK_A", auth_b_env_var="TOK_B", allow_mutations=False,
                 allowed_paths=["/api/"])
     p = dast.build_prompt(t)
-    assert "BOLA/IDOR" in p and "TOK_A" in p and "TOK_B" in p
+    assert "BOLA/IDOR" in p and 'identity "b"' in p
+    # Tokens are attached by the gate; the model is not told where they live.
+    assert "TOK_A" not in p and "TOK_B" not in p
     assert "GET/HEAD/OPTIONS" in p and "/api/" in p

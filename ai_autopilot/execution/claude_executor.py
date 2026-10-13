@@ -892,8 +892,8 @@ class ClaudeExecutor:
             # left sessions thrashing on autocompact.
             src_claude = Path(workspace) / ".claude"
             if src_claude.is_dir():
-                shutil.copytree(  # noqa: ASYNC240 - small local copy
-                    src_claude, Path(scratch) / ".claude",
+                await asyncio.to_thread(
+                    shutil.copytree, src_claude, Path(scratch) / ".claude",
                     ignore=shutil.ignore_patterns(".git", "rules"),
                 )
             worktreed: list[str] = []
@@ -1898,6 +1898,7 @@ class ClaudeExecutor:
     async def _run_read_only(
         self, item_id: int, repo: str, branch: str, prompt: str, pr_id: int = 0,
         feed_key: str = "", fresh: bool = False,
+        mcp_servers: dict | None = None, extra_disallowed: tuple[str, ...] = (),
     ) -> ExecutionResult:
         """Run an advisory command (e.g. /review) with no checkout at all.
 
@@ -1953,8 +1954,9 @@ class ClaudeExecutor:
             resume = None if fresh else await self._resume_for(repo, branch)
             claude_run = await self._run_claude(
                 prompt, claude_cwd, repo=repo, resume=resume,
-                disallowed_tools=list(_READ_ONLY_DENY),
+                disallowed_tools=[*_READ_ONLY_DENY, *extra_disallowed],
                 on_event=lambda line: activity.append(workspace, feed, line),
+                mcp_servers=mcp_servers,
             )
             if not fresh:
                 await self._save_session(repo, branch, claude_run)
@@ -2005,6 +2007,7 @@ class ClaudeExecutor:
 
     async def run_audit(
         self, name: str, prompt: str, repo: str, base_branch: str, project: str = "",
+        *, mcp_servers: dict | None = None, extra_disallowed: tuple[str, ...] = (),
     ) -> ExecutionResult:
         """Run a scheduled REPORT loop: inspect the repo, change nothing, answer in text.
 
@@ -2018,6 +2021,10 @@ class ClaudeExecutor:
         unattended, on a schedule, against a working repo. It also skips the worktree
         add/remove that an audit has no use for.
 
+        ``mcp_servers`` REPLACES the workspace's MCP servers (which are then also denied
+        by name), and ``extra_disallowed`` widens the deny list — for a caller that must
+        own the whole tool surface, like DAST routing every request through its gate.
+
         ``origin/<base_branch>`` is fetched first so the agent can diff against the real
         base; without it a nightly review would be reviewing whatever the checkout was
         left on.
@@ -2026,6 +2033,7 @@ class ClaudeExecutor:
             return await self._run_read_only(
                 0, repo, base_branch, prompt,
                 feed_key=activity.loop_key(name), fresh=True,
+                mcp_servers=mcp_servers, extra_disallowed=extra_disallowed,
             )
 
     # ── shared core ─────────────────────────────────────────────────────────
@@ -2427,7 +2435,7 @@ class ClaudeExecutor:
             return
         async with self._repo_lock(repo):
             await self._git(["worktree", "remove", "--force", path], repo, check=False)
-            shutil.rmtree(path, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, path, ignore_errors=True)
             await self._git(["worktree", "prune"], repo, check=False)
 
     async def _sweep_stale_revise_worktrees(self, base_dir: str, repo: str) -> None:
@@ -2447,7 +2455,7 @@ class ClaudeExecutor:
             self._log.info("sweeping stale revise worktree", path=str(p))
             async with self._repo_lock(repo):
                 await self._git(["worktree", "remove", "--force", str(p)], repo, check=False)
-            shutil.rmtree(p, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, p, ignore_errors=True)
         if stale:
             async with self._repo_lock(repo):
                 await self._git(["worktree", "prune"], repo, check=False)
@@ -2462,7 +2470,7 @@ class ClaudeExecutor:
                     os.utime(ws.path)
                 return
             await self._git(["worktree", "remove", "--force", ws.path], ws.repo, check=False)
-            shutil.rmtree(ws.path, ignore_errors=True)
+            await asyncio.to_thread(shutil.rmtree, ws.path, ignore_errors=True)
             # The pushed branch lives on origin for the PR; drop the local copy.
             await self._git(["branch", "-D", ws.branch], ws.repo, check=False)
             await self._git(["worktree", "prune"], ws.repo, check=False)
@@ -2473,15 +2481,25 @@ class ClaudeExecutor:
     async def _run_claude(
         self, prompt: str, work_dir: str, repo: str | None = None, on_event=None,
         resume: str | None = None, disallowed_tools: list[str] | None = None,
+        mcp_servers: dict | None = None,
     ) -> ClaudeRun:
         setting_sources: list[str] | None = None
-        mcp_servers: dict | None = None
         add_dirs: list[str] | None = None
+        override = mcp_servers is not None
         if self._config.workspace_directory:
             # Opt into loading the workspace's .claude skills/rules/settings, its
             # MCP servers, and grant access to the target repo subfolder.
             setting_sources = ["user", "project", "local"]
-            mcp_servers = _load_mcp_servers(self._config.workspace_directory)
+            workspace_mcp = _load_mcp_servers(self._config.workspace_directory) or {}
+            if override:
+                # The caller owns the tool surface. The CLI still loads servers from
+                # the workspace and user settings, so deny every one of those by name.
+                others = (set(workspace_mcp) | _user_mcp_names(self._config.workspace_directory)
+                          ) - set(mcp_servers or {})
+                disallowed_tools = [*(disallowed_tools or []),
+                                    *(f"mcp__{name}" for name in sorted(others))]
+            else:
+                mcp_servers = workspace_mcp or None
             if repo:
                 add_dirs = [repo]
         return await run_claude(
@@ -2638,22 +2656,28 @@ async def _force_rmtree(path: Path, attempts: int = 4) -> bool:
     for attempt in range(attempts):
         if not path.exists():
             return True
+        # Off the event loop: a worktree with node_modules or git packs takes seconds
+        # to delete, and the dashboard, Teams bot and poller share this loop.
         try:
-            shutil.rmtree(path)  # noqa: ASYNC240 - local fs delete, retried below
+            await asyncio.to_thread(shutil.rmtree, path)
             return True
         except OSError:
             # Clear read-only bits (the usual cause) before the next attempt.
-            for root, dirs, files in os.walk(path):
-                for name in (*dirs, *files):
-                    with contextlib.suppress(OSError):
-                        os.chmod(os.path.join(root, name), stat.S_IWRITE)  # noqa: ASYNC240
-            with contextlib.suppress(OSError):
-                os.chmod(path, stat.S_IWRITE)  # noqa: ASYNC240
+            await asyncio.to_thread(_clear_readonly, path)
             await asyncio.sleep(0.4 * (attempt + 1))  # let stale handles close
     if path.exists():
         _log.warning("could not fully delete scratch dir — leaving it behind", path=str(path))
         return False
     return True
+
+
+def _clear_readonly(path: Path) -> None:
+    for root, dirs, files in os.walk(path):
+        for name in (*dirs, *files):
+            with contextlib.suppress(OSError):
+                os.chmod(os.path.join(root, name), stat.S_IWRITE)
+    with contextlib.suppress(OSError):
+        os.chmod(path, stat.S_IWRITE)
 
 
 def _repo_name(repo: str, workspace: str) -> str:
@@ -2662,6 +2686,19 @@ def _repo_name(repo: str, workspace: str) -> str:
         return Path(repo).relative_to(Path(workspace)).as_posix()
     except ValueError:
         return Path(repo).name
+
+
+def _user_mcp_names(workspace: str) -> set[str]:
+    """MCP servers configured in ``~/.claude.json`` — user-wide, or for this workspace."""
+    try:
+        data = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    names = set(data.get("mcpServers") or {})
+    for path, entry in (data.get("projects") or {}).items():
+        if isinstance(entry, dict) and Path(path) == Path(workspace):
+            names |= set(entry.get("mcpServers") or {})
+    return names
 
 
 def _load_mcp_servers(workspace: str) -> dict | None:

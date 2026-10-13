@@ -49,6 +49,7 @@ from ai_autopilot.pr_conflicts import (
     RESOLVED,
     ConflictResolution,
     ResolveContext,
+    esc,
     files_html,
     is_conflicted,
     merge_status,
@@ -180,9 +181,9 @@ class PrConflictService:
                 return winner == me
             await c.ado.add_pull_request_comment(
                 row.repo_id, row.pr_id,
-                f"<div>🔒 Máy <b>{_esc(me)}</b> nhận xử lý conflict này — các máy autopilot "
+                f"<div>🔒 Máy <b>{esc(me)}</b> nhận xử lý conflict này — các máy autopilot "
                 f"khác sẽ không mở phiên trùng.<br/>"
-                f"<sub>{_CLAIM_TAG}:{key} · {_esc(me)}</sub></div>",
+                f"<sub>{_CLAIM_TAG}:{key} · {esc(me)}</sub></div>",
             )
             settle = max(0, int(self._config.pr_conflict_claim_settle_seconds or 0))
             if settle:
@@ -659,7 +660,7 @@ class PrConflictService:
         await c.ado.add_pull_request_comment(
             row.repo_id, row.pr_id,
             "<div><b>🙋 Chưa tự giải được conflict — cần người xử lý.</b><br/>"
-            f"Lý do: {_esc(error or 'không rõ')}<br/>"
+            f"Lý do: {esc(error or 'không rõ')}<br/>"
             f"{self._checks_html(checks)}{self._failures_html(failures)}"
             "Branch trên origin <b>không bị thay đổi</b> (merge đã được huỷ). Giải tay: "
             f"<code>git merge origin/{row.target_branch}</code> trên "
@@ -730,7 +731,7 @@ class PrConflictService:
             return "⚠️" if v.startswith("target ") else "❌"
 
         rows = "".join(
-            f"<li>{icon(str(v))} {label.get(k, k)}: {_esc(str(v))}</li>"
+            f"<li>{icon(str(v))} {label.get(k, k)}: {esc(str(v))}</li>"
             for k, v in checks.items()
         )
         return f"Kiểm tra:<ul>{rows}</ul>"
@@ -740,7 +741,7 @@ class PrConflictService:
         """What actually failed, so the reader does not re-run the suite to find out."""
         if not failures:
             return ""
-        shown = "\n".join(_esc(f) for f in failures[:limit])
+        shown = "\n".join(esc(f) for f in failures[:limit])
         more = f"\n… +{len(failures) - limit} nữa" if len(failures) > limit else ""
         return f"Lỗi:<pre>{shown}{more}</pre>"
 
@@ -789,7 +790,3 @@ def _age_hours(published: str) -> float:
     return (datetime.now(UTC) - at).total_seconds() / 3600
 
 
-def _esc(s: str) -> str:
-    """Errors carry git output and the agent's own words — always plain text, always
-    escaped before they reach a PR comment or the dashboard."""
-    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

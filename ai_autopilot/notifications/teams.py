@@ -12,6 +12,7 @@ from ai_autopilot.notifications.base import (
     NotificationChannel,
     NotificationMessage,
     NotificationType,
+    mmss,
 )
 
 _COLORS = {
@@ -168,7 +169,7 @@ class TeamsNotifier(NotificationChannel):
             # branch name was the only clue either way.
             if r.profile:
                 facts.append({"title": "SDLC role", "value": r.profile})
-            facts.append({"title": "Duration", "value": _mmss(r.duration_seconds)})
+            facts.append({"title": "Duration", "value": mmss(r.duration_seconds)})
             if r.branch_name:
                 facts.append({"title": "Branch", "value": r.branch_name})
             if r.pr_url:
@@ -221,8 +222,3 @@ class TeamsNotifier(NotificationChannel):
         }
 
 
-def _mmss(seconds: float) -> str:
-    total = max(0, int(seconds))
-    h, rem = divmod(total, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"

@@ -192,7 +192,7 @@ class NotificationMessage:
                     f" | For: {self.assignee}{self.state_part}{self.link_line}")
         if self.type is NotificationType.COMPLETED and self.result and self.result.success:
             r = self.result
-            duration = _mmss(r.duration_seconds)
+            duration = mmss(r.duration_seconds)
             extra = ""
             if r.pr_url:
                 extra += f"\nPR: {r.pr_url}"
@@ -225,7 +225,8 @@ class NotificationChannel(ABC):
         ...
 
 
-def _mmss(seconds: float) -> str:
+def mmss(seconds: float) -> str:
+    """A run duration as ``m:ss`` or ``h:mm:ss``."""
     total = max(0, int(seconds))
     h, rem = divmod(total, 3600)
     m, s = divmod(rem, 60)

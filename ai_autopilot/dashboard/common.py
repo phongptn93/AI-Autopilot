@@ -639,13 +639,6 @@ def _status_class(status: str) -> str:
     return _STATUS_CLASS.get(status, "badge-retrying")
 
 
-def _mmss(seconds: float) -> str:
-    total = max(0, int(seconds))
-    h, rem = divmod(total, 3600)
-    m, s = divmod(rem, 60)
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-
-
 def _fmt_duration(seconds: float) -> str:
     """How LONG something took. Stays precise: a run's duration is a measurement."""
     if seconds < 60:
@@ -1095,8 +1088,6 @@ def _filter_reviews(prs: list[dict], qp, me: list[str]) -> list[dict]:
     return out
 
 
-
-
 def _json_list(raw: str | None) -> list:
     """A JSON column back as a list — never an exception into a page render.
 
@@ -1111,12 +1102,3 @@ def _json_list(raw: str | None) -> list:
     except (ValueError, TypeError):
         return []
     return value if isinstance(value, list) else []
-
-
-def files_changed_count(raw: str | None) -> int:
-    if not raw:
-        return 0
-    try:
-        return len(json.loads(raw))
-    except (ValueError, TypeError):
-        return 0

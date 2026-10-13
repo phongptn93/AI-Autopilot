@@ -86,3 +86,44 @@ async def test_a_measured_duration_is_left_alone(repo):
     await repo.complete_execution(rid, result)
     assert result.duration_seconds == 12.5
     assert (await repo.get_recent(1))[0].duration_seconds == pytest.approx(12.5)
+
+
+async def test_date_filters_are_inclusive_days_and_ignore_garbage(repo):
+    from datetime import datetime
+
+    from sqlalchemy import update
+
+    from ai_autopilot.data.entities import ExecutionRecord
+
+    for item_id, when in ((1, "2026-10-01 23:59:00"), (2, "2026-10-02 00:00:00"),
+                          (3, "2026-10-03 12:00:00")):
+        await _record(repo, item_id, None, success=True)
+        async with repo._db.session() as s:
+            await s.execute(update(ExecutionRecord)
+                            .where(ExecutionRecord.work_item_id == item_id)
+                            .values(started_at=datetime.fromisoformat(when)))
+            await s.commit()
+
+    rows, total = await repo.search(dfrom="2026-10-02", dto="2026-10-02")
+    assert [r.work_item_id for r in rows] == [2] and total == 1
+    rows, _ = await repo.search(dto="2026-10-01")
+    assert [r.work_item_id for r in rows] == [1]
+    _, total = await repo.search(dfrom="not-a-date")
+    assert total == 3
+
+
+async def test_an_index_added_later_reaches_an_existing_database(tmp_path):
+    """create_all only builds indexes with a NEW table."""
+    from sqlalchemy import text
+
+    from ai_autopilot.data import Database
+
+    db = Database(f"sqlite+aiosqlite:///{tmp_path / 'old.db'}")
+    await db.create_all()
+    async with db._engine.begin() as conn:  # simulate a DB from before the index
+        await conn.execute(text("DROP INDEX ix_executions_project_started_at"))
+    await db.create_all()
+    async with db._engine.begin() as conn:
+        names = {r[1] for r in (await conn.execute(text("PRAGMA index_list(executions)")))}
+    await db.dispose()
+    assert "ix_executions_project_started_at" in names

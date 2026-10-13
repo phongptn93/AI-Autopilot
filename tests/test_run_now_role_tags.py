@@ -37,7 +37,7 @@ def _svc(cfg: Settings, ado) -> tuple[AdoPollerService, list[int]]:
     svc = AdoPollerService.__new__(AdoPollerService)
     svc._config = cfg
     svc._c = SimpleNamespace(ado=ado, state_repo=_NullState())
-    svc._live, svc._processed = {}, {}
+    svc._live, svc._processed, svc._bg = {}, {}, set()
     quiet = lambda *a, **k: None  # noqa: E731
     svc._log = SimpleNamespace(info=quiet, warning=quiet, debug=quiet, error=quiet)
     started: list[int] = []

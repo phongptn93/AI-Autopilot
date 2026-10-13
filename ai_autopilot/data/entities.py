@@ -633,6 +633,8 @@ class ExecutionRecord(Base):
     __table_args__ = (
         Index("ix_executions_work_item_id", "work_item_id"),
         Index("ix_executions_started_at", "started_at"),
+        # History / Overview / Analytics filter by workspace project, newest first.
+        Index("ix_executions_project_started_at", "project", "started_at"),
         Index("ix_executions_status", "status"),
     )
 

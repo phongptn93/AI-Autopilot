@@ -193,10 +193,10 @@ def files_html(files: list[str], limit: int = 20) -> str:
     """The conflicted files as an HTML list for a PR comment."""
     if not files:
         return "<i>(ADO did not list the files)</i>"
-    items = "".join(f"<li><code>{_esc(f)}</code></li>" for f in files[:limit])
+    items = "".join(f"<li><code>{esc(f)}</code></li>" for f in files[:limit])
     more = f"<li>… và {len(files) - limit} file khác</li>" if len(files) > limit else ""
     return f"<ul>{items}{more}</ul>"
 
 
-def _esc(s: str) -> str:
+def esc(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

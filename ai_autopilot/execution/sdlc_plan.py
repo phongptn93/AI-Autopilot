@@ -104,12 +104,6 @@ def role_doors(role: object) -> list[str]:
     return out
 
 
-def first_door(role: object) -> str:
-    """The role's primary door — what a one-line summary should name."""
-    doors = role_doors(role)
-    return doors[0] if doors else ""
-
-
 def effective_roles(cfg: Settings) -> dict[str, SdlcRole]:
     """Every role this machine knows: what it runs, and its way in and out.
 
@@ -206,13 +200,6 @@ def profile_stages(name: str, cfg: Settings) -> list[SdlcStage]:
     return stages
 
 
-def entry_stage(profile_name: str, cfg: Settings) -> SdlcStage | None:
-    """The first stage a role runs. Kept for callers that want the stage object; the
-    role's door no longer lives on it."""
-    stages = profile_stages(profile_name, cfg)
-    return stages[0] if stages else None
-
-
 def profile_for_state(state: str, cfg: Settings) -> str:
     """The role an item in this ADO state should run, or "" if none claims it.
 
@@ -240,26 +227,6 @@ def profile_for_state(state: str, cfg: Settings) -> str:
             state=state, roles=matches,
         )
     return ""
-
-
-def auto_states(cfg: Settings) -> list[str]:
-    """Door states marked ``auto`` — the hand-offs that self-start."""
-    out: list[str] = []
-    for role in effective_roles(cfg).values():
-        for door in role_doors(role) if role.auto else ():
-            if door not in out:
-                out.append(door)
-    return out
-
-
-def waiting_states(cfg: Settings) -> list[str]:
-    """Door states explicitly NOT auto — they wait for a person to press Run."""
-    out: list[str] = []
-    for role in effective_roles(cfg).values():
-        for door in () if role.auto else role_doors(role):
-            if door not in out:
-                out.append(door)
-    return out
 
 
 def entry_tag_for(profile_name: str, cfg: Settings) -> str:

@@ -67,6 +67,7 @@ class UpdaterService:
         self._config = c.config
         self._log = get_logger("services.updater")
         self._task: asyncio.Task | None = None
+        self._bg: set[asyncio.Task] = set()
         #: Newest release seen, or None. Read by the dashboard; never blocks a page.
         self.latest: updates.Release | None = None
         self.checked_at: float = 0.0
@@ -345,7 +346,9 @@ class UpdaterService:
         # A failed update is a machine sitting on old code believing it asked not to be —
         # worth an operator's attention. A merely AVAILABLE update is not: that would be
         # a notification every six hours forever.
-        asyncio.create_task(self._announce_failure(detail))
+        task = asyncio.create_task(self._announce_failure(detail))
+        self._bg.add(task)  # referenced until done, or it may be GC'd mid-send
+        task.add_done_callback(self._bg.discard)
 
     async def _announce_failure(self, detail: str) -> None:
         await self._audit("update.failed", detail)

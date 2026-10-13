@@ -175,6 +175,10 @@ class AdoPollerService:
         self._gate = asyncio.Semaphore(c.config.max_concurrent)
         self._task: asyncio.Task | None = None
         self._comment_task: asyncio.Task | None = None
+        # Item runs started outside the poll loop (webhook, restart, plan approval,
+        # human reply). Held here so they are not garbage-collected mid-run and so
+        # stop() can cancel them — otherwise shutdown orphans them.
+        self._bg: set[asyncio.Task] = set()
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="ado-poller")
@@ -206,11 +210,26 @@ class AdoPollerService:
         )
 
     async def stop(self) -> None:
-        for task in (self._task, self._comment_task):
-            if task is not None:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+        tasks = [t for t in (self._task, self._comment_task, *self._bg) if t is not None]
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    def _spawn(self, item: WorkItemInfo) -> asyncio.Task:
+        """Run ``_process(item)`` in the background, keeping a reference to it."""
+        task = asyncio.create_task(self._process(item), name=f"process-{item.id}")
+        self._bg.add(task)
+
+        def _done(t: asyncio.Task) -> None:
+            self._bg.discard(t)
+            if not t.cancelled() and (exc := t.exception()) is not None:
+                self._log.error("background item run crashed", id=item.id,
+                                error=describe_exc(exc))
+
+        task.add_done_callback(_done)
+        return task
 
     async def _comment_run(self) -> None:
         """Dedicated loop for ``/command`` comments — its own fast cadence, decoupled from
@@ -359,7 +378,7 @@ class AdoPollerService:
             self._log.info("processing webhook items", count=len(webhook_ids))
             for wi in await c.ado.get_work_items_by_ids(webhook_ids):
                 if wi.id not in self._processed and not c.retry_policy.is_exhausted(wi.id):
-                    asyncio.create_task(self._process(wi))
+                    self._spawn(wi)
 
         # A hold a person released on the board (the hold tag removed in ADO) must
         # release here too — otherwise the item sits in "Needs human" forever.
@@ -830,7 +849,7 @@ class AdoPollerService:
                 "from scratch using your latest comments.</div>",
             )
             self._log.info("restart requested", id=item.id, state=item.state)
-            asyncio.create_task(self._process(item))
+            self._spawn(item)
 
     def has_live_session(self, item_id: int) -> bool:
         """Is THIS process actually running an interactive session for the item?
@@ -917,7 +936,7 @@ class AdoPollerService:
                 profile=role or profile_for_state(item.state or "", cfg) or "(default)",
                 pinned=bool(role),
             )
-            asyncio.create_task(self._process(item))
+            self._spawn(item)
 
     async def _pin_profile(self, item: WorkItemInfo, role: str) -> None:
         """Stamp which role this run is, exclusively — the same act as the board's ▶ Run.
@@ -1096,7 +1115,7 @@ class AdoPollerService:
                                   error=describe_exc(exc))
                 continue
             self._log.info("plan approved — build run starting", id=item.id)
-            asyncio.create_task(self._process(item))
+            self._spawn(item)
 
     # ── autonomy for one run: plan-first + trust ladder ─────────────────────
 
@@ -1402,7 +1421,7 @@ class AdoPollerService:
             "<div><b>💬 Got your comment</b> — reprocessing with your latest guidance.</div>",
         )
         self._log.info("reprocessing on human comment", id=item.id)
-        asyncio.create_task(self._process(item))
+        self._spawn(item)
 
     async def _process(self, item: WorkItemInfo) -> None:
         c, cfg = self._c, self._config

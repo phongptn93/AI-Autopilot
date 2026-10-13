@@ -383,3 +383,26 @@ def test_every_editable_field_names_a_real_setting():
         if not hasattr(config, f.key) and f.key not in settings_form.SECRET_KEYS
     ]
     assert unknown == []
+
+
+def test_save_to_yaml_is_atomic_and_keeps_a_backup(tmp_path, monkeypatch):
+    """write_text truncates first: a failure mid-dump left an empty config.yaml (which
+    holds the PAT). Now the old file survives a failed write and a .bak is kept."""
+    import pytest
+
+    from ai_autopilot.dashboard import settings_form as sf
+
+    path = tmp_path / "config.yaml"
+    sf.save_to_yaml(path, {"poll_interval_seconds": 30})
+    sf.save_to_yaml(path, {"poll_interval_seconds": 45})
+    assert "45" in path.read_text(encoding="utf-8")
+    assert "30" in (tmp_path / "config.yaml.bak").read_text(encoding="utf-8")
+
+    def broken_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(sf.os, "replace", broken_replace)
+    with pytest.raises(OSError):
+        sf.save_to_yaml(path, {"poll_interval_seconds": 99})
+    assert "45" in path.read_text(encoding="utf-8")          # untouched
+    assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []

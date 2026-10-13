@@ -7,6 +7,7 @@ are kept here so they can be unit-tested without a running server.
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -1699,9 +1700,27 @@ def save_to_yaml(path: Path, updates: Mapping[str, Any]) -> None:
         if isinstance(loaded, dict):
             data = loaded
     data.update(updates)
-    path.write_text(
-        yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8"
-    )
+    _write_atomic(path, yaml.safe_dump(data, sort_keys=False, allow_unicode=True))
+
+
+def _write_atomic(path: Path, text: str) -> None:
+    """Replace ``path`` with ``text`` so a reader never sees it half-written.
+
+    ``write_text`` truncates first, so a crash or exception mid-dump left an empty or
+    partial config.yaml — and this file holds the PAT and every other secret, and is
+    rewritten by the periodic fleet sync. The previous version is kept as ``.bak``.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        if path.exists():
+            with contextlib.suppress(OSError):
+                path.with_name(path.name + ".bak").write_bytes(path.read_bytes())
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
 
 
 # Never reset, whatever the scope. Losing these does not restore a default — it locks

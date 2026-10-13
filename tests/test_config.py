@@ -182,3 +182,19 @@ def test_the_timeout_is_resolved_per_repo():
     # Nonsense never takes the gate down — it falls back.
     assert Settings(test_timeouts=["A = zero"]).test_timeout_for("A") == 600
     assert Settings(test_timeouts=["A = -5"]).test_timeout_for("A") == 600
+
+
+def test_numeric_settings_refuse_negatives_and_a_zero_run_gate():
+    """``max_concurrent: 0`` built a zero-slot semaphore that blocked every run forever,
+    and negatives were accepted then misread deep in a service."""
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="max_concurrent"):
+        Settings(max_concurrent=0)
+    with pytest.raises(ValidationError, match="must not be negative"):
+        Settings(poll_interval_seconds=-5)
+    cfg = Settings(max_concurrent=2, claude_max_turns=0)  # 0 still means "off"
+    with pytest.raises(ValidationError):  # the live object refuses it too (Settings page)
+        cfg.task_timeout_minutes = -1
+    assert cfg.task_timeout_minutes == 30

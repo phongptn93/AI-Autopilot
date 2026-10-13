@@ -12,12 +12,12 @@ from ai_autopilot.dashboard.common import (
     _category_badge,
     _fmt_ago,
     _fmt_duration,
-    _mmss,
     _model_label,
     _status_class,
     _tokens_detail,
     selected_workspace,
 )
+from ai_autopilot.notifications.base import mmss
 
 
 def _ctx(request: Request, active: str, **extra) -> dict:
@@ -77,7 +77,7 @@ def _ctx(request: Request, active: str, **extra) -> dict:
         # printed env-var names at the user): no credentials = nothing on any page is
         # live, and every empty table should be read in that light.
         "tracker_ready": bool(cfg and getattr(cfg, "has_tracker_auth", True)),
-        "mmss": _mmss,
+        "mmss": mmss,
         "fmt_duration": _fmt_duration,
         "fmt_ago": _fmt_ago,
         "category_badge": _category_badge,

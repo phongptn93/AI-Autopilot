@@ -340,3 +340,22 @@ def test_replay_cli_exit_code_and_json(repo: Path, tmp_path: Path):
     assert replay_cli.replay_main([str(cases_dir), "--min-pass-rate", "0"], Cfg(),
                                   lazy_agent) == 0
     assert replay_cli.replay_main([str(cases_dir), "--case", "nope"], Cfg(), lazy_agent) == 1
+
+
+def test_rm_tree_removes_read_only_files(tmp_path):
+    """Git marks pack files read-only; and ``onexc`` does not exist on 3.11 — passing it
+    raised TypeError there, which the caller swallowed, leaking every replay worktree."""
+    import os
+    import stat
+
+    from ai_autopilot.replay_eval import _rm_tree
+
+    root = tmp_path / "wt"
+    (root / ".git" / "objects").mkdir(parents=True)
+    pack = root / ".git" / "objects" / "pack.idx"
+    pack.write_text("x")
+    os.chmod(pack, stat.S_IREAD)
+
+    _rm_tree(root)
+
+    assert not root.exists()

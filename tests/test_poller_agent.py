@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -1443,7 +1444,7 @@ async def test_a_roles_own_run_now_tag_runs_that_role_not_the_default_pipeline()
     svc = AdoPollerService.__new__(AdoPollerService)
     svc._config = cfg
     svc._c = SimpleNamespace(ado=ado, state_repo=_NullStateRepo())
-    svc._live, svc._processed = {}, {}
+    svc._live, svc._processed, svc._bg = {}, {}, set()
     svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
 
     assert await _run_reconcile(svc) == [8965]
@@ -1470,7 +1471,7 @@ async def test_the_shared_run_now_tag_still_lets_the_state_pick_the_role():
     svc = AdoPollerService.__new__(AdoPollerService)
     svc._config = cfg
     svc._c = SimpleNamespace(ado=ado, state_repo=_NullStateRepo())
-    svc._live, svc._processed = {}, {}
+    svc._live, svc._processed, svc._bg = {}, {}, set()
     svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
 
     assert await _run_reconcile(svc) == [41]
@@ -1534,7 +1535,7 @@ async def test_the_run_now_tag_works_on_an_item_the_autopilot_is_not_already_hol
     svc = AdoPollerService.__new__(AdoPollerService)
     svc._config = cfg
     svc._c = SimpleNamespace(ado=ado, state_repo=_NullStateRepo())
-    svc._live, svc._processed = {}, {}
+    svc._live, svc._processed, svc._bg = {}, {}, set()
     svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
 
     assert await _run_reconcile(svc) == [9004]
@@ -1559,7 +1560,7 @@ async def test_every_run_now_tag_is_queried_not_just_the_shared_one():
     svc = AdoPollerService.__new__(AdoPollerService)
     svc._config = cfg
     svc._c = SimpleNamespace(ado=ado, state_repo=_NullStateRepo())
-    svc._live, svc._processed = {}, {}
+    svc._live, svc._processed, svc._bg = {}, {}, set()
     svc._log = type("L", (), {"info": lambda *a, **k: None, "warning": lambda *a, **k: None})()
 
     await _run_reconcile(svc)
@@ -2036,3 +2037,45 @@ async def test_interactive_result_gets_its_prs_files_for_scoring():
     failed.pr_urls = [ok.pr_url]
     await AdoPollerService._fill_changed_files(svc, failed)
     assert failed.files_changed == [] and len(asked) == 1       # a failure is left alone
+
+
+async def test_background_item_runs_are_held_and_cancelled_on_stop(monkeypatch):
+    """Runs started outside the poll loop (webhook, restart, human reply) used to be bare
+    ``create_task`` calls: nothing referenced them, so they could be garbage-collected
+    mid-run, and stop() left them orphaned."""
+    p, _c = _poller()
+    started, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def long_run(item):
+        started.set()
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(p, "_process", long_run)
+    task = p._spawn(_item())
+    await started.wait()
+    assert task in p._bg
+
+    await p.stop()
+
+    assert cancelled.is_set() and task.cancelled()
+    assert p._bg == set()
+
+
+async def test_a_crashed_background_run_is_logged_and_released(monkeypatch, capsys, caplog):
+    p, _c = _poller()
+
+    async def boom(item):
+        raise RuntimeError("kaput")
+
+    monkeypatch.setattr(p, "_process", boom)
+    task = p._spawn(_item())
+    with contextlib.suppress(RuntimeError):
+        await task
+    await asyncio.sleep(0)  # done-callbacks run on the next loop turn
+    assert p._bg == set()
+    # Console or stdlib logging, depending on what configured logging before this test.
+    assert "background item run crashed" in capsys.readouterr().out + caplog.text

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, false, func, or_, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
@@ -70,6 +71,14 @@ class EfficiencyStats:
     @property
     def avg_runs_per_item(self) -> float:
         return self.total_runs / self.distinct_items if self.distinct_items else 0.0
+
+
+def _parse_day(value: str | None) -> datetime | None:
+    """``YYYY-MM-DD`` → midnight of that day; None for blank or malformed input."""
+    try:
+        return datetime.strptime((value or "").strip(), "%Y-%m-%d") if value else None
+    except ValueError:
+        return None
 
 
 def _project_cond(projects: list[str] | None):
@@ -262,10 +271,12 @@ class ExecutionRepository:
                 conds.append(ExecutionRecord.work_item_id == int(s))
             else:
                 conds.append(ExecutionRecord.title.ilike(f"%{s}%"))
-        if dfrom:
-            conds.append(func.date(ExecutionRecord.started_at) >= dfrom)
-        if dto:
-            conds.append(func.date(ExecutionRecord.started_at) <= dto)
+        # Half-open bounds on the column itself: wrapping it in date() made SQLite scan
+        # every row instead of using ix_executions_started_at.
+        if day := _parse_day(dfrom):
+            conds.append(ExecutionRecord.started_at >= day)
+        if day := _parse_day(dto):
+            conds.append(ExecutionRecord.started_at < day + timedelta(days=1))
         async with self._db.session() as session:
             total = (
                 await session.execute(
@@ -533,7 +544,26 @@ class StateRepository:
         pr_url: str | None = None,
     ) -> None:
         """Upsert the state for a work item (only overwrites fields provided)."""
+        now = datetime.now(UTC)
         async with self._db.session() as session:
+            if session.get_bind().dialect.name == "sqlite":
+                # One atomic statement. Read-then-insert let two writers for the same item
+                # (the poll loop and a webhook run) both see "no row" and the second
+                # INSERT fail with an IntegrityError.
+                values: dict = {"work_item_id": work_item_id, "state": state,
+                                "title": title or "", "updated_at": now}
+                changed: dict = {"state": state, "updated_at": now}
+                if title:
+                    changed["title"] = title
+                if detail is not None:
+                    values["detail"] = changed["detail"] = detail
+                if pr_url is not None:
+                    values["pr_url"] = changed["pr_url"] = pr_url
+                await session.execute(
+                    sqlite_insert(WorkItemState).values(**values)
+                    .on_conflict_do_update(index_elements=["work_item_id"], set_=changed))
+                await session.commit()
+                return
             row = await session.get(WorkItemState, work_item_id)
             if row is None:
                 row = WorkItemState(work_item_id=work_item_id)
@@ -545,7 +575,7 @@ class StateRepository:
                 row.detail = detail
             if pr_url is not None:
                 row.pr_url = pr_url
-            row.updated_at = datetime.now(UTC)
+            row.updated_at = now
             await session.commit()
 
     async def get(self, work_item_id: int) -> WorkItemState | None:

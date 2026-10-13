@@ -19,6 +19,7 @@ from ai_autopilot.reports import SEVERITIES
 
 _log = get_logger("security_scan.ado_sync")
 
+_SEVERITY_FIELD = "Microsoft.VSTS.Common.Severity"
 _SEV_ADO = {
     "critical": "1 - Critical", "high": "2 - High", "medium": "3 - Medium", "low": "4 - Low",
 }
@@ -91,10 +92,18 @@ async def file_new_findings(
         if SEVERITIES.index(row.severity) > floor:
             continue
         try:
+            bug = dict(title=bug_title(row), item_type="Bug", parent_id=None, tag=tag,
+                       description=bug_body(row, repo_name or repo, scan_id), project=project)
+            # Without the field every Bug landed as ADO's default "3 - Medium", a Critical
+            # included. Not every process template has Severity on Bug (Basic does not),
+            # and an unknown field fails the whole create — so retry once without it.
             bug_id = await ado.create_work_item(
-                title=bug_title(row), item_type="Bug", parent_id=None, tag=tag,
-                description=bug_body(row, repo_name or repo, scan_id), project=project,
-            )
+                **bug, fields={_SEVERITY_FIELD: ado_severity(row.severity)})
+            if not bug_id:
+                bug_id = await ado.create_work_item(**bug)
+                if bug_id:
+                    _log.info("security bug filed without Severity — the Bug type here "
+                              "has no such field", bug=bug_id)
         except Exception as exc:  # noqa: BLE001 — one failure must not stop the rest
             _log.warning("security bug not filed", fp=fp, error=describe_exc(exc))
             bug_id = 0

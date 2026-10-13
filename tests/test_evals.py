@@ -173,3 +173,34 @@ async def test_the_report_names_the_failed_check():
     result = await run_suite(cases, _runner("unrelated"))
     text = format_report(result, 1.0)
     assert "[FAIL] nope" in text and "OWASP" in text
+
+
+async def test_a_case_whose_required_file_is_absent_is_skipped_not_failed(tmp_path):
+    """`.claude/` is a separate repository: on a clone without it the skill cases must
+    say why they did not run, not turn the suite red over the checkout."""
+    (tmp_path / "present.md").write_text("x")
+    runs: list[str] = []
+
+    async def runner(prompt, cwd, tools, timeout_seconds):
+        runs.append(prompt)
+        return "fine"
+
+    ok = EvalCase(name="ok", prompt="p1", cwd=str(tmp_path), requires=["present.md"],
+                  checks=[Check("contains", "fine")])
+    gone = EvalCase(name="gone", prompt="p2", cwd=str(tmp_path),
+                    requires=[".claude/skills/x/SKILL.md"], checks=[Check("contains", "fine")])
+
+    result = await run_suite([ok, gone], runner)
+
+    assert runs == ["p1"]                                  # the skipped case never ran
+    assert (result.passed, result.total, result.skipped) == (1, 1, 1)
+    assert result.pass_rate == 1.0
+    report = format_report(result, 1.0)
+    assert "[SKIP] gone" in report and "missing .claude/skills/x/SKILL.md" in report
+
+
+def test_requires_is_read_from_yaml(tmp_path):
+    (tmp_path / "c.yaml").write_text(
+        "name: c\nprompt: p\nrequires: [a/b.md]\nchecks: ['contains: x']\n", encoding="utf-8")
+    [case] = load_cases(tmp_path)
+    assert case.requires == ["a/b.md"]

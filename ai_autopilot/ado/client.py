@@ -750,9 +750,13 @@ class AdoClient:
 
     async def create_work_item(
         self, title: str, item_type: str, parent_id: int | None, tag: str,
-        description: str = "", project: str = "",
+        description: str = "", project: str = "", fields: dict[str, Any] | None = None,
     ) -> int:
         """Create a work item, in ``project`` when given else the default project.
+
+        ``fields`` sets extra fields by reference name (``Microsoft.VSTS.Common.Severity``).
+        A field the item type does not have fails the WHOLE create, so a caller passing
+        an optional one should retry without it on 0.
 
         A child MUST land in its parent's project: ADO cannot make a hierarchy link
         across projects, so decomposing an item from a secondary project into the
@@ -769,6 +773,8 @@ class AdoClient:
             patch.append(
                 {"op": "add", "path": "/fields/System.Description", "value": description}
             )
+        for name, value in (fields or {}).items():
+            patch.append({"op": "add", "path": f"/fields/{name}", "value": value})
         if parent_id is not None:
             patch.append(
                 {

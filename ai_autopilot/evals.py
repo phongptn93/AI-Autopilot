@@ -76,6 +76,10 @@ class EvalCase:
     allowed_tools: list[str] | None = None
     timeout_seconds: int = 900
     source: str = ""                 # file it came from, for the report
+    # Paths (relative to cwd) the case needs. The skill cases read `.claude/`, which is a
+    # separate repository: on a clone without it they are SKIPPED with the reason, not
+    # failed — a red suite there would grade the checkout, not the configuration.
+    requires: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], source: str = "") -> EvalCase:
@@ -98,6 +102,7 @@ class EvalCase:
             allowed_tools=data.get("allowed_tools"),
             timeout_seconds=int(data.get("timeout_seconds") or 900),
             source=source,
+            requires=[str(r) for r in (data.get("requires") or [])],
         )
 
 
@@ -109,6 +114,7 @@ class CaseResult:
     error: str = ""
     duration_seconds: float = 0.0
     output: str = ""
+    skipped: str = ""                # why it did not run; skipped cases are not graded
 
 
 @dataclass
@@ -117,7 +123,12 @@ class SuiteResult:
 
     @property
     def total(self) -> int:
-        return len(self.cases)
+        """Cases that ran. Skipped ones are reported but neither pass nor fail."""
+        return sum(1 for c in self.cases if not c.skipped)
+
+    @property
+    def skipped(self) -> int:
+        return sum(1 for c in self.cases if c.skipped)
 
     @property
     def passed(self) -> int:
@@ -238,6 +249,9 @@ Runner = Callable[[str, str, "list[str] | None", int], Awaitable[str]]
 async def run_case(case: EvalCase, runner: Runner) -> CaseResult:
     started = time.monotonic()
     cwd = case.cwd or str(Path(case.source).parent if case.source else Path.cwd())
+    missing = [r for r in case.requires if not (Path(cwd) / r).exists()]
+    if missing:
+        return CaseResult(case.name, False, skipped=f"missing {', '.join(missing)}")
     try:
         output = await runner(case.prompt, cwd, case.allowed_tools, case.timeout_seconds)
     except Exception as exc:  # noqa: BLE001 — a case that crashes is a case that failed
@@ -300,10 +314,14 @@ def format_report(result: SuiteResult, min_pass_rate: float) -> str:
     lines = [
         "",
         f"  Eval suite - {result.passed}/{result.total} passed "
-        f"({result.pass_rate * 100:.0f}%), threshold {min_pass_rate * 100:.0f}%",
+        f"({result.pass_rate * 100:.0f}%), threshold {min_pass_rate * 100:.0f}%"
+        + (f", {result.skipped} skipped" if result.skipped else ""),
         "",
     ]
     for case in result.cases:
+        if case.skipped:
+            lines.append(f"  [SKIP] {case.name}  ({case.skipped})")
+            continue
         mark = "PASS" if case.passed else "FAIL"
         lines.append(f"  [{mark}] {case.name}  ({case.duration_seconds:.0f}s)")
         if case.error:

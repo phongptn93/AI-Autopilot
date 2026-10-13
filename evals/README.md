@@ -38,6 +38,7 @@ checks:
 | `cwd` | Where the agent works. Blank = the case file's own directory. |
 | `allowed_tools` | Restrict the tool surface. Omit for the default. |
 | `timeout_seconds` | Per case. Default 900. |
+| `requires` | Paths (under `cwd`) the case needs. Any missing → the case is **skipped** with the reason and not graded. Use it for cases that read `.claude/`, which is a separate repository a fresh clone does not have. |
 | `checks` | What must hold. **A case with no checks fails.** |
 
 ### Check kinds

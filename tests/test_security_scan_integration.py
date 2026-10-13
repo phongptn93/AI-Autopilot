@@ -256,3 +256,57 @@ def test_loops_page_saves_scan_mode(tmp_path, monkeypatch):
         assert loop.scan_ai_mode == "off"
         page = client.get("/dashboard/loops").text
         assert 'value="scan" selected' in page
+
+
+class _Row:
+    """A stored finding; any column the bug body reads beyond these is blank."""
+
+    def __init__(self, sev: str):
+        self.id, self.severity, self.status, self.ado_bug_id = 1, sev, "open", None
+        self.title, self.cwe, self.kev, self.line = "leak", "CWE-798", False, 1
+
+    def __getattr__(self, name):
+        return ""
+
+
+class _OneRow:
+    def __init__(self, row):
+        self.row, self.bug = row, None
+
+    async def by_fingerprint(self, repo, fp):
+        return self.row
+
+    async def set_bug(self, rid, bug_id):
+        self.bug = bug_id
+
+
+def _filing_cfg():
+    cfg = Settings(autonomy_level="assisted")
+    cfg.security_scan.file_bugs = True
+    cfg.security_scan.file_bugs_from = "low"
+    return cfg
+
+
+async def test_security_bugs_carry_their_severity():
+    """Every Bug used to land as ADO's default "3 - Medium", a Critical included."""
+    ado = _Ado()
+    out = await ado_sync.file_new_findings(
+        ado=ado, security_repo=_OneRow(_Row("critical")), config=_filing_cfg(), repo="r",
+        project="", scan_id=1, fingerprints=["fp"])
+    assert out.filed and len(ado.created) == 1
+    assert ado.created[0]["fields"] == {"Microsoft.VSTS.Common.Severity": "1 - Critical"}
+
+
+async def test_a_template_without_severity_still_gets_the_bug():
+    """Basic's Bug has no Severity field and ADO refuses the whole create over it."""
+    class _NoSeverity(_Ado):
+        async def create_work_item(self, **kw):
+            self.created.append(kw)
+            return 0 if "fields" in kw else 950
+
+    ado, rows = _NoSeverity(), _OneRow(_Row("high"))
+    out = await ado_sync.file_new_findings(
+        ado=ado, security_repo=rows, config=_filing_cfg(), repo="r", project="",
+        scan_id=1, fingerprints=["fp"])
+    assert [("fields" in c) for c in ado.created] == [True, False]
+    assert out.filed == [(950, "fp")] and rows.bug == 950

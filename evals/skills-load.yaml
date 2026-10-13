@@ -10,6 +10,7 @@
     what does it say about which language to reply in? If you cannot find CLAUDE.md,
     say exactly: CLAUDE_MD_NOT_FOUND
   cwd: "."
+  requires: [CLAUDE.md]
   allowed_tools: ["Read", "Glob", "Grep"]
   checks:
     - kind: not_contains
@@ -23,6 +24,7 @@
     Read .claude/skills/bugfix-workflow/SKILL.md and answer in plain text:
     does it require reproducing the bug before fixing it? Quote the step.
   cwd: "."
+  requires: [.claude/skills/bugfix-workflow/SKILL.md]   # .claude is a separate repo
   allowed_tools: ["Read", "Glob", "Grep"]
   checks:
     - kind: regex
@@ -35,6 +37,7 @@
     Read .claude/skills/security-review/SKILL.md and answer in plain text:
     which published standard does it review against?
   cwd: "."
+  requires: [.claude/skills/security-review/SKILL.md]   # .claude is a separate repo
   allowed_tools: ["Read", "Glob", "Grep"]
   checks:
     - kind: contains

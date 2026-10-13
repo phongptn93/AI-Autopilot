@@ -551,6 +551,9 @@ over the lockfile, and a Docker build.
   `uv pip compile pyproject.toml --extra dev --extra docs --universal --python-version 3.11 --no-header --annotation-style line -o requirements-lock.txt`
 - There is no `ruff format` gate on purpose: the code uses aligned hanging indents the
   formatter would rewrite wholesale.
+- `.claude/` (skills, rules, agents) is a **separate repository** and is git-ignored here.
+  The Python tests do not need it; eval cases that read it declare `requires:` and are
+  reported as skipped on a clone without it (see [`evals/README.md`](evals/README.md)).
 - Tests never write to `logs/` (`tests/conftest.py` sets `AUTOPILOT_LOG_DIR=""`). The
   same variable moves the app's log folder; empty turns the file sink off.
 

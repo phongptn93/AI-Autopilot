@@ -85,8 +85,9 @@ def test_inspect_lists_repos_for_the_hub(tmp_path):
 _REPLY = '''```json
 {"verdict": "v", "traces": [
   {"ref": "FR-1", "status": "done"},
-  {"ref": "FR-2", "status": "better", "code": "chặn sửa năm đã khoá", "side": "update_doc",
-   "confidence": "high"},
+  {"ref": "FR-2", "spec": "Cho phép sửa mọi năm", "status": "better",
+   "code": "chặn sửa năm đã khoá", "side": "update_doc", "confidence": "high",
+   "doc_text": "FR-2: Chỉ sửa được năm chưa khoá; năm đã khoá chỉ xem."},
   {"ref": "FR-3", "status": "missing", "searched": "route copy-machine, CopyMachine, controller",
    "confidence": "medium"},
   {"ref": "FR-4", "status": "partial"}],
@@ -108,6 +109,20 @@ def test_better_counts_as_built_and_doc_quality_is_parsed():
     assert "## Đánh giá tài liệu — 62/100" in md and "(Cập nhật tài liệu)" in md
     html = rs.render_ado_comment("T", r)
     assert "Đánh giá tài liệu" in html and "Code đã làm tốt hơn" in html
+    # the doc rewrite travels with the row: matrix, Markdown, ADO comment, external copy
+    assert [t.ref for t in rs.doc_updates(r)] == ["FR-2"]
+    assert "## Cập nhật tài liệu" in md and "| FR-2 | Cho phép sửa mọi năm | FR-2: Chỉ sửa" in md
+    assert "Viết lại tài liệu:</b> FR-2: Chỉ sửa" in html
+    assert rs.external_copy(r).traces[1].doc_text.startswith("FR-2: Chỉ sửa")
+
+
+def test_challenge_can_set_and_settle_the_doc_rewrite():
+    r, _ = rs.parse(_REPLY, rs.KIND_SPEC)
+    rs.apply_challenge(r, 3, '```json\n{"status": "better", "side": "update_doc", '
+                       '"doc_text": "FR-4: viết lại"}\n```', rs.KIND_SPEC, note="code đúng hơn")
+    assert r.traces[3].doc_text == "FR-4: viết lại"
+    rs.apply_challenge(r, 1, '```json\n{"status": "done"}\n```', rs.KIND_SPEC, note="khớp")
+    assert r.traces[1].doc_text == ""
 
 
 def test_prompt_is_critical_of_the_document_and_demands_a_search():
@@ -170,6 +185,7 @@ def test_review_reads_the_chosen_workspace_and_a_challenge_rechecks(tmp_path, mo
         assert "Spec B" in seen[0][0] and seen[0][1] == str(b)        # read workspace B
         page = client.get(f"/dashboard/review/{rid}").text
         assert "Code tốt hơn tài liệu" in page and "Đánh giá tài liệu" in page
+        assert "✍️ Cập nhật tài liệu" in page and "Chỉ sửa được năm chưa khoá" in page
         assert "⚖️ Phản biện" in page and "Team B" in page
         # history is per workspace too
         assert f"/dashboard/review/{rid}" in client.get(f"/dashboard/review?ws={ws_b}").text

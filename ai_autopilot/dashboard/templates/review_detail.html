@@ -68,6 +68,10 @@
   .st.blue { color:#5aa9ff; background:rgba(90,169,255,.1); border-color:rgba(90,169,255,.45); }
   .side { font-size:11px; font-weight:650; margin-top:5px; color:var(--text-muted); }
   .side.update_doc { color:#5aa9ff; } .side.fix_code { color:var(--amber); }
+  .rw { margin-top:8px; padding:8px 10px; border-radius:8px; border:1px dashed rgba(90,169,255,.5); background:rgba(90,169,255,.07);
+    color:var(--text); font-size:12.5px; line-height:1.5; white-space:pre-line; }
+  .rw-h { display:flex; justify-content:space-between; gap:8px; font-size:11px; font-weight:650; color:#5aa9ff; margin-bottom:3px; white-space:normal; }
+  .rw-h button { all:unset; cursor:copy; color:var(--text-dim); font-weight:500; }
   .conf { font-size:10.5px; color:var(--text-dim); margin-top:3px; letter-spacing:.02em; }
   .conf.low { color:var(--amber); }
   .srch { margin-top:5px; font-size:11.5px; color:var(--text-dim); }
@@ -330,6 +334,8 @@
   <div class="tabs" role="tablist">
     {% if result.traces %}<button type="button" class="tab on" data-pane="t-mx">{{ '📋 Ma trận truy vết' if row.kind == 'spec' else '🛡️ Từng finding' }}<span class="n">{{ result.traces|length }}</span></button>{% endif %}
     {% if result.questions %}<button type="button" class="tab" data-pane="t-q">❓ Câu hỏi cho BA<span class="n">{{ result.questions|length }}</span></button>{% endif %}
+    {% set updates = result.traces|selectattr('doc_text')|list %}
+    {% if updates %}<button type="button" class="tab" data-pane="t-upd">✍️ Cập nhật tài liệu<span class="n">{{ updates|length }}</span></button>{% endif %}
     {% if result.doc_quality and (result.doc_quality.issues or result.doc_quality.verdict) %}<button type="button" class="tab" data-pane="t-dq">📝 Đánh giá tài liệu<span class="n">{{ result.doc_quality.issues|length }}</span></button>{% endif %}
     {% if result.risks %}<button type="button" class="tab" data-pane="t-risk">⚠️ Rủi ro<span class="n">{{ result.risks|length }}</span></button>{% endif %}
     {% if result.extras %}<button type="button" class="tab" data-pane="t-extra">➕ Ngoài spec<span class="n">{{ result.extras|length }}</span></button>{% endif %}
@@ -366,6 +372,8 @@
           {% if t.searched %}<details class="srch"><summary>🔍 đã tìm</summary>{{ t.searched }}</details>{% endif %}
           {% if t.evidence %}<div class="ev">{% for e in t.evidence %}{% if e.where %}<code title="{{ e.where }}{{ ' — ' ~ e.note if e.note }} · bấm để copy" data-copy="{{ e.where }}">{{ e.where|short_path(3) }}</code>{% endif %}{% endfor %}</div>{% endif %}</td>
         <td class="fix">{{ t.fix or '—' }}
+          {% if t.doc_text %}<div class="rw"><div class="rw-h"><span>📝 Viết lại tài liệu{{ ' (nếu chốt theo code)' if t.side == 'decide' }}</span>
+            <button type="button" data-copy="{{ t.doc_text }}" title="Copy nội dung để dán vào tài liệu">⧉ copy</button></div>{{ t.doc_text }}</div>{% endif %}
           {% for ch in t.challenges %}
           <div class="chal-h {{ ch.verdict }}">⚖️ <i>{{ ch.note }}</i><br>
             {{ {'accept': '✅ Chấp nhận', 'reject': '↩️ Giữ kết luận', 'partial': '🟡 Một phần'}.get(ch.verdict, 'ℹ️ Đã kiểm lại') }}{% if ch.before != ch.after %}: {{ statuses.get(ch.before, ('', ch.before))[1] }} → {{ statuses.get(ch.after, ('', ch.after))[1] }}{% endif %}{% if ch.reason %} — {{ ch.reason }}{% endif %}</div>
@@ -420,6 +428,29 @@
         {% if q.options %}<ul>{% for o in q.options %}<li>{{ o }}</li>{% endfor %}</ul>{% endif %}</div>
       {% endfor %}
     </div>
+  </div>
+  {% endif %}
+
+  {% if updates %}
+  <div class="pane" id="t-upd" hidden>
+    <div class="mx-tools"><span class="act-help" style="margin:0">Mục code làm khác tài liệu và tài liệu nên theo code — nội dung viết lại sẵn để BA dán thay nguyên văn cũ.</span>
+      <button type="button" class="btn-ghost btn-sm" data-copy-from="#upd-md">⧉ Copy tất cả (Markdown)</button></div>
+    <textarea id="upd-md" hidden>| Mục | Hiện tại | Điều chỉnh |
+|---|---|---|
+{% for t in updates %}| {{ t.ref }} | {{ (t.spec or '—')|replace('|', '\|')|replace('
+', ' ') }} | {{ t.doc_text|replace('|', '\|')|replace('
+', ' ') }}{{ ' _(cần nghiệp vụ chốt)_' if t.side == 'decide' }} |
+{% endfor %}</textarea>
+    <div class="mx-wrap"><table class="mx" style="min-width:700px">
+      <tr><th>Mục</th><th>Hiện tại (nguyên văn tài liệu)</th><th>Viết lại thành</th></tr>
+      {% for t in updates %}{% set s = statuses.get(t.status, ('❔', t.status, 'muted')) %}
+      <tr><td><span class="ref">{{ t.ref }}</span><br><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span>
+          {% if t.side %}<div class="side {{ t.side }}">→ {{ sides.get(t.side, t.side) }}</div>{% endif %}</td>
+        <td class="spec">{{ t.spec or '—' }}</td>
+        <td><div class="rw" style="margin:0"><div class="rw-h"><span>{{ 'Nếu chốt theo code' if t.side == 'decide' else 'Đề xuất' }}</span>
+          <button type="button" data-copy="{{ t.doc_text }}">⧉ copy</button></div>{{ t.doc_text }}</div></td></tr>
+      {% endfor %}
+    </table></div>
   </div>
   {% endif %}
 

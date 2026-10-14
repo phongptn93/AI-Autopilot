@@ -153,6 +153,17 @@
   </table>
   {% endif %}
 
+  {% set updates = result.traces|selectattr('doc_text')|list %}
+  {% if updates %}
+  <h2>Cập nhật tài liệu cho khớp hệ thống</h2>
+  <table class="mx">
+    <tr><th style="width:12%">Mục</th><th style="width:44%">Hiện tại (nguyên văn)</th><th>Viết lại thành</th></tr>
+    {% for t in updates %}
+    <tr><td><span class="ref">{{ t.ref }}</span></td><td>{{ t.spec or '—' }}</td><td><b>{{ t.doc_text }}</b>{% if t.side == 'decide' %}<span class="side">→ cần nghiệp vụ chốt</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
   {% set dq = result.doc_quality %}
   {% if dq and (dq.issues or dq.verdict) %}
   <h2>Đánh giá chất lượng tài liệu</h2>

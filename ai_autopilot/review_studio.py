@@ -117,6 +117,9 @@ class Trace:
     fix: str = ""            # the smallest change that would close the gap
     filed_as: int = 0        # work item this row became, once filed
     side: str = ""           # conflict/better: fix_code | update_doc | decide
+    # The spec item rewritten to match what the code does — ready for the BA to paste
+    # over the quoted original. Set when the document, not the code, should change.
+    doc_text: str = ""
     confidence: str = ""     # high | medium | low
     # For missing/unclear: what was searched before concluding "not there" — a
     # "missing" without it is a guess, and the reader has no way to tell.
@@ -227,6 +230,7 @@ _SPEC_SCHEMA = """\
      "severity": "critical|high|medium|low|info",
      "fix": "thay đổi nhỏ nhất để đóng gap (bỏ trống nếu done)",
      "side": "fix_code|update_doc|decide (chỉ khi conflict/better)",
+     "doc_text": "câu/đoạn tài liệu VIẾT LẠI để thay nguyên văn mục này cho khớp code (khi better hoặc side update_doc/decide)",
      "confidence": "high|medium|low",
      "searched": "đã tìm những gì (bắt buộc khi missing/unclear)"}
   ],
@@ -277,6 +281,11 @@ Cách làm:
    - better: code làm KHÁC tài liệu nhưng HỢP LÝ HƠN (an toàn hơn, đúng nghiệp vụ hơn,
      xử lý được trường hợp tài liệu bỏ sót) — nói rõ vì sao tốt hơn; đề xuất sửa TÀI LIỆU.
    Với conflict/better ghi "side": fix_code | update_doc | decide.
+   Khi status better, hoặc side update_doc/decide: ghi "doc_text" = nội dung MỤC ĐÓ
+   VIẾT LẠI cho khớp hành vi code — văn phong tài liệu nghiệp vụ, giữ mã mục, đủ ý để
+   BA dán thay nguyên văn cũ và QC viết test được (quy tắc, giá trị, ngoại lệ). Mô tả
+   hành vi người dùng thấy, KHÔNG nêu tên class/file. Với decide: viết theo phương án
+   code, BA chốt có dùng hay không.
 3. ĐÁNH GIÁ CHÍNH TÀI LIỆU như một reviewer chuyên nghiệp — tài liệu KHÔNG mặc nhiên
    đúng. Chấm "doc_quality": mục nào mơ hồ, thiếu, không kiểm thử được, mâu thuẫn,
    lỗi thời so với hệ thống, quá sa vào kỹ thuật, hoặc kém hơn cách code đã làm. Nêu
@@ -442,7 +451,7 @@ def external_copy(result: ReviewResult) -> ReviewResult:
     out = load(result.to_json())
     for t in out.traces:
         t.spec, t.code = hide_locations(t.spec), hide_locations(t.code)
-        t.fix = hide_locations(t.fix)
+        t.fix, t.doc_text = hide_locations(t.fix), hide_locations(t.doc_text)
         t.evidence = [Evidence(file="", line=0, note="") for e in t.evidence if e.where]
     for r in out.risks:
         r.detail, r.file, r.line = hide_locations(r.detail), "", 0
@@ -459,7 +468,7 @@ def redact_result(result: ReviewResult) -> ReviewResult:
     """Every free-text field of ``result`` through :func:`redact`, in place."""
     for t in result.traces:
         t.spec, t.code, t.fix = redact(t.spec), redact(t.code), redact(t.fix)
-        t.searched = redact(t.searched)
+        t.searched, t.doc_text = redact(t.searched), redact(t.doc_text)
         for e in t.evidence:
             e.note = redact(e.note)
     dq = result.doc_quality or {}
@@ -594,6 +603,7 @@ def parse(text: str, kind: str, *, safe: bool = True) -> tuple[ReviewResult, str
             severity=sev if sev in SEVERITIES else "",
             fix=str(t.get("fix") or "").strip(),
             side=_pick(t.get("side"), SIDES),
+            doc_text=str(t.get("doc_text") or "").strip(),
             confidence=_pick(t.get("confidence"), CONFIDENCE),
             searched=str(t.get("searched") or "").strip(),
         ))
@@ -730,6 +740,7 @@ Trả lời ngắn bằng Markdown (giải thích), rồi in ĐÚNG MỘT khối
   "code": "hiện trạng sau khi kiểm lại",
   "evidence": [{{"file": "...", "line": 0, "note": "..."}}],
   "fix": "...", "side": "fix_code|update_doc|decide", "confidence": "high|medium|low",
+  "doc_text": "mục tài liệu viết lại cho khớp code (khi better hoặc side update_doc/decide)",
   "searched": "đã tìm những gì"}}"""
 
 
@@ -754,12 +765,14 @@ def apply_challenge(result: ReviewResult, index: int, reply: str, kind: str, *, 
         entry["reason"] = str(data.get("reason") or "").strip()
         if status in allowed:
             t.status = status
+            if status in ("done", "fixed", "false_positive"):
+                t.doc_text = ""
             # A row that is now settled no longer needs the old "how to fix it" — unless
             # the answer gives a new one (e.g. a "better" row's doc rewrite).
             if status in ("done", "fixed", "false_positive") and not str(
                     data.get("fix") or "").strip():
                 t.fix = ""
-        for key in ("code", "fix", "searched"):
+        for key in ("code", "fix", "searched", "doc_text"):
             if str(data.get(key) or "").strip():
                 setattr(t, key, str(data[key]).strip())
         side = str(data.get("side") or "").strip().lower()
@@ -772,12 +785,18 @@ def apply_challenge(result: ReviewResult, index: int, reply: str, kind: str, *, 
         entry["after"] = t.status
         if safe:
             t.code, t.fix, t.searched = redact(t.code), redact(t.fix), redact(t.searched)
+            t.doc_text = redact(t.doc_text)
             entry["reason"] = redact(entry["reason"])
             for e in t.evidence:
                 e.note = redact(e.note)
     entry["note"] = redact(entry["note"]) if safe else entry["note"]
     t.challenges.append(entry)
     return prose, entry
+
+
+def doc_updates(result: ReviewResult) -> list[Trace]:
+    """Rows where the document should be rewritten — each carries the new wording."""
+    return [t for t in result.traces if t.doc_text]
 
 
 def gaps(result: ReviewResult, kind: str) -> list[int]:
@@ -835,6 +854,12 @@ def render_markdown(title: str, kind: str, result: ReviewResult, *,
             fix = t.fix + (f" ({SIDES[t.side]})" if t.side in SIDES else "")
             out.append(f"| {_cell(t.ref)} | {_cell(t.spec)} | {icon} {label} | "
                        f"{_cell(t.code)} | {ev} | {_cell(fix)} |")
+        out.append("")
+    updates = doc_updates(result)
+    if updates:
+        out += ["## Cập nhật tài liệu", "",
+                "| Mục | Hiện tại (nguyên văn) | Viết lại thành |", "|---|---|---|"]
+        out += [f"| {_cell(t.ref)} | {_cell(t.spec)} | {_cell(t.doc_text)} |" for t in updates]
         out.append("")
     dq = result.doc_quality or {}
     if dq.get("issues") or dq.get("verdict"):
@@ -912,7 +937,9 @@ def render_ado_comment(title: str, result: ReviewResult, *, link: str = "") -> s
             f"{escape(st.get(t.status, ('', t.status, ''))[1])}: {escape(t.code)}"
             + "".join(f"<br/><code>{escape(e.where)}</code>" for e in t.evidence if e.where)
             + f"</td><td>{escape(t.fix or '—')}"
-            + (f" <i>({escape(SIDES[t.side])})</i>" if t.side in SIDES else "") + "</td></tr>"
+            + (f" <i>({escape(SIDES[t.side])})</i>" if t.side in SIDES else "")
+            + (f"<br/>📝 <b>Viết lại tài liệu:</b> {escape(t.doc_text)}" if t.doc_text else "")
+            + "</td></tr>"
             for t in rows)
         parts.append("<p><b>2. Mục spec cần xử lý</b></p><table border='1' cellpadding='4'>"
                      "<tr><th>Mục</th><th>Spec (nguyên văn)</th><th>Code hiện tại</th>"
@@ -969,6 +996,7 @@ def trace_work_item(title: str, t: Trace, kind: str, *, link: str = "") -> tuple
             f"<code>{escape(e.where)}</code>" for e in t.evidence if e.where) + "</div>")
         if any(e.where for e in t.evidence) else "",
         f"<div><b>Đề xuất:</b> {escape(t.fix)}</div>" if t.fix else "",
+        f"<div><b>Viết lại tài liệu:</b> {escape(t.doc_text)}</div>" if t.doc_text else "",
         f"<div><a href='{escape(link)}'>Mở phiên rà soát</a></div>" if link else "",
     ]
     return head[:250], "".join(b for b in body if b)

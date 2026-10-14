@@ -93,17 +93,18 @@ The service listens on **`:5080`** by default:
 | Endpoint | Purpose |
 |----------|---------|
 | `/dashboard` | Overview · Board · Board processes · Planning · History · Learning · Settings · Config · Capabilities |
-| `/health` | Readiness checks (ado / claude / disk) as JSON |
+| `/health` | Dependency checks (ado / claude / disk) as JSON — for people, not probes |
+| `/livez` · `/readyz` | Kubernetes probes. Never leave the process: alive / database answers |
 | `/metrics` | Prometheus metrics |
-| `/api/webhook/ado` | ADO Service Hook → instant pickup (work items **and** PR comments) |
-| `/api/messages` | Teams bot messaging endpoint (only mounted when `teams_agent_enabled` + Agent ID/secret/tenant are set) |
+| `/api/webhook/ado` | ADO Service Hook → instant pickup (work items **and** PR comments). **From another host it needs `webhook_secret`** (sent as `X-Webhook-Secret`); without one it answers localhost only. A queued work item still has to pass the trigger rules. |
+| `/api/messages` | Teams bot messaging endpoint (only mounted when `teams_agent_enabled` + Agent ID/secret/tenant are set). Accepts only a valid Bot Service token for this bot, from `teams_agent_tenant_id`. |
 
 **⚡ How fast are `/ai` / `/review` replies picked up?** Three lanes, fastest wins:
 
 | Lane | Latency | Setup |
 |------|---------|-------|
 | **Hot lane** (built-in) | ~`pr_hot_poll_interval_seconds` (3s) | None. Once the bot engages a PR, that PR is re-polled fast for `pr_hot_window_minutes` — follow-up replies feel chat-like **even on localhost**. |
-| **Webhook** | ~1s, incl. the *first* command | Reachable URL required. *Project Settings → Service Hooks → Web Hooks* → event **“Pull request commented on”** → `http://<autopilot-host>:5080/api/webhook/ado`. On a local machine, expose the port first (`devtunnel host -p 5080` or `ngrok http 5080`) and use that public URL. |
+| **Webhook** | ~1s, incl. the *first* command | Reachable URL required. *Project Settings → Service Hooks → Web Hooks* → event **“Pull request commented on”** → `http://<autopilot-host>:5080/api/webhook/ado`, with an HTTP header `X-Webhook-Secret: <your webhook_secret>`. On a local machine, expose the port first (`devtunnel host -p 5080` or `ngrok http 5080`) and use that public URL. |
 | **Global poll** (fallback) | ≤ `pr_poll_interval_seconds` (15s) | None — always on, so a missed webhook or a cooled-down PR is only ever slow, never lost. |
 
 The webhook endpoint filters bot-signed comments and plain chatter — only real
@@ -146,9 +147,9 @@ Resume or Export.
 | **Share** | `.yaml` | Org, tags, states, pipeline map, thresholds. **No** PAT / token / webhook, and none of this host's paths, ports or trigger tag. |
 | **Backup / migrate** | `.enc` | Everything **including** the PAT and every token, encrypted with `config_export_password`. |
 
-The full export is **refused when `config_export_password` is empty** — encrypting under an
-empty password produces a valid‑looking `.enc` whose key anyone can reproduce, so the file
-would carry your PAT while looking protected.
+The full export is **refused when `config_export_password` is empty**, or still the old
+built‑in default `Export#12345` (it is in this public repo) — either way the `.enc` would
+carry your PAT while looking protected. Restoring a `.enc` (**import‑full**) is admin‑only.
 
 Neither mode carries the dashboard password: a restore never clobbers the target host's own
 credential, which does mean a **freshly migrated instance starts unlocked** until you set
@@ -533,7 +534,7 @@ legacy-dotnet/               # original .NET 8 implementation (reference)
 ## 🛠️ Development
 
 ```bash
-pip install -c requirements-lock.txt -e ".[dev,docs]"   # same pinned versions as CI
+pip install -c requirements-lock.txt -e ".[dev,docs,teams-bot]"   # same pinned versions as CI
 
 pytest                                  # run unit tests
 ruff check ai_autopilot tests scripts   # lint
@@ -548,7 +549,7 @@ over the lockfile, and a Docker build.
   the smaller `mypy-baseline.txt`. Never add to it to make a new error pass.
 - **Changed dependencies in `pyproject.toml`?** Regenerate the lock (Dependabot keeps it
   current otherwise):
-  `uv pip compile pyproject.toml --extra dev --extra docs --universal --python-version 3.11 --no-header --annotation-style line -o requirements-lock.txt`
+  `uv pip compile pyproject.toml --extra dev --extra docs --extra teams-bot --universal --python-version 3.11 --no-header --annotation-style line -o requirements-lock.txt`
 - There is no `ruff format` gate on purpose: the code uses aligned hanging indents the
   formatter would rewrite wholesale.
 - `.claude/` (skills, rules, agents) is a **separate repository** and is git-ignored here.

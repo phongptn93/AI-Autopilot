@@ -1569,7 +1569,8 @@ def import_full_settings(blob: bytes, password: str, valid_keys: set[str]) -> di
     data = yaml.safe_load(raw) or {}
     if not isinstance(data, dict):
         raise ValueError("Config file must be a YAML mapping")
-    return {k: v for k, v in data.items() if k in valid_keys}
+    # An export never carries these; a hand-made file must not plant them either.
+    return {k: v for k, v in data.items() if k in valid_keys and k not in FULL_EXPORT_EXCLUDE}
 
 
 def sections() -> list[tuple[str, list[Field]]]:

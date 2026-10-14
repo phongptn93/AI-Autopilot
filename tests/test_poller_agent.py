@@ -2079,3 +2079,27 @@ async def test_a_crashed_background_run_is_logged_and_released(monkeypatch, caps
     assert p._bg == set()
     # Console or stdlib logging, depending on what configured logging before this test.
     assert "background item run crashed" in capsys.readouterr().out + caplog.text
+
+
+async def test_webhook_items_must_pass_the_trigger_rules(monkeypatch):
+    """A hook fires for ANY update in the project and anyone reaching the endpoint can
+    post an id — it used to go straight to a run."""
+    from ai_autopilot.webhook import WebhookQueue
+
+    p, c = _poller(trigger_tag="autopilot")
+    c.webhook_queue = WebhookQueue()
+    tagged = _tagged(1, "New", ["autopilot"])
+    untagged = _tagged(2, "New", ["something-else"])
+
+    async def by_ids(ids):
+        return [i for i in (tagged, untagged) if i.id in ids]
+
+    c.ado.get_work_items_by_ids = by_ids
+    started: list[int] = []
+    monkeypatch.setattr(p, "_spawn", lambda item: started.append(item.id))
+    c.webhook_queue.enqueue(1)
+    c.webhook_queue.enqueue(2)
+
+    await p._process_webhook_items()
+
+    assert started == [1]

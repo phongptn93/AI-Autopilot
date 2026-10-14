@@ -25,8 +25,11 @@ def client(tmp_path) -> TestClient:
     settings = Settings(
         dry_run=True,
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
+        # TestClient is not a loopback peer, and without a secret the webhooks only
+        # answer this machine — so the webhook tests below sign their requests.
+        webhook_secret="hook-secret",
     )
-    with TestClient(create_app(settings)) as c:
+    with TestClient(create_app(settings), headers={"X-Webhook-Secret": "hook-secret"}) as c:
         yield c
 
 
@@ -417,6 +420,31 @@ def test_overview_shows_efficiency_cards(client: TestClient):
     assert "Run / item" in resp.text
 
 
+def test_k8s_probes_never_leave_the_process(client: TestClient, monkeypatch):
+    """/health asks ADO; probing it turned an ADO outage into a restart loop."""
+    from ai_autopilot import health
+
+    async def ado_must_not_be_called(*a, **k):
+        raise AssertionError("a probe called ADO")
+
+    monkeypatch.setattr(health, "check_ado", ado_must_not_be_called)
+    assert client.get("/livez").json() == {"status": "alive"}
+    resp = client.get("/readyz")
+    assert resp.status_code == 200 and resp.json() == {"status": "ready"}
+
+
+def test_readyz_fails_when_the_database_does_not_answer(client: TestClient, monkeypatch):
+    db = client.app.state.container.database
+
+    def broken():
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(db, "session", broken)
+    resp = client.get("/readyz")
+    assert resp.status_code == 503 and "disk gone" in resp.json()["error"]
+    assert client.get("/livez").status_code == 200     # alive, just not ready
+
+
 def test_health_reports_checks(client: TestClient):
     resp = client.get("/health")
     body = resp.json()
@@ -428,6 +456,16 @@ def test_webhook_enqueues(client: TestClient):
     resp = client.post("/api/webhook/ado", json={"resource": {"workItemId": 123}})
     assert resp.status_code == 200
     assert resp.json() == {"queued": 123}
+
+
+def test_without_a_secret_the_webhook_only_answers_this_machine(tmp_path):
+    """No secret means nothing tells a real ADO hook from anyone else on the network —
+    and a queued id used to go straight to a run."""
+    settings = Settings(dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 'w.db'}")
+    with TestClient(create_app(settings)) as remote:     # peer "testclient": not loopback
+        resp = remote.post("/api/webhook/ado", json={"resource": {"workItemId": 123}})
+        assert resp.status_code == 401
+        assert remote.app.state.container.webhook_queue.drain() == []
 
 
 def test_webhook_rejects_missing_id(client: TestClient):
@@ -602,6 +640,20 @@ def test_full_export_works_once_a_password_is_set(tmp_path):
         assert resp.status_code == 200
         assert b"a-real-pat" not in resp.content              # encrypted, not plaintext
         assert b"a-real-pat" in security.decrypt_bytes(resp.content, "pw")
+
+
+def test_the_old_public_default_export_password_is_refused(tmp_path):
+    """`Export#12345` shipped as the default and is in the public repo — an .enc made
+    with it protects nothing. Installs that still carry it must set their own."""
+    assert Settings().config_export_password == ""
+    settings = Settings(
+        database_url=f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}",
+        ado_pat="a-real-pat", config_export_password="Export#12345",
+    )
+    with TestClient(create_app(settings)) as client:
+        resp = client.get("/dashboard/settings/export-full", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.cookies["autopilot_flash"] == "err_weak_export_password"
 
 
 # ── Outcome banners travel in a one-shot cookie, never in the URL ─────────────

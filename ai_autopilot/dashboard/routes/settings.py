@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from ai_autopilot import fleet as fleet_mod
 from ai_autopilot import sdlc_presets, security, settings_form, trigger_check
-from ai_autopilot.config import SdlcRole, config_file_path
+from ai_autopilot.config import KNOWN_WEAK_EXPORT_PASSWORDS, SdlcRole, config_file_path
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard.common import (
     _FLASH_COOKIE,
@@ -893,6 +893,11 @@ def create_router() -> APIRouter:
             # token with no real protection, while looking protected.
             _log.warning("full export refused — config_export_password is not set")
             return _flash("/dashboard/settings", "err_no_export_password")
+        if c.config.config_export_password in KNOWN_WEAK_EXPORT_PASSWORDS:
+            # Same reasoning: the old built-in default is published in the repo.
+            _log.warning("full export refused — config_export_password is the old public "
+                         "default; set your own")
+            return _flash("/dashboard/settings", "err_weak_export_password")
         blob = settings_form.export_full_encrypted(c.config, c.config.config_export_password)
         # Audit only the event — never the secret payload or the password.
         _log.warning("FULL config (with secrets) exported via dashboard — encrypted download")

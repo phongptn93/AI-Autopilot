@@ -95,7 +95,10 @@ _RULES: list[tuple[str, str, str]] = [
     ("*", r"/(login|logout|auth/.*)$", ""),                 # always reachable
     ("POST", r"/workspace/select$", "view"),                # a view filter, not a change
     ("GET", r"/settings/(reveal/.*|export-full)$", "secrets.view"),
-    ("POST", r"/settings/import-full$", "secrets.view"),
+    # Restoring a full config rewrites every setting, roles and auth included — only an
+    # admin may. (It used to need just secrets.view: a viewer of secrets could grant
+    # itself users.manage, or set test_command and have the next run execute it.)
+    ("POST", r"/settings/import-full$", ADMIN),
     ("*", r"/users(/.*)?$", "users.manage"),
     ("GET", r".*", "view"),
     ("POST", r"/(board/run|sessions/[^/]+/cancel|feedback/[^/]+)$", "runs.start"),

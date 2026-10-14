@@ -5,7 +5,14 @@ metadata:
   labels:
     app: ai-autopilot
 spec:
+  # ONE replica, always. The scheduler runs in-process and the database is a SQLite
+  # file on a ReadWriteOnce volume — two pods would double-run work and contend for
+  # the file. Scale out with Fleet (central + workers), not replicas.
   replicas: 1
+  # Recreate, not RollingUpdate: a rolling update starts the new pod while the old
+  # one still holds the SQLite volume and the scheduler.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: ai-autopilot
@@ -14,8 +21,19 @@ spec:
       labels:
         app: ai-autopilot
     spec:
+      # The agent has a shell; it must not find a Kubernetes API token next to it.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001        # the image's `autopilot` user
+        runAsGroup: 10001
+        fsGroup: 10001          # makes the /data volume writable for that user
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: autopilot
+          # Pin a released version (the image tag matching the GitHub release) rather
+          # than :latest, so a restart never silently changes what runs.
           image: ai-autopilot:latest
           ports:
             - containerPort: 5080
@@ -27,25 +45,38 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # /livez and /readyz never leave the process. /health asks Azure DevOps, so
+          # probing it turned an ADO outage into a restart loop.
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: 5080
+            periodSeconds: 5
+            failureThreshold: 24     # up to 2 minutes to start
           livenessProbe:
             httpGet:
-              path: /health
+              path: /livez
               port: 5080
-            initialDelaySeconds: 15
             periodSeconds: 30
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
-              path: /health
+              path: /readyz
               port: 5080
-            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
           resources:
+            # The Claude CLI plus git on a real repo outgrow 512Mi.
             requests:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "250m"
             limits:
-              memory: "512Mi"
-              cpu: "500m"
+              memory: "1536Mi"
+              cpu: "1000m"
       volumes:
         - name: data
           persistentVolumeClaim:

@@ -352,6 +352,29 @@ class AdoPollerService:
         self._run_rung = trim_dict(self._run_rung)
         self._plan_only = trim_set(self._plan_only)
 
+    async def _process_webhook_items(self) -> None:
+        """Start the items ADO hooks queued — those that pass the trigger rules.
+
+        A hook fires for ANY update in the project, and anyone who can reach the
+        endpoint can post an id, so an item must pass the same rules the poll query
+        applies (tag, state, owner, project) rather than merely exist.
+        """
+        from ai_autopilot import trigger_check
+
+        c = self._c
+        webhook_ids = c.webhook_queue.drain()
+        if not webhook_ids:
+            return
+        self._log.info("processing webhook items", count=len(webhook_ids))
+        for wi in await c.ado.get_work_items_by_ids(webhook_ids):
+            if wi.id in self._processed or c.retry_policy.is_exhausted(wi.id):
+                continue
+            if not trigger_check.explain(wi, self._config).picked:
+                self._log.info("webhook item does not match the trigger rules — ignored",
+                               id=wi.id, state=wi.state)
+                continue
+            self._spawn(wi)
+
     async def _poll_and_process(self) -> None:
         c, cfg = self._c, self._config
 
@@ -373,12 +396,7 @@ class AdoPollerService:
             return
 
         # Webhook-triggered items first.
-        webhook_ids = c.webhook_queue.drain()
-        if webhook_ids:
-            self._log.info("processing webhook items", count=len(webhook_ids))
-            for wi in await c.ado.get_work_items_by_ids(webhook_ids):
-                if wi.id not in self._processed and not c.retry_policy.is_exhausted(wi.id):
-                    self._spawn(wi)
+        await self._process_webhook_items()
 
         # A hold a person released on the board (the hold tag removed in ADO) must
         # release here too — otherwise the item sits in "Needs human" forever.

@@ -10,7 +10,7 @@ import ipaddress
 import secrets
 import time
 from contextlib import asynccontextmanager
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import RedirectResponse
@@ -20,7 +20,7 @@ from ai_autopilot import fleet, health, metrics, rbac, security, user_auth
 from ai_autopilot.config import Settings, load_settings
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard import create_dashboard_router, forget_scans
-from ai_autopilot.logging_config import configure_logging, get_logger
+from ai_autopilot.logging_config import configure_logging, describe_exc, get_logger
 from ai_autopilot.services import (
     AdoPollerService,
     DeliveryTrackerService,
@@ -60,6 +60,30 @@ def _dashboard_auth_ok(header: str | None, config: Settings) -> bool:
     return bool(config.dashboard_auth_token) and secrets.compare_digest(
         password, config.dashboard_auth_token
     )
+
+
+_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _cross_site_write(request: Request) -> bool:
+    """True for a state-changing request a browser sent on behalf of another site.
+
+    With no password the dashboard trusts any loopback peer, and a page on any site the
+    operator visits can make the browser POST to 127.0.0.1 — e.g. setting
+    ``test_command``, which the next run executes in a shell. ``Sec-Fetch-Site`` is
+    computed by the browser from its own address bar, so it stays right behind a proxy
+    that rewrites ``Host``; ``Origin`` vs ``Host`` is the fallback for older browsers. A
+    client that sends neither (curl, a script) is not a browser and cannot be CSRF'd.
+    """
+    if request.method not in _UNSAFE_METHODS:
+        return False
+    site = (request.headers.get("sec-fetch-site") or "").lower()
+    if site:
+        return site == "cross-site"
+    origin = request.headers.get("origin") or ""
+    if not origin or origin == "null":
+        return bool(origin)  # "null" = sandboxed/opaque origin: never ours
+    return (urlparse(origin).netloc or "").lower() != (request.headers.get("host") or "").lower()
 
 
 def _is_loopback_client(request: Request) -> bool:
@@ -405,6 +429,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         open for probes.
         """
         path = request.url.path
+        if path.startswith("/dashboard") and _cross_site_write(request):
+            log.warning("dashboard: cross-site write refused", path=path,
+                        origin=request.headers.get("origin") or "",
+                        site=request.headers.get("sec-fetch-site") or "")
+            return Response(status_code=403, content="cross-site request refused")
+        if (path.startswith("/api/webhook") and not config.webhook_secret
+                and not _is_loopback_client(request)):
+            # No secret, so nothing tells a real ADO hook from anyone else on the
+            # network. Local callers (a tunnel or proxy on this host) still work.
+            log.warning("webhook refused: set webhook_secret to accept hooks from other "
+                        "hosts (sent as the X-Webhook-Secret header)", path=path)
+            return Response(status_code=401, content="webhook_secret is not configured")
         if config.webhook_secret and path.startswith("/api/webhook"):
             got = request.headers.get("x-webhook-secret") or ""
             if not secrets.compare_digest(got, config.webhook_secret):
@@ -447,7 +483,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         elif (
             path.startswith("/dashboard")
             and not config.dashboard_allow_remote_without_auth
-            and not _is_loopback_client(request)
+            and not (_is_loopback_client(request)
+                     and security.host_header_is_loopback(request.headers.get("host")))
         ):
             # No password: the dashboard can rewrite config, PAT included, so it is
             # served to this machine only. /health, /metrics and the webhooks are not
@@ -497,6 +534,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         }
 
+    # Kubernetes probes. /health asks ADO, so using it for liveness turned an ADO outage
+    # into a restart loop — and for readiness (one replica) into a dashboard that drops
+    # off the Service exactly when someone wants to look at it. Neither probe leaves
+    # this process.
+    @app.get("/livez")
+    async def livez() -> dict:
+        """The process answers. Nothing else is checked."""
+        return {"status": "alive"}
+
+    @app.get("/readyz")
+    async def readyz(response: Response) -> dict:
+        """Startup finished and the database answers."""
+        from sqlalchemy import text
+
+        c: Container | None = getattr(app.state, "container", None)
+        if c is None:
+            response.status_code = 503
+            return {"status": "starting"}
+        try:
+            async with c.database.session() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception as exc:  # noqa: BLE001 — any failure means "not ready"
+            response.status_code = 503
+            return {"status": "database unavailable", "error": describe_exc(exc)[:200]}
+        return {"status": "ready"}
+
     @app.get("/metrics")
     async def metrics_endpoint() -> Response:
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -510,6 +573,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         teams_agent = getattr(request.app.state, "teams_agent", None)
         if teams_agent is None:
             return Response(status_code=404)
+        from ai_autopilot.teams_agent import authorize_request
+        refused = await authorize_request(request, config)
+        if refused is not None:
+            status, reason = refused
+            log.warning("teams: request refused", status=status, reason=reason,
+                        client=request.client.host if request.client else "")
+            return Response(status_code=status)
         from microsoft_agents.hosting.fastapi import start_agent_process
 
         adapter = request.app.state.teams_adapter

@@ -351,6 +351,12 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
         "⚠️ Chưa đặt <b>Full-export password</b> — file sẽ không được bảo vệ. Đặt "
         "<code>config_export_password</code> ở mục <b>🔐 Web &amp; bảo mật</b> rồi export lại.",
     ),
+    "err_weak_export_password": (
+        "red",
+        "⚠️ <b>Full-export password</b> đang là mật khẩu mặc định cũ (<code>Export#12345</code>) "
+        "— ai cũng biết nên file sẽ không được bảo vệ. Đặt mật khẩu riêng ở mục "
+        "<b>🔐 Web &amp; bảo mật</b> rồi export lại.",
+    ),
 }
 
 

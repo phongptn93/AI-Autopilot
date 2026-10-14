@@ -948,6 +948,11 @@ def config_file_path() -> Path:
     return _yaml_path()
 
 
+# The default config_export_password shipped before v2.81.0. It is in the public repo, so
+# an export encrypted with it protects nothing; installs that still carry it are refused.
+KNOWN_WEAK_EXPORT_PASSWORDS = frozenset({"Export#12345"})
+
+
 class Settings(BaseSettings):
     """Root configuration for the autopilot service."""
 
@@ -2156,8 +2161,10 @@ class Settings(BaseSettings):
     # Symmetric password that encrypts the FULL config export (the download that
     # deliberately includes secrets — PAT, SMTP/Zalo tokens, per-tenant PATs).
     # Must stay usable to encrypt, so it is stored as-is (not hashed); the same
-    # value is needed to decrypt the exported file. Override in config.yaml / env.
-    config_export_password: str = "Export#12345"
+    # value is needed to decrypt the exported file. No default: the old built-in one
+    # ("Export#12345") was public, so any .enc made with it was not protected at all —
+    # it is refused like a blank one (see KNOWN_WEAK_EXPORT_PASSWORDS).
+    config_export_password: str = ""
 
     # ── Persistence ──
     database_url: str = "sqlite+aiosqlite:///autopilot.db"

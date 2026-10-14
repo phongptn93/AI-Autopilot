@@ -314,3 +314,27 @@ def test_keypair_helper_exports_pem():          # keeps the serialization import
     key, _ = _keypair()
     assert key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                              serialization.NoEncryption()).startswith(b"-----BEGIN")
+
+
+async def test_the_first_run_admin_is_this_machine_not_a_rebound_hostname():
+    """Until an admin exists, a loopback peer is made admin. DNS rebinding makes an
+    attacker's page a loopback peer too — only the Host header tells them apart."""
+    from types import SimpleNamespace
+
+    from ai_autopilot import user_auth
+    from ai_autopilot.config import Settings
+
+    class _Repo:
+        async def active_admins(self):
+            return []
+
+    container = SimpleNamespace(config=Settings(auth_breakglass=False), user_repo=_Repo())
+
+    def req(host):
+        return SimpleNamespace(cookies={}, headers={"host": host},
+                               client=SimpleNamespace(host="127.0.0.1"))
+
+    user, _ = await user_auth.resolve(req("127.0.0.1:5080"), container)
+    assert user is not None and user.kind == "bootstrap"
+    user, _ = await user_auth.resolve(req("evil.example:5080"), container)
+    assert user is None

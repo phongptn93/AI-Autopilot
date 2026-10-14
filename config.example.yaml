@@ -327,14 +327,16 @@ health_port: 5080
 # below set, the CLI prompts for a password and stores its PBKDF2 hash here.
 # dashboard_auth_password_hash: ""   # auto-filled by the first-run prompt (never plaintext)
 # dashboard_auth_token: ""           # legacy plaintext alternative (prefer the hash above)
-# webhook_secret: ""                 # require the X-Webhook-Secret HEADER on POST /api/webhook/*
+# webhook_secret: ""                 # required for hooks from other hosts: the X-Webhook-Secret
+#                                    # HEADER on POST /api/webhook/*. Empty = localhost only.
 #                                    # (a ?secret= query string is refused — it lands in proxy logs)
 # With no password the dashboard answers localhost only. True = serve it to the network
 # anyway (only behind a reverse proxy that authenticates on its own).
 # dashboard_allow_remote_without_auth: false
 # Password that encrypts the FULL config export (the download that INCLUDES
-# secrets). Needed to decrypt the exported .enc file. Override via env in prod.
-config_export_password: "Export#12345"
+# secrets). Needed to decrypt the exported .enc file. No default — the export is
+# refused until you set your own (the old default "Export#12345" is refused too).
+# config_export_password: ""
 
 # ── Persistence ──
 database_url: "sqlite+aiosqlite:///autopilot.db"

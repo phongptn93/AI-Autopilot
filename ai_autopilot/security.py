@@ -29,6 +29,21 @@ from ai_autopilot.config import Settings
 from ai_autopilot.logging_config import get_logger
 from ai_autopilot.models import WorkItemInfo
 
+_LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def host_header_is_loopback(host_header: str | None) -> bool:
+    """The ``Host`` a browser asked for names this machine.
+
+    DNS rebinding points an attacker's hostname at 127.0.0.1: the TCP peer is loopback,
+    but the page — and its script — belong to the attacker's origin. Only the Host
+    header tells the two apart, so anything that trusts a loopback PEER must check it.
+    """
+    host = (host_header or "").strip().lower()
+    bracketed = host.startswith("[") and "]" in host           # [::1]:5080
+    name = host[1:host.index("]")] if bracketed else host.split(":")[0]
+    return name in _LOOPBACK_NAMES
+
 
 def _identity_matches(allowed: list[str], identity: str) -> bool:
     """Whole-identity match, NOT substring.

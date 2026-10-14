@@ -153,6 +153,8 @@ async def resolve(request, container) -> tuple[CurrentUser | None, str]:
             request.cookies.get(security.SESSION_COOKIE), cfg):
         return _admin(BREAKGLASS), ""
     host = (request.client.host if request.client else "") or ""
-    if host in ("127.0.0.1", "::1", "localhost") and not await container.user_repo.active_admins():
+    if (host in ("127.0.0.1", "::1", "localhost")
+            and security.host_header_is_loopback(request.headers.get("host"))
+            and not await container.user_repo.active_admins()):
         return _admin("bootstrap"), ""
     return None, ""

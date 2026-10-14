@@ -53,6 +53,6 @@ ENV AUTOPILOT_DATABASE_URL=sqlite+aiosqlite:////data/autopilot.db \
 EXPOSE 5080
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5080/health').status==200 else 1)" || exit 1
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5080/livez').status==200 else 1)" || exit 1
 
 ENTRYPOINT ["python", "-m", "ai_autopilot"]

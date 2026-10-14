@@ -324,6 +324,58 @@ _VOTE_SHORT = {10: "✅ approved", 5: "✅ suggestions", 0: "⏳ chưa vote",
                -5: "⏸️ waiting", -10: "❌ rejected"}
 
 
+def activity_tenant(activity: Any) -> str:
+    """The Entra tenant a Bot Framework activity came from, or "" when it names none."""
+    if not isinstance(activity, dict):
+        return ""
+    conv = activity.get("conversation") or {}
+    tenant = (activity.get("channelData") or {}).get("tenant") or {}
+    return str((conv.get("tenantId") if isinstance(conv, dict) else "")
+               or (tenant.get("id") if isinstance(tenant, dict) else "") or "").strip()
+
+
+async def authorize_request(request: Any, config: Settings) -> tuple[int, str] | None:
+    """Refuse a ``/api/messages`` call that did not come from Bot Service for OUR tenant.
+
+    ``None`` = let it through; otherwise ``(status, reason)``. Without this the endpoint
+    accepted any POST: the adapter falls back to an anonymous identity when no claims are
+    set, so a forged ``expectReplies`` activity could read ADO data back in the HTTP
+    response, file tickets and start paid agent runs.
+
+    Two checks, both fail-closed:
+    1. The Bearer token is a valid Bot Service JWT whose audience is this bot's app id
+       (the SDK's own validator — signature, issuer, audience, expiry). No token → 401;
+       anonymous is never allowed.
+    2. The activity's tenant is ``teams_agent_tenant_id``. A valid token proves the call
+       came through Bot Service, not that it came from our organisation.
+    """
+    from microsoft_agents.hosting.core import AgentAuthConfiguration, AuthTypes
+    from microsoft_agents.hosting.core.authorization.jwt import JwtTokenValidator
+
+    auth = AgentAuthConfiguration(
+        auth_type=AuthTypes.client_secret, client_id=config.teams_agent_app_id,
+        client_secret=config.teams_agent_app_secret, tenant_id=config.teams_agent_tenant_id,
+        anonymous_allowed=False,
+    )
+    header = request.headers.get("Authorization") or ""
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return 401, "missing bearer token"
+    try:
+        request.state.claims_identity = await JwtTokenValidator(auth).validate_token(token.strip())
+    except Exception as exc:  # noqa: BLE001 — any validation failure is a refusal
+        return 401, f"invalid token ({type(exc).__name__})"
+    try:
+        activity = await request.json()
+    except Exception:  # noqa: BLE001
+        return 400, "body is not JSON"
+    tenant = activity_tenant(activity)
+    expected = (config.teams_agent_tenant_id or "").strip()
+    if not tenant or tenant.lower() != expected.lower():
+        return 403, f"tenant {tenant or '(none)'} is not this bot's tenant"
+    return None
+
+
 def build_agent(config: Settings, container: Container, reviewer_tracker: ReviewerTrackerService):
     """Build ``(agent_application, adapter, digest_task)`` for ``/api/messages``, or
     ``None`` if the Teams bot isn't configured/installed — the caller then skips the

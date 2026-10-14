@@ -41,10 +41,12 @@ dev = [
 # Two-way Microsoft Teams bot (approve/reject buttons, chat commands). Optional —
 # ai_autopilot/teams_agent.py degrades to a no-op if these aren't installed or
 # teams_agent_enabled is off, so the base install is unaffected.
+# The Microsoft Agents SDK requires Python 3.12+; on 3.11 this extra installs nothing
+# and the bot stays off (rather than the whole install failing).
 teams-bot = [
-    "microsoft-agents-hosting-fastapi>=1.2.0",
-    "microsoft-agents-hosting-teams>=1.2.0",
-    "microsoft-agents-authentication-msal>=1.2.0",
+    "microsoft-agents-hosting-fastapi>=1.2.0; python_version >= '3.12'",
+    "microsoft-agents-hosting-teams>=1.2.0; python_version >= '3.12'",
+    "microsoft-agents-authentication-msal>=1.2.0; python_version >= '3.12'",
 ]
 
 [project.scripts]

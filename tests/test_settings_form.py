@@ -406,3 +406,26 @@ def test_save_to_yaml_is_atomic_and_keeps_a_backup(tmp_path, monkeypatch):
         sf.save_to_yaml(path, {"poll_interval_seconds": 99})
     assert "45" in path.read_text(encoding="utf-8")          # untouched
     assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []
+
+
+def test_a_full_import_cannot_plant_the_auth_mechanism_keys():
+    """An export never carries them; a hand-made file must not plant them either."""
+    import yaml
+
+    from ai_autopilot import security
+    from ai_autopilot.config import Settings
+    from ai_autopilot.settings_form import import_full_settings
+
+    body = yaml.safe_dump({"poll_interval_seconds": 45, "config_export_password": "x",
+                           "dashboard_auth_password_hash": "pbkdf2$attacker"})
+    updates = import_full_settings(security.encrypt_bytes(body.encode(), "k"), "k",
+                                   set(Settings.model_fields))
+    assert updates == {"poll_interval_seconds": 45}
+
+
+def test_full_import_is_admin_only():
+    """It used to need only secrets.view — enough to grant yourself users.manage."""
+    from ai_autopilot import rbac
+
+    assert rbac.required("POST", "/dashboard/settings/import-full") == rbac.ADMIN
+    assert not rbac.allowed({"secrets.view", "settings.edit"}, rbac.ADMIN)

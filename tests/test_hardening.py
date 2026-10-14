@@ -7,6 +7,7 @@ import asyncio
 import sys
 
 import httpx
+import pytest
 from sqlalchemy import text
 from starlette.testclient import TestClient
 
@@ -128,8 +129,48 @@ def test_dashboard_without_password_refuses_remote_clients(tmp_path):
     with TestClient(app, client=("10.0.0.7", 5555)) as remote:
         assert remote.get("/dashboard").status_code == 403
         assert remote.get("/health").status_code != 403
-    with TestClient(app, client=("127.0.0.1", 5555)) as local:
+    with TestClient(app, client=("127.0.0.1", 5555), base_url="http://127.0.0.1:5080") as local:
         assert local.get("/dashboard").status_code == 200
+
+
+def test_dns_rebinding_is_refused_without_a_password(tmp_path):
+    """evil.example resolving to 127.0.0.1: the peer is loopback, the page is not ours."""
+    app = _no_auth_app(tmp_path, dashboard_allow_remote_without_auth=False)
+    with TestClient(app, client=("127.0.0.1", 5555), base_url="http://evil.example:5080") as c:
+        assert c.get("/dashboard").status_code == 403
+    for host in ("localhost:5080", "[::1]:5080"):
+        with TestClient(app, client=("127.0.0.1", 5555), base_url=f"http://{host}") as c:
+            assert c.get("/dashboard").status_code == 200
+
+
+@pytest.mark.parametrize("headers", [
+    {"Sec-Fetch-Site": "cross-site"},
+    {"Origin": "https://evil.example"},
+    {"Origin": "null"},
+])
+def test_cross_site_writes_to_the_dashboard_are_refused(tmp_path, headers, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    """A page on any site the operator visits could POST to 127.0.0.1 — e.g. set
+    test_command, which the next run executes in a shell."""
+    app = _no_auth_app(tmp_path, dashboard_allow_remote_without_auth=False)
+    with TestClient(app, client=("127.0.0.1", 5555), base_url="http://127.0.0.1:5080") as c:
+        resp = c.post("/dashboard/settings", data={"test_command": "calc"}, headers=headers,
+                      follow_redirects=False)
+        assert resp.status_code == 403
+        assert c.app.state.container.config.test_command != "calc"
+
+
+@pytest.mark.parametrize("headers", [
+    {"Sec-Fetch-Site": "same-origin"},
+    {"Origin": "http://127.0.0.1:5080"},
+    {},                                    # curl / scripts: not a browser, not CSRF
+])
+def test_same_origin_and_non_browser_writes_still_work(tmp_path, headers, monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_CONFIG_FILE", str(tmp_path / "config.yaml"))
+    app = _no_auth_app(tmp_path, dashboard_allow_remote_without_auth=False)
+    with TestClient(app, client=("127.0.0.1", 5555), base_url="http://127.0.0.1:5080") as c:
+        resp = c.post("/dashboard/settings", data={}, headers=headers, follow_redirects=False)
+        assert resp.status_code != 403
 
 
 def test_remote_dashboard_without_password_is_an_explicit_choice(tmp_path):

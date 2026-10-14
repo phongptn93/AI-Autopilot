@@ -29,7 +29,7 @@ jobs:
           python-version: "3.14"
           cache: pip
           cache-dependency-path: requirements-lock.txt
-      - run: pip install -c requirements-lock.txt -e ".[dev,docs]"
+      - run: pip install -c requirements-lock.txt -e ".[dev,docs,teams-bot]"
       - name: ruff
         run: ruff check ai_autopilot tests scripts
       - name: mypy (no new errors vs baseline)
@@ -53,7 +53,7 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: requirements-lock.txt
-      - run: pip install -c requirements-lock.txt -e ".[dev,docs]"
+      - run: pip install -c requirements-lock.txt -e ".[dev,docs,teams-bot]"
       - name: pytest
         run: python -m pytest -q --cov=ai_autopilot --cov-report=term:skip-covered --cov-fail-under=80
 

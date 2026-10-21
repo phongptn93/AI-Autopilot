@@ -839,3 +839,58 @@ def test_no_workspace_means_nothing_to_measure(tmp_path):
 
     assert check_workspace_context(Settings()) == []
     assert check_workspace_context(Settings(workspace_directory=str(tmp_path))) == []
+
+
+# ── workspace skills load ────────────────────────────────────────────────────
+
+
+def _skill(root, name: str, header: str, body: str = "body\n") -> None:
+    d = root / ".claude" / "skills" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "SKILL.md").write_text(f"---\n{header}\n---\n{body}", encoding="utf-8")
+
+
+def test_workspace_skills_ok_when_every_skill_loads(tmp_path):
+    _skill(tmp_path, "good", "name: good\ndescription: Use when X.")
+    found = doctor.check_workspace_skills(Settings(workspace_directory=str(tmp_path)))
+    assert [f.level for f in found] == [doctor.OK]
+
+
+def test_workspace_skills_flags_invalid_yaml_and_missing_description(tmp_path):
+    # The real-world one: an unquoted ': ' inside the description breaks the header.
+    _skill(tmp_path, "colon", "name: colon\ndescription: Build. Config: read from env")
+    _skill(tmp_path, "bare", "name: bare")
+    found = doctor.check_workspace_skills(Settings(workspace_directory=str(tmp_path)))
+    (bad,) = [f for f in found if "cannot be loaded" in f.title]
+    assert bad.level == doctor.WARN
+    assert "colon (invalid YAML" in bad.detail and "bare (no description)" in bad.detail
+
+
+def test_workspace_skills_flags_long_description_misname_loose_and_missing_script(tmp_path):
+    _skill(tmp_path, "long", "description: " + "x" * 1100)
+    _skill(tmp_path, "folder", "name: other\ndescription: ok")
+    _skill(tmp_path, "runner", "description: ok", "Run `python scripts/gone.py` then "
+           "`python scripts/here.py`.\n")
+    (tmp_path / ".claude" / "skills" / "runner" / "scripts").mkdir()
+    (tmp_path / ".claude" / "skills" / "runner" / "scripts" / "here.py").write_text("")
+    (tmp_path / ".claude" / "skills" / "stray.md").write_text("# not a skill")
+    (tmp_path / ".claude" / "skills" / "README.md").write_text("# index")
+    found = doctor.check_workspace_skills(Settings(workspace_directory=str(tmp_path)))
+    titles = " | ".join(f.title for f in found)
+    assert "exceed 1024" in titles and "does not match its folder" in titles
+    assert "1 file(s) loose" in titles                     # README.md is not counted
+    (miss,) = [f for f in found if "do not exist" in f.title]
+    assert "runner → scripts/gone.py" in miss.detail and "here.py" not in miss.detail
+
+
+def test_workspace_skills_checks_agent_headers(tmp_path):
+    agents = tmp_path / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "a.md").write_text("---\nname: a\n---\nbody", encoding="utf-8")
+    (agents / "README.md").write_text("# agents", encoding="utf-8")
+    found = doctor.check_workspace_skills(Settings(workspace_directory=str(tmp_path)))
+    assert any("agents/a.md (needs name + description)" in f.detail for f in found)
+
+
+def test_workspace_skills_silent_without_a_workspace():
+    assert doctor.check_workspace_skills(Settings(workspace_directory="")) == []

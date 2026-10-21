@@ -1654,6 +1654,146 @@ def check_security_scan(config: Settings) -> list[Finding]:
                         f"fail on {sec.fail_on} · KEV+EPSS on")]
 
 
+# The Agent Skills limit: a longer description is not indexed, so the skill is listed
+# with no description at all and the model never learns when to reach for it.
+_SKILL_DESCRIPTION_MAX = 1024
+_FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
+# A helper a skill tells the agent to run. Prose that names one which is not on disk sends
+# the run into a dead end it discovers only after loading the skill.
+_SCRIPT_REF_RE = re.compile(
+    r"(?<![\w/.\\-])((?:\.claude/skills/[\w-]+/)?scripts/[\w./-]+\.(?:py|ps1|sh|js|mjs|ts))"
+)
+
+
+def _frontmatter(path: Path) -> tuple[dict | None, str]:
+    """``(fields, error)`` of a markdown file's YAML header; ``(None, why)`` when unusable."""
+    import yaml
+
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, f"unreadable ({type(exc).__name__})"
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return None, "no --- frontmatter"
+    try:
+        data = yaml.safe_load(m.group(1))
+    except yaml.YAMLError as exc:
+        return None, "invalid YAML: " + str(exc).splitlines()[0]
+    return (data if isinstance(data, dict) else {}), ""
+
+
+def check_workspace_skills(config: Settings) -> list[Finding]:
+    """Whether the skills and agents the runs depend on can actually be loaded.
+
+    A broken skill does not fail — it silently stops existing. Invalid YAML in the header
+    (an unquoted ``:`` inside the description is the usual one), a description past the
+    1024-character limit, or a ``SKILL.md`` dropped loose in ``skills/`` instead of its own
+    folder: in every case the run carries on without it and nothing says why the agent
+    never picked the procedure up. The same goes for a helper script the skill names but
+    nobody shipped. Adapted from the validation Harness² runs on every proposed harness
+    before a single rollout.
+
+    Offline: reads files under the workspace's ``.claude``, nothing else.
+    """
+    workspace = (config.workspace_directory or "").strip()
+    if not workspace:
+        return []
+    root = Path(workspace)
+    claude = root / ".claude"
+    skills_dir = claude / "skills"
+    broken: list[str] = []
+    too_long: list[str] = []
+    misnamed: list[str] = []
+    loose: list[str] = []
+    missing: list[str] = []
+    total = 0
+    try:
+        entries = sorted(skills_dir.iterdir()) if skills_dir.is_dir() else []
+    except OSError:
+        entries = []
+    for entry in entries:
+        if entry.is_file():
+            if entry.suffix.lower() == ".md" and entry.name.lower() != "readme.md":
+                loose.append(entry.name)
+            continue
+        skill = entry / "SKILL.md"
+        if not skill.is_file():
+            continue
+        total += 1
+        fields, error = _frontmatter(skill)
+        if fields is None:
+            broken.append(f"{entry.name} ({error})")
+            continue
+        desc = fields.get("description")
+        if not (isinstance(desc, str) and desc.strip()):
+            broken.append(f"{entry.name} (no description)")
+        elif len(desc) > _SKILL_DESCRIPTION_MAX:
+            too_long.append(f"{entry.name} ({len(desc)} chars)")
+        name = fields.get("name")
+        if name and str(name) != entry.name:
+            misnamed.append(f"{entry.name} (name: {name})")
+        try:
+            body = skill.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for ref in sorted(set(_SCRIPT_REF_RE.findall(body))):
+            if not any((base / ref).is_file() for base in (entry, root, claude)):
+                missing.append(f"{entry.name} → {ref}")
+    agents_dir = claude / "agents"
+    with contextlib.suppress(OSError):
+        for agent in sorted(agents_dir.glob("*.md")) if agents_dir.is_dir() else []:
+            if agent.name.lower() == "readme.md":
+                continue
+            fields, error = _frontmatter(agent)
+            if fields is None:
+                broken.append(f"agents/{agent.name} ({error})")
+            elif not fields.get("name") or not fields.get("description"):
+                broken.append(f"agents/{agent.name} (needs name + description)")
+
+    def _some(items: list[str]) -> str:
+        return "; ".join(items[:5]) + (f"; … +{len(items) - 5} more" if len(items) > 5 else "")
+
+    out: list[Finding] = []
+    if broken:
+        out.append(Finding(
+            WARN, f"{len(broken)} skill/agent header(s) cannot be loaded",
+            f"{_some(broken)}. Without a valid header the skill is listed with a fallback "
+            "description or not at all, so the agent never knows when to use it.",
+            "Fix the YAML between the --- lines: quote a description that contains ': ', "
+            "and give every skill and agent a description.",
+        ))
+    if too_long:
+        out.append(Finding(
+            WARN, f"{len(too_long)} skill description(s) exceed {_SKILL_DESCRIPTION_MAX} chars",
+            f"{_some(too_long)}. An over-long description is dropped from the index, so the "
+            "skill shows up with no description.",
+            "Cut the description to its trigger situations; move detail into the body.",
+        ))
+    if misnamed:
+        out.append(Finding(
+            WARN, f"{len(misnamed)} skill(s) whose name does not match its folder",
+            _some(misnamed),
+            "Make `name:` equal to the folder name (or drop it).",
+        ))
+    if loose:
+        out.append(Finding(
+            WARN, f"{len(loose)} file(s) loose in .claude/skills are not skills",
+            f"{_some(loose)}. Only <folder>/SKILL.md is loaded; these are never read.",
+            "Move each into its own folder as SKILL.md, or into .claude/docs.",
+        ))
+    if missing:
+        out.append(Finding(
+            WARN, f"{len(missing)} script(s) named by a skill do not exist",
+            f"{_some(missing)}. The agent loads the skill, runs the helper and hits a "
+            "missing file. Looked next to the skill, at the workspace root and under .claude.",
+            "Ship the helper in <skill>/scripts/, or fix the path in SKILL.md.",
+        ))
+    if total and not out:
+        out.append(Finding(OK, f"Workspace skills: {total} load cleanly"))
+    return out
+
+
 def check_claude_cli(config: Settings) -> list[Finding]:
     """Which `claude` the Agent SDK will run — the one thing every SDK run needs.
 
@@ -1692,7 +1832,7 @@ CHECKS = (
     check_relay_hands_over, check_default_profile_is_not_a_doorway,
     check_sdlc_needs_headless, check_fleet, check_providers,
     check_second_organization,
-    check_workspace_context, check_deploy_stage,
+    check_workspace_context, check_workspace_skills, check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,
     check_autonomy, check_deferred_handoff, check_dashboard_security, check_notifications,

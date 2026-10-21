@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from ai_autopilot import activity
-from ai_autopilot.config import SdlcStage, Settings
+from ai_autopilot.config import EVIDENCE_BOUNDARY_INSTRUCTION, SdlcStage, Settings
 from ai_autopilot.data import QualityKind
 from ai_autopilot.execution.claude_client import ClaudeRun, Usage
 from ai_autopilot.execution.claude_executor import ClaudeExecutor, _branch_name, pretrust_claude_dir
@@ -368,7 +368,7 @@ class SdlcLoopEngine:
                 "top-priority instruction for this stage, overriding earlier assumptions "
                 f"where they conflict:\n\n{item.pending_comment}"
             )
-        return (head + body + artifact).strip() + guidance
+        return (head + body + artifact).strip() + guidance + f"\n\n{EVIDENCE_BOUNDARY_INSTRUCTION}"
 
     # ── helpers ──────────────────────────────────────────────────────────────
 

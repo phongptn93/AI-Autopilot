@@ -13,6 +13,7 @@ import tempfile
 from ai_autopilot.config import (
     AGENT_CONDUCT_INSTRUCTION,
     BOT_COMMENT_INSTRUCTION,
+    EVIDENCE_BOUNDARY_INSTRUCTION,
     Settings,
     match_command,
 )
@@ -269,7 +270,10 @@ class FeedbackHandler:
                 "it is purpose-built for exactly this. If that subagent is unavailable, do "
                 "the task directly with the relevant skill."
             )
-        return f"{body}\n\n{BOT_COMMENT_INSTRUCTION}\n\n{AGENT_CONDUCT_INSTRUCTION}"
+        return (
+            f"{body}\n\n{BOT_COMMENT_INSTRUCTION}\n\n{AGENT_CONDUCT_INSTRUCTION}"
+            f"\n\n{EVIDENCE_BOUNDARY_INSTRUCTION}"
+        )
 
     async def handle_feedback(
         self, item: WorkItemInfo, branch_name: str, feedback: str, revision: int,

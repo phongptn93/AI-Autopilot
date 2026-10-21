@@ -25,6 +25,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ai_autopilot.config import EVIDENCE_BOUNDARY_INSTRUCTION
+
 # Status tokens stored on a tracked conflict. Order is the lifecycle.
 OPEN = "open"            # ADO reports a conflict; nobody has resolved it yet
 RESOLVING = "resolving"  # a resolution run is in flight
@@ -172,6 +174,8 @@ How to resolve:
 4. If a hunk genuinely cannot be reconciled without a product decision (both sides
    change the same behaviour in incompatible ways), do not guess: leave that file's
    markers in place and explain why.
+
+{EVIDENCE_BOUNDARY_INSTRUCTION}
 
 Finish with one line exactly like one of:
 RESOLUTION: done — <one sentence on what you reconciled>

@@ -34,6 +34,7 @@ from ai_autopilot import activity, lessons, policy
 from ai_autopilot.config import (
     AGENT_CONDUCT_INSTRUCTION,
     BOT_COMMENT_INSTRUCTION,
+    EVIDENCE_BOUNDARY_INSTRUCTION,
     Settings,
 )
 from ai_autopilot.execution import transcript
@@ -381,6 +382,7 @@ class ClaudeExecutor:
             )
             if past:
                 parts.append(past)
+        parts.append(f"\n{EVIDENCE_BOUNDARY_INSTRUCTION}")
         parts.append(f"\nNow run this skill: {skill_command}")
         return "\n".join(parts)
 
@@ -707,6 +709,7 @@ class ClaudeExecutor:
             "most reasonable reading, note the assumption in the PR, keep going.",
             f"- {BOT_COMMENT_INSTRUCTION}",
             AGENT_CONDUCT_INSTRUCTION,
+            EVIDENCE_BOUNDARY_INSTRUCTION,
             "",
             "# Required output (the control plane reads ONLY this — you MUST write it)",
             f"When finished, write ONE JSON file at `{result_rel}` (relative to this "
@@ -1801,6 +1804,7 @@ class ClaudeExecutor:
             ambiguity,
             f"- {BOT_COMMENT_INSTRUCTION}",
             AGENT_CONDUCT_INSTRUCTION,
+            EVIDENCE_BOUNDARY_INSTRUCTION,
             "",
             "# Required output (the control plane reads ONLY this — you MUST write it)",
             f"When finished, write a JSON file at `{result_rel}` (relative to this workspace):",

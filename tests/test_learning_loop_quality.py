@@ -85,3 +85,19 @@ def test_the_page_leads_with_health_and_offers_promotion(tmp_path):
                     follow_redirects=False)
     rows = lessons.entries(str(ws), "Api")
     assert any(le.pinned and le.text.startswith("Validate") for le in rows)
+
+
+def test_the_generated_skill_header_parses_even_when_a_lesson_contains_a_colon(tmp_path):
+    # Found on a live workspace: an unquoted "đã yêu cầu sửa: «…»" made the header
+    # invalid YAML, so the skill the brief points at was listed without its description.
+    import yaml
+
+    ws = str(tmp_path)
+    lessons.record_lessons(ws, "Api", ["Reviewer đã yêu cầu sửa: «dùng ILogger»"],
+                           now=datetime(2026, 10, 1))
+    lessons.record_lessons(ws, "Api", ["x" * 900 + ": tail"], now=datetime(2026, 10, 2))
+    skill = lessons.render_skill(ws, "Api")
+    header = yaml.safe_load(skill.split("---\n")[1])
+    assert header["name"] == lessons.skill_name("Api")
+    assert "dùng ILogger" in header["description"]
+    assert len(header["description"]) <= 1024

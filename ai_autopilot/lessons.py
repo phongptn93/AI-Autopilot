@@ -43,6 +43,8 @@ _LESSONS_SUBDIR = Path(".autopilot") / "lessons"
 #: unattributable signal still teaches.
 SHARED_BUCKET = "_workspace"
 _MAX_LESSONS = 50  # keep the file bounded — oldest lines drop off
+#: The Agent Skills index limit; a longer description is dropped from the listing.
+_SKILL_DESCRIPTION_MAX = 1024
 #: A machine-learned line seen ONCE and not again for this long has stopped being
 #: news: whatever caused it was fixed, or it was a one-off. It stays in the file (a
 #: human may still want it) but leaves the skill and the brief, so it stops costing
@@ -378,10 +380,16 @@ def render_skill(workspace: str, repo: str) -> str:
         f"- {f'**Đã gặp {le.count} lần.** ' if le.count > 1 else ''}{le.text}"
         for le in learned
     )
+    # Quoted, and capped at the index limit. Lesson text routinely contains ": " (a
+    # reviewer's "đã yêu cầu sửa: «…»", a "Context: …" tail), which unquoted is invalid
+    # YAML — and a header that does not parse leaves the skill listed with a fallback
+    # description, i.e. the one skill the brief points at is the one nobody can find.
+    # A JSON string is a valid YAML double-quoted scalar.
+    desc = desc if len(desc) <= _SKILL_DESCRIPTION_MAX else desc[: _SKILL_DESCRIPTION_MAX - 1] + "…"
     return (
         "---\n"
         f"name: {skill_name(repo)}\n"
-        f"description: {desc}\n"
+        f"description: {json.dumps(desc, ensure_ascii=False)}\n"
         "---\n\n"
         f"# Bài học từ các run trước — {_label(repo)}\n\n"
         f"{_GENERATED_NOTE}\n\n"

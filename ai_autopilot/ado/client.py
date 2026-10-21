@@ -31,6 +31,12 @@ _MAX_IDS_PER_BATCH = 200
 # template) and only changes when someone edits the process, so a short cache turns
 # every reader of it into a free lookup.
 _TYPE_STATE_TTL_SECONDS = 300.0
+# State requests in flight at once while building that map. 19 one after another was
+# the whole of the Settings page's wait; ADO answers eight at a time without throttling.
+_TYPE_STATE_CONCURRENCY = 8
+# How long a walk that failed on the network (timeout, reset) is left alone before a
+# page tries again — so a slow ADO costs one page one timeout, not every page.
+_TYPE_STATE_FAIL_RETRY_SECONDS = 60.0
 # How long a project whose type listing failed is left alone before trying again.
 _TYPE_DENIED_RETRY_SECONDS = 600.0
 # Longest a single Retry-After is honoured for.
@@ -103,6 +109,11 @@ class AdoClient:
         # states) is a per-project thing: sharing one cache across projects would hand
         # a Bug's states to a project that has no Bug type.
         self._type_states: dict[str, tuple[float, dict[str, list[dict]]]] = {}
+        # project → when its last walk failed on the network; the in-flight background
+        # refresh; and the lock that keeps it to one walk at a time. See _type_state_map.
+        self._type_states_failed: dict[str, float] = {}
+        self._type_state_refresh: dict[str, asyncio.Task] = {}
+        self._type_state_locks: dict[str, asyncio.Lock] = {}
         # work-item id → its System.TeamProject, learned whenever we map an item.
         # Saves a round trip on the project-scoped endpoints (comments).
         self._item_projects: dict[int, str] = {}
@@ -123,6 +134,7 @@ class AdoClient:
         """Re-read the organization URL after a live config change."""
         self._base = self._config.ado_organization.rstrip("/")
         self._type_states = {}  # a different org/project has different types
+        self._type_states_failed = {}
         self._wi_types = {}
         self._types_denied = {}   # a config change may be the fix — ask again
         self._types_warned = set()
@@ -1477,45 +1489,90 @@ class AdoClient:
         the result is cached rather than re-fetched per reader. Best-effort throughout:
         an error yields ``{}`` (or omits the failing type) so the pages that depend on
         this still render with a manual-entry fallback.
+
+        Three things keep a page from waiting on that walk, because Settings, Board and
+        Flow each render through here and used to pay all of it in the request:
+
+        * the N state requests go out **concurrently** (they were one after another, so
+          the walk cost N round trips to dev.azure.com instead of about two);
+        * an EXPIRED entry is served as-is while one refresh runs in the background —
+          the states change when somebody edits the process, not every five minutes;
+        * a walk that failed on the network is not retried for a minute, so ADO being
+          slow or down costs one page one timeout, not every page a timeout each.
+
+        One walk per project at a time: pages opened together wait for the same walk
+        rather than starting their own.
         """
         project = (project or self._config.ado_project or "").strip()
-        cached = self._type_states.get(project.lower())
-        if cached is not None and time.monotonic() - cached[0] < _TYPE_STATE_TTL_SECONDS:
+        key = project.lower()
+        cached = self._type_states.get(key)
+        if cached is not None:
+            if time.monotonic() - cached[0] >= _TYPE_STATE_TTL_SECONDS:
+                self._refresh_type_states_later(project)
             return cached[1]
         if self._types_recently_denied(project):
             return {}
-        out: dict[str, list[dict]] = {}
-        try:
-            resp = await self._http.get(
-                self._url(f"wit/workitemtypes?{_API}", project),
-                headers=await self._auth.get_auth_header(),
-            )
-            if resp.status_code >= 400:
-                self._types_denied_now(project, resp)
-                return {}
-            self._types_denied.pop(project.lower(), None)
-            types = [
-                t["name"]
-                for t in (resp.json().get("value") or [])
-                if t.get("name") and not t.get("isDisabled")
-            ]
-            for type_name in types:
-                sresp = await self._http.get(
-                    self._url(
-                        f"wit/workitemtypes/{quote(type_name, safe='')}/states?{_API}", project
-                    ),
-                    headers=await self._auth.get_auth_header(),
-                )
-                if sresp.status_code >= 400:
-                    self._log.warning("list states failed for type", type=type_name,
-                                      status=sresp.status_code)
-                    continue
-                out[type_name] = [s for s in (sresp.json().get("value") or []) if s.get("name")]
-        except httpx.HTTPError as exc:
-            self._log.warning("work-item type/state request error", error=describe_exc(exc))
+        failed = self._type_states_failed.get(key)
+        if failed is not None and time.monotonic() - failed < _TYPE_STATE_FAIL_RETRY_SECONDS:
             return {}
-        self._type_states[project.lower()] = (time.monotonic(), out)
-        return out
+        return await self._fetch_type_states(project)
+
+    def _refresh_type_states_later(self, project: str) -> None:
+        """Rebuild an expired entry off the request path — at most one per project."""
+        key = project.lower()
+        running = self._type_state_refresh.get(key)
+        if running is not None and not running.done():
+            return
+        task = asyncio.get_running_loop().create_task(self._fetch_type_states(project))
+        self._type_state_refresh[key] = task
+        task.add_done_callback(lambda _t: self._type_state_refresh.pop(key, None))
+
+    async def _fetch_type_states(self, project: str) -> dict[str, list[dict]]:
+        """One walk of the type → state map for ``project``; see _type_state_map."""
+        key = project.lower()
+        lock = self._type_state_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            cached = self._type_states.get(key)
+            if cached is not None and time.monotonic() - cached[0] < _TYPE_STATE_TTL_SECONDS:
+                return cached[1]          # a walk that finished while we queued
+            try:
+                headers = await self._auth.get_auth_header()
+                resp = await self._http.get(
+                    self._url(f"wit/workitemtypes?{_API}", project), headers=headers,
+                )
+                if resp.status_code >= 400:
+                    self._types_denied_now(project, resp)
+                    return cached[1] if cached else {}
+                self._types_denied.pop(key, None)
+                types = [
+                    t["name"]
+                    for t in (resp.json().get("value") or [])
+                    if t.get("name") and not t.get("isDisabled")
+                ]
+                gate = asyncio.Semaphore(_TYPE_STATE_CONCURRENCY)
+
+                async def states_of(type_name: str) -> list[dict] | None:
+                    async with gate:
+                        sresp = await self._http.get(
+                            self._url(f"wit/workitemtypes/{quote(type_name, safe='')}"
+                                      f"/states?{_API}", project),
+                            headers=headers,
+                        )
+                    if sresp.status_code >= 400:
+                        self._log.warning("list states failed for type", type=type_name,
+                                          status=sresp.status_code)
+                        return None
+                    return [s for s in (sresp.json().get("value") or []) if s.get("name")]
+
+                found = await asyncio.gather(*(states_of(t) for t in types))
+            except httpx.HTTPError as exc:
+                self._log.warning("work-item type/state request error", error=describe_exc(exc))
+                self._type_states_failed[key] = time.monotonic()
+                return cached[1] if cached else {}
+            out = {t: s for t, s in zip(types, found, strict=True) if s is not None}
+            self._type_states_failed.pop(key, None)
+            self._type_states[key] = (time.monotonic(), out)
+            return out
 
     async def _type_state_map_all(self) -> dict[str, list[dict]]:
         """``_type_state_map`` unioned over every polled project.

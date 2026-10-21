@@ -174,17 +174,19 @@ async def test_nulls_from_omit_are_filtered_not_mapped():
     assert [i.id for i in got] == [1, 3]
 
 
-async def test_failure_logs_the_ids_and_the_ado_message(capsys):
+async def test_failure_logs_the_ids_and_the_ado_message(capsys, caplog):
     """The old warning carried only the status, so it could not say WHICH item — while the
     body it discarded named it: "TF401232: Work item 999 does not exist".
 
-    capsys, not caplog: structlog writes to stdout rather than through the stdlib handlers
-    caplog attaches to, so caplog.text is empty here even when the line was emitted.
+    Both capsys AND caplog, because where structlog writes depends on what ran before:
+    unconfigured it prints to stdout (caplog sees nothing), but once any test has called
+    create_app() -> configure_logging() it routes through the stdlib handlers (stderr,
+    which caplog does see). Reading one channel made this pass or fail by test order.
     """
     body = '{"message":"TF401232: Work item 999 does not exist, or you do not have permissions"}'
     c = _batch_client([_Resp(status=404, text=body)])
     assert await c.get_work_items_by_ids([999]) == []
-    logged = capsys.readouterr().out
+    logged = capsys.readouterr().out + caplog.text
     assert "999" in logged
     assert "TF401232" in logged          # the actionable part, previously thrown away
 

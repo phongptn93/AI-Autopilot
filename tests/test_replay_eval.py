@@ -359,3 +359,63 @@ def test_rm_tree_removes_read_only_files(tmp_path):
     _rm_tree(root)
 
     assert not root.exists()
+
+
+# ── replicates: where repeated runs of one case disagree ─────────────────────
+
+
+def _rep(name: str, touched: list[str], status: str, rep: int) -> rp.ReplayScore:
+    s = rp.score_case(_case(name=name), touched_files=touched, test_status=status)
+    s.replicate = rep
+    return s
+
+
+def test_divergence_separates_stable_from_split_cases():
+    scores = [
+        _rep("steady", ["a.py"], rp.TEST_PASSED, 0),
+        _rep("steady", ["a.py"], rp.TEST_PASSED, 1),
+        _rep("flaky", ["a.py", "b.py"], rp.TEST_PASSED, 0),
+        _rep("flaky", ["a.py"], rp.TEST_FAILED, 1),
+        _rep("flaky", ["a.py", "c.py"], rp.TEST_PASSED, 2),
+    ]
+    steady, flaky = rp.divergence(scores)
+    assert steady.stable and not steady.split and steady.runs == 2
+    assert flaky.split and not flaky.stable and (flaky.passed, flaky.runs) == (2, 3)
+    assert flaky.always_touched == ["a.py"]
+    assert flaky.sometimes_touched == ["b.py", "c.py"]
+    assert flaky.reasons == {"tests failed": 1}
+
+
+def test_divergence_flags_drift_even_when_every_run_passes():
+    # Same verdict, different files: the rules left WHICH files to touch to chance.
+    g, = rp.divergence([_rep("d", ["a.py"], rp.TEST_PASSED, 0),
+                        _rep("d", ["a.py", "z.py"], rp.TEST_PASSED, 1)])
+    assert not g.split and not g.stable and g.sometimes_touched == ["z.py"]
+
+
+def test_report_shows_divergence_only_with_repeats():
+    one = [_rep("x", ["a.py"], rp.TEST_PASSED, 0)]
+    assert "Divergence" not in rp.format_replay_report(one, 1.0)
+    two = one + [_rep("x", ["a.py"], rp.TEST_FAILED, 1)]
+    text = rp.format_replay_report(two, 1.0)
+    assert "Divergence across repeats - 0/1" in text and "SPLIT 1/2" in text
+    assert "tests failed (1/2)" in text
+    assert rp.report_json(two, 1.0)["divergence"][0]["split"] is True
+
+
+async def test_suite_runs_each_case_replicates_times(repo: Path, tmp_path: Path):
+    cases = rp.harvest(repo)
+    calls: list[str] = []
+
+    async def agent(brief, cwd, timeout_s):
+        calls.append(cwd)
+        return "nothing"
+
+    scores = await rp.run_replay_suite(cases, replicates=3, workspace=repo.parent,
+                                       agent=agent, tmp_root=tmp_path)
+    assert len(scores) == len(calls) == 3 * len(cases)
+    assert [s.replicate for s in scores[:3]] == [0, 1, 2]
+
+
+def test_replay_cli_rejects_zero_replicates(tmp_path: Path):
+    assert replay_cli.replay_main([str(tmp_path), "--replicates", "0"], object()) == 2

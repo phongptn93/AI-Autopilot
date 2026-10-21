@@ -91,7 +91,17 @@ ai-autopilot evals harvest --repo Backend-Fresh --limit 20 --out evals/replay/
 # 2. Chạy lại toàn bộ (hoặc một case), yêu cầu ≥ 70%, xuất JSON cho CI
 ai-autopilot evals replay evals/replay --min-pass-rate 0.7 --json out/replay.json
 ai-autopilot evals replay --case backend-fresh-wi1234-1a2b3c4d
+
+# 3. Chạy mỗi case 3 lần để xem các lần chạy LỆCH nhau ở đâu
+ai-autopilot evals replay evals/replay --replicates 3
 ```
+
+`--replicates N` chạy lại mỗi case N lần và in thêm mục **Divergence**. Case nào
+`stable` nghĩa là bộ skill/rule đã quyết định hành vi. `SPLIT 1/3` (lần pass lần fail)
+hoặc `drifting` (cùng kết quả nhưng sửa file khác nhau, kèm danh sách *touched in only
+some runs*) nghĩa là cấu hình đang **để mặc may rủi**. Đó là chỗ đáng sửa skill/rule
+trước tiên. Cách đọc này lấy từ Harness² (google-research/harness2): phương sai giữa
+các lần chạy chính là tín hiệu. Lưu ý chi phí: N lần chạy tốn ×N token.
 
 ### Harvest
 

@@ -239,6 +239,7 @@ class ReplayScore:
     error: str = ""
     duration_seconds: float = 0.0
     test_output: str = ""
+    replicate: int = 0                  # which repeat of the case this is (0-based)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -634,15 +635,81 @@ async def run_replay_case(
         await asyncio.to_thread(_remove_worktree, repo_dir, wt, tmp)
 
 
-async def run_replay_suite(cases: list[ReplayCase], **kwargs: Any) -> list[ReplayScore]:
-    """Every case, one at a time — each is a full agent session on a full repo."""
+async def run_replay_suite(
+    cases: list[ReplayCase], *, replicates: int = 1, **kwargs: Any,
+) -> list[ReplayScore]:
+    """Every case, one at a time — each is a full agent session on a full repo.
+
+    ``replicates`` runs each case that many times, back to back, so :func:`divergence`
+    can show where the runs disagree. One run says whether the agent CAN do the task;
+    only repeats say whether the configuration makes it do so reliably.
+    """
     out: list[ReplayScore] = []
     for case in cases:
-        _log.info("replay case starting", case=case.name)
-        score = await run_replay_case(case, **kwargs)
-        _log.info("replay case done", case=case.name, passed=score.passed,
-                  reasons=score.reasons[:3])
-        out.append(score)
+        for rep in range(max(1, replicates)):
+            _log.info("replay case starting", case=case.name, replicate=rep)
+            score = await run_replay_case(case, **kwargs)
+            score.replicate = rep
+            _log.info("replay case done", case=case.name, replicate=rep,
+                      passed=score.passed, reasons=score.reasons[:3])
+            out.append(score)
+    return out
+
+
+@dataclass
+class CaseDivergence:
+    """How the repeats of one case disagreed.
+
+    Variance between replicates is the signal (the reading Harness² builds its edits
+    on): where every run did the same thing, the configuration is already deciding the
+    behaviour; where they split — one run touched a file the others did not, one went
+    red — the skills and rules are leaving that decision to chance, and that is the
+    place an edit to them would pay off.
+    """
+
+    name: str
+    runs: int
+    passed: int
+    test_statuses: list[str] = field(default_factory=list)
+    sometimes_touched: list[str] = field(default_factory=list)  # in some runs, not all
+    always_touched: list[str] = field(default_factory=list)
+    reasons: dict[str, int] = field(default_factory=dict)       # failure reason -> runs
+
+    @property
+    def split(self) -> bool:
+        """The verdict itself depends on the run."""
+        return 0 < self.passed < self.runs
+
+    @property
+    def stable(self) -> bool:
+        """Every run got the same verdict, the same test status and the same files."""
+        return (not self.split and len(set(self.test_statuses)) <= 1
+                and not self.sometimes_touched)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**asdict(self), "split": self.split, "stable": self.stable}
+
+
+def divergence(scores: list[ReplayScore]) -> list[CaseDivergence]:
+    """Group the repeats by case and say where they disagreed. Pure."""
+    by_case: dict[str, list[ReplayScore]] = {}
+    for s in scores:
+        by_case.setdefault(s.name, []).append(s)
+    out: list[CaseDivergence] = []
+    for name, runs in by_case.items():
+        sets = [set(s.touched_files) for s in runs]
+        union = set().union(*sets)
+        common = set.intersection(*sets)
+        reasons: dict[str, int] = {}
+        for s in runs:
+            for r in dict.fromkeys(s.reasons):
+                reasons[r] = reasons.get(r, 0) + 1
+        out.append(CaseDivergence(
+            name=name, runs=len(runs), passed=sum(1 for s in runs if s.passed),
+            test_statuses=[s.tests for s in runs],
+            sometimes_touched=sorted(union - common), always_touched=sorted(common),
+            reasons=reasons,
+        ))
     return out
 
 
@@ -696,6 +763,29 @@ def format_replay_report(scores: list[ReplayScore], min_pass_rate: float) -> str
             lines.append(f"         - {note}")
     if not scores:
         lines.append("  No cases ran - an empty replay proves nothing, so this fails.")
+    groups = divergence(scores)
+    if any(g.runs > 1 for g in groups):
+        unstable = [g for g in groups if not g.stable]
+        lines += ["", f"  Divergence across repeats - {len(groups) - len(unstable)}/"
+                      f"{len(groups)} case(s) stable"]
+        for g in groups:
+            if g.stable:
+                verdict = "stable pass" if g.passed else "stable fail"
+                lines.append(f"  [{verdict:>11}] {g.name[:44]} ({g.runs} runs)")
+                continue
+            verdict = f"SPLIT {g.passed}/{g.runs}" if g.split else "drifting"
+            lines.append(f"  [{verdict:>11}] {g.name[:44]} - tests: "
+                         + ", ".join(g.test_statuses))
+            if g.sometimes_touched:
+                more = len(g.sometimes_touched) - 6
+                lines.append("         ~ touched in only some runs: "
+                             + ", ".join(g.sometimes_touched[:6])
+                             + (f" (+{more})" if more > 0 else ""))
+            for reason, n in list(g.reasons.items())[:3]:
+                lines.append(f"         x {reason} ({n}/{g.runs})")
+        if unstable:
+            lines.append("  -> A split is the configuration leaving that decision to "
+                         "chance: that is where a skill or rule edit pays off.")
     lines.append("")
     return "\n".join(lines)
 
@@ -707,4 +797,5 @@ def report_json(scores: list[ReplayScore], min_pass_rate: float) -> dict[str, An
         "pass_rate": pass_rate(scores),
         "threshold": min_pass_rate,
         "cases": [s.to_dict() for s in scores],
+        "divergence": [g.to_dict() for g in divergence(scores)],
     }

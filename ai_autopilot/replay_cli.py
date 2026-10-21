@@ -134,7 +134,12 @@ def replay_main(argv: list[str], config: Any | None = None,
     ap.add_argument("--workspace", default="", help="override the configured workspace")
     ap.add_argument("--include-examples", action="store_true",
                     help="also run cases marked example: true")
+    ap.add_argument("--replicates", type=int, default=1,
+                    help="run each case N times and report where the runs diverge")
     args = ap.parse_args(argv)
+    if args.replicates < 1:
+        print("--replicates must be at least 1.", file=sys.stderr)
+        return 2
 
     cases = rp.load_replay_cases(args.directory, include_examples=args.include_examples,
                                  name=args.case)
@@ -149,6 +154,7 @@ def replay_main(argv: list[str], config: Any | None = None,
         workspace=_workspace(config, args.workspace),
         agent=agent or rp.claude_agent(config),
         test_command_for=_test_command_resolver(config),
+        replicates=args.replicates,
     ))
     print(rp.format_replay_report(scores, args.min_pass_rate))
     if args.json:

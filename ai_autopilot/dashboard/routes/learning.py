@@ -32,6 +32,7 @@ def create_router() -> APIRouter:
         Without this page the loop is invisible — lessons live in files nobody opens, so
         a wrong lesson keeps poisoning every future brief with no way to notice.
         """
+        from ai_autopilot import lesson_evidence
         from ai_autopilot import lessons as lessons_mod
 
         c: Container = request.app.state.container
@@ -73,6 +74,7 @@ def create_router() -> APIRouter:
         injected_from = {
             repo: sum(1 for _, live in rows if live) for repo, rows in groups
         }
+        assessed = lesson_evidence.assess(workspace) if workspace else {}
         # The shared bucket rides along in EVERY repo's brief, so rendering each brief
         # whole printed the same three lines once per repo — on a two-repo workspace the
         # biggest block on the page was half duplicates, and the reader had to diff three
@@ -145,6 +147,10 @@ def create_router() -> APIRouter:
                 memory_pointer=memory_pointer,
                 memory_live=memory_live,
                 health=lessons_mod.health(workspace) if workspace else {},
+                # Whether each lesson WORKS, not only that it exists: carried in N runs
+                # and not back (holding), or a rule that is still broken (enforce).
+                assessed=assessed, evidence_health=lesson_evidence.health(assessed),
+                norm=lessons_mod.normalize, hold_after=lesson_evidence.HOLD_AFTER,
                 stale_days=lessons_mod.STALE_AFTER_DAYS,
                 recurring_at=lessons_mod.RECURRING_AT,
                 total=sum(len(rows) for _, rows in groups),

@@ -141,11 +141,15 @@ class QualityLog:
             work_item_id=work_item_id, kind=kind, value=value, stage=stage,
             actor=actor, pr_id=pr_id, detail=detail,
         )
-        self._learn(kind=kind, value=value, actor=actor, detail=detail)
+        self._learn(kind=kind, value=value, actor=actor, detail=detail,
+                    work_item_id=work_item_id, pr_id=pr_id)
 
     # ── learning ────────────────────────────────────────────────────────────────
 
-    def _learn(self, *, kind: str, value: int, actor: str, detail: str) -> None:
+    def _learn(
+        self, *, kind: str, value: int, actor: str, detail: str,
+        work_item_id: int = 0, pr_id: int = 0,
+    ) -> None:
         if not self._config.learning_loop_enabled:
             return
         workspace = self._config.workspace_directory
@@ -166,7 +170,10 @@ class QualityLog:
             return
         for repo in self._lesson_buckets():
             with contextlib.suppress(Exception):  # learning must never break a run
-                lessons.record_lessons(workspace, repo, [text], now=datetime.now())
+                lessons.record_lessons(
+                    workspace, repo, [text], now=datetime.now(),
+                    evidence={"kind": kind, "work_item_id": work_item_id, "pr_id": pr_id},
+                )
 
     def _lesson_buckets(self) -> list[str]:
         """Where to file a lesson. The shared bucket always, because a work-item-level

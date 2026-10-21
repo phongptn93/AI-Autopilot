@@ -442,9 +442,13 @@
     <div class="stat-sub">cũ &gt; {{ stale_days }} ngày</div>
   </div>
 </div>
-{% if health.recurring or health.stale %}
+{% if health.recurring or health.stale or evidence_health.enforce or evidence_health.holding %}
 <div class="card kh-card">
   <div class="kh-advice">
+    {% if evidence_health.enforce %}<div>🔒 <b>{{ evidence_health.enforce }}</b> quy tắc <b>đã nạp ở mọi run mà vẫn bị vi phạm</b> —
+      viết thêm chữ sẽ không ăn. Mở <b>Cần ép bằng máy</b> ở dòng đó để lấy đề bài dựng hook / test gate.</div>{% endif %}
+    {% if evidence_health.holding %}<div>✅ <b>{{ evidence_health.holding }}</b> bài học <b>đang hiệu nghiệm</b> — đã đi cùng
+      ≥{{ hold_after }} run kể từ lần gặp cuối mà lỗi không quay lại.</div>{% endif %}
     {% if health.recurring %}<div>⚠️ <b>{{ health.recurring }}</b> bài học vẫn <b>lặp lại</b> dù đã có trong skill —
       skill không ngăn được. Bấm <b>📌 Nâng thành quy tắc</b> ở dòng đó để nó vào file rule mà mọi run đều nạp.</div>{% endif %}
     {% if health.stale %}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">🧹 <span><b>{{ health.stale }}</b> bài học chỉ gặp một lần,
@@ -457,6 +461,10 @@
 {% endif %}
 <style>
   .kh-card { padding:14px 16px; }
+  .enforce { margin-top:6px; font-size:12.5px; }
+  .enforce summary { cursor:pointer; color:var(--red,#e5484d); }
+  .enforce textarea { width:100%; margin:6px 0 4px; font:12px/1.45 ui-monospace,monospace;
+                      background:var(--bg-soft,transparent); color:inherit; resize:vertical; }
   .kh-advice { display:flex; flex-direction:column; gap:8px; font-size:13px; line-height:1.55; }
   .krow.stale { opacity:.55; }
   .rep.hot { background:rgba(210,153,34,.18); color:#d29922; }
@@ -504,6 +512,14 @@
           {% set parts = lesson.text.split('Context:', 1) %}
           {{ parts[0] | trim }}
           {% if parts | length > 1 %}<span class="ctx">Context: {{ parts[1] | trim }}</span>{% endif %}
+          {% set ev = assessed.get((repo, norm(lesson.text))) %}
+          {% if ev and ev.prompt %}
+          <details class="enforce">
+            <summary>🔒 Cần ép bằng máy — {{ ev.verdict.reason }}</summary>
+            <textarea readonly rows="9" onclick="this.select()">{{ ev.prompt }}</textarea>
+            <div class="dim" style="font-size:12px">Đưa đề bài này cho agent (hoặc làm tay). Autopilot không tự ghi hook — hook chạy ở mọi tool call nên phải có người duyệt.</div>
+          </details>
+          {% endif %}
           <form method="post" action="/dashboard/learning/edit" class="edit-form" id="e{{ rid }}">
             <input type="hidden" name="repo" value="{{ repo }}"/>
             <input type="hidden" name="old" value="{{ lesson.text }}"/>
@@ -512,6 +528,9 @@
           </form>
         </span>
         <span class="kmark">
+          {% set ev = assessed.get((repo, norm(lesson.text))) %}
+          {% if ev and ev.verdict.name == 'enforce' %}<span class="rep hot" title="{{ ev.verdict.reason }}">🔒 vẫn vi phạm</span>
+          {% elif ev and ev.verdict.name == 'holding' %}<span class="src man" title="{{ ev.verdict.reason }}">✅ hiệu nghiệm</span>{% endif %}
           {% if lesson.stale() %}<span class="noinj" title="Chỉ gặp một lần, đã hơn {{ stale_days }} ngày — không còn vào skill/brief.">cũ</span>{% endif %}
           {% if lesson.count > 1 %}<span class="rep {{ 'hot' if lesson.recurring }}"
             title="Chuyện này đã xảy ra {{ lesson.count }} lần. Trước đây nó nằm thành {{ lesson.count }} dòng riêng và chiếm {{ lesson.count }} suất nạp của brief — giờ gộp làm một.">{{ lesson.count }} lần</span>{% endif %}

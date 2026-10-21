@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ai_autopilot import activity, lessons, policy
+from ai_autopilot import activity, lesson_evidence, lessons, policy
 from ai_autopilot.config import (
     AGENT_CONDUCT_INSTRUCTION,
     BOT_COMMENT_INSTRUCTION,
@@ -333,9 +333,22 @@ class ClaudeExecutor:
         workspace = self._config.workspace_directory
         if not self._config.learning_loop_enabled or not workspace:
             return 0
+        self._expose_lessons(repos)
         return len(
             lessons.recent(workspace, repos, limit=self._config.lessons_max_injected)
         )
+
+    def _expose_lessons(self, repos: list[str]) -> None:
+        """Count this run against every lesson its brief carried.
+
+        Called once per REAL run (never for a preview), so "carried in N runs and it
+        did not come back" is a fact about runs, which is what lets a lesson be
+        credited with working — see :mod:`ai_autopilot.lesson_evidence`."""
+        workspace = self._config.workspace_directory
+        if not self._config.learning_loop_enabled or not workspace:
+            return
+        with contextlib.suppress(Exception):     # evidence must never break a run
+            lesson_evidence.expose(workspace, repos)
 
     def _build_prompt(self, item: WorkItemInfo, skill_command: str, repo: str) -> str:
         """Build the Claude prompt for a work item.
@@ -1079,6 +1092,7 @@ class ClaudeExecutor:
             item, repos, autonomy=autonomy, draft_pr=draft_pr, stages=stages,
             opens_pr=opens_pr, brief_note=brief_note,
         )
+        self._expose_lessons(repos)
         brief_rel = f".autopilot/runs/{item.id}.brief.md"
         brief_path = Path(run_dir) / brief_rel
         brief_path.parent.mkdir(parents=True, exist_ok=True)

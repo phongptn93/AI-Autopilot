@@ -545,7 +545,7 @@ def _lessons_path(workspace: str, repo: str) -> Path:
 
 def record_lessons(
     workspace: str, repo: str, lessons: list[str], *, now: datetime,
-    source: str = SOURCE_LEARNED,
+    source: str = SOURCE_LEARNED, evidence: dict | None = None,
 ) -> None:
     """Record ``lessons`` for ``repo``, merging anything already stored.
 
@@ -556,6 +556,12 @@ def record_lessons(
     repeat now bumps the existing line's date and its count, which both collapses the
     noise and records the one fact the five copies were really carrying: this keeps
     happening.
+
+    ``evidence`` (``kind`` / ``work_item_id`` / ``pr_id``) marks this as an OCCURRENCE —
+    a quality signal, not a human typing a rule — and records it in
+    :mod:`ai_autopilot.lesson_evidence` together with whether the lesson already existed
+    and was a rule at that moment. That is what tells a lesson that is working from one
+    that is being ignored.
 
     Best-effort: any filesystem error is swallowed — learning must never break a run.
     """
@@ -573,6 +579,16 @@ def record_lessons(
         if not key:
             continue
         at = by_key.get(key)
+        if evidence is not None:
+            from ai_autopilot import lesson_evidence
+
+            lesson_evidence.observe(
+                workspace, repo, text, live=at is not None,
+                pinned=at is not None and items[at].pinned, now=now,
+                kind=str(evidence.get("kind") or ""),
+                work_item_id=int(evidence.get("work_item_id") or 0),
+                pr_id=int(evidence.get("pr_id") or 0),
+            )
         if at is None:
             items.append(Lesson(repo=repo, date=stamp, text=text, source=source, count=1))
             by_key[key] = len(items) - 1
@@ -718,7 +734,12 @@ def edit(workspace: str, repo: str, old: str, new: str) -> bool:
             hit = True
         else:
             out.append(le)
-    return _write(workspace, repo, out) if hit else False
+    if not hit:
+        return False
+    from ai_autopilot import lesson_evidence
+
+    lesson_evidence.rename(workspace, repo, target, replacement)   # keep its record
+    return _write(workspace, repo, out)
 
 
 def promote(workspace: str, repo: str, text: str) -> bool:
@@ -792,6 +813,9 @@ def delete(workspace: str, repo: str, text: str) -> bool:
     # button on this page does not work.
     if any(le.text == target and le.source == SOURCE_FLEET for le in items):
         decline_fleet(workspace, target)
+    from ai_autopilot import lesson_evidence
+
+    lesson_evidence.forget(workspace, repo, target)
     return _write(workspace, repo, kept)
 
 
@@ -806,6 +830,9 @@ def clear(workspace: str, repo: str) -> bool:
     # The only mutation that does not go through _write, so it has to say so itself —
     # otherwise "forget this repo" leaves the forgotten lines in front of the agent.
     sync_memory(workspace)
+    from ai_autopilot import lesson_evidence
+
+    lesson_evidence.forget(workspace, repo)
     return True
 
 

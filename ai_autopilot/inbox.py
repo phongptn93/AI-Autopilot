@@ -399,6 +399,27 @@ async def _src_knowledge(c) -> list[InboxEntry]:
                     actions=[InboxAction("📌 Nâng thành quy tắc", "/dashboard/learning/promote",
                                          "post", {"repo": repo, "text": le.text})],
                 ))
+        # The rung after "promote": a RULE, loaded on every run, that is still broken.
+        # More prose will not fix that, so this asks for a mechanical check instead.
+        from ai_autopilot import lesson_evidence
+
+        for a in lesson_evidence.assess(workspace).values():
+            if a.verdict.name != lesson_evidence.ENFORCE:
+                continue
+            shown_repo = "mọi repo" if a.repo == lessons_mod.SHARED_BUCKET else a.repo
+            last = (a.stats.evidence or [{}])[-1].get("date", "")
+            at = None
+            with contextlib.suppress(TypeError, ValueError):
+                at = datetime.combine(date.fromisoformat(last), datetime.min.time(),
+                                      tzinfo=UTC)
+            out.append(InboxEntry(
+                source="knowledge", tier=YELLOW, icon="🔒",
+                title=f"Quy tắc vẫn bị vi phạm {a.stats.ignored_as_rule} lần: "
+                      f"{_short(a.lesson.text, 110)}",
+                context=f"{shown_repo} · prose không ăn — cần hook / test gate",
+                at=at, href="/dashboard/learning",
+                actions=[InboxAction("Xem đề bài", "/dashboard/learning")],
+            ))
     return _cap("knowledge", out, "/dashboard/learning")
 
 

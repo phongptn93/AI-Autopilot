@@ -36,13 +36,36 @@ def test_first_occurrence_is_not_counted_as_ignored(tmp_path):
 def test_a_lesson_carried_in_enough_quiet_runs_is_holding(tmp_path):
     ws = str(tmp_path)
     _occur(ws, "Validate DTOs")
-    for _ in range(ev.HOLD_AFTER):
-        assert ev.expose(ws, ["Api"]) == 1
-    assert _verdict(ws, "Validate DTOs").name == ev.HOLDING
-    _occur(ws, "Validate DTOs", wid=2)                 # it came back: the clock restarts
+    for wid in range(10, 10 + ev.HOLD_AFTER):
+        assert ev.expose(ws, ["Api"], [wid]) == 1
+    v = _verdict(ws, "Validate DTOs")
+    assert v.name == ev.HOLDING and "chưa phải bằng chứng" in v.reason   # a signal, not proof
+    _occur(ws, "Validate DTOs", wid=12)        # a run that carried it repeated it
     st = ev.stats(ws, "Api", "Validate DTOs")
     assert st.quiet_runs == 0 and st.ignored == 1 and st.exposures == ev.HOLD_AFTER
+    assert st.evidence[-1]["carried"] is True
     assert _verdict(ws, "Validate DTOs").name == ev.UNPROVEN
+
+
+def test_a_repeat_by_a_run_that_never_carried_the_lesson_is_not_held_against_it(tmp_path):
+    # Concurrent runs: #2 started before #1's lesson existed, then made the same mistake.
+    ws = str(tmp_path)
+    _occur(ws, "Validate DTOs", wid=1)
+    ev.expose(ws, ["Api"], [3])                # run #3 starts and carries it
+    _occur(ws, "Validate DTOs", wid=2)         # #2 never saw it: not ignored
+    assert ev.stats(ws, "Api", "Validate DTOs").ignored == 0
+    _occur(ws, "Validate DTOs", wid=3)         # #3 carried it and still repeated it
+    st = ev.stats(ws, "Api", "Validate DTOs")
+    assert st.ignored == 1 and [e.get("carried", False) for e in st.evidence] == [
+        False, False, True]
+
+
+def test_a_batch_run_marks_every_item_as_a_carrier(tmp_path):
+    ws = str(tmp_path)
+    _occur(ws, "Validate DTOs", wid=1)
+    ev.expose(ws, ["Api"], [5, 6])
+    _occur(ws, "Validate DTOs", wid=6)
+    assert ev.stats(ws, "Api", "Validate DTOs").ignored == 1
 
 
 def test_exposure_is_scoped_to_the_runs_repos_but_rules_ride_on_every_run(tmp_path):
@@ -172,8 +195,10 @@ def test_a_real_run_counts_exposure_but_rendering_the_page_does_not(tmp_path):
     with TestClient(create_app(cfg)) as client:
         client.get("/dashboard/learning")
     assert ev.stats(str(ws), "Api", "Validate DTOs").exposures == 0
-    ClaudeExecutor(cfg, AutoReviewer(cfg))._lessons_injected(["Api"])
+    ClaudeExecutor(cfg, AutoReviewer(cfg))._lessons_injected(["Api"], [42])
     assert ev.stats(str(ws), "Api", "Validate DTOs").exposures == 1
+    _occur(str(ws), "Validate DTOs", wid=42)        # the run it rode with repeated it
+    assert ev.stats(str(ws), "Api", "Validate DTOs").ignored == 1
     off = Settings(workspace_directory=str(ws), learning_loop_enabled=False)
     ClaudeExecutor(off, AutoReviewer(off))._lessons_injected(["Api"])
     assert ev.stats(str(ws), "Api", "Validate DTOs").exposures == 1   # loop off: nothing

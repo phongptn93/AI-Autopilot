@@ -24,6 +24,7 @@ import tempfile
 import time
 import unicodedata
 import uuid
+from collections.abc import Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -309,7 +310,8 @@ class ClaudeExecutor:
         repo, base_branch = self._resolve_repo(item)
         prompt = self._build_prompt(item, skill_command, repo)
         workspace = self._config.workspace_directory
-        injected = self._lessons_injected([_repo_name(repo, workspace)] if workspace else [])
+        injected = self._lessons_injected(
+            [_repo_name(repo, workspace)] if workspace else [], [item.id])
         result = await self._run_in_workspace(
             item_id=item.id,
             repo=repo,
@@ -324,7 +326,7 @@ class ClaudeExecutor:
         result.lessons_injected = injected
         return result
 
-    def _lessons_injected(self, repos: list[str]) -> int:
+    def _lessons_injected(self, repos: list[str], item_ids: Sequence[int] = ()) -> int:
         """How many past lessons the brief just carried.
 
         Counts the SAME list the brief was built from, so History's 🧠 badge can never
@@ -333,12 +335,12 @@ class ClaudeExecutor:
         workspace = self._config.workspace_directory
         if not self._config.learning_loop_enabled or not workspace:
             return 0
-        self._expose_lessons(repos)
+        self._expose_lessons(repos, item_ids)
         return len(
             lessons.recent(workspace, repos, limit=self._config.lessons_max_injected)
         )
 
-    def _expose_lessons(self, repos: list[str]) -> None:
+    def _expose_lessons(self, repos: list[str], item_ids: Sequence[int] = ()) -> None:
         """Count this run against every lesson its brief carried.
 
         Called once per REAL run (never for a preview), so "carried in N runs and it
@@ -348,7 +350,7 @@ class ClaudeExecutor:
         if not self._config.learning_loop_enabled or not workspace:
             return
         with contextlib.suppress(Exception):     # evidence must never break a run
-            lesson_evidence.expose(workspace, repos)
+            lesson_evidence.expose(workspace, repos, list(item_ids))
 
     def _build_prompt(self, item: WorkItemInfo, skill_command: str, repo: str) -> str:
         """Build the Claude prompt for a work item.
@@ -427,7 +429,7 @@ class ClaudeExecutor:
             return result
 
         repos = self._allowed_repos(workspace)
-        injected = self._lessons_injected(repos)
+        injected = self._lessons_injected(repos, [item.id])
         # Isolate this task in its own worktree scratch so it never touches the
         # user's main checkout; None → run in the shared workspace (disabled / no repos).
         scratch = await self._acquire_agent_scratch(item.id, repos)
@@ -510,7 +512,7 @@ class ClaudeExecutor:
             return self._batch_fail(items, misconfig, started)
 
         repos = self._allowed_repos(workspace)
-        injected = self._lessons_injected(repos)
+        injected = self._lessons_injected(repos, [it.id for it in items])
         scratch = await self._acquire_agent_scratch(lead.id, repos)
         run_dir = scratch or workspace
         pretrust_claude_dir(run_dir)
@@ -1092,7 +1094,7 @@ class ClaudeExecutor:
             item, repos, autonomy=autonomy, draft_pr=draft_pr, stages=stages,
             opens_pr=opens_pr, brief_note=brief_note,
         )
-        self._expose_lessons(repos)
+        self._expose_lessons(repos, [item.id])
         brief_rel = f".autopilot/runs/{item.id}.brief.md"
         brief_path = Path(run_dir) / brief_rel
         brief_path.parent.mkdir(parents=True, exist_ok=True)

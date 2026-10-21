@@ -11,7 +11,8 @@ verdict       what the record shows                                           ne
 ============  ==============================================================  ==========
 unproven      not carried in enough runs yet to say anything                  wait
 holding       carried in ``HOLD_AFTER`` runs since it last happened, and the  keep
-              mistake has not come back
+              mistake has not come back — a signal, not proof: those runs
+              may never have met the situation
 ignored       a machine-learned line that recurred ``IGNORED_AT`` times while  promote to
               the skill already carried it — the skill is not preventing it   a rule
 enforce       a RULE (loaded on every run) that still recurred                 hook / gate
@@ -32,6 +33,14 @@ Two counters feed it, both cheap and both local:
 * :func:`observe` — once per recorded quality signal, saying whether the lesson already
   existed (``live``) and whether it was a rule (``pinned``) at that moment.
 
+A repeat only counts as IGNORED when the run that repeated it actually carried the
+lesson. "The lesson existed at the time" is not the same thing: with concurrent runs, a
+run that started before the lesson was written can make the same mistake without ever
+having seen it, and counting that against the lesson would ask for a hook it never
+earned. So :func:`expose` remembers which work items each lesson rode with, and
+:func:`observe` checks the signal's work item against that list. Only a signal with no
+work item, or a lesson recorded before this was tracked, falls back to ``live``.
+
 Stored beside the lesson files as ``_evidence.json`` — a sidecar, so the hand-editable
 ``<repo>.md`` format does not change and a deleted sidecar costs only history. Best
 effort everywhere: evidence must never break a run or a recording.
@@ -44,6 +53,7 @@ import json
 import os
 import tempfile
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +74,9 @@ IGNORED_AT = lessons.RECURRING_AT - 1
 ENFORCE_AT = 2
 #: How many occurrences to keep per lesson — enough to point at the PRs, not a log.
 _EVIDENCE_KEPT = 5
+#: Work items remembered per lesson as having carried it. A repeat is matched against
+#: these, so the list only has to outlive the gap between a run and its review signal.
+_CARRIERS_KEPT = 50
 _FILE = "_evidence.json"
 _lock = threading.Lock()
 
@@ -133,7 +146,8 @@ def observe(
         data = _load(workspace)
         row = _row(data, repo, key)
         row.setdefault("first_seen", stamp)
-        if live:
+        carried = _carried(row, work_item_id, live)
+        if carried:
             row["ignored"] = int(row.get("ignored", 0)) + 1
             if pinned:
                 row["ignored_as_rule"] = int(row.get("ignored_as_rule", 0)) + 1
@@ -141,18 +155,27 @@ def observe(
         trail = list(row.get("evidence") or [])
         trail.append({k: v for k, v in (
             ("date", stamp), ("kind", kind), ("work_item_id", work_item_id),
-            ("pr_id", pr_id), ("as_rule", pinned and live),
+            ("pr_id", pr_id), ("carried", carried), ("as_rule", pinned and carried),
         ) if v})
         row["evidence"] = trail[-_EVIDENCE_KEPT:]
         _save(workspace, data)
 
 
-def expose(workspace: str, repos: list[str]) -> int:
+def _carried(row: dict[str, Any], work_item_id: int, live: bool) -> bool:
+    """Did the run behind this signal carry the lesson? A fact when it can be one."""
+    if work_item_id and "carried_by" in row:
+        return work_item_id in (row.get("carried_by") or [])
+    return live
+
+
+def expose(workspace: str, repos: list[str], work_item_ids: Sequence[int] = ()) -> int:
     """Count one run against every lesson its brief carried. Returns how many.
 
     Carried = the machine-learned, non-stale lines of ``repos`` and the shared bucket
     (the brief names those repos' skills), plus EVERY rule, because the rule file is
-    loaded on every run whatever the work item touches.
+    loaded on every run whatever the work item touches. ``work_item_ids`` — the items
+    this run works on — are remembered against each lesson, so a later repeat on one of
+    them can be told apart from a repeat by a run that never saw the lesson.
     """
     if not workspace:
         return 0
@@ -170,6 +193,8 @@ def expose(workspace: str, repos: list[str]) -> int:
             row = _row(data, repo, key)
             row["exposures"] = int(row.get("exposures", 0)) + 1
             row["quiet_runs"] = int(row.get("quiet_runs", 0)) + 1
+            carriers = [w for w in row.get("carried_by") or [] if w not in work_item_ids]
+            row["carried_by"] = (carriers + [w for w in work_item_ids if w])[-_CARRIERS_KEPT:]
         _save(workspace, data)
     return len(carried)
 
@@ -221,8 +246,11 @@ def verdict(lesson: lessons.Lesson, st: Stats) -> Verdict:
             f"Đã nằm trong skill mà vẫn tái diễn {n} lần — skill không ngăn được. "
             "Nâng thành quy tắc để mọi run đều nạp."))
     if st.quiet_runs >= HOLD_AFTER:
+        # A signal, not a proof: the runs may never have met the situation. Said so,
+        # because a page that calls this "effective" gets believed.
         return Verdict(HOLDING, (
-            f"Đã đi cùng {st.quiet_runs} run kể từ lần gặp cuối mà lỗi không quay lại."))
+            f"Đã đi cùng {st.quiet_runs} run kể từ lần gặp cuối và lỗi chưa quay lại — "
+            "tín hiệu tốt, chưa phải bằng chứng (các run đó có thể chưa gặp tình huống này)."))
     return Verdict(UNPROVEN, (
         f"Mới đi cùng {st.quiet_runs}/{HOLD_AFTER} run kể từ lần gặp cuối — chưa đủ để "
         "kết luận."))

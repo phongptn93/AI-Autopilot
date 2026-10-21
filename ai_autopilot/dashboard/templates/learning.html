@@ -447,8 +447,9 @@
   <div class="kh-advice">
     {% if evidence_health.enforce %}<div>🔒 <b>{{ evidence_health.enforce }}</b> quy tắc <b>đã nạp ở mọi run mà vẫn bị vi phạm</b> —
       viết thêm chữ sẽ không ăn. Mở <b>Cần ép bằng máy</b> ở dòng đó để lấy đề bài dựng hook / test gate.</div>{% endif %}
-    {% if evidence_health.holding %}<div>✅ <b>{{ evidence_health.holding }}</b> bài học <b>đang hiệu nghiệm</b> — đã đi cùng
-      ≥{{ hold_after }} run kể từ lần gặp cuối mà lỗi không quay lại.</div>{% endif %}
+    {% if evidence_health.holding %}<div>✅ <b>{{ evidence_health.holding }}</b> bài học <b>chưa tái diễn</b> — đã đi cùng
+      ≥{{ hold_after }} run kể từ lần gặp cuối mà lỗi chưa quay lại. Tín hiệu tốt, chưa phải bằng chứng:
+      các run đó có thể chưa gặp đúng tình huống.</div>{% endif %}
     {% if health.recurring %}<div>⚠️ <b>{{ health.recurring }}</b> bài học vẫn <b>lặp lại</b> dù đã có trong skill —
       skill không ngăn được. Bấm <b>📌 Nâng thành quy tắc</b> ở dòng đó để nó vào file rule mà mọi run đều nạp.</div>{% endif %}
     {% if health.stale %}<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">🧹 <span><b>{{ health.stale }}</b> bài học chỉ gặp một lần,
@@ -530,7 +531,7 @@
         <span class="kmark">
           {% set ev = assessed.get((repo, norm(lesson.text))) %}
           {% if ev and ev.verdict.name == 'enforce' %}<span class="rep hot" title="{{ ev.verdict.reason }}">🔒 vẫn vi phạm</span>
-          {% elif ev and ev.verdict.name == 'holding' %}<span class="src man" title="{{ ev.verdict.reason }}">✅ hiệu nghiệm</span>{% endif %}
+          {% elif ev and ev.verdict.name == 'holding' %}<span class="src man" title="{{ ev.verdict.reason }}">✅ chưa tái diễn</span>{% endif %}
           {% if lesson.stale() %}<span class="noinj" title="Chỉ gặp một lần, đã hơn {{ stale_days }} ngày — không còn vào skill/brief.">cũ</span>{% endif %}
           {% if lesson.count > 1 %}<span class="rep {{ 'hot' if lesson.recurring }}"
             title="Chuyện này đã xảy ra {{ lesson.count }} lần. Trước đây nó nằm thành {{ lesson.count }} dòng riêng và chiếm {{ lesson.count }} suất nạp của brief — giờ gộp làm một.">{{ lesson.count }} lần</span>{% endif %}

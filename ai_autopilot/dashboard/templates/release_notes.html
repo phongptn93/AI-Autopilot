@@ -39,8 +39,8 @@
       </select>
       {% endif %}
       <select name="days" class="bf-input" style="min-width:110px" aria-label="Khoảng thời gian" onchange="this.form.submit()">
-        {% for d in [7, 14, 30] %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
-        {% if days not in [7, 14, 30] %}<option value="{{ days }}" selected>{{ days }} ngày</option>{% endif %}
+        {% for d in [1, 7, 14, 30] %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
+        {% if days not in [1, 7, 14, 30] %}<option value="{{ days }}" selected>{{ days }} ngày</option>{% endif %}
       </select>
       <noscript><button type="submit" class="btn-ghost">Áp dụng</button></noscript>
     </form>
@@ -73,12 +73,13 @@
 {% endif %}
 
 <div class="notice">
-  🗓️ {% if schedule.enabled %}Tự gửi Teams lúc <b>{{ schedule.at }}</b> ({{ schedule.days }}), bỏ qua trong giờ yên lặng.
-  {% else %}Chưa bật gửi theo lịch.{% endif %}
+  🗓️ {% if schedule.enabled %}Bản tuần: Teams lúc <b>{{ schedule.at }}</b> ({{ schedule.days }}).{% endif %}
+  {% if schedule.daily %}☀️ Bản tin sáng: <b>{{ schedule.daily_at }}</b> ({{ schedule.daily_days }}), gom từ lần gửi trước.{% endif %}
+  {% if schedule.enabled or schedule.daily %}Bỏ qua trong giờ yên lặng.{% else %}Chưa bật gửi theo lịch.{% endif %}
   "Đã giao" = {% if schedule.states %}vào state <b>{{ schedule.states | join(', ') }}</b>{% else %}vào nhóm Resolved/Completed{% endif %} lần đầu trong kỳ.
   {% if not schedule.tenant_tags %}Chưa khai tag tenant nên đang gom theo project.{% endif %}
   <a class="table-link" href="/dashboard/settings#release_note_enabled">Cấu hình ↗</a>
-  {% if schedule.enabled and not schedule.link %}· Đặt <code>dashboard_public_url</code> để tin Teams có nút mở trang này.{% endif %}
+  {% if (schedule.enabled or schedule.daily) and not schedule.link %}· Đặt <code>dashboard_public_url</code> để tin Teams có nút mở trang này.{% endif %}
 </div>
 
 {% if not note.groups %}

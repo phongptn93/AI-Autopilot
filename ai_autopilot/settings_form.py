@@ -658,6 +658,15 @@ _BASE_FIELDS: tuple[Field, ...] = (
           placeholder="08:30"),
     Field("release_note_days", "↳ Ngày gửi", "text", "📣 Release note",
           "Ví dụ Mon (mặc định) hoặc Mon,Thu. Để trống = gửi mỗi ngày.", placeholder="Mon"),
+    Field("release_note_daily_enabled", "☀️ Bản tin sáng hằng ngày", "bool", "📣 Release note",
+          "Mỗi sáng làm việc gửi lên Teams những gì đã giao kể từ lần gửi trước — thường là "
+          "1 ngày, sáng thứ 2 gom cả cuối tuần. Độc lập với bản tuần ở trên: bật một hoặc cả hai."),
+    Field("release_note_daily_at", "↳ Giờ gửi (HH:MM)", "text", "📣 Release note",
+          "Theo múi giờ ở mục Lịch làm việc. Không gửi trong giờ yên lặng.",
+          placeholder="08:00"),
+    Field("release_note_daily_days", "↳ Ngày gửi", "text", "📣 Release note",
+          "Mặc định Mon,Tue,Wed,Thu,Fri. Để trống = mỗi ngày (khi đó mỗi bản là đúng 1 ngày).",
+          placeholder="Mon,Tue,Wed,Thu,Fri"),
     Field("release_note_window_days", "Khoảng tổng hợp (ngày)", "int", "📣 Release note",
           "Nhìn lại bao nhiêu ngày. 7 = một tuần. Trang dashboard dùng làm mặc định."),
     Field("release_note_tenant_tags", "Tag tenant", "list", "📣 Release note",
@@ -1124,6 +1133,8 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     # Release note — only the schedule depends on the switch; the page always works.
     "release_note_at": ("release_note_enabled", ("1",)),
     "release_note_days": ("release_note_enabled", ("1",)),
+    "release_note_daily_at": ("release_note_daily_enabled", ("1",)),
+    "release_note_daily_days": ("release_note_daily_enabled", ("1",)),
     # Spec drift
     "spec_drift_tag": ("spec_drift_enabled", ("1",)),
     "spec_drift_holds_item": ("spec_drift_enabled", ("1",)),
@@ -1423,6 +1434,7 @@ MACHINE_LOCAL = frozenset({
     "teams_agent_digest_interval_hours", "teams_agent_digest_at",
     "digest_skip_when_empty", "digest_respect_quiet_hours",
     "release_note_enabled", "release_note_at", "release_note_days",
+    "release_note_daily_enabled", "release_note_daily_at", "release_note_daily_days",
     "notify_hours_start", "notify_hours_end", "notify_days", "notify_quiet_max_held",
     "notify_window_applies_to",
 })

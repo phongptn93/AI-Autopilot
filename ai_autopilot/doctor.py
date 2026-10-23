@@ -1826,31 +1826,37 @@ def check_claude_cli(config: Settings) -> list[Finding]:
 
 
 def check_release_note(config: Settings) -> list[Finding]:
-    """The scheduled release note can actually go out, and has something to say.
+    """The scheduled release notes (weekly, and the morning brief) can actually go out.
 
-    Each of these fails quietly at runtime — a bad time stops the schedule with one log
-    line, no history means an empty note every week, and no timezone means 08:30 on the
+    Each of these fails quietly at runtime — a bad time stops that schedule with one log
+    line, no history means an empty note every time, and no timezone means 08:30 on the
     host's clock (UTC on every container) rather than the team's.
     """
-    if not config.release_note_enabled:
-        return []
     from ai_autopilot.scheduling import parse_days, resolve_tz
+    from ai_autopilot.services.release_note_service import schedules
 
+    planned = schedules(config)
+    if not planned:
+        return []
+    labels = {"weekly": ("Release note", "release_note"),
+              "daily": ("Morning brief", "release_note_daily")}
     out: list[Finding] = []
-    if parse_hhmm(config.release_note_at) is None:
-        out.append(Finding(
-            ERROR, "Release note schedule has no valid time",
-            f"release_note_at = {config.release_note_at!r} is not HH:MM, so the schedule "
-            "stops at startup and nothing is ever posted.",
-            "Set release_note_at to a time such as 08:30.",
-        ))
-    days = (config.release_note_days or "").strip()
-    if days and not parse_days(days):
-        out.append(Finding(
-            ERROR, "Release note send days are not recognised",
-            f"release_note_days = {days!r} names no weekday, so no day ever matches.",
-            "Use Mon,Tue,… (comma separated), or leave it blank for every day.",
-        ))
+    for sch in planned:
+        label, prefix = labels[sch.name]
+        if parse_hhmm(sch.at) is None:
+            out.append(Finding(
+                ERROR, f"{label} schedule has no valid time",
+                f"{prefix}_at = {sch.at!r} is not HH:MM, so the schedule stops at startup "
+                "and nothing is ever posted.",
+                f"Set {prefix}_at to a time such as 08:30.",
+            ))
+        days = (sch.days or "").strip()
+        if days and not parse_days(days):
+            out.append(Finding(
+                ERROR, f"{label} send days are not recognised",
+                f"{prefix}_days = {days!r} names no weekday, so no day ever matches.",
+                "Use Mon,Tue,… (comma separated), or leave it blank for every day.",
+            ))
     if not config.delivery_history_enabled:
         out.append(Finding(
             ERROR, "Release note is scheduled but state history is off",
@@ -1861,14 +1867,15 @@ def check_release_note(config: Settings) -> list[Finding]:
     if not resolve_tz(config.timezone):
         out.append(Finding(
             WARN, "Release note time is read on the host clock",
-            f"No valid timezone is set, so {config.release_note_at} means the server's "
-            "clock — UTC on a container — not the team's.",
+            "No valid timezone is set, so the send times mean the server's clock — UTC on "
+            "a container — not the team's.",
             "Set timezone (e.g. Asia/Ho_Chi_Minh).",
         ))
     if not out:
-        out.append(Finding(
-            OK, f"Release note: {config.release_note_at} "
-                f"({days or 'every day'}), {config.release_note_window_days} days"))
+        out.extend(
+            Finding(OK, f"{labels[s.name][0]}: {s.at} ({(s.days or '').strip() or 'every day'})")
+            for s in planned
+        )
     return out
 
 

@@ -112,6 +112,9 @@ def create_router() -> APIRouter:
                 schedule={
                     "enabled": cfg.release_note_enabled, "at": cfg.release_note_at,
                     "days": cfg.release_note_days or "mỗi ngày",
+                    "daily": cfg.release_note_daily_enabled,
+                    "daily_at": cfg.release_note_daily_at,
+                    "daily_days": cfg.release_note_daily_days or "mỗi ngày",
                     "tenant_tags": list(cfg.release_note_tenant_tags or []),
                     "states": list(cfg.release_note_states or []),
                     "link": bool(page_url(cfg, note.days)),

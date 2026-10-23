@@ -186,7 +186,7 @@ async def test_send_posts_one_card_with_a_link_to_the_page_when_there_is_a_publi
 
 
 async def test_scheduled_firing_respects_day_quiet_hours_and_empty(monkeypatch):
-    monday = datetime(2026, 10, 26, 8, 30)          # a Monday
+    monday = datetime(2026, 10, 26, 8, 30, tzinfo=UTC)          # a Monday
     c = _container([], release_note_days="Mon")
     service = ReleaseNoteService(c)
     assert await service.run_once(monday + timedelta(days=1)) == "not-today"
@@ -196,18 +196,61 @@ async def test_scheduled_firing_respects_day_quiet_hours_and_empty(monkeypatch):
     monkeypatch.setattr(svc_mod.QuietHours, "is_quiet", lambda self, now=None: False)
     c2 = _container([_ch(1, "Resolved", "Resolved", 1)], [_wi(1, "TLCL.1 x", ["TLCL"])],
                     release_note_days="")
-    assert await ReleaseNoteService(c2).run_once(monday + timedelta(days=3)) == "sent"
+    assert await ReleaseNoteService(c2).run_once(NOW) == "sent"     # cut at the firing time
     assert len(c2.notifier.sent) == 1
+
+
+@pytest.mark.parametrize(("weekday", "days", "back"), [
+    (0, "Mon,Tue,Wed,Thu,Fri", 3),      # Monday covers the weekend
+    (1, "Mon,Tue,Wed,Thu,Fri", 1),
+    (4, "Mon,Tue,Wed,Thu,Fri", 1),
+    (2, "Mon,Wed", 2),
+    (3, "", 1),                         # every day → exactly one day
+])
+def test_the_morning_brief_covers_the_time_since_the_previous_send_day(weekday, days, back):
+    when = datetime(2026, 10, 26, 8, 0) + timedelta(days=weekday)   # 26/10/2026 is a Monday
+    assert when.weekday() == weekday
+    assert svc_mod.since_previous_send_day(days, when) == back
+
+
+async def test_monday_morning_brief_reports_the_weekend_under_its_own_heading():
+    monday = datetime(2026, 10, 26, 1, 0, tzinfo=UTC)              # 08:00 in Hanoi
+    changes = [
+        _ch(1, "Resolved", "Resolved", -1.5),    # Saturday 14:00 UTC → in (weekend)
+        _ch(2, "Resolved", "Resolved", 1),       # Thursday → before Friday 08:00, out
+    ]
+    c = _container(changes, [_wi(1, "TLCL.1 Cuối tuần", ["TLCL"]), _wi(2, "TLCL.2 Cũ", ["TLCL"])],
+                   release_note_daily_enabled=True)
+    sch = next(s for s in svc_mod.schedules(c.config) if s.daily)
+    assert await ReleaseNoteService(c).run_once(monday, sch) == "sent"
+    (msg,) = c.notifier.sent
+    assert msg.heading.startswith("☀️ Bản tin sáng 26/10 — 1 hạng mục đã giao (gồm 3 ngày")
+    assert "TLCL.1" in msg.text and "TLCL.2" not in msg.text
+    tuesday = monday + timedelta(days=1)
+    assert await ReleaseNoteService(c).run_once(tuesday, sch) == "empty"   # nothing new
+
+
+async def test_weekly_and_daily_run_as_separate_schedules():
+    c = _container([], release_note_enabled=True, release_note_daily_enabled=True)
+    assert [s.name for s in svc_mod.schedules(c.config)] == ["weekly", "daily"]
+    service = ReleaseNoteService(c)
+    service.start()
+    try:
+        assert sorted(t.get_name() for t in service._tasks) == [
+            "release-note-daily", "release-note-weekly"]
+    finally:
+        await service.stop()
+    assert service._tasks == []
 
 
 def test_schedule_starts_only_when_enabled_and_history_is_recorded():
     off = ReleaseNoteService(_container([], release_note_enabled=False))
     off.start()
-    assert off._task is None
+    assert off._tasks == []
     no_history = ReleaseNoteService(_container([], release_note_enabled=True,
                                                delivery_history_enabled=False))
     no_history.start()
-    assert no_history._task is None
+    assert no_history._tasks == []
 
 
 # ── doctor ───────────────────────────────────────────────────────────────────
@@ -224,6 +267,10 @@ def test_doctor_names_a_schedule_that_can_never_post():
     good = doctor.check_release_note(Settings(
         release_note_enabled=True, timezone="Asia/Ho_Chi_Minh"))
     assert [f.level for f in good] == [doctor.OK]
+    daily = doctor.check_release_note(Settings(
+        release_note_daily_enabled=True, release_note_daily_at="25:00",
+        timezone="Asia/Ho_Chi_Minh"))
+    assert [f.title for f in daily] == ["Morning brief schedule has no valid time"]
 
 
 # ── dashboard ────────────────────────────────────────────────────────────────

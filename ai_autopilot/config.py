@@ -2091,6 +2091,12 @@ class Settings(BaseSettings):
     # "Mon,Thu"; blank = every day.
     release_note_at: str = "08:30"
     release_note_days: str = "Mon"
+    # The morning brief: the same note, posted each working morning, covering the time
+    # since the previous send day (so Monday's covers the weekend). Independent of the
+    # weekly post — a team can have either, or both.
+    release_note_daily_enabled: bool = False
+    release_note_daily_at: str = "08:00"
+    release_note_daily_days: str = "Mon,Tue,Wed,Thu,Fri"
     # Which states mean "released". Blank = the Resolved/Completed state category — the
     # Delivery page's rule. Name states (e.g. "Pre-Release") when the release IS a state.
     release_note_states: list[str] = Field(default_factory=list)

@@ -172,14 +172,15 @@ def _ticket_key(ticket: str) -> tuple[str, int]:
     return prefix, int(num) if num.isdigit() else 0
 
 
-def render_teams(note: ReleaseNote, *, link_base: str = "") -> tuple[str, str]:
-    """``(heading, text)`` for the Teams card.
+def render_teams(note: ReleaseNote, *, link_base: str = "", title: str = "") -> tuple[str, str]:
+    """``(heading, text)`` for the Teams card. ``title`` replaces the default heading
+    (the morning brief names the day rather than a span).
 
     Bullets, not a table: an Adaptive Card TextBlock does not render markdown tables. The
     full tables — and the customer version — are one click away on the dashboard page.
     """
     span = f"{_local_day(note.start)} – {_local_day(note.end)}"
-    heading = f"📣 Release note {note.days} ngày ({span}) — {note.total} hạng mục"
+    heading = title or f"📣 Release note {note.days} ngày ({span}) — {note.total} hạng mục"
     if not note.groups:
         return heading, "Không có hạng mục nào được giao trong khoảng này."
     lines: list[str] = []

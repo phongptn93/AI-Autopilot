@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from ai_autopilot import release_notes
@@ -32,10 +33,56 @@ def page_url(config, days: int) -> str:
     return f"{base}/dashboard/release-notes?days={days}" if base else ""
 
 
+@dataclass(frozen=True)
+class Schedule:
+    """One scheduled post. ``daily`` notes cover the time since the previous send day;
+    the weekly one covers ``release_note_window_days``."""
+
+    name: str        # "weekly" | "daily" — for the log and the task name
+    at: str          # HH:MM in ``timezone``
+    days: str        # "Mon,Tue" — blank = every day
+    daily: bool = False
+
+
+def schedules(config) -> list[Schedule]:
+    """The posts this machine is configured to send, weekly first."""
+    out: list[Schedule] = []
+    if config.release_note_enabled:
+        out.append(Schedule("weekly", config.release_note_at, config.release_note_days))
+    if config.release_note_daily_enabled:
+        out.append(Schedule("daily", config.release_note_daily_at,
+                            config.release_note_daily_days, daily=True))
+    return out
+
+
+def is_send_day(days: str, now: datetime) -> bool:
+    """Is ``now`` (local) one of ``days``? Blank = every day."""
+    return not (days or "").strip() or now.weekday() in parse_days(days)
+
+
 def due_today(config, now: datetime) -> bool:
-    """Is ``now`` (local) one of the configured send days? Blank days = every day."""
-    days = parse_days(config.release_note_days)
-    return not (config.release_note_days or "").strip() or now.weekday() in days
+    """The weekly schedule's send-day test (kept for callers of the single schedule)."""
+    return is_send_day(config.release_note_days, now)
+
+
+def since_previous_send_day(days: str, now: datetime) -> int:
+    """Days back to the previous send day — the morning brief's window.
+
+    Monday's brief on a Mon–Fri schedule covers Friday 08:00 → Monday 08:00, so what
+    shipped over the weekend is reported once instead of never. Blank days = 1.
+    """
+    allowed = parse_days(days) if (days or "").strip() else set(range(7))
+    for back in range(1, 8):
+        if (now - timedelta(days=back)).weekday() in allowed:
+            return back
+    return 1
+
+
+def morning_title(note) -> str:
+    """The morning brief's heading: today's date, and the span when it is not one day."""
+    today = note.end.strftime("%d/%m")
+    span = "" if note.days <= 1 else f" (gồm {note.days} ngày từ {note.start.strftime('%d/%m')})"
+    return f"☀️ Bản tin sáng {today} — {note.total} hạng mục đã giao{span}"
 
 
 class ReleaseNoteService:
@@ -44,7 +91,7 @@ class ReleaseNoteService:
     def __init__(self, c) -> None:
         self._c = c
         self._config = c.config
-        self._task: asyncio.Task | None = None
+        self._tasks: list[asyncio.Task] = []
 
     # ── building ────────────────────────────────────────────────────────────
 
@@ -107,7 +154,7 @@ class ReleaseNoteService:
 
     # ── posting ─────────────────────────────────────────────────────────────
 
-    async def post(self, note: release_notes.ReleaseNote) -> bool:
+    async def post(self, note: release_notes.ReleaseNote, *, title: str = "") -> bool:
         """Post ``note`` to every channel THROUGH the notifier — so the alert policy and
         the quiet window apply, as for every other sender. True when posted."""
         from ai_autopilot.dashboard.common import work_item_link_base
@@ -116,7 +163,7 @@ class ReleaseNoteService:
             _log.info("[DRY-RUN] would post release note", items=note.total)
             return False
         heading, text = release_notes.render_teams(
-            note, link_base=work_item_link_base(self._config))
+            note, link_base=work_item_link_base(self._config), title=title)
         url = page_url(self._config, note.days)
         await self._c.notifier.notify(NotificationMessage(
             work_item=WorkItemInfo(id=0), type=NotificationType.INFO,
@@ -129,57 +176,77 @@ class ReleaseNoteService:
     # ── schedule ────────────────────────────────────────────────────────────
 
     def start(self) -> None:
-        cfg = self._config
-        if not cfg.release_note_enabled:
+        planned = schedules(self._config)
+        if not planned:
             return
-        if not cfg.delivery_history_enabled:
+        if not self._config.delivery_history_enabled:
             _log.warning("release note schedule off — delivery_history_enabled is false, "
                          "so there is no state history to build it from")
             return
-        self._task = asyncio.create_task(self._run(), name="release-note")
+        for schedule in planned:
+            self._tasks.append(asyncio.create_task(
+                self._run(schedule), name=f"release-note-{schedule.name}"))
 
     async def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
+        for task in self._tasks:
+            task.cancel()
+        for task in self._tasks:
             with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+                await task
+        self._tasks = []
 
-    async def _run(self) -> None:
-        cfg = self._config
-        tz = resolve_tz(cfg.timezone)
+    async def _run(self, schedule: Schedule) -> None:
+        tz = resolve_tz(self._config.timezone)
 
         def _now() -> datetime:
             return datetime.now(tz) if tz else datetime.now()  # noqa: DTZ005 — host fallback
 
-        _log.info("release note schedule started", at=cfg.release_note_at,
-                  days=cfg.release_note_days or "every day")
+        _log.info("release note schedule started", schedule=schedule.name, at=schedule.at,
+                  days=schedule.days or "every day")
         while True:
             try:
-                delay = seconds_until(cfg.release_note_at.strip(), _now())
+                delay = seconds_until((schedule.at or "").strip(), _now())
                 if delay is None:
                     # A constant that does not parse will not parse next time either.
-                    _log.error("release note schedule off — release_note_at is not HH:MM",
-                               value=cfg.release_note_at)
+                    _log.error("release note schedule off — time is not HH:MM",
+                               schedule=schedule.name, value=schedule.at)
                     return
                 await asyncio.sleep(delay)
-                await self.run_once(_now())
+                await self.run_once(_now(), schedule)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 — one bad cycle must not kill the loop
-                _log.error("release note cycle failed", error=describe_exc(exc))
+                _log.error("release note cycle failed", schedule=schedule.name,
+                           error=describe_exc(exc))
 
-    async def run_once(self, now: datetime) -> str:
-        """One scheduled firing. Returns what happened, for the log and the tests."""
+    async def run_once(self, now: datetime, schedule: Schedule | None = None) -> str:
+        """One scheduled firing. Returns what happened, for the log and the tests.
+
+        ``schedule`` defaults to the weekly one. ``now`` is local time (``timezone``);
+        the note itself is cut on the same instant.
+        """
         cfg = self._config
-        if not due_today(cfg, now):
+        schedule = schedule or Schedule("weekly", cfg.release_note_at, cfg.release_note_days)
+        if not is_send_day(schedule.days, now):
             return "not-today"
         if cfg.digest_respect_quiet_hours and QuietHours(cfg).is_quiet():
-            _log.info("release note skipped — outside notify hours")
+            _log.info("release note skipped — outside notify hours", schedule=schedule.name)
             return "quiet"
-        note = await self.build()
+        if schedule.daily:
+            note = await self.build(days=since_previous_send_day(schedule.days, now),
+                                    now=_as_utc(now))
+        else:
+            note = await self.build(now=_as_utc(now))
         if note.error and not note.groups:
             return "error"
         if not note.total and cfg.digest_skip_when_empty:
-            _log.info("release note skipped — nothing delivered", days=note.days)
+            _log.info("release note skipped — nothing delivered", schedule=schedule.name,
+                      days=note.days)
             return "empty"
-        return "sent" if await self.post(note) else "dry-run"
+        title = morning_title(note) if schedule.daily else ""
+        return "sent" if await self.post(note, title=title) else "dry-run"
+
+
+def _as_utc(now: datetime) -> datetime:
+    """A local firing time as UTC; a naive one (no timezone set) is the host's clock."""
+    return now.astimezone(UTC) if now.tzinfo else now.astimezone().astimezone(UTC)

@@ -673,9 +673,17 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Các tag dùng để gom nhóm, theo thứ tự hiển thị — ví dụ TLCL, TLLA, VPM. Item mang hai "
           "tag tenant hiện ở cả hai nhóm. Để trống = gom theo project. Item không khớp tag nào "
           "vào nhóm Chung."),
-    Field("release_note_states", "State tính là đã phát hành", "list", "📣 Release note",
+    Field("release_note_states", "State tính là đã lên production", "list", "📣 Release note",
           "Để trống = state thuộc nhóm Resolved/Completed (đúng như trang Bàn giao). Ghi tên "
-          "state (ví dụ Pre-Release) nếu đội coi một state cụ thể là thời điểm phát hành."),
+          "state nếu đội coi một state cụ thể là thời điểm deploy — ví dụ In UAT, Closed "
+          "(thêm Closed để item nhảy thẳng qua In UAT không bị sót)."),
+    Field("release_note_waiting_states", "State chờ deploy production", "list",
+          "📣 Release note",
+          "Ví dụ Ready for UAT. Trang và mọi bản tin hiện danh sách đang nằm ở state này, cũ "
+          "nhất trước, kèm số ngày chờ. Bản tin vẫn gửi khi không có gì lên production nhưng "
+          "hàng chờ còn hạng mục. Để trống = không hiện hàng chờ."),
+    Field("release_note_stale_days", "↳ Cảnh báo chờ quá (ngày)", "int", "📣 Release note",
+          "Hạng mục chờ deploy từ ngần này ngày trở lên được đánh dấu ⚠️."),
 
     # ── Notifications ──
     # Neither `teams_webhook_url` nor `teams_webhook_urls` is a Field. Both are edited as

@@ -474,6 +474,33 @@ class AdoClient:
         ids = [r["id"] for r in (resp.json().get("workItems") or [])]
         return await self.get_work_items_by_ids(ids)
 
+    async def get_work_items_in_states(
+        self, states: list[str], top: int = 500,
+    ) -> list[WorkItemInfo]:
+        """Every work item currently in one of ``states`` (any tag, any assignee) — the
+        release note's "waiting for deploy" queue. Oldest change first, capped at ``top``.
+        Raises on a failed query: an empty queue and an unreadable one must not look alike.
+        """
+        wanted = [s.strip() for s in (states or []) if s and s.strip()]
+        if not wanted:
+            return []
+        joined = ", ".join(f"'{_wiql_lit(s)}'" for s in wanted)
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems "
+            f"WHERE [System.State] IN ({joined}) "
+            f"AND {self._project_clause()} "
+            "ORDER BY [System.ChangedDate] ASC"
+        )
+        resp = await self._http.post(
+            self._org_url(f"wit/wiql?{_API}"), json={"query": wiql},
+            headers=await self._headers(),
+        )
+        text = resp.text.lstrip()
+        if resp.status_code >= 400 or not text.startswith("{"):
+            raise RuntimeError(f"state WIQL failed: HTTP {resp.status_code} {_terse(resp.text)}")
+        ids = [r["id"] for r in (resp.json().get("workItems") or [])]
+        return await self.get_work_items_by_ids(ids[:top])
+
     async def get_all_active_work_items(self, top: int = 300) -> list[WorkItemInfo]:
         """Every work item in the project (ANY tag, ANY assignee), most-recently
         changed first — unlike ``get_pending_work_items``/``get_all_tagged_work_items``

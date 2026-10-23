@@ -82,7 +82,7 @@ def morning_title(note) -> str:
     """The morning brief's heading: today's date, and the span when it is not one day."""
     today = note.end.strftime("%d/%m")
     span = "" if note.days <= 1 else f" (gồm {note.days} ngày từ {note.start.strftime('%d/%m')})"
-    return f"☀️ Bản tin sáng {today} — {note.total} hạng mục đã giao{span}"
+    return f"☀️ Bản tin sáng {today} — {release_notes.counts_text(note)}{span}"
 
 
 class ReleaseNoteService:
@@ -112,6 +112,13 @@ class ReleaseNoteService:
         history = getattr(self._c, "state_history", None)
         if history is None or projects == []:
             return note
+        built = await self._released(note, history, projects)
+        await self._add_waiting(built, history, projects)
+        return built
+
+    async def _released(self, note, history, projects) -> release_notes.ReleaseNote:
+        cfg = self._config
+        start, end, days = note.start, note.end, note.days
         try:
             # Twice the window, as the Delivery page does: an item already released
             # just before the window must be SEEN to be excluded.
@@ -152,6 +159,36 @@ class ReleaseNoteService:
         built.error = note.error
         return built
 
+    async def _add_waiting(self, note, history, projects) -> None:
+        """Fill ``note.waiting``: what sits in a waiting state NOW. Best-effort — a
+        failed read leaves the queue empty and says so in ``note.error``."""
+        cfg = self._config
+        states = [s.strip() for s in (cfg.release_note_waiting_states or []) if s.strip()]
+        note.waiting_states = states
+        note.stale_days = max(1, int(cfg.release_note_stale_days or 7))
+        if not states:
+            return
+        try:
+            items = await self._c.ado.get_work_items_in_states(states)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("release note: waiting queue read failed", error=describe_exc(exc))
+            note.error = " ".join(filter(None, [
+                note.error, "Không đọc được danh sách chờ deploy từ ADO."]))
+            return
+        if projects is not None:
+            wanted = {p.lower() for p in projects}
+            items = [i for i in items if (i.project or "").lower() in wanted]
+        entered: dict[int, datetime] = {}
+        with contextlib.suppress(Exception):
+            latest = await history.latest_entries([i.id for i in items])
+            current = {i.id: (i.state or "").strip().lower() for i in items}
+            # Only when the history agrees on the state: a row for an older state would
+            # date the wait from the wrong transition.
+            entered = {wid: at for wid, (state, at) in latest.items()
+                       if (state or "").strip().lower() == current.get(wid)}
+        note.waiting = release_notes.build_waiting(
+            items, entered, tenant_tags=list(cfg.release_note_tenant_tags or []))
+
     # ── posting ─────────────────────────────────────────────────────────────
 
     async def post(self, note: release_notes.ReleaseNote, *, title: str = "") -> bool:
@@ -162,12 +199,13 @@ class ReleaseNoteService:
         if self._config.dry_run:
             _log.info("[DRY-RUN] would post release note", items=note.total)
             return False
-        heading, text = release_notes.render_teams(
-            note, link_base=work_item_link_base(self._config), title=title)
+        link_base = work_item_link_base(self._config)
+        heading, text = release_notes.render_teams(note, link_base=link_base, title=title)
         url = page_url(self._config, note.days)
         await self._c.notifier.notify(NotificationMessage(
             work_item=WorkItemInfo(id=0), type=NotificationType.INFO,
             heading=heading, text=text,
+            card=release_notes.render_card(note, link_base=link_base),
             actions=[("📣 Mở release note đầy đủ", url)] if url else [],
         ))
         _log.info("release note posted", items=note.total, days=note.days)
@@ -239,7 +277,9 @@ class ReleaseNoteService:
             note = await self.build(now=_as_utc(now))
         if note.error and not note.groups:
             return "error"
-        if not note.total and cfg.digest_skip_when_empty:
+        # A non-empty queue is news even when nothing shipped: "38 waiting, oldest 21
+        # days" is exactly what the PM should read on a quiet morning.
+        if not note.total and not note.waiting and cfg.digest_skip_when_empty:
             _log.info("release note skipped — nothing delivered", schedule=schedule.name,
                       days=note.days)
             return "empty"

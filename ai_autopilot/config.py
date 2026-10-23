@@ -2100,6 +2100,12 @@ class Settings(BaseSettings):
     # Which states mean "released". Blank = the Resolved/Completed state category — the
     # Delivery page's rule. Name states (e.g. "Pre-Release") when the release IS a state.
     release_note_states: list[str] = Field(default_factory=list)
+    # States that mean "ready, waiting for the production deploy" (e.g. "Ready for UAT"
+    # when "In UAT" is the deployed state). Shown as a snapshot queue, oldest first, on
+    # the page and in every post. Blank = no queue.
+    release_note_waiting_states: list[str] = Field(default_factory=list)
+    # A waiting item this many days old is flagged ⚠️.
+    release_note_stale_days: int = 7
     # Tags that name a tenant (e.g. TLCL, TLLA, VPM), in the order groups are shown.
     # Blank = group by project. An item with none of them lands under "Chung".
     release_note_tenant_tags: list[str] = Field(default_factory=list)

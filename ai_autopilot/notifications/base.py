@@ -105,6 +105,9 @@ class NotificationMessage:
     # ``work_item``, which such a notice has none of.
     heading: str = ""
     text: str = ""
+    # Native Adaptive Card elements for channels that render cards (Teams): when set,
+    # they replace the ``text`` block there. ``text`` stays the fallback for the rest.
+    card: list[dict] = field(default_factory=list)
     # Browser URL of the work item. Filled by ``AdoNotifier._broadcast`` so every
     # channel can link back to the item: a card naming "#9083" left the reader to
     # search for it by hand, which on a phone is the difference between acting on

@@ -88,26 +88,25 @@ def create_router() -> APIRouter:
     async def release_notes_page(
         request: Request, days: int = 0, project: str = "all", sent: str = "",
     ):
-        """What was delivered in the window, per tenant — the internal tables and the
-        customer version without ids, built from the recorded state history."""
+        """What reached production in the window, per tenant; what is waiting for the
+        next deploy now; and one handover per tenant (no ids) — from the recorded state
+        history plus the live queue."""
+        from ai_autopilot import release_notes
         from ai_autopilot.services.release_note_service import ReleaseNoteService, page_url
 
         c: Container = request.app.state.container
         cfg = c.config
         available, projects = _release_scope(request, project)
         note = await ReleaseNoteService(c).build(days=days, projects=projects)
-        customer_md = "\n".join(
-            ["| STT | Mã | Hạng Mục |", "|---|---|---|"]
-            + [f"| {n} | {ticket} | {title} |"
-               for n, (ticket, title) in enumerate(note.customer_rows(), 1)]
-        )
+        link_base = work_item_link_base(cfg)
         return _TEMPLATES.TemplateResponse(
             request, "release_notes.html",
             _ctx(
                 request, "release_notes", note=note, days=note.days,
                 projects=available, selected_project=project,
-                item_link=work_item_link_base(cfg), customer_md=customer_md,
-                customer_rows=note.customer_rows(),
+                item_url=lambda wid: release_notes.item_url(link_base, wid),
+                handovers=[(g, release_notes.handover_markdown(note, g)) for g in note.groups],
+                oldest_wait=note.oldest_wait(), stale_count=len(note.stale()),
                 recording=cfg.delivery_history_enabled,
                 schedule={
                     "enabled": cfg.release_note_enabled, "at": cfg.release_note_at,
@@ -117,6 +116,7 @@ def create_router() -> APIRouter:
                     "daily_days": cfg.release_note_daily_days or "mỗi ngày",
                     "tenant_tags": list(cfg.release_note_tenant_tags or []),
                     "states": list(cfg.release_note_states or []),
+                    "waiting_states": note.waiting_states,
                     "link": bool(page_url(cfg, note.days)),
                 },
                 sent=sent,
@@ -140,7 +140,7 @@ def create_router() -> APIRouter:
         _, projects = _release_scope(request, project)
         service = ReleaseNoteService(c)
         note = await service.build(days=days, projects=projects)
-        outcome = "empty" if not note.total else (
+        outcome = "empty" if not note.total and not note.waiting else (
             "sent" if await service.post(note) else "dry-run")
         with contextlib.suppress(Exception):
             await c.audit_repo.record(

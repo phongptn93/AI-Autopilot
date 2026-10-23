@@ -7,27 +7,46 @@
             letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border,#23232b); }
   .tbl td { padding:7px 10px; border-bottom:1px solid var(--border,#23232b); vertical-align:top; }
   .tbl tr:last-child td { border-bottom:none; }
-  .tbl .id { white-space:nowrap; width:90px; }
-  .tbl .tk { white-space:nowrap; width:120px; font-variant-numeric:tabular-nums; }
+  .tbl .id { white-space:nowrap; width:80px; }
+  .tbl .tk { white-space:nowrap; width:110px; font-variant-numeric:tabular-nums; }
   .tbl .stt { width:48px; text-align:right; font-variant-numeric:tabular-nums; }
+  .tbl .num { white-space:nowrap; width:96px; text-align:right; font-variant-numeric:tabular-nums; }
+  .tbl tr.stale td { background:rgba(229,72,77,.06); }
+  .tbl tr.stale .num { color:var(--red,#e5484d); font-weight:600; }
+  .rn-sub { display:block; font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .rn-chip { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px;
+             border:1px solid var(--border,#23232b); color:var(--text-muted); margin-right:4px; }
+  .rn-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
+  .rn-kpi { border:1px solid var(--border,#23232b); border-radius:12px; padding:14px 16px; background:var(--card-bg,transparent); }
+  .rn-kpi .v { font-size:28px; font-weight:700; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .rn-kpi .l { font-size:12px; color:var(--text-muted); margin-top:4px; }
+  .rn-kpi.good .v { color:var(--green,#22c55e); }
+  .rn-kpi.warn .v { color:var(--amber,#f5a524); }
+  .rn-kpi.bad .v { color:var(--red,#e5484d); }
+  .rn-section { display:flex; align-items:baseline; gap:10px; margin:22px 0 10px; }
+  .rn-section h3 { margin:0; font-size:15px; }
+  .rn-section .hint { font-size:12px; color:var(--text-muted); }
   .rn-group-head { display:flex; align-items:center; gap:10px; }
   .rn-count { font-size:12px; color:var(--text-muted); }
-  .rn-type { display:block; font-size:11px; color:var(--text-dim); margin-top:2px; }
   .notice { font-size:12px; color:var(--text-muted); background:var(--bg,#0d0d12);
             border:1px solid var(--border,#23232b); border-radius:9px; padding:9px 13px; margin-bottom:14px; }
   .notice.ok { border-color:rgba(34,197,94,.45); }
   .empty { color:var(--text-dim); font-size:13px; text-align:center; padding:22px 0; }
-  .rn-copy { width:100%; min-height:140px; font:12px/1.5 ui-monospace,monospace; color:inherit;
+  .rn-copy { width:100%; min-height:120px; font:12px/1.5 ui-monospace,monospace; color:inherit;
              background:transparent; border:1px solid var(--border,#23232b); border-radius:8px;
              padding:10px; resize:vertical; margin-top:10px; }
   .rn-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .rn-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .rn-tabs button { font-size:12.5px; padding:5px 12px; border-radius:999px; cursor:pointer;
+                    border:1px solid var(--border,#23232b); background:transparent; color:inherit; }
+  .rn-tabs button[aria-selected="true"] { background:var(--accent,#6366f1); border-color:transparent; color:#fff; }
+  .rn-handover[hidden] { display:none; }
 </style>
 
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
   <div>
     <h2 class="page-title">{{ page_title("release_notes") }}</h2>
-    <p><b>{{ note.total }}</b> hạng mục đã giao trong {{ days }} ngày
-      ({{ note.start.strftime('%d/%m/%Y') }} – {{ note.end.strftime('%d/%m/%Y') }}),
+    <p>{{ days }} ngày ({{ note.start.strftime('%d/%m/%Y') }} – {{ note.end.strftime('%d/%m/%Y') }}),
       gom theo {% if schedule.tenant_tags %}tenant{% else %}project{% endif %}.</p>
   </div>
   <div class="rn-actions">
@@ -45,10 +64,10 @@
       <noscript><button type="submit" class="btn-ghost">Áp dụng</button></noscript>
     </form>
     <form method="post" action="/dashboard/release-notes/send" style="margin:0"
-          onsubmit="return confirm('Gửi release note {{ days }} ngày này lên các kênh Teams ngay bây giờ?');">
+          onsubmit="return confirm('Gửi bản tin {{ days }} ngày này lên các kênh Teams ngay bây giờ?');">
       <input type="hidden" name="days" value="{{ days }}"/>
       <input type="hidden" name="project" value="{{ selected_project }}"/>
-      <button class="btn-primary" type="submit" {% if not note.total %}disabled title="Không có hạng mục nào để gửi"{% endif %}>📨 Gửi Teams ngay</button>
+      <button class="btn-primary" type="submit" {% if not note.total and not note.waiting %}disabled title="Không có gì để gửi"{% endif %}>📨 Gửi Teams ngay</button>
     </form>
   </div>
 </div>
@@ -63,29 +82,41 @@
 </div>
 {% endif %}
 
+{# ── KPI strip ─────────────────────────────────────────────────────────── #}
+<div class="rn-kpis">
+  <div class="rn-kpi good"><div class="v">{{ note.total }}</div><div class="l">🚀 Lên production trong {{ days }} ngày</div></div>
+  {% if note.waiting_states %}
+  <div class="rn-kpi {% if note.waiting %}warn{% endif %}"><div class="v">{{ note.waiting | length }}</div><div class="l">⏳ Đang chờ deploy ({{ note.waiting_states | join(', ') }})</div></div>
+  <div class="rn-kpi {% if oldest_wait is not none and oldest_wait >= note.stale_days %}bad{% endif %}"><div class="v">{% if oldest_wait is none %}—{% else %}{{ oldest_wait }} ngày{% endif %}</div><div class="l">🕰️ Chờ lâu nhất</div></div>
+  <div class="rn-kpi {% if stale_count %}bad{% endif %}"><div class="v">{{ stale_count }}</div><div class="l">⚠️ Chờ ≥ {{ note.stale_days }} ngày</div></div>
+  {% endif %}
+</div>
+
 {% if not recording %}
-<div class="notice">⏸️ <b>Đang tắt ghi lịch sử trạng thái</b> — release note được dựng từ lịch sử này nên sẽ trống.
+<div class="notice">⏸️ <b>Đang tắt ghi lịch sử trạng thái</b> — phần "lên production" dựng từ lịch sử này nên sẽ trống.
   Bật ở <a class="table-link" href="/dashboard/settings">Settings</a> → <code>delivery_history_enabled</code>.</div>
 {% elif note.partial %}
 <div class="notice">📖 Lịch sử trạng thái chỉ có từ
   <b>{% if note.history_since %}{{ note.history_since.strftime('%d/%m/%Y %H:%M') }}{% else %}chưa có dữ liệu{% endif %}</b>
-  — hạng mục giao trước mốc này không có trong danh sách.</div>
+  — hạng mục lên production trước mốc này không có trong danh sách.</div>
 {% endif %}
 
 <div class="notice">
   🗓️ {% if schedule.enabled %}Bản tuần: Teams lúc <b>{{ schedule.at }}</b> ({{ schedule.days }}).{% endif %}
   {% if schedule.daily %}☀️ Bản tin sáng: <b>{{ schedule.daily_at }}</b> ({{ schedule.daily_days }}), gom từ lần gửi trước.{% endif %}
   {% if schedule.enabled or schedule.daily %}Bỏ qua trong giờ yên lặng.{% else %}Chưa bật gửi theo lịch.{% endif %}
-  "Đã giao" = {% if schedule.states %}vào state <b>{{ schedule.states | join(', ') }}</b>{% else %}vào nhóm Resolved/Completed{% endif %} lần đầu trong kỳ.
+  "Lên production" = {% if schedule.states %}vào state <b>{{ schedule.states | join(', ') }}</b>{% else %}vào nhóm Resolved/Completed{% endif %} lần đầu trong kỳ.
+  {% if not schedule.waiting_states %}Chưa khai state chờ deploy (vd <code>Ready for UAT</code>) nên không có hàng chờ.{% endif %}
   {% if not schedule.tenant_tags %}Chưa khai tag tenant nên đang gom theo project.{% endif %}
   <a class="table-link" href="/dashboard/settings#release_note_enabled">Cấu hình ↗</a>
   {% if (schedule.enabled or schedule.daily) and not schedule.link %}· Đặt <code>dashboard_public_url</code> để tin Teams có nút mở trang này.{% endif %}
 </div>
 
+{# ── 1. Deployed ───────────────────────────────────────────────────────── #}
+<div class="rn-section" id="deployed"><h3>🚀 Đã lên production</h3><span class="hint">{{ note.total }} hạng mục · {{ note.start.strftime('%d/%m') }} – {{ note.end.strftime('%d/%m') }}</span></div>
 {% if not note.groups %}
-<div class="card"><div class="card-body"><div class="empty">Không có hạng mục nào được giao trong {{ days }} ngày qua.</div></div></div>
+<div class="card"><div class="card-body"><div class="empty">Không có hạng mục nào lên production trong {{ days }} ngày qua.</div></div></div>
 {% else %}
-
 {% for group in note.groups %}
 <div class="card" style="margin-bottom:14px">
   <div class="card-header"><div class="rn-group-head">
@@ -93,13 +124,14 @@
   </div></div>
   <div class="card-body" style="padding:0">
     <table class="tbl">
-      <thead><tr><th class="id">Mã</th><th class="tk">Mã Ticket</th><th>Hạng Mục</th></tr></thead>
+      <thead><tr><th class="id">Mã</th><th class="tk">Mã Ticket</th><th>Hạng Mục</th><th class="num">Lên prod</th></tr></thead>
       <tbody>
       {% for e in group.entries %}
         <tr>
-          <td class="id">{% if item_link %}<a class="table-link" href="{{ item_link }}{{ e.id }}" target="_blank" rel="noopener">#{{ e.id }}</a>{% else %}#{{ e.id }}{% endif %}</td>
+          <td class="id">{% set u = item_url(e.id) %}{% if u %}<a class="table-link" href="{{ u }}" target="_blank" rel="noopener">#{{ e.id }}</a>{% else %}#{{ e.id }}{% endif %}</td>
           <td class="tk">{{ e.ticket or '—' }}</td>
-          <td>{{ e.title }}<span class="rn-type">{{ e.work_item_type }}{% if e.work_item_type and e.project %} · {% endif %}{{ e.project }} · {{ e.delivered_at.strftime('%d/%m') }}</span></td>
+          <td>{{ e.title }}<span class="rn-sub">{{ e.work_item_type }}{% if e.work_item_type and e.project %} · {% endif %}{{ e.project }}</span></td>
+          <td class="num">{{ e.delivered_at.strftime('%d/%m') }}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -107,21 +139,71 @@
   </div>
 </div>
 {% endfor %}
+{% endif %}
 
-<div class="card">
-  <div class="card-header"><h3 class="card-title">📣 Bản gửi khách hàng (gom chung)</h3></div>
-  <div class="card-body">
-    <p class="dim" style="font-size:12.5px;margin:0 0 10px">Không có mã work item nội bộ — chỉ mã ticket của khách (lấy từ đầu tiêu đề, để trống nếu không có).</p>
+{# ── 2. Waiting for deploy ─────────────────────────────────────────────── #}
+{% if note.waiting_states %}
+<div class="rn-section" id="waiting"><h3>⏳ Chờ deploy production</h3>
+  <span class="hint">{{ note.waiting | length }} hạng mục đang ở {{ note.waiting_states | join(', ') }} — cũ nhất trước{% if note.waiting %} ·
+  {% for t, n in note.waiting_by_tenant() %}{{ t }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}{% endif %}</span></div>
+<div class="card" style="margin-bottom:14px">
+  <div class="card-body" style="padding:0">
+  {% if not note.waiting %}<div class="empty">Không có hạng mục nào đang chờ deploy.</div>
+  {% else %}
     <table class="tbl">
-      <thead><tr><th class="stt">STT</th><th class="tk">Mã</th><th>Hạng Mục</th></tr></thead>
+      <thead><tr><th class="id">Mã</th><th class="tk">Mã Ticket</th><th>Hạng Mục</th><th class="num">Vào hàng chờ</th><th class="num">Đã chờ</th></tr></thead>
       <tbody>
-      {% for ticket, title in customer_rows %}
-        <tr><td class="stt">{{ loop.index }}</td><td class="tk">{{ ticket }}</td><td>{{ title }}</td></tr>
+      {% for w in note.waiting %}{% set age = w.age_days(note.end) %}
+        <tr {% if age is not none and age >= note.stale_days %}class="stale"{% endif %}>
+          <td class="id">{% set u = item_url(w.id) %}{% if u %}<a class="table-link" href="{{ u }}" target="_blank" rel="noopener">#{{ w.id }}</a>{% else %}#{{ w.id }}{% endif %}</td>
+          <td class="tk">{{ w.ticket or '—' }}</td>
+          <td>{{ w.title }}<span class="rn-sub">{% for t in w.tenants %}<span class="rn-chip">{{ t }}</span>{% endfor %}{{ w.state }}</span></td>
+          <td class="num">{% if w.since %}{{ w.since.strftime('%d/%m') }}{% else %}—{% endif %}</td>
+          <td class="num" {% if w.approx %}title="Chưa có lịch sử chuyển trạng thái — tính từ lần sửa cuối, nên thực tế có thể lâu hơn"{% endif %}>{% if age is none %}—{% elif age == 0 %}hôm nay{% else %}{% if w.approx %}≥ {% endif %}{{ age }} ngày{% endif %}</td>
+        </tr>
       {% endfor %}
       </tbody>
     </table>
-    <textarea class="rn-copy" readonly onclick="this.select()" aria-label="Bản gửi khách dạng Markdown">{{ customer_md }}</textarea>
+  {% endif %}
   </div>
 </div>
+{% endif %}
+
+{# ── 3. Handover, one per tenant ───────────────────────────────────────── #}
+{% if handovers %}
+<div class="rn-section" id="handover"><h3>📄 Bàn giao khách hàng</h3><span class="hint">mỗi tenant một bản — không có mã work item nội bộ, chỉ mã ticket của khách</span></div>
+<div class="card">
+  <div class="card-body">
+    {% if handovers | length > 1 %}
+    <div class="rn-tabs" role="tablist">
+      {% for g, md in handovers %}<button type="button" role="tab" aria-selected="{{ 'true' if loop.first else 'false' }}" data-ho="{{ loop.index }}">{{ g.tenant }} · {{ g.entries | length }}</button>{% endfor %}
+    </div>
+    {% endif %}
+    {% for g, md in handovers %}
+    <div class="rn-handover" data-ho="{{ loop.index }}" {% if not loop.first %}hidden{% endif %}>
+      <p style="font-size:13px;margin:0 0 8px"><b>Danh sách hạng mục đã triển khai production — {{ g.tenant }}</b>
+        <span class="dim">({{ note.start.strftime('%d/%m/%Y') }} – {{ note.end.strftime('%d/%m/%Y') }})</span></p>
+      <table class="tbl">
+        <thead><tr><th class="stt">STT</th><th class="tk">Mã</th><th>Hạng Mục</th></tr></thead>
+        <tbody>
+        {% for e in g.entries %}<tr><td class="stt">{{ loop.index }}</td><td class="tk">{{ e.ticket }}</td><td>{{ e.title }}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      <div class="rn-actions" style="margin-top:10px">
+        <button type="button" class="btn-ghost" data-copy-from="#ho-{{ loop.index }}">📋 Sao chép bản {{ g.tenant }}</button>
+      </div>
+      <textarea class="rn-copy" id="ho-{{ loop.index }}" readonly onclick="this.select()" aria-label="Bản bàn giao {{ g.tenant }} dạng Markdown">{{ md }}</textarea>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<script>
+  document.querySelectorAll('.rn-tabs button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.rn-tabs button').forEach(function (x) { x.setAttribute('aria-selected', x === b ? 'true' : 'false'); });
+      document.querySelectorAll('.rn-handover').forEach(function (p) { p.hidden = p.dataset.ho !== b.dataset.ho; });
+    });
+  });
+</script>
 {% endif %}
 {% endblock %}

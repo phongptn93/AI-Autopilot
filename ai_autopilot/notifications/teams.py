@@ -201,8 +201,8 @@ class TeamsNotifier(NotificationChannel):
                 # The notice's own words. Free-form notices (a PR that needs a person,
                 # a machine that went offline, a digest) carry their whole point here,
                 # and the card used to drop it.
-                *([{"type": "TextBlock", "text": message.text, "wrap": True,
-                    "spacing": "Small"}] if message.text else []),
+                *(message.card or ([{"type": "TextBlock", "text": message.text, "wrap": True,
+                                     "spacing": "Small"}] if message.text else [])),
                 *([{"type": "FactSet", "facts": facts}] if facts else []),
             ],
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

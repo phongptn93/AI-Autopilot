@@ -693,6 +693,22 @@ class StateHistoryRepository:
             )
             return {r.work_item_id: r.state for r in rows.scalars().all()}
 
+    async def latest_entries(self, ids: list[int]) -> dict[int, tuple[str, datetime]]:
+        """``{work_item_id: (state, entered_at)}`` of the newest recorded row — i.e. when
+        each item entered the state it is (last seen) in."""
+        if not ids:
+            return {}
+        async with self._db.session() as session:
+            newest = (
+                select(func.max(WorkItemStateHistory.id))
+                .where(WorkItemStateHistory.work_item_id.in_(ids))
+                .group_by(WorkItemStateHistory.work_item_id)
+            )
+            rows = await session.execute(
+                select(WorkItemStateHistory).where(WorkItemStateHistory.id.in_(newest))
+            )
+            return {r.work_item_id: (r.state, r.entered_at) for r in rows.scalars().all()}
+
     async def known_projects(self, ids: list[int] | None = None) -> dict[int, str]:
         """``{work_item_id: project}`` from the recorded history.
 

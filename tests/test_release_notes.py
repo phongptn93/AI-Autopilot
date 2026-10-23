@@ -94,13 +94,13 @@ def test_teams_text_is_bullets_with_links_capped_per_group_and_flags_partial_his
     note = rn.build(items, {i.id: NOW for i in items}, tenant_tags=["TLCL"],
                     start=START, end=NOW, days=7, history_since=NOW - timedelta(days=2))
     heading, text = rn.render_teams(note, link_base="https://dev.azure.com/org/_workitems/edit/")
-    assert "20 hạng mục" in heading and "| " not in text                # no markdown table
+    assert "20 lên production" in heading and "| " not in text                # no markdown table
     assert "[#1](https://dev.azure.com/org/_workitems/edit/1) TLCL.1 — item 1" in text
     assert f"và {20 - rn.TEAMS_LINES_PER_GROUP} hạng mục khác" in text
     assert "có thể chưa đủ" in text                                     # partial window said
     empty_heading, empty_text = rn.render_teams(
         rn.ReleaseNote(start=START, end=NOW, days=7))
-    assert "0 hạng mục" in empty_heading and "Không có" in empty_text
+    assert "0 lên production" in empty_heading and "Không có" in empty_text
 
 
 # ── service ──────────────────────────────────────────────────────────────────
@@ -118,16 +118,30 @@ class _History:
     async def first_seen(self):
         return self.first.replace(tzinfo=None)
 
+    async def latest_entries(self, ids):
+        latest = {}
+        for ch in sorted(self.changes, key=lambda c: c.entered_at):
+            if ch.work_item_id in ids:
+                latest[ch.work_item_id] = (ch.state, ch.entered_at)
+        return latest
+
 
 class _Ado:
-    def __init__(self, items=(), fail=False):
+    def __init__(self, items=(), fail=False, waiting=(), waiting_fail=False):
         self.items, self.fail, self.asked = list(items), fail, None
+        self.waiting, self.waiting_fail, self.asked_states = list(waiting), waiting_fail, None
 
     async def get_work_items_by_ids(self, ids):
         self.asked = list(ids)
         if self.fail:
             raise RuntimeError("ADO down")
         return [i for i in self.items if i.id in ids]
+
+    async def get_work_items_in_states(self, states):
+        self.asked_states = list(states)
+        if self.waiting_fail:
+            raise RuntimeError("WIQL down")
+        return list(self.waiting)
 
 
 class _Notifier:
@@ -138,12 +152,106 @@ class _Notifier:
         self.sent.append(message)
 
 
-def _container(changes, items=(), fail=False, **cfg):
+def _container(changes, items=(), fail=False, waiting=(), waiting_fail=False, **cfg):
     base = {"release_note_tenant_tags": ["TLCL", "VPM"], "ado_organization": "https://dev.azure.com/org",
             "ado_project": "TLCL-DxFac"}
     base.update(cfg)
     return SimpleNamespace(config=Settings(**base), state_history=_History(changes),
-                           ado=_Ado(items, fail), notifier=_Notifier())
+                           ado=_Ado(items, fail, waiting, waiting_fail), notifier=_Notifier())
+
+
+def _ready(wid, title, tags=(), project="TLCL-DxFac", changed_days_ago=None):
+    item = _wi(wid, title, tags, project)
+    item.state = "Ready for UAT"
+    if changed_days_ago is not None:
+        item.changed_date = NOW - timedelta(days=changed_days_ago)
+    return item
+
+
+# ── links: the base is ".../_workitems/edit" with NO trailing slash ─────────────
+
+
+def test_links_put_a_slash_between_the_base_and_the_id():
+    """The real base (work_item_link_base) has no trailing slash; gluing the id on bare
+    produced .../_workitems/edit8357 — a link to nothing, in every card ever sent."""
+    base = "https://dev.azure.com/newoceanis/_workitems/edit"
+    assert rn.item_url(base, 8357) == f"{base}/8357"
+    assert rn.item_url(base + "/", 8357) == f"{base}/8357"
+    assert rn.item_url("", 8357) == ""
+    note = rn.build([_wi(8357, "VPM_UAT báo cáo", ["TLCL"])], {8357: NOW}, tenant_tags=["TLCL"],
+                    start=START, end=NOW, days=7)
+    _, text = rn.render_teams(note, link_base=base)
+    assert f"({base}/8357)" in text and "edit8357" not in text
+    assert "edit8357" not in str(rn.render_card(note, link_base=base))
+
+
+# ── waiting queue ────────────────────────────────────────────────────────────
+
+
+def test_waiting_queue_is_oldest_first_aged_from_history_else_marked_approximate():
+    items = [_ready(1, "TLCL.1 Mới", ["TLCL"]), _ready(2, "TLCL.2 Cũ", ["TLCL"]),
+             _ready(3, "Không lịch sử", ["VPM"], changed_days_ago=4), _ready(4, "Không gì cả")]
+    entered = {1: NOW - timedelta(days=1), 2: NOW - timedelta(days=12)}
+    queue = rn.build_waiting(items, entered, tenant_tags=["TLCL", "VPM"])
+    assert [w.id for w in queue] == [2, 3, 1, 4]                  # unknown age last
+    assert queue[0].ticket == "TLCL.2" and queue[0].age_days(NOW) == 12 and not queue[0].approx
+    assert queue[1].approx and queue[1].tenants == ("VPM",)       # from ChangedDate: "≥ 4"
+    assert queue[3].age_days(NOW) is None and queue[3].tenants == (rn.COMMON,)
+    note = rn.ReleaseNote(start=START, end=NOW, days=7, waiting=queue,
+                          waiting_states=["Ready for UAT"], stale_days=7)
+    assert [w.id for w in note.stale()] == [2] and note.oldest_wait() == 12
+    assert note.waiting_by_tenant() == [("TLCL", 2), ("VPM", 1), (rn.COMMON, 1)]
+    _, text = rn.render_teams(note)
+    assert "Chờ deploy (4)" in text and "12 ngày" in text and "≥ 4 ngày" in text
+
+
+async def test_service_reads_the_queue_scopes_it_and_dates_it_only_from_a_matching_state():
+    changes = [_ch(1, "Ready for UAT", "Resolved", 9), _ch(2, "Ready for UAT", "Resolved", 20),
+               _ch(2, "Rework Required", "InProgress", 3)]       # history lags ADO for #2
+    waiting = [_ready(1, "TLCL.1 a", ["TLCL"]),
+               _ready(2, "TLCL.2 b", ["TLCL"], changed_days_ago=1),
+               _ready(3, "c", project="Other")]
+    c = _container(changes, waiting=waiting, release_note_waiting_states=["Ready for UAT"],
+                   release_note_stale_days=5)
+    note = await ReleaseNoteService(c).build(now=NOW, projects=["TLCL-DxFac"])
+    assert c.ado.asked_states == ["Ready for UAT"]
+    assert [w.id for w in note.waiting] == [1, 2]                  # #3 out of scope
+    first, second = note.waiting
+    assert first.age_days(NOW) == 9 and not first.approx
+    assert second.approx and second.age_days(NOW) == 1             # not the stale 20-day row
+    assert note.stale_days == 5 and [w.id for w in note.stale()] == [1]
+    off = _container(changes, waiting=waiting)                     # no waiting states → no query
+    assert (await ReleaseNoteService(off).build(now=NOW)).waiting == [] and off.ado.asked_states is None
+    broken = _container([], waiting_fail=True, release_note_waiting_states=["Ready for UAT"])
+    assert "chờ deploy" in (await ReleaseNoteService(broken).build(now=NOW)).error
+
+
+async def test_a_quiet_morning_still_posts_when_the_queue_is_not_empty():
+    c = _container([], waiting=[_ready(9, "TLCL.9 Chờ", ["TLCL"], changed_days_ago=10)],
+                   release_note_waiting_states=["Ready for UAT"], release_note_daily_enabled=True)
+    sch = next(s for s in svc_mod.schedules(c.config) if s.daily)
+    tuesday = datetime(2026, 10, 27, 1, 0, tzinfo=UTC)
+    assert await ReleaseNoteService(c).run_once(tuesday, sch) == "sent"
+    (msg,) = c.notifier.sent
+    assert "0 lên production · 1 chờ deploy" in msg.heading
+
+
+async def test_the_teams_post_is_a_native_card_with_kpis_and_both_sections():
+    from ai_autopilot.notifications.teams import TeamsNotifier
+
+    c = _container([_ch(1, "In UAT", "Resolved", 1)], [_wi(1, "TLCL.5 Done", ["TLCL"])],
+                   waiting=[_ready(9, "TLCL.9 Chờ", ["TLCL"], changed_days_ago=10)],
+                   release_note_states=["In UAT"], release_note_waiting_states=["Ready for UAT"])
+    service = ReleaseNoteService(c)
+    assert await service.post(await service.build(now=NOW))
+    (msg,) = c.notifier.sent
+    body = TeamsNotifier._payload(msg)["attachments"][0]["content"]["body"]
+    flat = str(body)
+    assert body[0]["text"] == msg.heading and body[1:] == msg.card
+    assert "ColumnSet" in flat and "ĐÃ LÊN PRODUCTION" in flat and "CHỜ DEPLOY (Ready for UAT)" in flat
+    assert "https://dev.azure.com/org/TLCL-DxFac/_workitems/edit/9" in flat
+    assert "⚠️ ≥ 10 ngày" in flat                                  # past stale_days → flagged
+    assert msg.text and "TLCL.5" in msg.text                       # fallback for email/Zalo
 
 
 async def test_service_builds_from_history_and_asks_ado_only_for_released_items():
@@ -177,7 +285,7 @@ async def test_send_posts_one_card_with_a_link_to_the_page_when_there_is_a_publi
     service = ReleaseNoteService(c)
     assert await service.post(await service.build(now=NOW))
     (msg,) = c.notifier.sent
-    assert msg.heading.startswith("📣 Release note 7 ngày") and "TLCL.5" in msg.text
+    assert msg.heading.startswith("📣 Release 7 ngày") and "TLCL.5" in msg.text
     assert msg.actions == [("📣 Mở release note đầy đủ",
                             "https://autopilot.example.com/dashboard/release-notes?days=7")]
     dry = _container([_ch(1, "Resolved", "Resolved", 2)], [_wi(1, "x")], dry_run=True)
@@ -224,7 +332,7 @@ async def test_monday_morning_brief_reports_the_weekend_under_its_own_heading():
     sch = next(s for s in svc_mod.schedules(c.config) if s.daily)
     assert await ReleaseNoteService(c).run_once(monday, sch) == "sent"
     (msg,) = c.notifier.sent
-    assert msg.heading.startswith("☀️ Bản tin sáng 26/10 — 1 hạng mục đã giao (gồm 3 ngày")
+    assert msg.heading.startswith("☀️ Bản tin sáng 26/10 — 1 lên production (gồm 3 ngày")
     assert "TLCL.1" in msg.text and "TLCL.2" not in msg.text
     tuesday = monday + timedelta(days=1)
     assert await ReleaseNoteService(c).run_once(tuesday, sch) == "empty"   # nothing new
@@ -292,8 +400,31 @@ def test_page_shows_internal_tables_and_a_customer_version_without_ids(tmp_path,
     with TestClient(create_app(cfg)) as client:
         html = client.get("/dashboard/release-notes").text
     assert "#42" in html and "TLCL.18" in html and "Thêm cột" in html
-    customer = html.split("Bản gửi khách hàng", 1)[1]
+    assert 'href="https://dev.azure.com/org/P/_workitems/edit/42"' in html
+    customer = html.split("Bàn giao khách hàng", 1)[1]
     assert "#42" not in customer and "| 1 | TLCL.18 | Thêm cột |" in customer
+
+
+def test_page_shows_the_waiting_queue_and_one_handover_per_tenant(tmp_path, monkeypatch):
+    async def fake_build(self, **kw):
+        note = rn.build([_wi(1, "TLCL.1 Một", ["TLCL"]), _wi(2, "VPM.2 Hai", ["VPM"])],
+                        {1: NOW, 2: NOW}, tenant_tags=["TLCL", "VPM"], start=START, end=NOW,
+                        days=7, history_since=NOW - timedelta(days=30))
+        note.waiting_states = ["Ready for UAT"]
+        note.waiting = rn.build_waiting([_ready(9, "TLCL.9 Chờ lâu", ["TLCL"])],
+                                        {9: NOW - timedelta(days=15)}, tenant_tags=["TLCL"])
+        return note
+
+    monkeypatch.setattr(ReleaseNoteService, "build", fake_build)
+    cfg = Settings(dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 'w.db'}")
+    with TestClient(create_app(cfg)) as client:
+        html = client.get("/dashboard/release-notes").text
+    waiting = html.split("Chờ deploy production", 1)[1].split("Bàn giao khách hàng", 1)[0]
+    assert "TLCL.9" in waiting and "15 ngày" in waiting and 'class="stale"' in waiting
+    handover = html.split("Bàn giao khách hàng", 1)[1]
+    tlcl, vpm = handover.split('id="ho-1"', 1)[1], handover.split('id="ho-2"', 1)[1]
+    assert "TLCL.1" in tlcl.split("</textarea>")[0] and "VPM.2" not in tlcl.split("</textarea>")[0]
+    assert "VPM.2" in vpm.split("</textarea>")[0] and "TLCL.1" not in vpm.split("</textarea>")[0]
 
 
 def test_send_now_posts_and_reports_back(tmp_path, monkeypatch):

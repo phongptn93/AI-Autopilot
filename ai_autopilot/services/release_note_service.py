@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -113,7 +114,8 @@ class ReleaseNoteService:
         if history is None or projects == []:
             return note
         built = await self._released(note, history, projects)
-        await self._add_waiting(built, history, projects)
+        await self._add_snapshots(built, history, projects)
+        await self._add_wip(built, projects)
         return built
 
     async def _released(self, note, history, projects) -> release_notes.ReleaseNote:
@@ -131,8 +133,13 @@ class ReleaseNoteService:
         if projects is not None:
             wanted = {p.lower() for p in projects}
             changes = [ch for ch in changes if (ch.project or "").lower() in wanted]
-        released = release_notes.released_between(
-            changes, start, end, list(cfg.release_note_states or []))
+        states = list(cfg.release_note_states or [])
+        released = release_notes.released_between(changes, start, end, states)
+        # The window before, for "+3 so với kỳ trước" — only when history covers it.
+        if note.history_since is not None and \
+                release_notes._utc(note.history_since) <= start - timedelta(days=days):
+            note.previous_total = len(release_notes.released_between(
+                changes, start - timedelta(days=days), start, states))
         if not released:
             return self._finish(note, [], released)
         try:
@@ -157,23 +164,28 @@ class ReleaseNoteService:
             start=note.start, end=note.end, days=note.days, history_since=note.history_since,
         )
         built.error = note.error
+        built.previous_total = note.previous_total
         return built
 
-    async def _add_waiting(self, note, history, projects) -> None:
-        """Fill ``note.waiting``: what sits in a waiting state NOW. Best-effort — a
-        failed read leaves the queue empty and says so in ``note.error``."""
+    async def _add_snapshots(self, note, history, projects) -> None:
+        """Fill ``note.waiting`` and ``note.lanes``: what sits in a waiting or a role's
+        state NOW — one query for all of them. Best-effort: a failed read leaves them
+        empty and says so in ``note.error``."""
         cfg = self._config
         states = [s.strip() for s in (cfg.release_note_waiting_states or []) if s.strip()]
+        roles = release_notes.parse_roles(cfg.release_note_roles)
         note.waiting_states = states
         note.stale_days = max(1, int(cfg.release_note_stale_days or 7))
-        if not states:
+        wanted = list(dict.fromkeys(states + [s for _, ss in roles for s in ss]))
+        if not wanted:
             return
         try:
-            items = await self._c.ado.get_work_items_in_states(states)
+            items = await self._c.ado.get_work_items_in_states(wanted)
         except Exception as exc:  # noqa: BLE001
-            _log.warning("release note: waiting queue read failed", error=describe_exc(exc))
+            _log.warning("release note: snapshot read failed", error=describe_exc(exc))
             note.error = " ".join(filter(None, [
-                note.error, "Không đọc được danh sách chờ deploy từ ADO."]))
+                note.error, "Không đọc được danh sách chờ deploy / theo vai trò từ ADO."]))
+            note.lanes = release_notes.build_lanes(roles, [])
             return
         if projects is not None:
             wanted = {p.lower() for p in projects}
@@ -186,8 +198,53 @@ class ReleaseNoteService:
             # date the wait from the wrong transition.
             entered = {wid: at for wid, (state, at) in latest.items()
                        if (state or "").strip().lower() == current.get(wid)}
-        note.waiting = release_notes.build_waiting(
+        queue = release_notes.build_waiting(
             items, entered, tenant_tags=list(cfg.release_note_tenant_tags or []))
+        waiting = {s.lower() for s in states}
+        note.waiting = [w for w in queue if w.state.lower() in waiting]
+        note.lanes = release_notes.build_lanes(roles, queue)
+
+    async def _add_wip(self, note, projects) -> None:
+        """Fill ``note.wip`` from each project's board. Best-effort, per project."""
+        cfg = self._config
+        if not cfg.release_note_wip_enabled:
+            return
+        for project in (projects if projects is not None else cfg.effective_ado_projects):
+            try:
+                columns = await self._c.ado.get_board_wip(project, cfg.release_note_wip_board)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("release note: WIP read failed", project=project,
+                             error=describe_exc(exc))
+                continue
+            note.wip += [release_notes.WipColumn(project, name, n, limit)
+                         for name, n, limit in columns]
+
+    async def analyze(self, note: release_notes.ReleaseNote, *, kind: str = "") -> bool:
+        """Ask Claude for the assessment block. True when ``note.analysis`` was set.
+
+        Tool-less and one turn: it reads the facts handed to it and can touch nothing.
+        Anything short of a well-formed, grounded answer leaves the note as it was."""
+        from ai_autopilot.execution.claude_client import run_claude
+
+        cfg = self._config
+        if not cfg.release_note_ai_enabled or not note.has_news:
+            return False
+        prompt = release_notes.ANALYSIS_PROMPT.format(
+            kind=kind or f"{note.days} ngày", facts=release_notes.analysis_facts(note))
+        try:
+            run = await run_claude(
+                prompt, tempfile.gettempdir(), timeout_seconds=90,
+                model=cfg.claude_model or None, max_turns=1, allowed_tools=[],
+                effort=cfg.claude_effort_chat,
+            )
+        except Exception as exc:  # noqa: BLE001 — the brief goes out without it
+            _log.warning("release note: analysis failed", error=describe_exc(exc))
+            return False
+        note.analysis = release_notes.parse_analysis(run.text or "",
+                                                     release_notes.known_ids(note))
+        if note.analysis is None:
+            _log.warning("release note: analysis unusable", text=(run.text or "")[:200])
+        return note.analysis is not None
 
     # ── posting ─────────────────────────────────────────────────────────────
 
@@ -279,10 +336,11 @@ class ReleaseNoteService:
             return "error"
         # A non-empty queue is news even when nothing shipped: "38 waiting, oldest 21
         # days" is exactly what the PM should read on a quiet morning.
-        if not note.total and not note.waiting and cfg.digest_skip_when_empty:
+        if not note.has_news and cfg.digest_skip_when_empty:
             _log.info("release note skipped — nothing delivered", schedule=schedule.name,
                       days=note.days)
             return "empty"
+        await self.analyze(note, kind="sáng" if schedule.daily else "tuần")
         title = morning_title(note) if schedule.daily else ""
         return "sent" if await self.post(note, title=title) else "dry-run"
 

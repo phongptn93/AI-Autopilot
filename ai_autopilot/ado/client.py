@@ -8,6 +8,7 @@ Code, so it does not use MCP). Auth headers are injected per-request via
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import html
 import json
 import re
@@ -500,6 +501,53 @@ class AdoClient:
             raise RuntimeError(f"state WIQL failed: HTTP {resp.status_code} {_terse(resp.text)}")
         ids = [r["id"] for r in (resp.json().get("workItems") or [])]
         return await self.get_work_items_by_ids(ids[:top])
+
+    async def get_board_wip(self, project: str, board: str = "") -> list[tuple[str, int, int]]:
+        """``[(column, count, WIP limit)]`` for the columns of ``project``'s default-team
+        board that carry a limit — the numbers the board header shows as "11/5".
+
+        ``board`` names the board (Stories, Requirements…); blank = the lowest-level board
+        that has any limit. Counted like the board: the column's state per type, inside
+        the team's area paths. Raises on a failed read."""
+        async def get(path: str) -> dict:
+            resp = await self._http.get(self._url(path, project), headers=await self._headers())
+            if resp.status_code >= 400 or not resp.text.lstrip().startswith("{"):
+                raise RuntimeError(f"{path}: HTTP {resp.status_code} {_terse(resp.text)}")
+            return resp.json()
+
+        boards = [b.get("name", "") for b in (await get(f"work/boards?{_API}")).get("value", [])]
+        if board:
+            boards = [b for b in boards if b.lower() == board.strip().lower()]
+        limited: list[dict] = []
+        for name in reversed(boards):        # ADO lists top-down; the team works the bottom
+            columns = (await get(f"work/boards/{quote(name, safe='')}/columns?{_API}")).get(
+                "value", [])
+            limited = [c for c in columns if int(c.get("itemLimit") or 0) > 0]
+            if limited:
+                break
+        if not limited:
+            return []
+        area = ""
+        with contextlib.suppress(Exception):
+            tfv = await get(f"work/teamsettings/teamfieldvalues?{_API}")
+            ref = (tfv.get("field") or {}).get("referenceName") or "System.AreaPath"
+            parts = [f"[{ref}] {'UNDER' if v.get('includeChildren') else '='} "
+                     f"'{_wiql_lit(v.get('value', ''))}'" for v in tfv.get("values") or []]
+            area = f" AND ({' OR '.join(parts)})" if parts else ""
+
+        async def count(column: dict) -> tuple[str, int, int]:
+            pairs = [f"([System.WorkItemType] = '{_wiql_lit(t)}' AND [System.State] = "
+                     f"'{_wiql_lit(s)}')" for t, s in (column.get("stateMappings") or {}).items()]
+            wiql = (f"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = "
+                    f"'{_wiql_lit(project)}' AND ({' OR '.join(pairs) or '1 = 0'}){area}")
+            resp = await self._http.post(self._org_url(f"wit/wiql?{_API}"),
+                                         json={"query": wiql}, headers=await self._headers())
+            if resp.status_code >= 400 or not resp.text.lstrip().startswith("{"):
+                raise RuntimeError(f"WIP WIQL failed: HTTP {resp.status_code}")
+            return (column.get("name", ""), len(resp.json().get("workItems") or []),
+                    int(column["itemLimit"]))
+
+        return list(await asyncio.gather(*(count(c) for c in limited)))
 
     async def get_all_active_work_items(self, top: int = 300) -> list[WorkItemInfo]:
         """Every work item in the project (ANY tag, ANY assignee), most-recently

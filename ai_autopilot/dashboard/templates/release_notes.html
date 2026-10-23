@@ -41,6 +41,24 @@
                     border:1px solid var(--border,#23232b); background:transparent; color:inherit; }
   .rn-tabs button[aria-selected="true"] { background:var(--accent,#6366f1); border-color:transparent; color:#fff; }
   .rn-handover[hidden] { display:none; }
+  .rn-ai { border-left:4px solid var(--amber,#f5a524); }
+  .rn-ai-good { border-left-color:var(--green,#22c55e); }
+  .rn-ai-risk { border-left-color:var(--red,#e5484d); }
+  .rn-ai-tag { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; }
+  .rn-health { font-size:12.5px; font-weight:600; }
+  .rn-ai-head { font-size:15px; font-weight:600; margin:6px 0 8px; }
+  .rn-ai-list { margin:0; padding-left:18px; font-size:13px; line-height:1.6; }
+  .rn-wip { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-bottom:6px; }
+  .rn-wip-col { border:1px solid var(--border,#23232b); border-radius:10px; padding:10px 12px; }
+  .rn-wip-col .n { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .rn-wip-col .n span { font-size:13px; font-weight:500; color:var(--text-muted); }
+  .rn-wip-col .l { font-size:12px; color:var(--text-muted); }
+  .rn-wip-col.over { border-color:var(--red,#e5484d); background:rgba(229,72,77,.06); }
+  .rn-wip-col.over .n { color:var(--red,#e5484d); }
+  .rn-lanes { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px; }
+  .rn-lane-counts { padding:10px 12px 4px; display:flex; flex-wrap:wrap; gap:4px; }
+  .rn-more { font-size:12px; color:var(--text-dim); padding:6px 12px 10px; }
+  @media (max-width: 480px) { .rn-lanes { grid-template-columns:1fr; } }
 </style>
 
 <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
@@ -67,7 +85,7 @@
           onsubmit="return confirm('Gửi bản tin {{ days }} ngày này lên các kênh Teams ngay bây giờ?');">
       <input type="hidden" name="days" value="{{ days }}"/>
       <input type="hidden" name="project" value="{{ selected_project }}"/>
-      <button class="btn-primary" type="submit" {% if not note.total and not note.waiting %}disabled title="Không có gì để gửi"{% endif %}>📨 Gửi Teams ngay</button>
+      <button class="btn-primary" type="submit" {% if not note.has_news %}disabled title="Không có gì để gửi"{% endif %}>📨 Gửi Teams ngay</button>
     </form>
   </div>
 </div>
@@ -111,6 +129,65 @@
   <a class="table-link" href="/dashboard/settings#release_note_enabled">Cấu hình ↗</a>
   {% if (schedule.enabled or schedule.daily) and not schedule.link %}· Đặt <code>dashboard_public_url</code> để tin Teams có nút mở trang này.{% endif %}
 </div>
+
+{# ── 0. Claude's assessment, on request ────────────────────────────────── #}
+{% if note.analysis %}{% set a = note.analysis %}
+<div class="card rn-ai rn-ai-{{ a.health }}" style="margin-bottom:14px">
+  <div class="card-body">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">
+      <span class="rn-ai-tag">🧠 Nhận định (Claude)</span>
+      <span class="rn-health">{{ {'good': '🟢 Ổn định', 'watch': '🟡 Cần để ý', 'risk': '🔴 Rủi ro'}[a.health] }}</span>
+    </div>
+    <p class="rn-ai-head">{{ a.headline }}</p>
+    {% if a.insights %}<ul class="rn-ai-list">{% for i in a.insights %}<li>{{ i }}</li>{% endfor %}</ul>{% endif %}
+    {% if a.actions %}
+    <table class="tbl" style="margin-top:8px"><thead><tr><th style="width:110px">Vai trò</th><th>Việc cần làm</th></tr></thead>
+      <tbody>{% for role, text in a.actions %}<tr><td><span class="rn-chip">{{ role }}</span></td><td>{{ text }}</td></tr>{% endfor %}</tbody></table>
+    {% endif %}
+  </div>
+</div>
+{% elif schedule.ai and (note.total or note.waiting or note.lanes) %}
+<div class="notice" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+  <span>🧠 {% if schedule.analyze_failed %}<b>Claude chưa trả được nhận định</b> (lỗi hoặc trả lời không hợp lệ) — thử lại.{% else %}Bản tin theo lịch có khối nhận định do Claude viết. Xem trước cho kỳ đang chọn:{% endif %}</span>
+  <a class="btn-ghost" href="/dashboard/release-notes?days={{ days }}&project={{ selected_project }}&analyze=1">🧠 Nhờ Claude đánh giá</a>
+</div>
+{% endif %}
+
+{# ── 0b. WIP and role blocks — the brief is read by every role ─────────── #}
+{% if note.wip %}
+<div class="rn-section" id="wip"><h3>🚦 Giới hạn WIP</h3><span class="hint">{{ note.over_wip() | length }} cột đang vượt</span></div>
+<div class="rn-wip">
+  {% for c in note.wip %}<div class="rn-wip-col {% if c.over %}over{% endif %}"><div class="n">{{ c.count }}<span>/{{ c.limit }}</span></div><div class="l">{% if (note.wip | map(attribute='project') | unique | list | length) > 1 %}{{ c.project }} · {% endif %}{{ c.column }}</div></div>{% endfor %}
+</div>
+{% endif %}
+
+{% if note.lanes %}
+<div class="rn-section" id="roles"><h3>👥 Theo vai trò</h3><span class="hint">việc đang nằm ở từng vai trò, cũ nhất trước</span></div>
+<div class="rn-lanes">
+{% for lane in note.lanes %}
+<div class="card">
+  <div class="card-header"><div class="rn-group-head"><h3 class="card-title">{{ lane.role }}</h3><span class="rn-count">{{ lane.items | length }} hạng mục</span></div></div>
+  <div class="card-body" style="padding:0">
+    <div class="rn-lane-counts">{% for state, n, age in lane.by_state(note.end) %}<span class="rn-chip">{{ state }} <b>{{ n }}</b>{% if age %} · lâu nhất {{ age }}d{% endif %}</span>{% endfor %}</div>
+    {% if lane.items %}
+    <table class="tbl">
+      <tbody>
+      {% for w in lane.items[:8] %}{% set age = w.age_days(note.end) %}
+        <tr {% if age is not none and age >= note.stale_days %}class="stale"{% endif %}>
+          <td class="id">{% set u = item_url(w.id) %}{% if u %}<a class="table-link" href="{{ u }}" target="_blank" rel="noopener">#{{ w.id }}</a>{% else %}#{{ w.id }}{% endif %}</td>
+          <td>{{ w.title }}<span class="rn-sub">{{ w.state }}{% if w.assignee %} · {{ w.assignee }}{% endif %}</span></td>
+          <td class="num">{% if age is none %}—{% elif age == 0 %}hôm nay{% else %}{% if w.approx %}≥ {% endif %}{{ age }} ngày{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if lane.items | length > 8 %}<div class="rn-more">… và {{ lane.items | length - 8 }} hạng mục khác</div>{% endif %}
+    {% else %}<div class="empty">Không có hạng mục nào.</div>{% endif %}
+  </div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
 
 {# ── 1. Deployed ───────────────────────────────────────────────────────── #}
 <div class="rn-section" id="deployed"><h3>🚀 Đã lên production</h3><span class="hint">{{ note.total }} hạng mục · {{ note.start.strftime('%d/%m') }} – {{ note.end.strftime('%d/%m') }}</span></div>

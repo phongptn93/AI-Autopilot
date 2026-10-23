@@ -31,6 +31,7 @@ Rules, kept identical to the skill so the two never disagree about the same week
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -74,9 +75,57 @@ class Waiting:
     tenants: tuple[str, ...]
     since: datetime | None = None
     approx: bool = False
+    assignee: str = ""
 
     def age_days(self, now: datetime) -> int | None:
         return None if self.since is None else max(0, (_utc(now) - _utc(self.since)).days)
+
+
+@dataclass
+class Lane:
+    """One role's slice of the board NOW — what Dev / QC / BA each have to act on.
+
+    The note was written for whoever ships; the morning brief is read by every role,
+    and a tester looking for "what is waiting for me" found nothing in it."""
+
+    role: str
+    states: tuple[str, ...]
+    items: list[Waiting] = field(default_factory=list)    # oldest first
+
+    def by_state(self, now: datetime) -> list[tuple[str, int, int | None]]:
+        """``[(state, count, oldest age)]`` in the configured state order, zeros kept —
+        "In Testing: 0" is information too."""
+        out = []
+        for state in self.states:
+            ages = [w.age_days(now) for w in self.items if w.state.lower() == state.lower()]
+            known = [a for a in ages if a is not None]
+            out.append((state, len(ages), max(known) if known else None))
+        return out
+
+
+@dataclass(frozen=True)
+class WipColumn:
+    """A board column with a WIP limit, as Azure DevOps counts it."""
+
+    project: str
+    column: str
+    count: int
+    limit: int
+
+    @property
+    def over(self) -> bool:
+        return self.count > self.limit
+
+
+@dataclass(frozen=True)
+class Analysis:
+    """Claude's reading of the note: a headline, a health call, insights and actions
+    addressed to roles. Built ONLY from the facts in :func:`analysis_facts`."""
+
+    headline: str
+    health: str                                   # good | watch | risk
+    insights: tuple[str, ...] = ()
+    actions: tuple[tuple[str, str], ...] = ()     # (role, what to do)
 
 
 @dataclass
@@ -100,6 +149,20 @@ class ReleaseNote:
     waiting_states: list[str] = field(default_factory=list)
     #: A waiting item at least this many days old is flagged.
     stale_days: int = 7
+    #: Per-role snapshots (``release_note_roles``) and the board's WIP columns.
+    lanes: list[Lane] = field(default_factory=list)
+    wip: list[WipColumn] = field(default_factory=list)
+    #: Released in the window just before this one — None when history does not reach.
+    previous_total: int | None = None
+    analysis: Analysis | None = None
+
+    def over_wip(self) -> list[WipColumn]:
+        return [c for c in self.wip if c.over]
+
+    @property
+    def has_news(self) -> bool:
+        """Anything worth posting: shipped, waiting, or on a role's plate."""
+        return bool(self.total or self.waiting or any(lane.items for lane in self.lanes))
 
     @property
     def total(self) -> int:
@@ -244,11 +307,131 @@ def build_waiting(
             id=item.id, ticket=ticket, title=title, state=item.state or "",
             tenants=tuple(tenants_of(list(item.tags or []), item.project or "", tenant_tags)),
             since=since if since is not None else item.changed_date, approx=approx,
+            assignee=(item.assigned_to or "").strip(),
         ))
     return sorted(out, key=lambda w: (w.since is None, _utc(w.since) if w.since else NEVER, w.id))
 
 
 NEVER = datetime.max.replace(tzinfo=UTC)
+
+
+def parse_roles(mapping: dict[str, str] | None) -> list[tuple[str, list[str]]]:
+    """``{"🛠️ Dev": "Rework Required", "🧪 QC": "Ready for Testing, In Testing"}`` →
+    ``[(role, [states])]`` in the configured order; a role naming no state is dropped."""
+    out = []
+    for role, raw in (mapping or {}).items():
+        states = [s.strip() for s in re.split(r"[,;]", raw or "") if s.strip()]
+        if role.strip() and states:
+            out.append((role.strip(), states))
+    return out
+
+
+def build_lanes(roles: list[tuple[str, list[str]]], queue: list[Waiting]) -> list[Lane]:
+    """Split the snapshot ``queue`` (every role state, oldest first) into one lane per
+    role. A state named by two roles shows in both — each of them has to act on it."""
+    lanes = []
+    for role, states in roles:
+        wanted = {s.lower() for s in states}
+        lanes.append(Lane(role=role, states=tuple(states),
+                          items=[w for w in queue if w.state.lower() in wanted]))
+    return lanes
+
+
+# ── Claude's analysis ────────────────────────────────────────────────────────
+
+ANALYSIS_PROMPT = """Bạn là trưởng nhóm delivery giàu kinh nghiệm, viết phần NHẬN ĐỊNH \
+cho bản tin {kind} gửi CẢ TEAM (Dev, QC, BA/PO, PM) trên Microsoft Teams.
+
+Dữ liệu thật (chỉ dùng đúng những gì có ở đây — TUYỆT ĐỐI không bịa số, mã hay tên):
+{facts}
+
+Yêu cầu:
+- Đánh giá thẳng thắn, chuyên nghiệp: điểm nghẽn ở đâu, rủi ro gì, so với kỳ trước ra sao.
+- Ưu tiên điều đáng hành động: hàng chờ lâu, cột vượt WIP, rework nhiều, QC ùn.
+- Mỗi việc cần làm gán cho MỘT vai trò (Dev, QC, BA/PO, PM hoặc Team), cụ thể, \
+nêu mã #id khi có trong dữ liệu.
+- Tiếng Việt, câu ngắn, không chào hỏi, không lặp lại nguyên bảng số liệu.
+
+Trả về DUY NHẤT một JSON, không kèm chữ nào khác:
+{{"headline": "1 câu tổng quan ≤ 25 từ",
+ "health": "good | watch | risk",
+ "insights": ["tối đa 4 nhận định, mỗi câu ≤ 30 từ"],
+ "actions": [{{"role": "Dev|QC|BA/PO|PM|Team", "text": "việc cụ thể ≤ 25 từ"}}]}}
+Tối đa 5 actions."""
+
+
+def analysis_facts(note: ReleaseNote) -> str:
+    """The note as compact text for Claude — every number it may cite, and nothing it
+    could mistake for an instruction (titles are data, quoted)."""
+    now = note.end
+    lines = [f"Kỳ: {_local_day(note.start)} – {_local_day(note.end)} ({note.days} ngày)",
+             f"Lên production trong kỳ: {note.total}"]
+    if note.previous_total is not None:
+        lines.append(f"Kỳ trước cùng độ dài: {note.previous_total}")
+    for g in note.groups:
+        lines.append(f"- {g.tenant}: {len(g.entries)} — "
+                     + "; ".join(f"#{e.id} \"{e.title[:80]}\"" for e in g.entries[:8]))
+    if note.waiting_states:
+        lines.append(f"Chờ deploy ({', '.join(note.waiting_states)}): {len(note.waiting)}, "
+                     f"lâu nhất {note.oldest_wait()} ngày, quá {note.stale_days} ngày: "
+                     f"{len(note.stale())}")
+        for w in note.waiting[:8]:
+            lines.append(f"  #{w.id} chờ {w.age_days(now)} ngày \"{w.title[:80]}\"")
+    for lane in note.lanes:
+        parts = [f"{s}: {n} (lâu nhất {a} ngày)" if a is not None else f"{s}: {n}"
+                 for s, n, a in lane.by_state(now)]
+        lines.append(f"Vai trò {lane.role}: " + "; ".join(parts))
+        for w in lane.items[:5]:
+            lines.append(f"  #{w.id} [{w.state}] {w.age_days(now)} ngày, "
+                         f"{w.assignee or 'chưa giao'} \"{w.title[:80]}\"")
+    for c in note.wip:
+        flag = " — VƯỢT" if c.over else ""
+        lines.append(f"WIP {c.project}/{c.column}: {c.count}/{c.limit}{flag}")
+    return "\n".join(lines)
+
+
+def known_ids(note: ReleaseNote) -> set[int]:
+    ids = {e.id for g in note.groups for e in g.entries} | {w.id for w in note.waiting}
+    return ids | {w.id for lane in note.lanes for w in lane.items}
+
+
+def parse_analysis(text: str, ids: set[int]) -> Analysis | None:
+    """Claude's JSON → :class:`Analysis`, or None when it is not usable.
+
+    A sentence citing a work item that is NOT in the facts is dropped: an invented id in
+    a team-wide post sends someone to chase a ticket that does not exist."""
+    m = re.search(r"\{.*\}", text or "", re.S)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    def grounded(s: object) -> str:
+        s = str(s or "").strip()
+        cited = {int(x) for x in re.findall(r"#(\d+)", s)}
+        return s if s and cited <= ids else ""
+
+    headline = grounded(data.get("headline"))
+    if not headline:
+        return None
+    health = str(data.get("health") or "").strip().lower()
+    insights = tuple(x for x in (grounded(i) for i in (data.get("insights") or [])[:4]) if x)
+    actions = []
+    for a in (data.get("actions") or [])[:5]:
+        if isinstance(a, dict) and (text_ := grounded(a.get("text"))):
+            actions.append((str(a.get("role") or "Team").strip()[:12], text_))
+    return Analysis(headline=headline, health=health if health in HEALTH else "watch",
+                    insights=insights, actions=tuple(actions))
+
+
+#: health → (label, Adaptive Card container style, colour)
+HEALTH = {"good": ("🟢 Ổn định", "good", "Good"),
+          "watch": ("🟡 Cần để ý", "warning", "Warning"),
+          "risk": ("🔴 Rủi ro", "attention", "Attention")}
 
 
 def _ticket_key(ticket: str) -> tuple[str, int]:
@@ -265,6 +448,19 @@ def render_teams(note: ReleaseNote, *, link_base: str = "", title: str = "") -> 
     """
     heading = title or weekly_title(note)
     lines: list[str] = []
+    if note.analysis:
+        a = note.analysis
+        lines += [f"**🧠 {HEALTH.get(a.health, HEALTH['watch'])[0]} — {a.headline}**",
+                  *[f"- {i}" for i in a.insights],
+                  *[f"- **{role}**: {text}" for role, text in a.actions], ""]
+    if note.over_wip():
+        lines += ["**🚦 Vượt WIP:** " + " · ".join(
+            f"{c.column} {c.count}/{c.limit}" for c in note.over_wip()), ""]
+    for lane in note.lanes:
+        lines.append(f"**{lane.role}:** " + " · ".join(
+            f"{s} {n}" for s, n, _ in lane.by_state(note.end)))
+    if note.lanes:
+        lines.append("")
     if not note.groups:
         lines += ["Không có hạng mục nào lên production trong khoảng này.", ""]
     else:
@@ -333,6 +529,17 @@ def render_card(note: ReleaseNote, *, link_base: str = "") -> list[dict]:
     section per stage, each row an id column beside a wrapping title column.
     """
     body: list[dict] = [_kpis(note)]
+    if note.analysis:
+        body.append(_analysis_block(note.analysis))
+    if note.over_wip():
+        wip = [_section_title("🚦 VƯỢT GIỚI HẠN WIP", "Attention")]
+        multi = len({c.project for c in note.wip}) > 1
+        wip.append(_text(" · ".join(
+            f"{c.project + '/' if multi else ''}{c.column} **{c.count}**/{c.limit}"
+            for c in note.over_wip()), size="Small"))
+        body.append(_container(wip))
+    for lane in note.lanes:
+        body.append(_lane_block(lane, note, link_base))
     deployed: list[dict] = [_section_title("🚀 ĐÃ LÊN PRODUCTION", "Good")]
     if not note.groups:
         deployed.append(_text("Không có hạng mục nào lên production trong khoảng này.",
@@ -368,8 +575,53 @@ def render_card(note: ReleaseNote, *, link_base: str = "") -> list[dict]:
     return body
 
 
+def _analysis_block(a: Analysis) -> dict:
+    label, style, color = HEALTH.get(a.health, HEALTH["watch"])
+    items: list[dict] = [
+        {"type": "ColumnSet", "columns": [
+            {"type": "Column", "width": "stretch", "items": [
+                _section_title("🧠 NHẬN ĐỊNH (Claude)", "Accent")]},
+            {"type": "Column", "width": "auto", "items": [
+                {"type": "TextBlock", "text": label, "size": "Small", "weight": "Bolder",
+                 "color": color}]},
+        ]},
+        {"type": "TextBlock", "text": a.headline, "weight": "Bolder", "wrap": True,
+         "spacing": "Small"},
+    ]
+    items += [_text(f"• {i}", size="Small") for i in a.insights]
+    if a.actions:
+        items.append(_text("**Việc cần làm**", size="Small", spacing="Medium"))
+        items.append({"type": "FactSet", "spacing": "Small",
+                      "facts": [{"title": role, "value": text} for role, text in a.actions]})
+    return {"type": "Container", "style": style, "spacing": "Medium", "items": items}
+
+
+#: How many items a role block lists (its oldest) — the counts carry the rest.
+TEAMS_LANE_LINES = 3
+
+
+def _lane_block(lane: Lane, note: ReleaseNote, link_base: str) -> dict:
+    counts = " · ".join(
+        f"{state} **{n}**" + (f" (lâu nhất {age}d)" if age else "")
+        for state, n, age in lane.by_state(note.end))
+    items: list[dict] = [_section_title(f"{lane.role.upper()} — {len(lane.items)} hạng mục",
+                                        "Accent"),
+                         _text(counts, size="Small")]
+    for w in lane.items[:TEAMS_LANE_LINES]:
+        stale = (w.age_days(note.end) or 0) >= note.stale_days
+        who = f" · _{w.assignee}_" if w.assignee else ""
+        items.append(_row(w.id, link_base, f"{_coded(w.ticket, w.title)}{who}",
+                          age=_age_text(w, note.end), alert=stale))
+    return _container(items)
+
+
 def _kpis(note: ReleaseNote) -> dict:
-    tiles = [(str(note.total), "Lên production", "Good")]
+    shipped = "Lên production"
+    if note.previous_total is not None:
+        delta = note.total - note.previous_total
+        shipped += f" ({'+' if delta > 0 else ''}{delta} so với kỳ trước)" if delta else \
+            " (bằng kỳ trước)"
+    tiles = [(str(note.total), shipped, "Good")]
     if note.waiting_states:
         oldest = note.oldest_wait()
         stale = len(note.stale())

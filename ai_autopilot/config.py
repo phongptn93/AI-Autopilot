@@ -2106,6 +2106,19 @@ class Settings(BaseSettings):
     release_note_waiting_states: list[str] = Field(default_factory=list)
     # A waiting item this many days old is flagged ⚠️.
     release_note_stale_days: int = 7
+    # The brief is read by every role, not only whoever ships. One line per role:
+    # "🛠️ Dev => Rework Required", "🧪 QC => Ready for Testing, In Testing",
+    # "📋 BA/PO => Ready for UAT, In UAT". Each gets a block: counts per state, the oldest
+    # items with their assignee. Blank = no role blocks.
+    release_note_roles: dict[str, str] = Field(default_factory=dict)
+    # Flag board columns over their WIP limit (read from the board settings in ADO, the
+    # default team of each project). Board blank = the lowest-level board with limits.
+    release_note_wip_enabled: bool = False
+    release_note_wip_board: str = ""
+    # A Claude-written assessment (headline, health, insights, actions per role) on top
+    # of every scheduled post and on demand on the page. One tool-less model call per
+    # post; a failure only drops the block, never the post.
+    release_note_ai_enabled: bool = True
     # Tags that name a tenant (e.g. TLCL, TLLA, VPM), in the order groups are shown.
     # Blank = group by project. An item with none of them lands under "Chung".
     release_note_tenant_tags: list[str] = Field(default_factory=list)

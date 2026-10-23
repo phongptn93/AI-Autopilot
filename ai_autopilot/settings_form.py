@@ -684,6 +684,26 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "hàng chờ còn hạng mục. Để trống = không hiện hàng chờ."),
     Field("release_note_stale_days", "↳ Cảnh báo chờ quá (ngày)", "int", "📣 Release note",
           "Hạng mục chờ deploy từ ngần này ngày trở lên được đánh dấu ⚠️."),
+    Field("release_note_roles", "Khối theo vai trò (vai trò => state)", "map",
+          "📣 Release note",
+          "Bản tin gửi cả team, không chỉ PM. Mỗi dòng một vai trò: '🛠️ Dev => Rework "
+          "Required', '🧪 QC => Ready for Testing, In Testing', '📋 BA/PO => Ready for UAT, "
+          "In UAT'. Mỗi vai trò một khối: số item theo state, item cũ nhất kèm người được "
+          "giao. Để trống = không có khối vai trò.",
+          placeholder="🛠️ Dev => Rework Required\n🧪 QC => Ready for Testing, In Testing\n"
+                      "📋 BA/PO => Ready for UAT, In UAT"),
+    Field("release_note_wip_enabled", "Cảnh báo cột vượt giới hạn WIP", "bool",
+          "📣 Release note",
+          "Đọc giới hạn WIP trên board ADO (team mặc định của từng project) và đánh dấu cột "
+          "đang vượt, vd Rework Required 11/5."),
+    Field("release_note_wip_board", "↳ Tên board", "text", "📣 Release note",
+          "Vd Requirements, Stories. Để trống = board cấp thấp nhất có đặt giới hạn WIP.",
+          placeholder="Requirements"),
+    Field("release_note_ai_enabled", "🧠 Claude nhận định bản tin", "bool", "📣 Release note",
+          "Mỗi bản tin (sáng, tuần, gửi tay) có thêm khối do Claude viết: một câu tổng quan, "
+          "mức sức khoẻ (ổn / cần để ý / rủi ro), tối đa 4 nhận định và việc cần làm theo "
+          "từng vai trò. Claude chỉ đọc số liệu của bản tin, không dùng tool; lỗi thì bản "
+          "tin vẫn gửi, chỉ thiếu khối này. Tốn một lượt gọi model mỗi bản tin."),
 
     # ── Notifications ──
     # Neither `teams_webhook_url` nor `teams_webhook_urls` is a Field. Both are edited as

@@ -154,7 +154,7 @@ class _Notifier:
 
 def _container(changes, items=(), fail=False, waiting=(), waiting_fail=False, **cfg):
     base = {"release_note_tenant_tags": ["TLCL", "VPM"], "ado_organization": "https://dev.azure.com/org",
-            "ado_project": "TLCL-DxFac"}
+            "ado_project": "TLCL-DxFac", "release_note_ai_enabled": False}
     base.update(cfg)
     return SimpleNamespace(config=Settings(**base), state_history=_History(changes),
                            ado=_Ado(items, fail, waiting, waiting_fail), notifier=_Notifier())
@@ -437,8 +437,12 @@ def test_send_now_posts_and_reports_back(tmp_path, monkeypatch):
         posted.append(note.total)
         return True
 
+    async def fake_analyze(self, note, **kw):
+        return False
+
     monkeypatch.setattr(ReleaseNoteService, "build", fake_build)
     monkeypatch.setattr(ReleaseNoteService, "post", fake_post)
+    monkeypatch.setattr(ReleaseNoteService, "analyze", fake_analyze)
     cfg = Settings(dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 's.db'}")
     with TestClient(create_app(cfg)) as client:
         r = client.post("/dashboard/release-notes/send", data={"days": "7"},
@@ -446,3 +450,168 @@ def test_send_now_posts_and_reports_back(tmp_path, monkeypatch):
         assert r.status_code == 303 and "sent=sent" in r.headers["location"]
         assert "Đã gửi release note" in client.get(r.headers["location"]).text
     assert posted == [1]
+
+
+# ── roles, WIP, Claude's assessment ──────────────────────────────────────────
+
+
+def _state(item, state, assignee=""):
+    item.state, item.assigned_to = state, assignee
+    return item
+
+
+def test_roles_split_one_snapshot_into_a_block_per_role_with_zero_counts_kept():
+    roles = rn.parse_roles({"🛠️ Dev": "Rework Required", "🧪 QC": "Ready for Testing, In Testing",
+                            "Nobody": " "})
+    assert roles == [("🛠️ Dev", ["Rework Required"]),
+                     ("🧪 QC", ["Ready for Testing", "In Testing"])]
+    queue = rn.build_waiting(
+        [_state(_wi(1, "a"), "Rework Required", "An"), _state(_wi(2, "b"), "Ready for Testing")],
+        {1: NOW - timedelta(days=9), 2: NOW - timedelta(days=2)}, tenant_tags=[])
+    dev, qc = rn.build_lanes(roles, queue)
+    assert [w.id for w in dev.items] == [1] and dev.items[0].assignee == "An"
+    assert qc.by_state(NOW) == [("Ready for Testing", 1, 2), ("In Testing", 0, None)]
+
+
+def _rich_note():
+    note = rn.build([_wi(1, "TLCL.1 Một", ["TLCL"])], {1: NOW}, tenant_tags=["TLCL"],
+                    start=START, end=NOW, days=7, history_since=NOW - timedelta(days=30))
+    note.previous_total = 3
+    note.waiting_states = ["Ready for UAT"]
+    note.waiting = rn.build_waiting([_ready(9, "TLCL.9 Chờ", ["TLCL"])],
+                                    {9: NOW - timedelta(days=15)}, tenant_tags=["TLCL"])
+    note.lanes = rn.build_lanes([("🛠️ Dev", ["Rework Required"])], rn.build_waiting(
+        [_state(_wi(5, "Sửa lỗi"), "Rework Required", "An")], {5: NOW - timedelta(days=6)},
+        tenant_tags=[]))
+    note.wip = [rn.WipColumn("P", "Rework Required", 11, 5), rn.WipColumn("P", "In UAT", 1, 5)]
+    return note
+
+
+def test_facts_for_claude_carry_every_number_it_may_cite():
+    facts = rn.analysis_facts(_rich_note())
+    for needle in ("Lên production trong kỳ: 1", "Kỳ trước cùng độ dài: 3", "#9 chờ 15 ngày",
+                   "Vai trò 🛠️ Dev: Rework Required: 1 (lâu nhất 6 ngày)", "An",
+                   "WIP P/Rework Required: 11/5 — VƯỢT", "WIP P/In UAT: 1/5"):
+        assert needle in facts, needle
+
+
+def test_claude_answer_is_parsed_strictly_and_invented_ids_are_dropped():
+    ids = {1, 9}
+    text = ('Đây là nhận định:\n{"headline": "Hàng chờ UAT kéo dài, #9 chờ 15 ngày", '
+            '"health": "risk", "insights": ["#9 quá hạn", "#4242 bị bịa", "Rework vượt WIP"], '
+            '"actions": [{"role": "BA/PO", "text": "Chốt lịch deploy #9"}, '
+            '{"role": "Dev", "text": "Xử lý #777"}, "rác"]}')
+    a = rn.parse_analysis(text, ids)
+    assert a.health == "risk" and a.headline.startswith("Hàng chờ")
+    assert a.insights == ("#9 quá hạn", "Rework vượt WIP")
+    assert a.actions == (("BA/PO", "Chốt lịch deploy #9"),)
+    assert rn.parse_analysis('{"headline": "x", "health": "great"}', ids).health == "watch"
+    assert rn.parse_analysis("không phải JSON", ids) is None
+    assert rn.parse_analysis('{"headline": "#5 bịa"}', ids) is None     # no grounded headline
+
+
+def test_card_puts_assessment_wip_and_role_blocks_above_the_lists():
+    note = _rich_note()
+    note.analysis = rn.Analysis("Ổn", "good", ("i1",), (("QC", "test #9"),))
+    body = rn.render_card(note, link_base="https://x/_workitems/edit")
+    flat = [str(b) for b in body]
+    assert "NHẬN ĐỊNH (Claude)" in flat[1] and "'style': 'good'" in flat[1]
+    assert "VƯỢT GIỚI HẠN WIP" in flat[2] and "Rework Required **11**/5" in flat[2]
+    assert "In UAT" not in flat[2]                                  # under limit → not flagged
+    assert "🛠️ DEV — 1 hạng mục" in flat[3] and "_An_" in flat[3]
+    assert "-2 so với kỳ trước" in flat[0]
+    assert "ĐÃ LÊN PRODUCTION" in flat[4]
+    _, text = rn.render_teams(note)
+    assert "🧠 🟢 Ổn định — Ổn" in text and "**QC**: test #9" in text and "Vượt WIP" in text
+
+
+async def test_service_builds_role_lanes_from_one_query_and_counts_the_previous_window():
+    changes = [_ch(1, "In UAT", "Resolved", 2), _ch(2, "In UAT", "Resolved", 10),
+               _ch(3, "In UAT", "Resolved", 12)]
+    waiting = [_ready(9, "TLCL.9 w", ["TLCL"], changed_days_ago=3),
+               _state(_wi(5, "rework"), "Rework Required", "An"),
+               _state(_wi(6, "testing"), "In Testing")]
+    c = _container(changes, [_wi(1, "a", ["TLCL"])], waiting=waiting,
+                   release_note_states=["In UAT"], release_note_waiting_states=["Ready for UAT"],
+                   release_note_roles={"Dev": "Rework Required",
+                                       "QC": "Ready for Testing, In Testing"})
+    note = await ReleaseNoteService(c).build(now=NOW)
+    assert c.ado.asked_states == ["Ready for UAT", "Rework Required", "Ready for Testing",
+                                  "In Testing"]
+    assert [w.id for w in note.waiting] == [9]
+    assert [[w.id for w in lane.items] for lane in note.lanes] == [[5], [6]]
+    assert note.total == 1 and note.previous_total == 2
+    assert note.has_news
+
+
+async def test_analysis_is_added_by_claude_and_its_failure_never_blocks_the_post(monkeypatch):
+    from ai_autopilot.execution import claude_client
+
+    prompts = []
+
+    async def fake_run(prompt, cwd, **kw):
+        prompts.append((prompt, kw))
+        return SimpleNamespace(text='{"headline": "Tuần ổn, #1 đã lên prod", "health": "good",'
+                                    ' "insights": [], "actions": []}')
+
+    monkeypatch.setattr(claude_client, "run_claude", fake_run)
+    c = _container([_ch(1, "Resolved", "Resolved", 1)], [_wi(1, "TLCL.1 x", ["TLCL"])],
+                   release_note_ai_enabled=True, release_note_days="")
+    assert await ReleaseNoteService(c).run_once(NOW) == "sent"
+    (msg,) = c.notifier.sent
+    assert "Tuần ổn" in str(msg.card) and "Tuần ổn" in msg.text
+    ((prompt, kw),) = prompts
+    assert kw["allowed_tools"] == [] and kw["max_turns"] == 1 and "bản tin tuần" in prompt
+    assert "#1" in prompt and "CẢ TEAM" in prompt
+
+    async def boom(prompt, cwd, **kw):
+        raise TimeoutError
+
+    monkeypatch.setattr(claude_client, "run_claude", boom)
+    c2 = _container([_ch(1, "Resolved", "Resolved", 1)], [_wi(1, "TLCL.1 x", ["TLCL"])],
+                    release_note_ai_enabled=True, release_note_days="")
+    assert await ReleaseNoteService(c2).run_once(NOW) == "sent"
+    assert "NHẬN ĐỊNH" not in str(c2.notifier.sent[0].card)
+
+
+async def test_board_wip_reads_the_limited_columns_of_the_lowest_board_in_the_team_area():
+    import json
+
+    import httpx
+
+    from ai_autopilot.ado.client import AdoClient
+
+    queries = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/work/boards"):
+            return httpx.Response(200, json={"value": [{"name": "Epics"},
+                                                       {"name": "Requirements"}]})
+        if path.endswith("/Requirements/columns"):
+            return httpx.Response(200, json={"value": [
+                {"name": "New", "itemLimit": 0, "stateMappings": {"Requirement": "New"}},
+                {"name": "Rework Required", "itemLimit": 5,
+                 "stateMappings": {"Requirement": "Rework Required", "Bug": "Rework"}},
+            ]})
+        if path.endswith("/teamfieldvalues"):
+            return httpx.Response(200, json={
+                "field": {"referenceName": "System.AreaPath"},
+                "values": [{"value": "P\\Team", "includeChildren": True}]})
+        if path.endswith("/wiql"):
+            queries.append(json.loads(request.content)["query"])
+            return httpx.Response(200, json={"workItems": [{"id": i} for i in range(11)]})
+        return httpx.Response(404, text="nope")
+
+    client = AdoClient(http=httpx.AsyncClient(transport=httpx.MockTransport(handler)), auth=None,
+                       config=Settings(ado_organization="https://dev.azure.com/org",
+                                       ado_project="P"))
+
+    async def _auth_header():
+        return {}
+
+    client._auth = type("A", (), {"get_auth_header": staticmethod(_auth_header)})()
+    assert await client.get_board_wip("P") == [("Rework Required", 11, 5)]
+    (q,) = queries
+    assert "[System.WorkItemType] = 'Bug' AND [System.State] = 'Rework'" in q
+    assert "[System.AreaPath] UNDER 'P\\Team'" in q and "[System.TeamProject] = 'P'" in q

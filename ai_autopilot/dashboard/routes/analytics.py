@@ -87,6 +87,7 @@ def create_router() -> APIRouter:
     @router.get("/release-notes", response_class=HTMLResponse)
     async def release_notes_page(
         request: Request, days: int = 0, project: str = "all", sent: str = "",
+        analyze: int = 0,
     ):
         """What reached production in the window, per tenant; what is waiting for the
         next deploy now; and one handover per tenant (no ids) — from the recorded state
@@ -97,7 +98,10 @@ def create_router() -> APIRouter:
         c: Container = request.app.state.container
         cfg = c.config
         available, projects = _release_scope(request, project)
-        note = await ReleaseNoteService(c).build(days=days, projects=projects)
+        service = ReleaseNoteService(c)
+        note = await service.build(days=days, projects=projects)
+        # A model call per view would make the page slow and costly; it runs on request.
+        analyzed = analyze and await service.analyze(note)
         link_base = work_item_link_base(cfg)
         return _TEMPLATES.TemplateResponse(
             request, "release_notes.html",
@@ -117,6 +121,10 @@ def create_router() -> APIRouter:
                     "tenant_tags": list(cfg.release_note_tenant_tags or []),
                     "states": list(cfg.release_note_states or []),
                     "waiting_states": note.waiting_states,
+                    "ai": cfg.release_note_ai_enabled,
+                    "roles": bool(cfg.release_note_roles),
+                    "wip": cfg.release_note_wip_enabled,
+                    "analyze_failed": bool(analyze) and not analyzed,
                     "link": bool(page_url(cfg, note.days)),
                 },
                 sent=sent,
@@ -140,7 +148,9 @@ def create_router() -> APIRouter:
         _, projects = _release_scope(request, project)
         service = ReleaseNoteService(c)
         note = await service.build(days=days, projects=projects)
-        outcome = "empty" if not note.total and not note.waiting else (
+        if note.has_news:
+            await service.analyze(note)
+        outcome = "empty" if not note.has_news else (
             "sent" if await service.post(note) else "dry-run")
         with contextlib.suppress(Exception):
             await c.audit_repo.record(

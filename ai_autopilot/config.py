@@ -2080,6 +2080,24 @@ class Settings(BaseSettings):
         default_factory=lambda: ["PM - Need Review", "Product - Review"]
     )
 
+    # ── Release note (what was delivered, grouped by tenant) ──
+    # Built from the delivery tracker's state history plus one batched read of the
+    # items, so it costs no model run (the ``release-note`` skill does the same by hand).
+    # The dashboard page works regardless; ``release_note_enabled`` only schedules the
+    # Teams post. See ai_autopilot/release_notes.py for the grouping rules.
+    release_note_enabled: bool = False
+    release_note_window_days: int = 7
+    # When the scheduled post goes out, in ``timezone``. Days: "Mon" (default) or
+    # "Mon,Thu"; blank = every day.
+    release_note_at: str = "08:30"
+    release_note_days: str = "Mon"
+    # Which states mean "released". Blank = the Resolved/Completed state category — the
+    # Delivery page's rule. Name states (e.g. "Pre-Release") when the release IS a state.
+    release_note_states: list[str] = Field(default_factory=list)
+    # Tags that name a tenant (e.g. TLCL, TLLA, VPM), in the order groups are shown.
+    # Blank = group by project. An item with none of them lands under "Chung".
+    release_note_tenant_tags: list[str] = Field(default_factory=list)
+
     # ── Scheduling & quiet hours ──
     # IANA timezone every window below is read in, e.g. "Asia/Ho_Chi_Minh". REQUIRED for
     # any window to apply: the system clock is usually UTC (containers, VMs), so applying

@@ -74,6 +74,81 @@ def create_router() -> APIRouter:
             ),
         )
 
+    def _release_scope(request: Request, project: str) -> tuple[list[str], list[str] | None]:
+        """``(projects offered, projects to report)`` — the Delivery page's rule: the
+        dropdown narrows WITHIN the workspace, and a stale value never widens it."""
+        cfg = request.app.state.container.config
+        _, in_scope = scope_of(request, cfg)
+        available = in_scope if in_scope is not None else cfg.effective_ado_projects
+        if project != "all":
+            return available, [p for p in available if p.lower() == project.lower()]
+        return available, in_scope
+
+    @router.get("/release-notes", response_class=HTMLResponse)
+    async def release_notes_page(
+        request: Request, days: int = 0, project: str = "all", sent: str = "",
+    ):
+        """What was delivered in the window, per tenant — the internal tables and the
+        customer version without ids, built from the recorded state history."""
+        from ai_autopilot.services.release_note_service import ReleaseNoteService, page_url
+
+        c: Container = request.app.state.container
+        cfg = c.config
+        available, projects = _release_scope(request, project)
+        note = await ReleaseNoteService(c).build(days=days, projects=projects)
+        customer_md = "\n".join(
+            ["| STT | Mã | Hạng Mục |", "|---|---|---|"]
+            + [f"| {n} | {ticket} | {title} |"
+               for n, (ticket, title) in enumerate(note.customer_rows(), 1)]
+        )
+        return _TEMPLATES.TemplateResponse(
+            request, "release_notes.html",
+            _ctx(
+                request, "release_notes", note=note, days=note.days,
+                projects=available, selected_project=project,
+                item_link=work_item_link_base(cfg), customer_md=customer_md,
+                customer_rows=note.customer_rows(),
+                recording=cfg.delivery_history_enabled,
+                schedule={
+                    "enabled": cfg.release_note_enabled, "at": cfg.release_note_at,
+                    "days": cfg.release_note_days or "mỗi ngày",
+                    "tenant_tags": list(cfg.release_note_tenant_tags or []),
+                    "states": list(cfg.release_note_states or []),
+                    "link": bool(page_url(cfg, note.days)),
+                },
+                sent=sent,
+            ),
+        )
+
+    @router.post("/release-notes/send")
+    async def release_notes_send(request: Request):
+        """Post the note on screen to Teams now, whatever the schedule says."""
+        from fastapi.responses import RedirectResponse
+
+        from ai_autopilot.services.release_note_service import ReleaseNoteService
+
+        c: Container = request.app.state.container
+        form = await request.form()
+        try:
+            days = int(str(form.get("days") or 0))
+        except ValueError:
+            days = 0
+        project = str(form.get("project") or "all")
+        _, projects = _release_scope(request, project)
+        service = ReleaseNoteService(c)
+        note = await service.build(days=days, projects=projects)
+        outcome = "empty" if not note.total else (
+            "sent" if await service.send(note) else "dry-run")
+        with contextlib.suppress(Exception):
+            await c.audit_repo.record(
+                actor="dashboard", source="dashboard", action="release_note.sent",
+                target=f"{note.days} ngày · {project} · {note.total} hạng mục · {outcome}",
+            )
+        return RedirectResponse(
+            f"/dashboard/release-notes?days={note.days}&project={project}&sent={outcome}",
+            status_code=303,
+        )
+
     return router
 
 

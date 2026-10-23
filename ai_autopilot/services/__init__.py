@@ -8,6 +8,7 @@ from ai_autopilot.services.poller import AdoPollerService
 from ai_autopilot.services.pr_conflicts import PrConflictService
 from ai_autopilot.services.pr_monitor import PrMonitorService
 from ai_autopilot.services.process_health_service import ProcessHealthService
+from ai_autopilot.services.release_note_service import ReleaseNoteService
 from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
 from ai_autopilot.services.state_sync import StateSyncService
 from ai_autopilot.services.updater import UpdaterService
@@ -21,6 +22,7 @@ __all__ = [
     "PrConflictService",
     "PrMonitorService",
     "ProcessHealthService",
+    "ReleaseNoteService",
     "ReviewerTrackerService",
     "StateSyncService",
     "UpdaterService",

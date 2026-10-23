@@ -30,6 +30,7 @@ from ai_autopilot.services import (
     PrConflictService,
     PrMonitorService,
     ProcessHealthService,
+    ReleaseNoteService,
     ReviewerTrackerService,
     StateSyncService,
     UpdaterService,
@@ -335,6 +336,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 reviewer_tracker,
                 LoopScheduler(container),
                 ProcessHealthService(container),
+                ReleaseNoteService(container),
                 UpdaterService(container),
                 # Worker machines only: report in and pull the shared config. A central
                 # or standalone install starts nothing, so this is inert by default.

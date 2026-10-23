@@ -27,10 +27,10 @@ The two windows treat a MISSING timezone differently, on purpose:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, time, tzinfo
+from datetime import UTC, datetime, time, timedelta, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ai_autopilot.config import Settings
+from ai_autopilot.config import Settings, parse_hhmm
 from ai_autopilot.logging_config import get_logger
 
 _log = get_logger("scheduling")
@@ -228,3 +228,21 @@ def render_held_summary(held: list, dropped: int = 0) -> tuple[str, str]:
             f"\n⚠️ {dropped} thông báo cũ hơn đã bị bỏ do vượt hạn mức lưu giữ."
         )
     return f"🔕 {len(held)} thông báo ngoài giờ", "\n".join(lines)
+
+
+def seconds_until(hhmm: str, now: datetime) -> float | None:
+    """Seconds from ``now`` to the next local occurrence of ``hhmm``, or None if it isn't
+    a time of day.
+
+    Always strictly positive: at exactly the scheduled second the digest for that slot has
+    just been sent, so the same time TODAY only counts when it is still ahead — otherwise
+    the loop would fire twice in a row on a zero-length sleep.
+    """
+    parsed = parse_hhmm(hhmm)
+    if parsed is None:
+        return None
+    hour, minute = parsed
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()

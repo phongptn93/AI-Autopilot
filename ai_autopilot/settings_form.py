@@ -647,6 +647,27 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Cảnh báo khi việc ngoài kế hoạch vượt tỷ lệ này. Bỏ qua khi mẫu nhỏ — một ticket "
           "ad-hoc trong tuần vắng là 100% và chẳng nói lên gì."),
 
+    # ── Release note ──
+    Field("release_note_enabled", "Gửi release note lên Teams theo lịch", "bool",
+          "📣 Release note",
+          "Tổng hợp các hạng mục đã giao, gom theo tenant, rồi đăng lên các kênh Teams đã cài. "
+          "Trang Release note trên dashboard luôn xem được, kể cả khi tắt mục này. Không tốn "
+          "lượt chạy model: dữ liệu lấy từ lịch sử trạng thái mà delivery tracker đã ghi."),
+    Field("release_note_at", "↳ Giờ gửi (HH:MM)", "text", "📣 Release note",
+          "Theo múi giờ ở mục Lịch làm việc. Không gửi trong giờ yên lặng.",
+          placeholder="08:30"),
+    Field("release_note_days", "↳ Ngày gửi", "text", "📣 Release note",
+          "Ví dụ Mon (mặc định) hoặc Mon,Thu. Để trống = gửi mỗi ngày.", placeholder="Mon"),
+    Field("release_note_window_days", "Khoảng tổng hợp (ngày)", "int", "📣 Release note",
+          "Nhìn lại bao nhiêu ngày. 7 = một tuần. Trang dashboard dùng làm mặc định."),
+    Field("release_note_tenant_tags", "Tag tenant", "list", "📣 Release note",
+          "Các tag dùng để gom nhóm, theo thứ tự hiển thị — ví dụ TLCL, TLLA, VPM. Item mang hai "
+          "tag tenant hiện ở cả hai nhóm. Để trống = gom theo project. Item không khớp tag nào "
+          "vào nhóm Chung."),
+    Field("release_note_states", "State tính là đã phát hành", "list", "📣 Release note",
+          "Để trống = state thuộc nhóm Resolved/Completed (đúng như trang Bàn giao). Ghi tên "
+          "state (ví dụ Pre-Release) nếu đội coi một state cụ thể là thời điểm phát hành."),
+
     # ── Notifications ──
     # Neither `teams_webhook_url` nor `teams_webhook_urls` is a Field. Both are edited as
     # rows of the "📣 Teams channels" card, which renders INSIDE this section — one list, in
@@ -1100,6 +1121,9 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     "process_health_window_days": ("process_health_enabled", ("1",)),
     "process_health_blocked_days": ("process_health_enabled", ("1",)),
     "process_health_adhoc_threshold_pct": ("process_health_enabled", ("1",)),
+    # Release note — only the schedule depends on the switch; the page always works.
+    "release_note_at": ("release_note_enabled", ("1",)),
+    "release_note_days": ("release_note_enabled", ("1",)),
     # Spec drift
     "spec_drift_tag": ("spec_drift_enabled", ("1",)),
     "spec_drift_holds_item": ("spec_drift_enabled", ("1",)),
@@ -1398,6 +1422,7 @@ MACHINE_LOCAL = frozenset({
     "pr_reviewer_reminder_hours", "pr_reviewer_reminder_repeat_hours",
     "teams_agent_digest_interval_hours", "teams_agent_digest_at",
     "digest_skip_when_empty", "digest_respect_quiet_hours",
+    "release_note_enabled", "release_note_at", "release_note_days",
     "notify_hours_start", "notify_hours_end", "notify_days", "notify_quiet_max_held",
     "notify_window_applies_to",
 })

@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .tbl th { text-align:left; padding:7px 10px; font-size:11px; text-transform:uppercase;
+            letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border,#23232b); }
+  .tbl td { padding:7px 10px; border-bottom:1px solid var(--border,#23232b); vertical-align:top; }
+  .tbl tr:last-child td { border-bottom:none; }
+  .tbl .id { white-space:nowrap; width:90px; }
+  .tbl .tk { white-space:nowrap; width:120px; font-variant-numeric:tabular-nums; }
+  .tbl .stt { width:48px; text-align:right; font-variant-numeric:tabular-nums; }
+  .rn-group-head { display:flex; align-items:center; gap:10px; }
+  .rn-count { font-size:12px; color:var(--text-muted); }
+  .rn-type { display:block; font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .notice { font-size:12px; color:var(--text-muted); background:var(--bg,#0d0d12);
+            border:1px solid var(--border,#23232b); border-radius:9px; padding:9px 13px; margin-bottom:14px; }
+  .notice.ok { border-color:rgba(34,197,94,.45); }
+  .empty { color:var(--text-dim); font-size:13px; text-align:center; padding:22px 0; }
+  .rn-copy { width:100%; min-height:140px; font:12px/1.5 ui-monospace,monospace; color:inherit;
+             background:transparent; border:1px solid var(--border,#23232b); border-radius:8px;
+             padding:10px; resize:vertical; margin-top:10px; }
+  .rn-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2 class="page-title">{{ page_title("release_notes") }}</h2>
+    <p><b>{{ note.total }}</b> hạng mục đã giao trong {{ days }} ngày
+      ({{ note.start.strftime('%d/%m/%Y') }} – {{ note.end.strftime('%d/%m/%Y') }}),
+      gom theo {% if schedule.tenant_tags %}tenant{% else %}project{% endif %}.</p>
+  </div>
+  <div class="rn-actions">
+    <form method="get" action="/dashboard/release-notes" style="display:flex;gap:8px;align-items:center">
+      {% if projects and projects | length > 1 %}
+      <select name="project" class="bf-input" style="min-width:170px" aria-label="Project" onchange="this.form.submit()">
+        <option value="all" {% if selected_project == 'all' %}selected{% endif %}>Tất cả project</option>
+        {% for p in projects %}<option value="{{ p }}" {% if selected_project == p %}selected{% endif %}>{{ p }}</option>{% endfor %}
+      </select>
+      {% endif %}
+      <select name="days" class="bf-input" style="min-width:110px" aria-label="Khoảng thời gian" onchange="this.form.submit()">
+        {% for d in [7, 14, 30] %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
+        {% if days not in [7, 14, 30] %}<option value="{{ days }}" selected>{{ days }} ngày</option>{% endif %}
+      </select>
+      <noscript><button type="submit" class="btn-ghost">Áp dụng</button></noscript>
+    </form>
+    <form method="post" action="/dashboard/release-notes/send" style="margin:0"
+          onsubmit="return confirm('Gửi release note {{ days }} ngày này lên các kênh Teams ngay bây giờ?');">
+      <input type="hidden" name="days" value="{{ days }}"/>
+      <input type="hidden" name="project" value="{{ selected_project }}"/>
+      <button class="btn-primary" type="submit" {% if not note.total %}disabled title="Không có hạng mục nào để gửi"{% endif %}>📨 Gửi Teams ngay</button>
+    </form>
+  </div>
+</div>
+
+{% if sent == 'sent' %}<div class="notice ok">✅ Đã gửi release note lên các kênh Teams.</div>
+{% elif sent == 'dry-run' %}<div class="notice">🧪 Đang chạy <code>dry_run</code> — không gửi thật.</div>
+{% elif sent == 'empty' %}<div class="notice">Không có hạng mục nào trong khoảng này — không gửi.</div>{% endif %}
+
+{% if note.error %}
+<div class="card" style="border-color: var(--red,#e5484d);">
+  <div class="card-body" style="padding:14px 22px;color:var(--red,#e5484d)">⚠️ {{ note.error }}</div>
+</div>
+{% endif %}
+
+{% if not recording %}
+<div class="notice">⏸️ <b>Đang tắt ghi lịch sử trạng thái</b> — release note được dựng từ lịch sử này nên sẽ trống.
+  Bật ở <a class="table-link" href="/dashboard/settings">Settings</a> → <code>delivery_history_enabled</code>.</div>
+{% elif note.partial %}
+<div class="notice">📖 Lịch sử trạng thái chỉ có từ
+  <b>{% if note.history_since %}{{ note.history_since.strftime('%d/%m/%Y %H:%M') }}{% else %}chưa có dữ liệu{% endif %}</b>
+  — hạng mục giao trước mốc này không có trong danh sách.</div>
+{% endif %}
+
+<div class="notice">
+  🗓️ {% if schedule.enabled %}Tự gửi Teams lúc <b>{{ schedule.at }}</b> ({{ schedule.days }}), bỏ qua trong giờ yên lặng.
+  {% else %}Chưa bật gửi theo lịch.{% endif %}
+  "Đã giao" = {% if schedule.states %}vào state <b>{{ schedule.states | join(', ') }}</b>{% else %}vào nhóm Resolved/Completed{% endif %} lần đầu trong kỳ.
+  {% if not schedule.tenant_tags %}Chưa khai tag tenant nên đang gom theo project.{% endif %}
+  <a class="table-link" href="/dashboard/settings#release_note_enabled">Cấu hình ↗</a>
+  {% if schedule.enabled and not schedule.link %}· Đặt <code>dashboard_public_url</code> để tin Teams có nút mở trang này.{% endif %}
+</div>
+
+{% if not note.groups %}
+<div class="card"><div class="card-body"><div class="empty">Không có hạng mục nào được giao trong {{ days }} ngày qua.</div></div></div>
+{% else %}
+
+{% for group in note.groups %}
+<div class="card" style="margin-bottom:14px">
+  <div class="card-header"><div class="rn-group-head">
+    <h3 class="card-title">{{ group.tenant }}</h3><span class="rn-count">{{ group.entries | length }} hạng mục</span>
+  </div></div>
+  <div class="card-body" style="padding:0">
+    <table class="tbl">
+      <thead><tr><th class="id">Mã</th><th class="tk">Mã Ticket</th><th>Hạng Mục</th></tr></thead>
+      <tbody>
+      {% for e in group.entries %}
+        <tr>
+          <td class="id">{% if item_link %}<a class="table-link" href="{{ item_link }}{{ e.id }}" target="_blank" rel="noopener">#{{ e.id }}</a>{% else %}#{{ e.id }}{% endif %}</td>
+          <td class="tk">{{ e.ticket or '—' }}</td>
+          <td>{{ e.title }}<span class="rn-type">{{ e.work_item_type }}{% if e.work_item_type and e.project %} · {% endif %}{{ e.project }} · {{ e.delivered_at.strftime('%d/%m') }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+<div class="card">
+  <div class="card-header"><h3 class="card-title">📣 Bản gửi khách hàng (gom chung)</h3></div>
+  <div class="card-body">
+    <p class="dim" style="font-size:12.5px;margin:0 0 10px">Không có mã work item nội bộ — chỉ mã ticket của khách (lấy từ đầu tiêu đề, để trống nếu không có).</p>
+    <table class="tbl">
+      <thead><tr><th class="stt">STT</th><th class="tk">Mã</th><th>Hạng Mục</th></tr></thead>
+      <tbody>
+      {% for ticket, title in customer_rows %}
+        <tr><td class="stt">{{ loop.index }}</td><td class="tk">{{ ticket }}</td><td>{{ title }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <textarea class="rn-copy" readonly onclick="this.select()" aria-label="Bản gửi khách dạng Markdown">{{ customer_md }}</textarea>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

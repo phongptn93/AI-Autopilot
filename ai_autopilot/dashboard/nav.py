@@ -48,6 +48,8 @@ GROUPS: tuple[NavGroup, ...] = (
                 "Item đang chờ con người: thiếu thông tin, test đỏ, cần duyệt."),
         NavItem("delivery", "/dashboard/delivery", "🚚", "Bàn giao",
                 "Góc nhìn PM: việc chờ merge, chờ review, đứng yên quá lâu."),
+        NavItem("release_notes", "/dashboard/release-notes", "📣", "Release note",
+                "Hạng mục đã giao trong 7 ngày, gom theo tenant — bản nội bộ và bản gửi khách."),
     )),
     NavGroup("work", "📋 Công việc", (
         NavItem("board", "/dashboard/board", "🗂️", "Board",

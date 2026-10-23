@@ -31,11 +31,11 @@ from typing import Any
 from urllib.parse import quote, unquote
 
 from ai_autopilot import delivery
-from ai_autopilot.config import Settings, parse_hhmm
+from ai_autopilot.config import Settings
 from ai_autopilot.container import Container
 from ai_autopilot.data.entities import PipelineState
 from ai_autopilot.logging_config import describe_exc, get_logger
-from ai_autopilot.scheduling import QuietHours, resolve_tz
+from ai_autopilot.scheduling import QuietHours, resolve_tz, seconds_until
 from ai_autopilot.services import delivery_report, planning_analyzer
 from ai_autopilot.services.reviewer_tracker import ReviewerTrackerService
 
@@ -479,24 +479,6 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
 
     _log.info("Teams bot configured", app_id=config.teams_agent_app_id)
     return app, adapter, digest_task
-
-
-def seconds_until(hhmm: str, now: datetime) -> float | None:
-    """Seconds from ``now`` to the next local occurrence of ``hhmm``, or None if it isn't
-    a time of day.
-
-    Always strictly positive: at exactly the scheduled second the digest for that slot has
-    just been sent, so the same time TODAY only counts when it is still ahead — otherwise
-    the loop would fire twice in a row on a zero-length sleep.
-    """
-    parsed = parse_hhmm(hhmm)
-    if parsed is None:
-        return None
-    hour, minute = parsed
-    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return (target - now).total_seconds()
 
 
 async def _digest_loop(

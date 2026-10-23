@@ -138,7 +138,7 @@ def create_router() -> APIRouter:
         service = ReleaseNoteService(c)
         note = await service.build(days=days, projects=projects)
         outcome = "empty" if not note.total else (
-            "sent" if await service.send(note) else "dry-run")
+            "sent" if await service.post(note) else "dry-run")
         with contextlib.suppress(Exception):
             await c.audit_repo.record(
                 actor="dashboard", source="dashboard", action="release_note.sent",

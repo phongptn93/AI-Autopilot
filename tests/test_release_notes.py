@@ -175,13 +175,13 @@ async def test_send_posts_one_card_with_a_link_to_the_page_when_there_is_a_publi
     c = _container([_ch(1, "Resolved", "Resolved", 2)], [_wi(1, "TLCL.5 Done", ["TLCL"])],
                    dashboard_public_url="https://autopilot.example.com/")
     service = ReleaseNoteService(c)
-    assert await service.send(await service.build(now=NOW))
+    assert await service.post(await service.build(now=NOW))
     (msg,) = c.notifier.sent
     assert msg.heading.startswith("📣 Release note 7 ngày") and "TLCL.5" in msg.text
     assert msg.actions == [("📣 Mở release note đầy đủ",
                             "https://autopilot.example.com/dashboard/release-notes?days=7")]
     dry = _container([_ch(1, "Resolved", "Resolved", 2)], [_wi(1, "x")], dry_run=True)
-    assert not await ReleaseNoteService(dry).send(await ReleaseNoteService(dry).build(now=NOW))
+    assert not await ReleaseNoteService(dry).post(await ReleaseNoteService(dry).build(now=NOW))
     assert dry.notifier.sent == []
 
 
@@ -255,12 +255,12 @@ def test_send_now_posts_and_reports_back(tmp_path, monkeypatch):
 
     posted = []
 
-    async def fake_send(self, note):
+    async def fake_post(self, note):
         posted.append(note.total)
         return True
 
     monkeypatch.setattr(ReleaseNoteService, "build", fake_build)
-    monkeypatch.setattr(ReleaseNoteService, "send", fake_send)
+    monkeypatch.setattr(ReleaseNoteService, "post", fake_post)
     cfg = Settings(dry_run=True, database_url=f"sqlite+aiosqlite:///{tmp_path / 's.db'}")
     with TestClient(create_app(cfg)) as client:
         r = client.post("/dashboard/release-notes/send", data={"days": "7"},

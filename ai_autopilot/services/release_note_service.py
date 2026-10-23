@@ -107,8 +107,9 @@ class ReleaseNoteService:
 
     # ── posting ─────────────────────────────────────────────────────────────
 
-    async def send(self, note: release_notes.ReleaseNote) -> bool:
-        """Post ``note`` to every channel through the alert policy. True when sent."""
+    async def post(self, note: release_notes.ReleaseNote) -> bool:
+        """Post ``note`` to every channel THROUGH the notifier — so the alert policy and
+        the quiet window apply, as for every other sender. True when posted."""
         from ai_autopilot.dashboard.common import work_item_link_base
 
         if self._config.dry_run:
@@ -181,4 +182,4 @@ class ReleaseNoteService:
         if not note.total and cfg.digest_skip_when_empty:
             _log.info("release note skipped — nothing delivered", days=note.days)
             return "empty"
-        return "sent" if await self.send(note) else "dry-run"
+        return "sent" if await self.post(note) else "dry-run"

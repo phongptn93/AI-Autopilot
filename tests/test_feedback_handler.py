@@ -181,3 +181,83 @@ async def test_mention_end_to_end_change_request_becomes_action(monkeypatch):
     monkeypatch.setattr(claude_client, "run_claude", _reply("/ai"))
     assert await resolve_command(cfg, cmd) is False           # action → revises + pushes
     assert cmd["instruction"].startswith("/ai")
+
+
+# ── Talking to the bot: corrections, accepted offers, chit-chat ──────────────
+
+def _capture(text: str, seen: list):
+    async def fake_run_claude(prompt, work_dir, **kwargs):
+        assert kwargs.get("allowed_tools") == []
+        seen.append(prompt)
+
+        class _R:
+            pass
+
+        _R.text = text
+        return _R()
+
+    return fake_run_claude
+
+
+async def test_inference_sees_the_bots_own_turns(monkeypatch):
+    from ai_autopilot.execution.feedback_handler import infer_intent
+
+    seen: list = []
+    monkeypatch.setattr(claude_client, "run_claude", _capture("/ai correction", seen))
+    intent = await infer_intent(
+        Settings(), "sai rồi, phải là 30 phút",
+        context="Phong: /ai đổi timeout\nAutopilot: Đã xử lý xong — branch đã được cập nhật.",
+    )
+    assert (intent.command, intent.advisory, intent.correction) == ("/ai", False, True)
+    assert "Autopilot: Đã xử lý xong" in seen[0]          # it knew what "sai" refers to
+    assert "sai rồi, phải là 30 phút" in seen[0]
+
+
+async def test_none_means_nothing_to_do(monkeypatch):
+    from ai_autopilot.execution.feedback_handler import infer_intent
+
+    monkeypatch.setattr(claude_client, "run_claude", _reply("/none"))
+    intent = await infer_intent(Settings(), "cảm ơn nhé", followup=True)
+    assert intent.skip is True
+
+
+async def test_a_followup_that_cannot_be_read_does_nothing(monkeypatch):
+    """A reply that did not @mention the bot is the least certain address — when the
+    inference fails it must not turn into a review run, let alone an action."""
+    from ai_autopilot.execution.feedback_handler import infer_intent
+
+    async def boom(prompt, work_dir, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(claude_client, "run_claude", boom)
+    assert (await infer_intent(Settings(), "x", followup=True)).skip is True
+    # ...while an explicit @mention still gets the advisory answer it asked for.
+    explicit = await infer_intent(Settings(), "x")
+    assert (explicit.command, explicit.advisory, explicit.skip) == ("/review", True, False)
+
+
+async def test_a_correction_briefs_the_run_to_recheck_itself(monkeypatch):
+    monkeypatch.setattr(claude_client, "run_claude", _reply("/review correction"))
+    cmd = {"instruction": "bạn sai rồi, hàm này có check null mà", "via_mention": True,
+           "thread_context": "Autopilot: Thiếu null check ở Foo.cs:42"}
+    assert await resolve_command(Settings(), cmd) is True
+    assert cmd["instruction"].startswith("/review [CORRECTION]")
+    assert "Autopilot: Thiếu null check ở Foo.cs:42" in cmd["instruction"]
+    assert "do not ask them to confirm" in cmd["instruction"]
+    assert cmd["correction"] is True
+
+
+async def test_accepting_the_offer_acts_without_another_command(monkeypatch):
+    monkeypatch.setattr(claude_client, "run_claude", _reply("/ai"))
+    cmd = {"instruction": "ok sửa đi", "via_mention": True, "followup": True,
+           "thread_context": "Autopilot: 💡 Muốn tôi sửa luôn?"}
+    assert await resolve_command(Settings(), cmd) is False      # action
+    assert cmd["instruction"].startswith("/ai Conversation so far:")
+    assert not cmd.get("skip")
+
+
+async def test_skip_is_flagged_for_the_caller(monkeypatch):
+    monkeypatch.setattr(claude_client, "run_claude", _reply("/none"))
+    cmd = {"instruction": "thanks", "via_mention": True, "followup": True}
+    await resolve_command(Settings(), cmd)
+    assert cmd["skip"] is True

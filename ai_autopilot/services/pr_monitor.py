@@ -604,6 +604,8 @@ class PrMonitorService:
             # you can ask for another review even after the item is revision-capped.
             # A bare @mention has its command inferred here, defaulting to advisory.
             advisory = await resolve_command(cfg, cmd)
+            if cmd.get("skip"):
+                continue   # a "thanks" / a note to a colleague under the bot's reply
             if advisory:
                 if await self._advisory_exhausted(pr_id, pr):
                     self._spawn(self._reply_advisory_capped(repo_id, pr_id, cmd["thread_id"]))

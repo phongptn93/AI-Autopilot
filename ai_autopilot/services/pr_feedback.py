@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from ai_autopilot.config import (
+    BOT_ICON,
     BotIdentity,
     comment_text,
     find_bot_mention,
@@ -110,7 +111,15 @@ def command_threads(
     and it's what lets a user keep the conversation going — replying ``/ai fix it`` under
     the bot's review findings re-activates the thread even though the bot resolved it after
     the earlier ``/review``. A RESOLVED thread the bot never spoke in is different: the
-    human closed it themselves, so its command is treated as dismissed, not pending."""
+    human closed it themselves, so its command is treated as dismissed, not pending.
+
+    A plain reply UNDER the bot's answer, by the person who asked, is part of the same
+    conversation: "sai rồi, phải là X" or "ok sửa đi" is addressed to the bot whether or
+    not it @mentions it again. Demanding a fresh mention or a new /command for every turn
+    is what made the bot feel deaf. Such a reply comes back with ``via_mention`` AND
+    ``followup`` set, so it is inferred like a mention — and may be judged chit-chat and
+    dropped (see ``resolve_command``). A reply by anyone else is a colleague talking to
+    a colleague, and stays theirs."""
     out: list[dict[str, Any]] = []
     for thread in threads:
         resolved = (thread.get("status") or "").lower() in _RESOLVED_STATUSES
@@ -118,7 +127,7 @@ def command_threads(
         if tid is None:
             continue
         latest, instruction = None, None
-        via_mention = False
+        via_mention = followup = False
         bot_seen = False          # any bot-signed comment so far
         bot_replied_after = False  # bot-signed reply AFTER the newest command → handled
         follows_bot = False        # newest command came after a bot reply (a follow-up)
@@ -137,9 +146,15 @@ def command_threads(
                 # "@bot /security check this" names a command after the mention — honour it
                 # rather than inferring, so an explicit ask is never second-guessed.
                 mentioned = got is not None and match_command(got, commands) is None
+            is_followup = False
+            replying_to_bot = latest is not None and bot_replied_after
+            if got is None and replying_to_bot and _same_author(comment, latest):
+                plain = comment_text(content).strip()
+                if plain:
+                    got, mentioned, is_followup = plain, True, True
             if got is not None:
                 latest, instruction = comment, got  # keep the NEWEST command in the thread
-                via_mention = mentioned
+                via_mention, followup = mentioned, is_followup
                 bot_replied_after = False           # a newer command supersedes old replies
                 follows_bot = bot_seen
         if latest is None or bot_replied_after:
@@ -154,6 +169,9 @@ def command_threads(
             "author_email": author.get("uniqueName"),
             "author_name": author.get("displayName"),
             "via_mention": via_mention,
+            # A reply under the bot's answer without a mention — inferred like one, but
+            # allowed to come out as "nothing to do" (thanks, ok, a note to a colleague).
+            "followup": followup,
             # What the thread was about before the mention. "@bot mày có nghe không"
             # carries no intent on its own — the ask is in the comment above it, which
             # is exactly what a teammate reads before answering. Only for mentions:
@@ -161,6 +179,16 @@ def command_threads(
             "thread_context": thread_context(thread, latest) if via_mention else "",
         })
     return out
+
+
+def _same_author(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Whether two comments were written by the same person — by account, then name."""
+    def ident(c: dict[str, Any]) -> str:
+        who = c.get("author") or {}
+        return (who.get("uniqueName") or who.get("displayName") or "").strip().lower()
+
+    x, y = ident(a), ident(b)
+    return bool(x) and x == y
 
 
 def command_verb(instruction: str | None, commands: list[str] | tuple[str, ...]) -> str:
@@ -178,20 +206,33 @@ def command_verb(instruction: str | None, commands: list[str] | tuple[str, ...])
 
 # Offered right where a review ends, because that is the moment someone decides what
 # to do with it. A generic command list is a menu; this is the next step for THIS thread.
+# A plain reply is enough: the follow-up is read with the review above it (see
+# ``command_threads``), so "ok sửa đi" or "chỉ sửa mục 2" needs no command to be acted on.
 FIX_OFFER = (
-    "💡 Muốn tôi sửa luôn theo các nhận xét trên? Reply "
-    "<code>/ai</code> (kèm mô tả nếu muốn giới hạn phạm vi) — tôi sẽ chỉnh code, "
+    "💡 Muốn tôi sửa luôn? Cứ reply ngay tại đây — ví dụ <i>“ok sửa đi”</i>, "
+    "<i>“chỉ sửa mục 2”</i>, hay <i>“mục 3 sai, vì …”</i> — tôi sẽ chỉnh code, "
     "commit &amp; push lên chính branch này."
 )
 
 
-def thread_context(thread: dict[str, Any], upto: dict[str, Any], limit: int = 1500) -> str:
-    """The human conversation in a thread, oldest first, up to (not including) ``upto``.
+_BOT_BADGE_RE = re.compile(r"^\s*AI-Autopilot\s*·\s*")
+
+
+def thread_context(
+    thread: dict[str, Any], upto: dict[str, Any], limit: int = 3000, bot_limit: int = 600,
+) -> str:
+    """The conversation in a thread, oldest first, up to (not including) ``upto``.
 
     A mention is usually the SHORTEST comment in the thread — "@bot còn đó không?" — and
     reading it alone taught the intent-inference nothing, so a real request one line
-    above was answered with a generic review. Bot comments are dropped (its own replies
-    are not the ask) and the text is capped, newest kept, because only the tail matters.
+    above was answered with a generic review.
+
+    The bot's OWN turns are part of it, labelled ``Autopilot:``. They used to be dropped
+    as "not the ask", which left every reply to the bot without a referent: "bạn sai
+    rồi" could not say what was wrong, "ok sửa đi" could not say what was offered, and
+    the bot answered both with a fresh generic review plus "reply /ai". Each bot turn is
+    capped at ``bot_limit`` — a long review is the context, not the request — and the
+    whole text is capped at ``limit``, newest kept, because only the tail matters.
     """
     parts: list[str] = []
     for comment in thread.get("comments") or []:
@@ -199,13 +240,35 @@ def thread_context(thread: dict[str, Any], upto: dict[str, Any], limit: int = 15
             break
         if (comment.get("commentType") or "text") == "system":
             continue
-        content = comment_text(comment.get("content") or "").strip()
-        if not content or is_bot_signed(comment.get("content") or ""):
+        raw = comment.get("content") or ""
+        content = comment_text(raw).strip()
+        if not content:
+            continue
+        if is_bot_signed(raw):
+            # The signature badge says who spoke — the label below already does.
+            content = _BOT_BADGE_RE.sub("", content.replace(BOT_ICON, "")).strip()
+            if len(content) > bot_limit:
+                content = content[:bot_limit].rstrip() + " …"
+            parts.append(f"Autopilot: {content}")
             continue
         who = ((comment.get("author") or {}).get("displayName") or "").strip()
         parts.append(f"{who}: {content}" if who else content)
     text = chr(10).join(parts)
     return text[-limit:] if len(text) > limit else text
+
+
+def item_context(comments: list[dict[str, Any]], upto_id: int, last: int = 8) -> str:
+    """:func:`thread_context` for a work item, whose discussion is one flat list.
+
+    ``comments`` are the provider's ``{"id", "text", "is_bot", "created_by"}`` rows,
+    oldest first. Only the ``last`` comments before ``upto_id`` are kept: a work item's
+    discussion runs for months, and the exchange a mention answers is the recent one."""
+    before = [c for c in comments if (c.get("id") or 0) < upto_id][-last:]
+    return thread_context({"comments": [
+        {"id": c.get("id"), "content": c.get("text") or "",
+         "author": {"displayName": c.get("created_by") or ""}}
+        for c in before
+    ]}, {"id": upto_id})
 
 
 def newest_actionable_thread_id(threads: list[dict[str, Any]]) -> int | None:

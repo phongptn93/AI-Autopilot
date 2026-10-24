@@ -2103,3 +2103,43 @@ async def test_webhook_items_must_pass_the_trigger_rules(monkeypatch):
     await p._process_webhook_items()
 
     assert started == [1]
+
+
+async def test_a_work_item_mention_is_read_with_the_bots_reply_and_may_be_dropped():
+    """"@bot sai rồi" on a work item reaches the inference WITH the bot reply it answers,
+    and a mention judged chit-chat ("cảm ơn") dispatches nothing."""
+    from ai_autopilot.config import BOT_COMMENT_PREFIX, BotIdentity
+
+    p, c = _poller(bot=BotIdentity(identity_id=_BOT_GUID, display_name="AI Autopilot"))
+    c.config.trigger_tag = "autopilot"
+    c.config.auto_transition_assignee = "phong.pham@nois.vn"
+    item = _tagged(7, "Active", ["autopilot", c.config.review_tag])
+    c.ado.tagged_items = [item]
+    c.ado.comments_by_item = {7: [
+        _cmt(5, BOT_COMMENT_PREFIX + "Đã cập nhật spec mục AC-03", is_bot=True),
+        _cmt(6, _mention_html("cảm ơn nhé"), is_bot=False, email="phong.pham@nois.vn"),
+    ]}
+    p._comment_seen[7] = 4
+    dispatched: list = []
+
+    async def _fake_dispatch(it, instruction):
+        dispatched.append(instruction)
+
+    p._dispatch_with_comment = _fake_dispatch
+    import ai_autopilot.services.poller as poller_mod
+
+    seen: list = []
+
+    async def _fake_resolve(cfg, cmd):
+        seen.append(cmd.get("thread_context"))
+        cmd["skip"] = True
+        return True
+
+    original, poller_mod.resolve_command = poller_mod.resolve_command, _fake_resolve
+    try:
+        await p._reconcile_human_replies()
+    finally:
+        poller_mod.resolve_command = original
+
+    assert seen == ["Autopilot: Đã cập nhật spec mục AC-03"]
+    assert dispatched == []

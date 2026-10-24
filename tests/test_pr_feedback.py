@@ -376,7 +376,9 @@ def test_thread_context_is_what_a_teammate_would_read_first():
     ]}
     ctx = thread_context(thread, mention)
     assert "Lam Huynh: FE có ClientSettingService sao không dùng?" in ctx
-    assert "đang xem" not in ctx and "status changed" not in ctx
+    # The bot's own turn is context too — "bạn sai rồi" has to know what it answers.
+    assert "Autopilot: đang xem" in ctx
+    assert "status changed" not in ctx
     assert "mày có nghe không" not in ctx        # the mention itself is not context
 
     # Long threads keep the tail: the newest exchange is what the ask refers to.
@@ -395,11 +397,11 @@ async def test_a_mention_carries_the_thread_into_the_run():
     from ai_autopilot.config import Settings
     from ai_autopilot.execution import feedback_handler as fh
 
-    async def _fake_infer(config, text):
-        assert "ClientSettingService" in text     # the thread reached the inference
-        return "/ai", False
+    async def _fake_infer(config, text, *, context="", followup=False):
+        assert "ClientSettingService" in context  # the thread reached the inference
+        return fh.MentionIntent("/ai", False)
 
-    original, fh.infer_mention_command = fh.infer_mention_command, _fake_infer
+    original, fh.infer_intent = fh.infer_intent, _fake_infer
     try:
         cmd = {
             "via_mention": True,
@@ -408,8 +410,96 @@ async def test_a_mention_carries_the_thread_into_the_run():
         }
         advisory = await fh.resolve_command(Settings(), cmd)
     finally:
-        fh.infer_mention_command = original
+        fh.infer_intent = original
 
     assert advisory is False                       # an actionable ask, read correctly
     assert cmd["instruction"].startswith("/ai ")
     assert "ClientSettingService" in cmd["instruction"]
+
+
+# ── Conversation with the bot: replies under its answer need no new command ──
+
+def _turn(cid, content, email="phong@nois.vn", name="Phong"):
+    return {"id": cid, "commentType": "text",
+            "author": {"displayName": name, "uniqueName": email}, "content": content}
+
+
+def test_reply_under_the_bots_answer_is_a_followup():
+    """"sai rồi" under the bot's reply, by the person who asked, is addressed to the
+    bot — it used to be ignored until they @mentioned it or typed a new /command."""
+    from ai_autopilot.config import BOT_COMMENT_PREFIX
+
+    threads = [{"id": 10, "status": "fixed", "comments": [
+        _turn(1, "/ai đổi timeout sang 30s"),
+        _turn(2, BOT_COMMENT_PREFIX + "✅ Đã xử lý xong — branch đã được cập nhật."),
+        _turn(3, "<div>sai rồi, phải là 30 phút chứ</div>"),
+    ]}]
+    got = command_threads(threads, ["/ai", "/review"])
+    assert [t["comment_id"] for t in got] == [3]
+    assert got[0]["via_mention"] is True and got[0]["followup"] is True
+    assert got[0]["instruction"] == "sai rồi, phải là 30 phút chứ"
+    ctx = got[0]["thread_context"]
+    assert "Autopilot: ✅ Đã xử lý xong" in ctx               # the bot's turn, labelled
+    assert "AI-Autopilot" not in ctx and "🤖" not in ctx      # signature badge stripped
+    assert "Phong: /ai đổi timeout sang 30s" in got[0]["thread_context"]
+
+
+def test_colleagues_reply_under_the_bots_answer_is_not_for_the_bot():
+    from ai_autopilot.config import BOT_COMMENT_PREFIX
+
+    threads = [{"id": 10, "status": "fixed", "comments": [
+        _turn(1, "/review"),
+        _turn(2, BOT_COMMENT_PREFIX + "🔍 Đã xem xong"),
+        _turn(3, "anh Phong xem giúp em mục 2", email="lam@nois.vn", name="Lam"),
+    ]}]
+    assert command_threads(threads, ["/ai", "/review"]) == []
+
+
+def test_reply_before_the_bot_answered_is_not_a_new_turn():
+    """The bot hasn't spoken yet — "hurry up" is not a second command."""
+    threads = [{"id": 10, "status": "active", "comments": [
+        _turn(1, "/ai do it"), _turn(2, "hurry up"),
+    ]}]
+    got = command_threads(threads, ["/ai"])
+    assert got[0]["comment_id"] == 1 and got[0]["followup"] is False
+
+
+def test_an_answered_followup_is_not_picked_up_again():
+    from ai_autopilot.config import BOT_COMMENT_PREFIX
+
+    threads = [{"id": 10, "status": "fixed", "comments": [
+        _turn(1, "/review"),
+        _turn(2, BOT_COMMENT_PREFIX + "🔍 Đã xem xong"),
+        _turn(3, "ok sửa đi"),
+        _turn(4, BOT_COMMENT_PREFIX + "✅ Đã xử lý xong"),
+    ]}]
+    assert command_threads(threads, ["/ai", "/review"]) == []
+
+
+def test_long_bot_turns_are_capped_in_context():
+    from ai_autopilot.config import BOT_COMMENT_PREFIX
+    from ai_autopilot.services.pr_feedback import thread_context
+
+    last = {"id": 3, "content": "sai"}
+    thread = {"comments": [
+        _turn(1, "/review"),
+        _turn(2, BOT_COMMENT_PREFIX + "x" * 5000),
+        last,
+    ]}
+    ctx = thread_context(thread, last, bot_limit=100)
+    assert "Phong: /review" in ctx and len(ctx) < 200 and ctx.endswith("…")
+
+
+def test_item_context_reads_a_work_items_recent_exchange():
+    from ai_autopilot.config import BOT_COMMENT_PREFIX
+    from ai_autopilot.services.pr_feedback import item_context
+
+    comments = [{"id": i, "text": f"old {i}", "is_bot": False, "created_by": "A"}
+                for i in range(1, 20)]
+    comments += [
+        {"id": 20, "text": BOT_COMMENT_PREFIX + "Đã cập nhật spec", "is_bot": True,
+         "created_by": "Phong"},
+        {"id": 21, "text": "@bot sai rồi", "is_bot": False, "created_by": "Phong"},
+    ]
+    ctx = item_context(comments, 21, last=3)
+    assert ctx.splitlines() == ["A: old 18", "A: old 19", "Autopilot: Đã cập nhật spec"]

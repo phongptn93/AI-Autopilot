@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+from dataclasses import dataclass
 
 from ai_autopilot.config import (
     AGENT_CONDUCT_INSTRUCTION,
@@ -118,29 +119,58 @@ def _guidance(command: str, item: WorkItemInfo, branch: str, feedback: str, base
     )
 
 
-# ── Inferring what a bare @mention meant ─────────────────────────────────────
+# ── Inferring what a command-less message to the bot meant ──────────────────
 
-_INFER_PROMPT = """A teammate @mentioned the autopilot in a code-review comment without \
-naming a command. Decide which ONE command they meant.
+_INFER_PROMPT = """A teammate is talking to the autopilot in a code-review / work-item \
+thread without naming a command. Read the WHOLE conversation like a colleague would, \
+then decide what they want now.
 
-Their comment (may be Vietnamese):
+Conversation so far, oldest first ("Autopilot:" lines are YOUR earlier replies; may be \
+Vietnamese):
+\"\"\"{context}\"\"\"
+
+Their newest message — the one to act on:
 \"\"\"{text}\"\"\"
 
 Available commands:
 {catalog}
+- /none — nothing to do: thanks, "ok" with nothing pending, or a remark meant for a \
+colleague{none_note}
 
-Rules:
-- DEFAULT TO AN ADVISORY command. Most mentions are questions, opinions, or requests to \
-look at something.
-- Pick an ACTION command ONLY if the comment unmistakably instructs you to CHANGE the \
-code, spec or tests — e.g. "sửa lại chỗ này", "fix this", "thêm test cho case X", \
-"cập nhật spec". A question, a complaint, or an observation that something looks wrong \
-("chỗ này sai rồi", "sao chậm vậy?") is NOT an instruction to change anything: those are \
+How to decide:
+1. ACCEPTING YOUR OFFER. If your last reply offered to change something ("Muốn tôi sửa \
+luôn?") and they accept ("ok", "sửa đi", "làm đi", "đồng ý", "yes", "chỉ sửa mục 2"), \
+pick the ACTION command that does it. They already said yes — never ask again.
+2. CORRECTING YOU. If they say your last reply or change was wrong ("bạn sai rồi", "không \
+phải vậy", "vẫn lỗi", "chưa đúng", "wrong"):
+   - your last turn CHANGED code/spec/tests ("Đã xử lý xong", "branch đã được cập nhật") \
+→ the ACTION command that redoes it: they asked for that change and are telling you it \
+is not right yet;
+   - they also say what the right result is AND ask for it or accept your earlier offer \
+→ the ACTION command;
+   - otherwise (your last turn was a review / an answer) → the ADVISORY command that \
+re-examines it.
+   Mark a correction by adding the word "correction" after the command.
+3. A NEW REQUEST. An ACTION command ONLY if it unmistakably instructs you to CHANGE \
+the code, spec or tests ("sửa lại chỗ này", "thêm test cho case X", "cập nhật spec"). A \
+question, or an observation about code nobody asked you to change ("sao chậm vậy?"), is \
 ADVISORY.
-- If you are unsure at all, choose the advisory command that best fits.
+4. Unsure → the advisory command that fits best.
 
-Answer with EXACTLY the command token and nothing else, e.g. /security"""
+Answer with EXACTLY one line: the command token, optionally followed by the word \
+correction. Examples: /security   |   /ai correction   |   /review correction   |   /none"""
 
+# Prepended to the instruction of a run that answers "you got it wrong", so the agent
+# re-checks its OWN previous turn instead of producing a fresh, generic one.
+_CORRECTION_BRIEF = (
+    "[CORRECTION] The person says your previous reply/change in this thread is WRONG. "
+    "The conversation below includes your earlier turns (\"Autopilot:\"). Re-check that "
+    "turn against the actual code — do not repeat it. If they are right: say so in one "
+    "line, then deliver the corrected result directly (the fix, or the corrected "
+    "answer) — do not ask them to confirm or to send another command. If you still "
+    "believe you were right: explain why with concrete evidence (file:line, what the "
+    "code does), and say what would change your mind."
+)
 
 _ADVISORY_NOTE = "ADVISORY (comment only, never changes code)"
 _ACTION_NOTE = "ACTION (changes code and pushes)"
@@ -162,37 +192,60 @@ def _advisory_default(config: Settings) -> str:
     return ""
 
 
-async def infer_mention_command(config: Settings, text: str) -> tuple[str, bool]:
-    """Map a bare @mention comment onto ``(command, advisory)``.
+@dataclass(frozen=True)
+class MentionIntent:
+    """What a command-less message to the bot asks for.
 
-    An @mention is how a human asks a teammate something, so it carries no command — but
-    everything downstream (``_guidance``, ``review_only``) is keyed on one. Rather than
-    special-casing mentions through that machinery, we infer the command they meant and let
-    the existing paths run unchanged.
+    ``skip`` — nothing to do (thanks, a note to a colleague); the caller drops it.
+    ``correction`` — it says the bot's previous turn was wrong; the run re-checks that
+    turn instead of starting over."""
 
-    SAFETY: ``advisory`` is DERIVED from the chosen command, never decided separately, and
-    every failure mode (timeout, unparseable answer, a command that isn't configured) lands
-    on the advisory default. That matters because the alternative — treating an unrecognised
-    mention as an action, which is what the plain command path does — would let
-    "@bot sao chỗ này chậm vậy?" rewrite the branch and push."""
+    command: str
+    advisory: bool
+    correction: bool = False
+    skip: bool = False
+
+
+async def infer_intent(
+    config: Settings, text: str, *, context: str = "", followup: bool = False,
+) -> MentionIntent:
+    """Map a command-less message to the bot onto a :class:`MentionIntent`.
+
+    An @mention — or a plain reply under the bot's answer — is how a human talks to a
+    teammate, so it carries no command, but everything downstream (``_guidance``,
+    ``review_only``) is keyed on one. The command is inferred from the WHOLE
+    conversation, the bot's own turns included: "bạn sai rồi" right after the bot pushed
+    a change asks to redo that change, and "ok sửa đi" right after it offered a fix is
+    the yes to that offer. Read alone, both looked like remarks and were answered with a
+    generic review plus "reply /ai" — the person had to say it twice.
+
+    SAFETY: ``advisory`` is DERIVED from the chosen command, never decided separately,
+    and every failure mode (timeout, unparseable answer, a command that isn't configured)
+    lands on the advisory default — or, for a ``followup`` that did not address the bot
+    explicitly, on doing nothing. An action needs the model to name one."""
     catalog = config.command_catalog
     if not catalog:
-        return "", True
+        return MentionIntent("", True, skip=followup)
     default = _advisory_default(config)
+    fallback = MentionIntent(default, True, skip=followup)
     advisory_set = {cmd.lower() for cmd, adv, _ in catalog if adv}
-
-    def _resolve(choice: str) -> tuple[str, bool]:
-        low = choice.lower()
-        if low not in {c.lower() for c, _, _ in catalog}:
-            return default, True
-        return choice, low in advisory_set
+    known = {c.lower(): c for c, _, _ in catalog}
 
     from ai_autopilot.execution.claude_client import run_claude
 
     log = get_logger("execution.feedback_handler")
+    prompt = _INFER_PROMPT.format(
+        context=(context or "(no earlier messages)")[-3000:],
+        text=(text or "")[:1500],
+        catalog=_format_catalog(catalog),
+        none_note=(
+            " — they did not @mention you, so pick /none unless it is clearly for you"
+            if followup else ""
+        ),
+    )
     try:
         run = await run_claude(
-            _INFER_PROMPT.format(text=text[:800], catalog=_format_catalog(catalog)),
+            prompt,
             tempfile.gettempdir(),  # tool-less → cwd only has to exist
             timeout_seconds=45,
             model=config.claude_model or None,
@@ -201,41 +254,69 @@ async def infer_mention_command(config: Settings, text: str) -> tuple[str, bool]
             effort=config.claude_effort_chat,   # picks one command from a menu
         )
     except Exception as exc:  # noqa: BLE001 — never let inference decide by failing open
-        log.warning("mention intent inference failed — defaulting to advisory",
-                    error=f"{type(exc).__name__}: {exc}", default=default)
-        return default, True
-    m = re.search(r"/\w+", run.text or "")
+        log.warning("mention intent inference failed — falling back",
+                    error=f"{type(exc).__name__}: {exc}", default=default, followup=followup)
+        return fallback
+    reply = run.text or ""
+    m = re.search(r"/\w+", reply)
     if not m:
-        log.warning("mention intent unparseable — defaulting to advisory",
-                    reply=(run.text or "")[:120], default=default)
-        return default, True
-    command, advisory = _resolve(m.group(0))
-    log.info("mention intent inferred", command=command, advisory=advisory)
-    return command, advisory
+        log.warning("mention intent unparseable — falling back",
+                    reply=reply[:120], default=default, followup=followup)
+        return fallback
+    choice = m.group(0).lower()
+    if choice == "/none":
+        log.info("mention intent inferred", command="/none", followup=followup)
+        return MentionIntent("", True, skip=True)
+    if choice not in known:
+        return MentionIntent(default, True)
+    correction = "correction" in reply[m.end():].lower()
+    intent = MentionIntent(known[choice], choice in advisory_set, correction=correction)
+    log.info("mention intent inferred", command=intent.command,
+             advisory=intent.advisory, correction=correction, followup=followup)
+    return intent
+
+
+async def infer_mention_command(config: Settings, text: str) -> tuple[str, bool]:
+    """``(command, advisory)`` for a bare @mention with no thread around it."""
+    intent = await infer_intent(config, text)
+    return intent.command, intent.advisory
 
 
 async def resolve_command(config: Settings, cmd: dict) -> bool:
     """Whether ``cmd`` is ADVISORY (review-only), inferring the command first when it came
-    from a bare @mention — in which case ``cmd["instruction"]`` is rewritten to carry the
-    inferred command so ``_guidance`` / ``_AGENT_FOR`` route it like any other.
+    from a bare @mention or a follow-up reply — in which case ``cmd["instruction"]`` is
+    rewritten to carry the inferred command so ``_guidance`` / ``_AGENT_FOR`` route it
+    like any other.
 
-    A mention is read WITH the thread it sits in. The mention itself is usually the
-    shortest comment there — "@bot mày có nghe không" — while the actual request is the
-    comment above it, so judging the mention alone answered a concrete ask ("FE thiếu
-    ClientSettingService…") with a generic review. A teammate reads the thread first;
-    so does this. The inferred command still defaults to advisory on any doubt, and the
-    context is passed on as the instruction so the run works on the real request.
+    A mention is read WITH the thread it sits in, the bot's own replies included. The
+    mention itself is usually the shortest comment there — "@bot mày có nghe không",
+    "bạn sai rồi" — while what it refers to is above it. The conversation is passed on
+    in the instruction too, so the run works on the real request; a correction is
+    flagged so the run re-checks its previous turn rather than starting over.
 
-    One helper for every caller (PR babysitter, reviewer tracker) so the advisory default
-    for mentions can't be honoured in one place and forgotten in another.
+    Sets ``cmd["skip"]`` when there is nothing to do; callers must then drop it.
+
+    One helper for every caller (PR babysitter, reviewer tracker, work-item poller) so
+    the advisory default for mentions can't be honoured in one place and forgotten in
+    another.
     """
     if cmd.get("via_mention"):
         asked = str(cmd.get("instruction") or "").strip()
         context = str(cmd.get("thread_context") or "").strip()
-        full = (context + chr(10) + asked).strip() if context else asked
-        command, advisory = await infer_mention_command(config, full)
-        cmd["instruction"] = " ".join(x for x in (command, full) if x)
-        return advisory
+        intent = await infer_intent(
+            config, asked, context=context, followup=bool(cmd.get("followup")),
+        )
+        if intent.skip:
+            cmd["skip"] = True
+            return True
+        body = asked
+        if context:
+            body = f"Conversation so far:\n{context}\n\nLatest message:\n{asked}"
+        if intent.correction:
+            body = f"{_CORRECTION_BRIEF}\n\n{body}"
+        cmd["instruction"] = " ".join(x for x in (intent.command, body) if x)
+        cmd["correction"] = intent.correction
+        return intent.advisory
     return match_command(cmd["instruction"], config.advisory_commands) is not None
 
 

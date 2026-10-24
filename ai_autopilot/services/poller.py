@@ -42,7 +42,7 @@ from ai_autopilot.routing import plan_schedule, sort_by_priority
 from ai_autopilot.routing.planning_groups import group_by_links
 from ai_autopilot.services.deferred_verification import DeferredVerificationService
 from ai_autopilot.services.planning_analyzer import run_due_plans
-from ai_autopilot.services.pr_feedback import is_bot_branch, parse_pr_url
+from ai_autopilot.services.pr_feedback import is_bot_branch, item_context, parse_pr_url
 from ai_autopilot.services.spec_guard import SpecGuard
 
 # An ADO pull-request URL, e.g.
@@ -1321,14 +1321,21 @@ class AdoPollerService:
             # A bare @mention carries no command, but everything downstream is keyed on
             # one — so infer it and fold it into the text, exactly as the PR path does.
             parts: list[str] = []
-            for _, instr, via_mention in cmds:
+            for cid, instr, via_mention in cmds:
                 if via_mention:
-                    cmd = {"instruction": instr, "via_mention": True}
+                    # Read with what came before it, the bot's own replies included —
+                    # "@bot sai rồi" means nothing without the reply it answers.
+                    cmd = {"instruction": instr, "via_mention": True,
+                           "thread_context": item_context(comments, cid)}
                     advisory = await resolve_command(cfg, cmd)
+                    if cmd.get("skip"):
+                        continue
                     instr = cmd["instruction"]
                     self._log.info("work-item @mention resolved", id=item.id,
                                    advisory=advisory, instruction=instr[:120])
                 parts.append(instr)
+            if not parts:
+                continue
             instruction = "\n\n".join(parts)
             rounds = self._comment_rounds.get(item.id, 0) + 1
             if rounds > cfg.max_comment_rounds:

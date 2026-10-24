@@ -792,6 +792,8 @@ class ReviewerTrackerService:
             # A bare @mention gets its command inferred here (advisory by default) and
             # written into the instruction, so the metric and _guidance see a real command.
             advisory = await resolve_command(cfg, cmd)
+            if cmd.get("skip"):
+                continue   # a "thanks" / a note to a colleague under the bot's reply
             metrics.record_pr_command(self._verb(cmd["instruction"]))
             if advisory:
                 # Same ceiling as the babysitter: advisory work is free of the revision

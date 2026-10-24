@@ -188,8 +188,8 @@ class ReleaseNoteService:
             note.lanes = release_notes.build_lanes(roles, [])
             return
         if projects is not None:
-            wanted = {p.lower() for p in projects}
-            items = [i for i in items if (i.project or "").lower() in wanted]
+            in_scope = {p.lower() for p in projects}
+            items = [i for i in items if (i.project or "").lower() in in_scope]
         entered: dict[int, datetime] = {}
         with contextlib.suppress(Exception):
             latest = await history.latest_entries([i.id for i in items])

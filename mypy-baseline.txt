@@ -130,7 +130,6 @@ ai_autopilot/execution/claude_client.py: Unsupported operand types for + ("objec
 ai_autopilot/execution/claude_client.py: Unsupported operand types for - ("float" and "object")  [operator]
 ai_autopilot/execution/claude_executor.py: Item "None" of "dict[Any, Any] | None" has no attribute "get"  [union-attr]
 ai_autopilot/execution/claude_executor.py: Item "None" of "str | None" has no attribute "lower"  [union-attr]
-ai_autopilot/execution/claude_executor.py: Name "out" already defined on line 576  [no-redef]
 ai_autopilot/execution/result_contract.py: "object" has no attribute "__iter__"; maybe "__dir__" or "__str__"? (not iterable)  [attr-defined]
 ai_autopilot/execution/result_contract.py: "object" has no attribute "__iter__"; maybe "__dir__" or "__str__"? (not iterable)  [attr-defined]
 ai_autopilot/execution/result_contract.py: "object" has no attribute "__iter__"; maybe "__dir__" or "__str__"? (not iterable)  [attr-defined]

@@ -230,7 +230,8 @@ _SPEC_SCHEMA = """\
      "severity": "critical|high|medium|low|info",
      "fix": "thay đổi nhỏ nhất để đóng gap (bỏ trống nếu done)",
      "side": "fix_code|update_doc|decide (chỉ khi conflict/better)",
-     "doc_text": "câu/đoạn tài liệu VIẾT LẠI để thay nguyên văn mục này cho khớp code (khi better hoặc side update_doc/decide)",
+     "doc_text": "đoạn tài liệu VIẾT LẠI thay nguyên văn mục này cho khớp code
+                  (khi better hoặc side update_doc/decide)",
      "confidence": "high|medium|low",
      "searched": "đã tìm những gì (bắt buộc khi missing/unclear)"}
   ],

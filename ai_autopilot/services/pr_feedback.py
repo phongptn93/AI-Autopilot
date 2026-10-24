@@ -148,7 +148,8 @@ def command_threads(
                 mentioned = got is not None and match_command(got, commands) is None
             is_followup = False
             replying_to_bot = latest is not None and bot_replied_after
-            if got is None and replying_to_bot and _same_author(comment, latest):
+            if (got is None and replying_to_bot and latest is not None
+                    and _same_author(comment, latest)):
                 plain = comment_text(content).strip()
                 if plain:
                     got, mentioned, is_followup = plain, True, True

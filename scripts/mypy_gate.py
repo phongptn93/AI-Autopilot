@@ -39,6 +39,11 @@ def current_errors() -> Counter[str]:
         m = _ERROR.match(line.strip())
         if m:
             errors[f"{m['file'].replace(chr(92), '/')}: {m['msg']}"] += 1
+    # Exit 1 with no error lines is not "clean": `python -m mypy` without mypy installed
+    # also exits 1, and reading that as zero errors invites `--update` to wipe the baseline.
+    if proc.returncode == 1 and not errors:
+        sys.stderr.write(proc.stdout + proc.stderr)
+        raise SystemExit("mypy exited 1 but reported no errors — is mypy installed?")
     return errors
 
 

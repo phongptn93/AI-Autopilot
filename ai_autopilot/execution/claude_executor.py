@@ -590,10 +590,10 @@ class ClaudeExecutor:
             reason = f"Batch produced no result file ({path})"
             if last:
                 reason += f" — agent's last words: {last}"
-            out = self._batch_fail(items, reason, time.monotonic())
-            for res in out.values():
+            failed = self._batch_fail(items, reason, time.monotonic())
+            for res in failed.values():
                 res.output = run_text
-            return out
+            return failed
 
         by_item: dict[int, list] = {i.id: [] for i in items}
         unattributed = []

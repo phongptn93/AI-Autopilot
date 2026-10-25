@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import sys
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 
@@ -159,7 +160,7 @@ def main() -> None:
 
     _ensure_dashboard_password()
     config = load_settings()
-    tls = {}
+    tls: dict[str, Any] = {}
     if config.health_tls_certfile and config.health_tls_keyfile:
         tls = {"ssl_certfile": config.health_tls_certfile, "ssl_keyfile": config.health_tls_keyfile}
     uvicorn.run(

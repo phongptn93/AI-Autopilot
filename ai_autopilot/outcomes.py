@@ -4,10 +4,12 @@ and the PR babysitter can apply outcomes without a circular import."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from ai_autopilot.flows import resolve_state, resolve_tag
 
 
-def outcome_policy(cfg: object, outcome: str, work_item_type: str = "") -> tuple[str, str]:
+def outcome_policy(cfg: Any, outcome: str, work_item_type: str = "") -> tuple[str, str]:
     """Return ``(tag_to_add, ado_state_to_set)`` for a pipeline ``outcome`` — either may be
     blank (= skip). Edit the underlying fields in Settings ("Outcomes → tag + state"),
     or per work-item type at /dashboard/flow.
@@ -41,7 +43,7 @@ def outcome_policy(cfg: object, outcome: str, work_item_type: str = "") -> tuple
     )
 
 
-def all_outcome_tags(cfg: object) -> set[str]:
+def all_outcome_tags(cfg: Any) -> set[str]:
     """Every tag the outcome policy can apply — these are MUTUALLY EXCLUSIVE (an item is in
     exactly one outcome), so applying one clears the others.
 
@@ -57,8 +59,8 @@ def all_outcome_tags(cfg: object) -> set[str]:
 
 
 async def apply_outcome(
-    ado: object, cfg: object, work_item_id: int, outcome: str, work_item_type: str = "",
-    log: object = None,
+    ado: Any, cfg: Any, work_item_id: int, outcome: str, work_item_type: str = "",
+    log: Any = None,
 ) -> bool:
     """Apply an outcome's tag + ADO state to a work item. Shared by the poller and the PR
     babysitter. Blank tag/state or ``dry_run`` → skipped for that part.

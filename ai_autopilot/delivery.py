@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any, overload
 
 # ADO state categories, which is what the process template guarantees — state NAMES are
 # free text an admin can change, categories are not.
@@ -276,6 +277,10 @@ class DeliveryReport:
         return out
 
 
+@overload
+def _as_utc(value: datetime) -> datetime: ...
+@overload
+def _as_utc(value: datetime | None) -> datetime | None: ...
 def _as_utc(value: datetime | None) -> datetime | None:
     """Naive datetimes come out of SQLite; treat them as UTC (which is what we wrote)."""
     if value is None:
@@ -372,7 +377,7 @@ def _pr_actions(
     from day one, because a PR carries its own real timestamps."""
     actions: list[ActionItem] = []
     for pr in prs:
-        common = dict(
+        common: dict[str, Any] = dict(
             work_item_id=pr.work_item_id, pr_id=pr.id, repo=pr.repo,
             owner=pr.author, project=pr.project, url=pr.url,
             title=pr.title or f"PR !{pr.id}",

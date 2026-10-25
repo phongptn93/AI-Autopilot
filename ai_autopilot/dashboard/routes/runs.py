@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
@@ -210,7 +211,7 @@ def create_router() -> APIRouter:
         rows = await _scope_rows(request, c, rows)
         link_base = work_item_link_base(cfg)
         now = datetime.now(UTC)
-        runs = []
+        runs: list[dict[str, Any]] = []
         for r in rows:
             # A PR-level run files its feed under "pr-<id>"; a work-item run under the
             # bare id. Reading the wrong key would show an empty feed for half of them.
@@ -266,17 +267,17 @@ def create_router() -> APIRouter:
             for role, xs in by_role.items():
                 xs.sort()
                 typical[role] = int(xs[len(xs) // 2])
-        for r in runs:
-            t = typical.get(r["role"]) or typical.get("")
-            r["typical"] = t
-            r["progress"] = (min(100, int(r["elapsed"] / t * 100))
-                             if t and r["elapsed"] is not None else None)
-            r["overdue"] = bool(t and r["elapsed"] is not None and r["elapsed"] > 2 * t)
-            q = r["quiet"]
-            r["level"] = ("none" if q is None else "stuck" if q >= _QUIET_STUCK_SECONDS
-                          else "warn" if q >= _QUIET_WARN_SECONDS else "ok")
-            r["session"] = (f"autopilot-{r['id']}"
-                            if (r["skill"] or "").startswith("interactive") else "")
+        for run in runs:
+            t = typical.get(run["role"]) or typical.get("")
+            run["typical"] = t
+            run["progress"] = (min(100, int(run["elapsed"] / t * 100))
+                               if t and run["elapsed"] is not None else None)
+            run["overdue"] = bool(t and run["elapsed"] is not None and run["elapsed"] > 2 * t)
+            q = run["quiet"]
+            run["level"] = ("none" if q is None else "stuck" if q >= _QUIET_STUCK_SECONDS
+                            else "warn" if q >= _QUIET_WARN_SECONDS else "ok")
+            run["session"] = (f"autopilot-{run['id']}"
+                              if (run["skill"] or "").startswith("interactive") else "")
 
         # Today, in numbers — spend, and how the day's runs ended.
         spend = None
@@ -308,26 +309,26 @@ def create_router() -> APIRouter:
                     "cancel": f"/dashboard/conflicts/{row.id}/cancel",
                 })
         with contextlib.suppress(Exception):
-            for row in await c.pr_session_repo.open_sessions():
-                st = row.started
+            for sess in await c.pr_session_repo.open_sessions():
+                st = sess.started
                 if st is not None and st.tzinfo is None:
                     st = st.replace(tzinfo=UTC)
                 sessions.append({
-                    "kind": "ai", "pr": row.pr_id, "repo": row.repo_name,
-                    "branch": row.branch, "title": row.instruction[:140],
-                    "session": row.session_name, "url": "",
+                    "kind": "ai", "pr": sess.pr_id, "repo": sess.repo_name,
+                    "branch": sess.branch, "title": sess.instruction[:140],
+                    "session": sess.session_name, "url": "",
                     "elapsed": int((now - st).total_seconds()) if st else None,
-                    "cancel": f"/dashboard/sessions/{row.id}/cancel",
+                    "cancel": f"/dashboard/sessions/{sess.id}/cancel",
                 })
         session_limit = int(getattr(cfg, "pr_session_hours", 8) or 8) * 3600
 
         # Up next and just finished: the page is useful when nothing is running too.
         queued: list[dict] = []
         with contextlib.suppress(Exception):
-            for st in await c.state_repo.all():
-                if st.state == PipelineState.QUEUED:
-                    queued.append({"id": st.work_item_id, "title": st.title or "",
-                                   "since": st.updated_at})
+            for ws in await c.state_repo.all():
+                if ws.state == PipelineState.QUEUED:
+                    queued.append({"id": ws.work_item_id, "title": ws.title or "",
+                                   "since": ws.updated_at})
             queued.sort(key=lambda q: q["since"] or datetime.min)
         recent: list = []
         with contextlib.suppress(Exception):
@@ -395,7 +396,7 @@ def create_router() -> APIRouter:
         poller (trigger tag + state), so work continues without a manual restart."""
         c: Container = request.app.state.container
         form = await request.form()
-        ids = [int(x) for x in form.getlist("ids") if str(x).strip().isdigit()]
+        ids = [int(str(x)) for x in form.getlist("ids") if str(x).strip().isdigit()]
         if not ids:
             return RedirectResponse("/dashboard/queue", status_code=303)
         # EVERY outcome tag, not just the hold: the poller skips an item carrying any of

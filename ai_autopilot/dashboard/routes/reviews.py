@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request
@@ -59,13 +60,13 @@ async def _scan_reviews(c: Container) -> list[dict]:
     project = quote(cfg.code_project or cfg.ado_project, safe="")
     tracked: dict = {}
     try:
-        for snap in await c.pr_reviewer_repo.all_reviewers():
-            tracked[(snap.pr_id, snap.reviewer_id)] = snap
+        for known in await c.pr_reviewer_repo.all_reviewers():
+            tracked[(known.pr_id, known.reviewer_id)] = known
     except Exception as exc:  # noqa: BLE001 — the DB half may fail on its own
         _log.warning("reviewer state load failed", error=describe_exc(exc))
 
-    repos = [(r.get("id"), r.get("name") or "")
-             for r in await c.ado.get_repositories() if r.get("id")]
+    repos: list[tuple[str, str]] = [(r["id"], r.get("name") or "")
+                                    for r in await c.ado.get_repositories() if r.get("id")]
     per_repo = await _gather_scan(c.ado.get_active_pull_requests(rid) for rid, _ in repos)
 
     # Flatten first, THEN ask for every work-item link at once. One request per PR
@@ -90,7 +91,7 @@ async def _scan_reviews(c: Container) -> list[dict]:
         # work-item column blank on every PR named without an id, and wrong on any
         # branch whose name merely opens with a number.
         _linked = linked_ids[0] if linked_ids else None
-        reviewers = []
+        reviewers: list[dict[str, Any]] = []
         bot_reviewed = False
         for r in pr.get("reviewers") or []:
             if not r.get("id") or r.get("isContainer"):

@@ -119,11 +119,16 @@ def render(text: str) -> str:
             out.append("<p>" + "<br>".join(_inline(p) for p in paragraph) + "</p>")
             paragraph.clear()
 
+    def close_blocks() -> None:
+        flush_paragraph()
+        close_list()
+        close_quote()
+
     while i < len(lines):
         raw = lines[i]
         fence = _FENCE.match(raw)
         if fence:
-            flush_paragraph(), close_list(), close_quote()
+            close_blocks()
             lang = fence.group(1)
             body: list[str] = []
             i += 1
@@ -136,19 +141,19 @@ def render(text: str) -> str:
             continue
 
         if not raw.strip():
-            flush_paragraph(), close_list(), close_quote()
+            close_blocks()
             i += 1
             continue
 
         if _RULE.match(raw):
-            flush_paragraph(), close_list(), close_quote()
+            close_blocks()
             out.append("<hr>")
             i += 1
             continue
 
         heading = _HEADING.match(raw)
         if heading:
-            flush_paragraph(), close_list(), close_quote()
+            close_blocks()
             level = len(heading.group(1))
             out.append(f"<h{level}>{_inline(heading.group(2).strip())}</h{level}>")
             i += 1
@@ -157,7 +162,7 @@ def render(text: str) -> str:
         # A table needs its separator row to exist, or a line that merely contains a
         # pipe (a shell command, a regex alternation) would start one.
         if "|" in raw and i + 1 < len(lines) and _TABLE_SEP.match(lines[i + 1]):
-            flush_paragraph(), close_list(), close_quote()
+            close_blocks()
             head = _cells(raw)
             i += 2
             rows: list[list[str]] = []
@@ -176,7 +181,8 @@ def render(text: str) -> str:
 
         quote = _QUOTE.match(raw)
         if quote:
-            flush_paragraph(), close_list()
+            flush_paragraph()
+            close_list()
             if not quoting:
                 out.append("<blockquote>")
                 quoting = True
@@ -198,7 +204,9 @@ def render(text: str) -> str:
                 close_list()
                 out.append(f"<{want}>")
                 list_tag = want
-            item = bullet.group(1) if bullet else ordered.group(2)
+            m = bullet or ordered
+            assert m is not None
+            item = m.group(1) if bullet else m.group(2)
             out.append(f"<li>{_inline(item.strip())}</li>")
             i += 1
             continue
@@ -215,5 +223,5 @@ def render(text: str) -> str:
         paragraph.append(raw.strip())
         i += 1
 
-    flush_paragraph(), close_list(), close_quote()
+    close_blocks()
     return "\n".join(out)

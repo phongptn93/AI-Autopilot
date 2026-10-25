@@ -6,6 +6,7 @@ import contextlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any, overload
 
 from sqlalchemy import delete, false, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -325,7 +326,7 @@ class ExecutionRepository:
         async with self._db.session() as session:
             result = await session.execute(delete(ExecutionRecord))
             await session.commit()
-            return int(result.rowcount or 0)
+            return int(_rowcount(result) or 0)
 
     async def get_by_work_item(self, work_item_id: int) -> list[ExecutionRecord]:
         async with self._db.session() as session:
@@ -520,6 +521,7 @@ class ExecutionRepository:
 
         def _gap(r: ExecutionRecord) -> float:
             at = r.completed_at
+            assert at is not None  # the query keeps only completed runs
             if at.tzinfo is not None:
                 at = at.astimezone(UTC).replace(tzinfo=None)
             ref = near.astimezone(UTC).replace(tzinfo=None) if near.tzinfo else near
@@ -758,7 +760,7 @@ class StateHistoryRepository:
                 delete(WorkItemStateHistory).where(WorkItemStateHistory.entered_at < before)
             )
             await session.commit()
-            return result.rowcount or 0
+            return _rowcount(result) or 0
 
 
 class SdlcLoopStateRepository:
@@ -1496,6 +1498,16 @@ class AlertStateRepository:
             )).scalar() or 0)
 
 
+def _rowcount(result: Any) -> int:
+    """Rows an UPDATE/DELETE touched. ``session.execute`` is typed as ``Result``, but for
+    DML it returns a ``CursorResult`` — the one that carries ``rowcount``."""
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+@overload
+def _naive(value: datetime) -> datetime: ...
+@overload
+def _naive(value: datetime | None) -> datetime | None: ...
 def _naive(value: datetime | None) -> datetime | None:
     """Drop tzinfo for comparison with DateTime columns, which SQLite stores naive.
 
@@ -2242,8 +2254,9 @@ class FleetWorkerRepository:
         write, so two beats racing cannot both claim the recovery.
         """
         health = getattr(report, "health", None)
+        dump = getattr(health, "model_dump", None)
         health_json = json.dumps(
-            health.model_dump() if hasattr(health, "model_dump") else (health or {}),
+            dump() if dump is not None else (health or {}),
             ensure_ascii=False,
         )
         stamp = _naive(now or datetime.now(UTC))
@@ -2296,7 +2309,7 @@ class FleetWorkerRepository:
                 .values(offline_alerted=True)
             )
             await session.commit()
-            return bool(result.rowcount)
+            return bool(_rowcount(result))
 
     async def get(self, name: str) -> FleetWorker | None:
         async with self._db.session() as session:
@@ -2322,7 +2335,7 @@ class FleetWorkerRepository:
         async with self._db.session() as session:
             result = await session.execute(delete(FleetWorker).where(FleetWorker.name == name))
             await session.commit()
-            return bool(result.rowcount)
+            return bool(_rowcount(result))
 
 
 class FleetCommandRepository:
@@ -2381,7 +2394,7 @@ class FleetCommandRepository:
                         finished_at=stamp)
             )
             await session.commit()
-            return bool(result.rowcount)
+            return bool(_rowcount(result))
 
     async def cancel(self, command_id: int, *, now: datetime | None = None) -> bool:
         """Withdraw a command nobody has picked up yet. Delivered ones are already running."""
@@ -2393,7 +2406,7 @@ class FleetCommandRepository:
                         finished_at=_naive(now or datetime.now(UTC)))
             )
             await session.commit()
-            return bool(result.rowcount)
+            return bool(_rowcount(result))
 
     async def expire(self, older_than_minutes: int, *, now: datetime | None = None) -> int:
         """Close open commands nobody answered — the machine is off or too old to know them."""
@@ -2407,7 +2420,7 @@ class FleetCommandRepository:
                         finished_at=stamp)
             )
             await session.commit()
-            return int(result.rowcount or 0)
+            return int(_rowcount(result) or 0)
 
     async def recent(self, worker: str | None = None, limit: int = 50) -> list[FleetCommand]:
         """Newest first — what the page lists under each machine."""
@@ -2524,7 +2537,7 @@ class FleetKnowledgeRepository:
                 delete(FleetKnowledge).where(FleetKnowledge.key == key)
             )
             await session.commit()
-            return bool(result.rowcount)
+            return bool(_rowcount(result))
 
 
 @dataclass
@@ -3035,7 +3048,7 @@ class ReviewRepository:
                     status="failed", content="⚠️ Bị gián đoạn (khởi động lại).")
             )
             await session.commit()
-            return int(res.rowcount or 0) + int(res2.rowcount or 0)
+            return int(_rowcount(res) or 0) + int(_rowcount(res2) or 0)
 
     async def add_message(self, review_id: int, role: str, content: str, *,
                           author: str = "", status: str = "done") -> int:

@@ -27,7 +27,7 @@ import tempfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote, unquote
 
 from ai_autopilot import delivery
@@ -400,6 +400,7 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
             AuthTypes,
             MemoryStorage,
             MessageFactory,
+            Storage,
             TurnContext,
         )
         from microsoft_agents.hosting.core.app.proactive.proactive_options import (
@@ -425,10 +426,12 @@ def build_agent(config: Settings, container: Container, reviewer_tracker: Review
     )
     adapter = CloudAdapter(connection_manager=connections)
     conversation_storage = _DbConversationStorage(container.database)
-    app = AgentApplication(
+    app: AgentApplication[Any] = AgentApplication(
         options=ApplicationOptions(
             adapter=adapter, bot_app_id=config.teams_agent_app_id, storage=MemoryStorage(),
-            proactive=ProactiveOptions(storage=conversation_storage),
+            # Duck-typed: the SDK only calls read/write/delete. Subclassing its Storage ABC
+            # would import the optional SDK at module load, which must keep working without it.
+            proactive=ProactiveOptions(storage=cast(Storage, conversation_storage)),
         ),
         connection_manager=connections,
     )

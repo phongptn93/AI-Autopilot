@@ -154,7 +154,10 @@ def test_rework_scratch_is_none_when_the_feature_is_off(tmp_path):
 
 def test_transcript_session_id_picks_the_newest_conversation(tmp_path, monkeypatch):
     ex = _rework_exec(tmp_path)
-    cwd = tmp_path / "scratch"
+    # Only the folder's NAME is looked up, so keep it short: the mangled cwd lands inside
+    # tmp_path a second time, and under xdist (popen-gwN) that crossed Windows' 260-char
+    # MAX_PATH.
+    cwd = Path(tmp_path.anchor) / "autopilot-scratch"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     project = tmp_path / "cfg" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
     project.mkdir(parents=True)

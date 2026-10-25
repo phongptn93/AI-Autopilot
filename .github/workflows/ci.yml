@@ -55,7 +55,7 @@ jobs:
           cache-dependency-path: requirements-lock.txt
       - run: pip install -c requirements-lock.txt -e ".[dev,docs,teams-bot]"
       - name: pytest
-        run: python -m pytest -q --cov=ai_autopilot --cov-report=term:skip-covered --cov-fail-under=80
+        run: python -m pytest -q -n auto --cov=ai_autopilot --cov-report=term:skip-covered --cov-fail-under=80
 
   audit:
     name: Dependency audit

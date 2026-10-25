@@ -9,8 +9,11 @@ touched, the agent asking for a human, a lock file — leaves origin EXACTLY as 
 
 from __future__ import annotations
 
+import atexit
 import json
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,8 +43,40 @@ def _git(cwd: Path, *args: str) -> str:
                           text=True).stdout.strip()
 
 
+# Building the repos takes 16 git processes — ~5 s per test on Windows, where spawning
+# git is slow. Each variant is built once per process and copied into tmp_path.
+_TEMPLATES: dict[tuple, Path] = {}
+
+
 def _setup(tmp_path: Path, *, conflict: bool = True, extra_target: dict | None = None):
-    """origin (bare) + a workspace clone at ws/app with branches main and feature."""
+    """origin (bare) + a workspace clone at ws/app with branches main and feature.
+
+    Also leaves the ``seed`` clone the history was written from, for tests that add to it.
+    """
+    key = (conflict, tuple(sorted((extra_target or {}).items())))
+    template = _TEMPLATES.get(key)
+    if template is None:
+        template = Path(tempfile.mkdtemp(prefix="ap-conflict-repo-"))
+        atexit.register(shutil.rmtree, template, ignore_errors=True)
+        _build_repos(template, conflict=conflict, extra_target=extra_target)
+        _TEMPLATES[key] = template
+    for name in ("origin.git", "seed", "ws"):
+        shutil.copytree(template / name, tmp_path / name)
+    # The clones' remote is the template's origin by absolute path — point it here.
+    # git escapes backslashes in .git/config, so a Windows path is stored doubled.
+    pairs = [(str(template), str(tmp_path)),
+             (str(template).replace("\\", "\\\\"), str(tmp_path).replace("\\", "\\\\"))]
+    for clone in (tmp_path / "seed", tmp_path / "ws" / "app"):
+        config = clone / ".git" / "config"
+        text = config.read_text(encoding="utf-8")
+        for old, new in pairs:
+            text = text.replace(old, new)
+        assert str(template) not in text.replace("\\\\", "\\"), text
+        config.write_text(text, encoding="utf-8")
+    return tmp_path / "origin.git", tmp_path / "ws"
+
+
+def _build_repos(tmp_path: Path, *, conflict: bool, extra_target: dict | None) -> None:
     origin = tmp_path / "origin.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(origin))
     seed = tmp_path / "seed"
@@ -68,7 +103,6 @@ def _setup(tmp_path: Path, *, conflict: bool = True, extra_target: dict | None =
     ws = tmp_path / "ws"
     ws.mkdir()
     _git(ws, "clone", str(origin), "app")
-    return origin, ws
 
 
 def _executor(ws: Path, **overrides) -> ClaudeExecutor:

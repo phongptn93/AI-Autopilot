@@ -537,9 +537,11 @@ legacy-dotnet/               # original .NET 8 implementation (reference)
 ```bash
 pip install -c requirements-lock.txt -e ".[dev,docs,teams-bot]"   # same pinned versions as CI
 
-pytest                                  # run unit tests
+pytest -n auto                          # run unit tests in parallel (serial takes ~30 min on Windows)
 ruff check ai_autopilot tests scripts   # lint
 python scripts/mypy_gate.py             # type-check: fails only on errors not in mypy-baseline.txt
+
+git config core.hooksPath scripts/hooks # once per clone: ruff + mypy gate before every push (~25 s)
 ```
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push and PR:

@@ -1,0 +1,2 @@
+# Git runs hooks with sh — a CRLF line ending breaks them (": command not found").
+scripts/hooks/* text eol=lf

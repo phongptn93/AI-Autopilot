@@ -1,0 +1,30 @@
+#!/bin/sh
+# Run the CI lint + type gate before a push leaves this machine.
+#
+# CI is the real gate, but when it does not run (it was off 2026-10-21 → 10-24 while the
+# GitHub account was locked) nothing else stops a red main. This is the same two steps
+# as the "Lint + type gate" job; tests stay in CI and the release checklist — 5 minutes
+# is too long to wait on every push.
+#
+#   install:  git config core.hooksPath scripts/hooks
+#   skip once (you know why):  git push --no-verify
+
+ROOT=$(git rev-parse --show-toplevel) || exit 1
+cd "$ROOT" || exit 1
+
+if [ -x .venv/Scripts/python.exe ]; then PY=.venv/Scripts/python.exe
+elif [ -x .venv/bin/python ]; then PY=.venv/bin/python
+else PY=python
+fi
+
+echo "pre-push: ruff"
+"$PY" -m ruff check ai_autopilot tests scripts || {
+    echo "pre-push: ruff failed — fix it, or push with --no-verify if you must." >&2
+    exit 1
+}
+
+echo "pre-push: mypy gate"
+"$PY" scripts/mypy_gate.py || {
+    echo "pre-push: new mypy errors — fix them, or push with --no-verify if you must." >&2
+    exit 1
+}

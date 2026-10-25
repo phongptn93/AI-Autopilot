@@ -2,7 +2,7 @@
 
 > Engineering reference for the AI Autopilot service. Describes the system **as it
 > is built today**, not an aspiration. Companion deck:
-> `AI-Autopilot-Technical-Architecture.pptx`.
+> [`docs/slides/AI-Autopilot-Technical-Architecture.pptx`](docs/slides/AI-Autopilot-Technical-Architecture.pptx).
 
 **Version:** 2.0 (Python rewrite) · **Runtime:** Python 3.11, FastAPI/uvicorn ·
 **Agent:** Claude Agent SDK + interactive Claude Code (Remote Control).

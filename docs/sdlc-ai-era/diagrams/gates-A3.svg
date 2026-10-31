@@ -1,0 +1,341 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420mm" height="297mm" viewBox="0 0 1587 1123" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+<title>Cơ chế chấm điểm cổng — Sơ đồ A3</title>
+<rect x="0.0" y="0.0" width="1587.0" height="1123.0" rx="0" fill="#fff" stroke="none" stroke-width="1.4"/>
+<rect x="0.0" y="0.0" width="1587.0" height="92.0" rx="0" fill="#12263f" stroke="none" stroke-width="1.4"/>
+<text x="40.0" y="44.0" font-size="30" fill="#fff" font-weight="700" text-anchor="start" >CƠ CHẾ CHẤM ĐIỂM CỔNG (GATE SCORECARD)</text>
+<text x="40.0" y="72.0" font-size="15" fill="#cbd5e1" font-weight="400" text-anchor="start" >Năm cổng G1–G5 · tiêu chí có trọng số · ngưỡng theo tầng rủi ro · hard-fail thắng điểm · không bằng chứng thì không tính là đạt</text>
+<text x="1547.0" y="44.0" font-size="15" fill="#cbd5e1" font-weight="600" text-anchor="end" >Đề xuất · v1.2</text>
+<text x="1547.0" y="72.0" font-size="13" fill="#94a3b8" font-weight="400" text-anchor="end" >2026-10-31 · khổ A3</text>
+<text x="40.0" y="118.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">CÁCH TÍNH ĐIỂM</text>
+<rect x="40.0" y="126.0" width="489.0" height="76.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="54.0" y="148.0" font-size="13.5" fill="#12263f" font-weight="700" text-anchor="start" >Giá trị tiêu chí</text>
+<text x="54.0" y="166.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >pass 1,0 · partial 0,5 · unknown 0,5 · fail 0 · n/a bỏ khỏi phép tính (trọng</text>
+<text x="54.0" y="180.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >số chuẩn hoá lại).</text>
+<rect x="549.0" y="126.0" width="489.0" height="76.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="563.0" y="148.0" font-size="13.5" fill="#12263f" font-weight="700" text-anchor="start" >Quy tắc bằng chứng</text>
+<text x="563.0" y="166.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >pass / partial mà không có bằng chứng bị hạ xuống unknown. Thiếu dữ liệu cũng</text>
+<text x="563.0" y="180.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >là unknown, không phải điểm tối đa.</text>
+<rect x="1058.0" y="126.0" width="489.0" height="76.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="1072.0" y="148.0" font-size="13.5" fill="#12263f" font-weight="700" text-anchor="start" >Điểm cổng (0–100)</text>
+<text x="1072.0" y="166.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Σ(trọng số × giá trị) ÷ Σ trọng số áp dụng × 100. Điểm trả lời 'làm tốt đến</text>
+<text x="1072.0" y="180.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >đâu'; quyết định trả lời 'có cần người xem'.</text>
+<text x="40.0" y="224.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">TIÊU CHÍ VÀ TRỌNG SỐ THEO CỔNG   (chấm xanh / vàng / đỏ = áp dụng cho tầng đó · viền đỏ = hard-fail: fail là BLOCK)</text>
+<rect x="40.0" y="232.0" width="290.2" height="254.0" rx="10" fill="#fff" stroke="#475569" stroke-width="1.6"/>
+<rect x="40.0" y="232.0" width="290.2" height="32.0" rx="10" fill="#475569" stroke="none" stroke-width="1.4"/>
+<rect x="40.0" y="248.0" width="290.2" height="16.0" rx="0" fill="#475569" stroke="none" stroke-width="1.4"/>
+<text x="54.0" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G1 · Định nghĩa</text>
+<text x="316.2" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="316.2" y="286.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >30</text>
+<text x="54.0" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Mỗi FR có AC kiểm chứng được</text>
+<circle cx="246.2" cy="280" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="261.2" cy="280" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="276.2" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="50.0" y1="308" x2="320.2" y2="308" stroke="#e2e8f0"/>
+<text x="316.2" y="328.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >25</text>
+<text x="54.0" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Khách/Owner xác nhận PRD nhẹ +</text>
+<text x="54.0" y="335.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >mockup</text>
+<circle cx="246.2" cy="322" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="261.2" cy="322" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="276.2" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="50.0" y1="350" x2="320.2" y2="350" stroke="#e2e8f0"/>
+<text x="316.2" y="370.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >20</text>
+<text x="54.0" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >SRS trỏ về PRD, không FR mồ côi</text>
+<circle cx="246.2" cy="364" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="261.2" cy="364" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="276.2" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="50.0" y1="392" x2="320.2" y2="392" stroke="#e2e8f0"/>
+<text x="316.2" y="412.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >15</text>
+<text x="54.0" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Giả định và câu hỏi mở đã xử lý</text>
+<circle cx="246.2" cy="406" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="261.2" cy="406" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="276.2" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="50.0" y1="434" x2="320.2" y2="434" stroke="#e2e8f0"/>
+<text x="316.2" y="454.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >10</text>
+<text x="54.0" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Yêu cầu bảo mật và phân quyền</text>
+<text x="54.0" y="461.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >có trong spec</text>
+<circle cx="246.2" cy="448" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="261.2" cy="448" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="276.2" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<rect x="344.2" y="232.0" width="290.2" height="254.0" rx="10" fill="#fff" stroke="#2563eb" stroke-width="1.6"/>
+<rect x="344.2" y="232.0" width="290.2" height="32.0" rx="10" fill="#2563eb" stroke="none" stroke-width="1.4"/>
+<rect x="344.2" y="248.0" width="290.2" height="16.0" rx="0" fill="#2563eb" stroke="none" stroke-width="1.4"/>
+<text x="358.2" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G2 · Kế hoạch</text>
+<text x="620.4" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="620.4" y="286.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >25</text>
+<text x="358.2" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Mỗi bước plan trỏ về FR</text>
+<circle cx="550.4" cy="280" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="565.4" cy="280" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="580.4" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="354.2" y1="308" x2="624.4" y2="308" stroke="#e2e8f0"/>
+<text x="620.4" y="328.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >25</text>
+<text x="358.2" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Đã phân loại Xanh/Vàng/Đỏ, khớp</text>
+<text x="358.2" y="335.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >vùng file thực tế</text>
+<circle cx="550.4" cy="322" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="565.4" cy="322" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="580.4" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="354.2" y1="350" x2="624.4" y2="350" stroke="#e2e8f0"/>
+<text x="620.4" y="370.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >15</text>
+<text x="358.2" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Phạm vi file ước lượng trong</text>
+<text x="358.2" y="377.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >ngưỡng</text>
+<circle cx="550.4" cy="364" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="565.4" cy="364" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="580.4" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="354.2" y1="392" x2="624.4" y2="392" stroke="#e2e8f0"/>
+<text x="620.4" y="412.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >25</text>
+<text x="358.2" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >SA review giải pháp (độc lập</text>
+<text x="358.2" y="419.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >với người thiết kế)</text>
+<circle cx="550.4" cy="406" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="565.4" cy="406" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="580.4" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="354.2" y1="434" x2="624.4" y2="434" stroke="#e2e8f0"/>
+<text x="620.4" y="454.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >10</text>
+<text x="358.2" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Ghi chú đe doạ cho việc đụng</text>
+<text x="358.2" y="461.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >auth/dữ liệu</text>
+<circle cx="550.4" cy="448" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="565.4" cy="448" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="580.4" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<rect x="648.4" y="232.0" width="290.2" height="296.0" rx="10" fill="#fff" stroke="#7c3aed" stroke-width="1.6"/>
+<rect x="648.4" y="232.0" width="290.2" height="32.0" rx="10" fill="#7c3aed" stroke="none" stroke-width="1.4"/>
+<rect x="648.4" y="248.0" width="290.2" height="16.0" rx="0" fill="#7c3aed" stroke="none" stroke-width="1.4"/>
+<text x="662.4" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G3 · Thực thi</text>
+<text x="924.6" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="924.6" y="286.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >30</text>
+<text x="662.4" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Build + test đơn vị xanh</text>
+<circle cx="854.5999999999999" cy="280" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="869.5999999999999" cy="280" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="308" x2="928.5999999999999" y2="308" stroke="#e2e8f0"/>
+<text x="924.6" y="328.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >10</text>
+<text x="662.4" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Không lộ bí mật (key, token,</text>
+<text x="662.4" y="335.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >chuỗi kết nối)</text>
+<circle cx="854.5999999999999" cy="322" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="869.5999999999999" cy="322" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="350" x2="928.5999999999999" y2="350" stroke="#e2e8f0"/>
+<text x="924.6" y="370.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >15</text>
+<text x="662.4" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >SAST và phụ thuộc sạch</text>
+<circle cx="854.5999999999999" cy="364" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="869.5999999999999" cy="364" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="392" x2="928.5999999999999" y2="392" stroke="#e2e8f0"/>
+<text x="924.6" y="412.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >20</text>
+<text x="662.4" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Auto-review không có lỗi</text>
+<text x="662.4" y="419.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >critical</text>
+<circle cx="854.5999999999999" cy="406" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="869.5999999999999" cy="406" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="434" x2="928.5999999999999" y2="434" stroke="#e2e8f0"/>
+<text x="924.6" y="454.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >15</text>
+<text x="662.4" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Diff trong ngưỡng, không chạm</text>
+<text x="662.4" y="461.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >đường dẫn bảo vệ</text>
+<circle cx="854.5999999999999" cy="448" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="869.5999999999999" cy="448" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="476" x2="928.5999999999999" y2="476" stroke="#e2e8f0"/>
+<text x="924.6" y="496.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >10</text>
+<text x="662.4" y="490.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Chạy trong sandbox/worktree,</text>
+<text x="662.4" y="503.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >quyền tối thiểu</text>
+<circle cx="854.5999999999999" cy="490" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="869.5999999999999" cy="490" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="884.5999999999999" cy="490" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<rect x="952.6" y="232.0" width="290.2" height="254.0" rx="10" fill="#fff" stroke="#059669" stroke-width="1.6"/>
+<rect x="952.6" y="232.0" width="290.2" height="32.0" rx="10" fill="#059669" stroke="none" stroke-width="1.4"/>
+<rect x="952.6" y="248.0" width="290.2" height="16.0" rx="0" fill="#059669" stroke="none" stroke-width="1.4"/>
+<text x="966.6" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G4 · Kiểm chứng</text>
+<text x="1228.8" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="1228.8" y="286.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >35</text>
+<text x="966.6" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >TC sinh từ spec: tất cả pass</text>
+<text x="966.6" y="293.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >(không fail, không blocked)</text>
+<circle cx="1158.8" cy="280" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1173.8" cy="280" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1188.8" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="962.5999999999999" y1="308" x2="1232.8" y2="308" stroke="#e2e8f0"/>
+<text x="1228.8" y="328.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >20</text>
+<text x="966.6" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Mỗi AC có ít nhất một TC</text>
+<circle cx="1158.8" cy="322" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="1173.8" cy="322" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1188.8" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="962.5999999999999" y1="350" x2="1232.8" y2="350" stroke="#e2e8f0"/>
+<text x="1228.8" y="370.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >10</text>
+<text x="966.6" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Exploratory / dữ liệu thật</text>
+<circle cx="1158.8" cy="364" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="1173.8" cy="364" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1188.8" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="962.5999999999999" y1="392" x2="1232.8" y2="392" stroke="#e2e8f0"/>
+<text x="1228.8" y="412.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >20</text>
+<text x="966.6" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Review bảo mật + DAST/PoC xác</text>
+<text x="966.6" y="419.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >thực</text>
+<circle cx="1158.8" cy="406" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="1173.8" cy="406" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1188.8" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="962.5999999999999" y1="434" x2="1232.8" y2="434" stroke="#e2e8f0"/>
+<text x="1228.8" y="454.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >15</text>
+<text x="966.6" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Không còn spec drift chưa xử lý</text>
+<circle cx="1158.8" cy="448" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="1173.8" cy="448" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1188.8" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<rect x="1256.8" y="232.0" width="290.2" height="254.0" rx="10" fill="#fff" stroke="#d97706" stroke-width="1.6"/>
+<rect x="1256.8" y="232.0" width="290.2" height="32.0" rx="10" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<rect x="1256.8" y="248.0" width="290.2" height="16.0" rx="0" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<text x="1270.8" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G5 · Nghiệm thu</text>
+<text x="1533.0" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="1533.0" y="286.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >40</text>
+<text x="1270.8" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Đối chiếu AC đã ký</text>
+<text x="1270.8" y="293.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >(khách/owner)</text>
+<circle cx="1463.0" cy="280" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1478.0" cy="280" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1493.0" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="1266.8" y1="308" x2="1537.0" y2="308" stroke="#e2e8f0"/>
+<text x="1533.0" y="328.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >20</text>
+<text x="1270.8" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Demo chạy thật trên bản build</text>
+<circle cx="1463.0" cy="322" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="1478.0" cy="322" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1493.0" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="1266.8" y1="350" x2="1537.0" y2="350" stroke="#e2e8f0"/>
+<text x="1533.0" y="370.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >15</text>
+<text x="1270.8" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Ngoại lệ bảo mật còn hạn, có</text>
+<text x="1270.8" y="377.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >người duyệt</text>
+<circle cx="1463.0" cy="364" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1478.0" cy="364" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1493.0" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="1266.8" y1="392" x2="1537.0" y2="392" stroke="#e2e8f0"/>
+<text x="1533.0" y="412.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >15</text>
+<text x="1270.8" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Spec đã đồng bộ với bản giao</text>
+<circle cx="1463.0" cy="406" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="1478.0" cy="406" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1493.0" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="1266.8" y1="434" x2="1537.0" y2="434" stroke="#e2e8f0"/>
+<text x="1533.0" y="454.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >10</text>
+<text x="1270.8" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Có kế hoạch rollback / ghi chú</text>
+<text x="1270.8" y="461.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >triển khai</text>
+<circle cx="1463.0" cy="448" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="1478.0" cy="448" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1493.0" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<text x="40.0" y="556.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">NGƯỠNG THEO TẦNG RỦI RO VÀ YÊU CẦU NGƯỜI</text>
+<rect x="40.0" y="566.0" width="760.0" height="184.0" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="60.0" y="592.0" font-size="10" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">TẦNG</text>
+<text x="170.0" y="592.0" font-size="10" fill="#64748b" font-weight="700" text-anchor="middle" letter-spacing="1">PASS khi ≥</text>
+<text x="262.0" y="592.0" font-size="10" fill="#64748b" font-weight="700" text-anchor="middle" letter-spacing="1">REVIEW khi ≥</text>
+<text x="400.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G1</text>
+<text x="474.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G2</text>
+<text x="548.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G3</text>
+<text x="622.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G4</text>
+<text x="696.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G5</text>
+<text x="768.0" y="592.0" font-size="10" fill="#1f2937" font-weight="400" text-anchor="start" ></text>
+<circle cx="68" cy="619" r="9" fill="#16a34a"/>
+<text x="84.0" y="624.0" font-size="13.5" fill="#16a34a" font-weight="800" text-anchor="start" >XANH</text>
+<text x="170.0" y="624.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >85</text>
+<text x="262.0" y="624.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >60</text>
+<circle cx="400" cy="619" r="10" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<circle cx="474" cy="619" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="548" cy="619" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="622" cy="619" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="696" cy="619" r="10" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<circle cx="68" cy="659" r="9" fill="#d97706"/>
+<text x="84.0" y="664.0" font-size="13.5" fill="#d97706" font-weight="800" text-anchor="start" >VÀNG</text>
+<text x="170.0" y="664.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >90</text>
+<text x="262.0" y="664.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >70</text>
+<circle cx="400" cy="659" r="10" fill="#12263f"/>
+<circle cx="474" cy="659" r="10" fill="#12263f"/>
+<circle cx="548" cy="659" r="10" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<circle cx="622" cy="659" r="10" fill="#12263f"/>
+<circle cx="696" cy="659" r="10" fill="#12263f"/>
+<circle cx="68" cy="699" r="9" fill="#dc2626"/>
+<text x="84.0" y="704.0" font-size="13.5" fill="#dc2626" font-weight="800" text-anchor="start" >ĐỎ</text>
+<text x="170.0" y="704.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >—</text>
+<text x="262.0" y="704.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >80</text>
+<circle cx="400" cy="699" r="10" fill="#12263f"/>
+<circle cx="474" cy="699" r="10" fill="#12263f"/>
+<circle cx="548" cy="699" r="10" fill="#12263f"/>
+<circle cx="622" cy="699" r="10" fill="#12263f"/>
+<circle cx="696" cy="699" r="10" fill="#12263f"/>
+<circle cx="70" cy="728" r="6" fill="#12263f"/>
+<text x="82.0" y="732.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >người xem đầy đủ</text>
+<circle cx="260" cy="728" r="6" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<text x="272.0" y="732.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >người xác nhận nhanh</text>
+<circle cx="450" cy="728" r="6" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="462.0" y="732.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >tự động đi tiếp</text>
+<text x="786.0" y="732.0" font-size="11" fill="#dc2626" font-weight="600" text-anchor="end" >Đỏ: không bao giờ tự đi tiếp (dấu — ở cột PASS)</text>
+<text x="824.0" y="556.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">QUYẾT ĐỊNH — ÁP DỤNG THEO THỨ TỰ</text>
+<rect x="824.0" y="566.0" width="723.0" height="184.0" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="846" cy="596" r="10" fill="#12263f"/>
+<text x="846.0" y="600.0" font-size="11.5" fill="#fff" font-weight="800" text-anchor="middle" >1</text>
+<text x="866.0" y="600.0" font-size="12" fill="#1f2937" font-weight="500" text-anchor="start" >Có tiêu chí hard-fail ở trạng thái fail</text>
+<rect x="1377.0" y="586.0" width="74.0" height="20.0" rx="10" fill="#dc2626" stroke="none" stroke-width="1.4"/>
+<text x="1414.0" y="601.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >BLOCK</text>
+<text x="1461.0" y="600.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >bất kể điểm</text>
+<circle cx="846" cy="627" r="10" fill="#12263f"/>
+<text x="846.0" y="631.0" font-size="11.5" fill="#fff" font-weight="800" text-anchor="middle" >2</text>
+<text x="866.0" y="631.0" font-size="12" fill="#1f2937" font-weight="500" text-anchor="start" >Điểm &lt; ngưỡng REVIEW</text>
+<rect x="1377.0" y="617.0" width="74.0" height="20.0" rx="10" fill="#dc2626" stroke="none" stroke-width="1.4"/>
+<text x="1414.0" y="632.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >BLOCK</text>
+<text x="1461.0" y="631.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >trả lại</text>
+<circle cx="846" cy="658" r="10" fill="#12263f"/>
+<text x="846.0" y="662.0" font-size="11.5" fill="#fff" font-weight="800" text-anchor="middle" >3</text>
+<text x="866.0" y="662.0" font-size="12" fill="#1f2937" font-weight="500" text-anchor="start" >Ngưỡng REVIEW ≤ điểm &lt; ngưỡng PASS</text>
+<rect x="1377.0" y="648.0" width="74.0" height="20.0" rx="10" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<text x="1414.0" y="663.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >REVIEW</text>
+<text x="1461.0" y="662.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >người xem</text>
+<circle cx="846" cy="689" r="10" fill="#12263f"/>
+<text x="846.0" y="693.0" font-size="11.5" fill="#fff" font-weight="800" text-anchor="middle" >4</text>
+<text x="866.0" y="693.0" font-size="12" fill="#1f2937" font-weight="500" text-anchor="start" >Điểm ≥ ngưỡng PASS: cổng 'tự động'</text>
+<rect x="1377.0" y="679.0" width="74.0" height="20.0" rx="10" fill="#16a34a" stroke="none" stroke-width="1.4"/>
+<text x="1414.0" y="694.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >PASS</text>
+<text x="1461.0" y="693.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >đi tiếp</text>
+<text x="866.0" y="724.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >… cổng 'xác nhận nhanh' → CONFIRM · cổng 'xem đầy đủ' → REVIEW</text>
+<text x="40.0" y="774.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">VÍ DỤ TÍNH ĐIỂM (chạy bằng gates/gate_score.py trên gates/examples/)</text>
+<rect x="40.0" y="784.0" width="741.5" height="275.0" rx="10" fill="#fff" stroke="#d97706" stroke-width="2"/>
+<text x="56.0" y="810.0" font-size="14" fill="#12263f" font-weight="700" text-anchor="start" >G3 · tầng Vàng — Thực thi</text>
+<rect x="681.5" y="794.0" width="84.0" height="20.0" rx="10" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<text x="723.5" y="809.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >REVIEW</text>
+<text x="665.5" y="809.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >78/100</text>
+<text x="56.0" y="838.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Build + test đơn vị xanh</text>
+<text x="631.5" y="838.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >partial</text>
+<text x="765.5" y="838.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >15 / 30</text>
+<text x="56.0" y="857.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Không lộ bí mật (key, token, chuỗi kết nối)</text>
+<text x="631.5" y="857.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="765.5" y="857.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >10 / 10</text>
+<text x="56.0" y="876.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >SAST và phụ thuộc sạch</text>
+<text x="631.5" y="876.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >partial</text>
+<text x="765.5" y="876.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >7.5 / 15</text>
+<text x="56.0" y="895.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Auto-review không có lỗi critical</text>
+<text x="631.5" y="895.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="765.5" y="895.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >20 / 20</text>
+<text x="56.0" y="914.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Diff trong ngưỡng, không chạm đường dẫn bảo vệ</text>
+<text x="631.5" y="914.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="765.5" y="914.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >15 / 15</text>
+<text x="56.0" y="933.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Chạy trong sandbox/worktree, quyền tối thiểu</text>
+<text x="631.5" y="933.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="765.5" y="933.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >10 / 10</text>
+<line x1="56.0" y1="946" x2="765.5" y2="946" stroke="#e2e8f0"/>
+<text x="56.0" y="958.0" font-size="11.5" fill="#d97706" font-weight="600" text-anchor="start" >→ điểm 78 nằm giữa 70 và 90: người phải xem</text>
+<rect x="56.0" y="1013.0" width="709.5" height="32.0" rx="6" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+<text x="66.0" y="1033.0" font-size="11" fill="#334155" font-weight="600" text-anchor="start" font-family="Consolas, monospace">python gates/gate_score.py gates/gate-scorecard.json gates/examples/g3-yellow-review.json</text>
+<rect x="805.5" y="784.0" width="741.5" height="275.0" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2"/>
+<text x="821.5" y="810.0" font-size="14" fill="#12263f" font-weight="700" text-anchor="start" >G4 · tầng Đỏ — Kiểm chứng</text>
+<rect x="1447.0" y="794.0" width="84.0" height="20.0" rx="10" fill="#dc2626" stroke="none" stroke-width="1.4"/>
+<text x="1489.0" y="809.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >BLOCK</text>
+<text x="1431.0" y="809.0" font-size="18" fill="#dc2626" font-weight="800" text-anchor="end" >55/100</text>
+<text x="821.5" y="838.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >TC sinh từ spec: tất cả pass (không fail, không blocked)</text>
+<text x="1397.0" y="838.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >fail</text>
+<text x="1531.0" y="838.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >0 / 35</text>
+<text x="821.5" y="857.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Mỗi AC có ít nhất một TC</text>
+<text x="1397.0" y="857.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="1531.0" y="857.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >20 / 20</text>
+<text x="821.5" y="876.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Exploratory / dữ liệu thật</text>
+<text x="1397.0" y="876.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="1531.0" y="876.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >10 / 10</text>
+<text x="821.5" y="895.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Review bảo mật + DAST/PoC xác thực</text>
+<text x="1397.0" y="895.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >partial</text>
+<text x="1531.0" y="895.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >10 / 20</text>
+<text x="821.5" y="914.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Không còn spec drift chưa xử lý</text>
+<text x="1397.0" y="914.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="1531.0" y="914.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >15 / 15</text>
+<line x1="821.5" y1="927" x2="1531.0" y2="927" stroke="#e2e8f0"/>
+<text x="821.5" y="939.0" font-size="11.5" fill="#dc2626" font-weight="600" text-anchor="start" >→ tc_pass: KHÔNG ĐẠT - TC sinh từ spec: tất cả pass (không fail, không blocked)</text>
+<text x="821.5" y="955.0" font-size="11.5" fill="#dc2626" font-weight="600" text-anchor="start" >→ hard-fail: tc_pass -&gt; BLOCK bất kể điểm</text>
+<rect x="821.5" y="1013.0" width="709.5" height="32.0" rx="6" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+<text x="831.5" y="1033.0" font-size="11" fill="#334155" font-weight="600" text-anchor="start" font-family="Consolas, monospace">python gates/gate_score.py gates/gate-scorecard.json gates/examples/g4-red-block.json</text>
+<text x="40.0" y="1095.0" font-size="12" fill="#64748b" font-weight="400" text-anchor="start" >Khớp với pr_scorer.py của AI-Autopilot: ngưỡng 85/60, tín hiệu chưa biết chấm trung tính-thấp, test case fail ép escalate bất kể điểm. Bộ này mở rộng sang yêu cầu, bảo mật và nghiệm thu.</text>
+<text x="1547.0" y="1095.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="end" >AI-Autopilot</text>
+</svg>

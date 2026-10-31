@@ -1,0 +1,1523 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quy trình phát triển phần mềm thời đại AI</title>
+<style>
+:root{
+  --navy:#12263f; --ink:#1f2937; --muted:#64748b; --line:#e2e8f0; --bg:#f8fafc; --card:#fff;
+  --blue:#2563eb; --blue-l:#dbeafe; --violet:#7c3aed; --violet-l:#ede9fe;
+  --amber:#d97706; --amber-l:#fef3c7; --green:#059669; --green-l:#d1fae5; --red:#dc2626; --red-l:#fee2e2;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:"Segoe UI",system-ui,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6;font-size:15.5px}
+a{color:var(--blue)}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+header.hero{background:linear-gradient(135deg,#0b1a2e,#12263f 55%,#1e3a5f);color:#fff;padding:64px 0 52px}
+.hero .tag{display:inline-block;font-size:12px;letter-spacing:.14em;font-weight:700;color:#93c5fd;border:1px solid #3b5b85;border-radius:99px;padding:4px 12px;margin-bottom:18px}
+.hero h1{font-size:42px;line-height:1.15;margin:0 0 14px;letter-spacing:-.01em}
+.hero p.lead{font-size:18px;color:#cbd5e1;max-width:820px;margin:0 0 30px}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.key{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:16px 18px}
+.key b{display:block;color:#fff;margin-bottom:4px}
+.key span{color:#cbd5e1;font-size:14.5px}
+.meta{margin-top:26px;color:#94a3b8;font-size:13.5px}
+nav.toc{position:sticky;top:0;z-index:10;background:#ffffffee;backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+nav.toc .wrap{display:flex;flex-wrap:wrap;gap:0 2px;padding:4px 24px}
+nav.toc a{white-space:nowrap;text-decoration:none;color:var(--muted);font-size:13px;font-weight:600;padding:7px 10px;border-bottom:2px solid transparent}
+nav.toc a:hover{color:var(--navy);border-color:var(--blue)}
+section{padding:46px 0 10px}
+section h2{font-size:28px;color:var(--navy);margin:0 0 6px;letter-spacing:-.01em}
+section h2 .n{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--navy);color:#fff;font-size:16px;align-items:center;justify-content:center;margin-right:10px;vertical-align:3px}
+section .sub{color:var(--muted);margin:0 0 22px;max-width:860px}
+h3{font-size:18px;color:var(--navy);margin:28px 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14.5px}
+th{background:#eef2f7;color:var(--navy);text-align:left;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;padding:10px 12px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.c,th.c{text-align:center}
+.pill{display:inline-block;font-size:12px;font-weight:700;border-radius:99px;padding:2px 10px;white-space:nowrap}
+.p-g{background:var(--green-l);color:#047857}.p-a{background:var(--amber-l);color:#b45309}.p-r{background:var(--red-l);color:#b91c1c}
+.p-b{background:var(--blue-l);color:#1d4ed8}.p-v{background:var(--violet-l);color:#6d28d9}.p-n{background:#e2e8f0;color:#475569}
+.callout{border-left:4px solid var(--amber);background:var(--amber-l);border-radius:8px;padding:12px 16px;margin:18px 0;color:#78350f}
+.callout.info{border-color:var(--blue);background:var(--blue-l);color:#1e3a8a}
+.callout.ok{border-color:var(--green);background:var(--green-l);color:#065f46}
+.diagram{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 2px 8px rgba(15,23,42,.06);overflow:auto}
+.diagram svg{display:block;min-width:900px}
+.dl{margin:10px 0 0;font-size:13.5px;color:var(--muted)}
+.raci td.c{font-weight:700;font-size:14px}
+.raci .A{color:#b91c1c}.raci .R{color:#1d4ed8}.raci .C{color:#047857}.raci .I{color:#94a3b8;font-weight:500}
+ul{padding-left:20px;margin:8px 0}li{margin:3px 0}
+.phase{border-top:5px solid var(--navy)}
+.phase.b{border-color:var(--blue)}.phase.v{border-color:var(--violet)}
+.phase h4{margin:0 0 6px;color:var(--navy)}
+.phase .cond{margin-top:10px;font-size:13.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px}
+footer{margin-top:60px;background:var(--navy);color:#94a3b8;padding:30px 0;font-size:13.5px}
+footer b{color:#fff}
+.small{font-size:13.5px;color:var(--muted)}
+@media(max-width:860px){.keys,.grid2,.grid3{grid-template-columns:1fr}.hero h1{font-size:30px}}
+@media print{
+  @page{size:A4 landscape;margin:12mm}
+  nav.toc{display:none} body{background:#fff;font-size:12.5px}
+  header.hero{padding:28px 0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  section{break-inside:avoid-page;padding-top:22px} .card,table,.diagram{break-inside:avoid}
+  .diagram svg{min-width:0}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">GÓI QUY TRÌNH · V1.2 · 2026-10-31</span>
+    <h1>Quy trình phát triển phần mềm<br>trong thời đại AI</h1>
+    <p class="lead">Từ giả thuyết "BA → vận hành agent → SA review → QC → nghiệm thu" đến một gói quy trình áp dụng được: ai làm gì, tài liệu nào là trục, cổng chấm điểm ra sao, bảo mật ở đâu, và đối chiếu với AI-Autopilot đang có.</p>
+    <div class="keys">
+      <div class="key"><b>Thực thi co lại, quyết định đậm lên</b><span>Nút cổ chai chuyển từ viết code sang làm rõ yêu cầu, kiểm chứng và nghiệm thu.</span></div>
+      <div class="key"><b>Cổng có núm vặn</b><span>Phân tầng rủi ro Xanh / Vàng / Đỏ; nới hay siết dựa trên số liệu đo được, không theo cảm giác.</span></div>
+      <div class="key"><b>Người luôn chịu trách nhiệm</b><span>Agent làm nhanh nhưng không chịu trách nhiệm. Mỗi việc có một người sở hữu và có bằng chứng chạy thật.</span></div>
+    </div>
+    <div class="meta">Đối tượng: đội Dev / BA / QC / SA / PM · Kèm 4 sơ đồ A3 (SVG), 6 mẫu tài liệu và bộ tính điểm cổng chạy được</div>
+  </div>
+</header>
+
+<nav class="toc"><div class="wrap">
+  <a href="#gia-thiet">Giả thuyết</a><a href="#nguyen-tac">Nguyên tắc</a><a href="#luong">Luồng</a><a href="#vai-tro">Vai trò</a><a href="#raci">RACI</a>
+  <a href="#spec">Spec</a><a href="#artifact">Artifact</a><a href="#bao-mat">Bảo mật</a><a href="#rui-ro">Phân tầng</a><a href="#cham-diem">Chấm điểm cổng</a>
+  <a href="#dev">Dev</a><a href="#scrum">Scrum · Kanban</a><a href="#so-lieu">Số liệu</a><a href="#ai-autopilot">AI-Autopilot</a><a href="#kiem-chung">Kiểm chứng</a>
+  <a href="#lo-trinh">Lộ trình</a><a href="#rui-ro-chuyen-doi">Rủi ro</a><a href="#ap-dung">Áp dụng</a>
+</div></nav>
+
+<main class="wrap">
+
+<section id="gia-thiet">
+  <h2><span class="n">1</span>Giả thuyết vận hành</h2>
+  <p class="sub">Quy trình dưới đây là một <b>giả thuyết có thể kiểm chứng</b>, không phải kết luận. Phần này phát biểu giả thuyết, các giả định đi kèm và điều kiện bác bỏ, để người đọc biết điều gì đã được lập luận, điều gì sẽ được đo.</p>
+  <div class="card" style="margin-bottom:18px">
+    <b>Giả thuyết trung tâm.</b> Khi yêu cầu được chốt thành spec có tiêu chí chấp nhận <i>kiểm chứng được</i>, phần thực thi (lên plan, phân tích, viết code, viết và chạy test) có thể giao cho đội agent dưới sự điều phối của một <b>Operator</b>, với chất lượng không thấp hơn quy trình hiện tại, <b>miễn là</b> mỗi giai đoạn có cổng chấm điểm, bằng chứng chạy thật và một người chịu trách nhiệm.
+    <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <span class="pill p-b">BA · đại diện khách, tìm gap, chốt spec</span> →
+      <span class="pill p-v">Operator + Đội Agent · plan, thực hiện, chạy test</span> →
+      <span class="pill p-n">SA · review giải pháp</span> →
+      <span class="pill p-g">QC · kiểm chứng độc lập</span> →
+      <span class="pill p-b">Owner / khách · nghiệm thu</span>
+    </div>
+  </div>
+  <h3>Giả định đi kèm, cách đo và điều kiện bác bỏ</h3>
+  <table>
+    <tr><th style="width:24%">Giả thuyết con</th><th>Điều kiện cần</th><th style="width:22%">Đo bằng</th><th style="width:22%">Bác bỏ nếu</th></tr>
+    <tr><td><b>H1.</b> Việc phạm vi rõ (tầng Xanh) giao được cho agent mà không tăng lỗi lọt</td><td>Spec có AC kiểm chứng được; có test bảo vệ; không đụng vùng rủi ro</td><td>Tỷ lệ lỗi lọt tầng Xanh so với baseline</td><td>Cao hơn baseline thủ công</td></tr>
+    <tr><td><b>H2.</b> Cổng chấm điểm bắt đúng việc cần người xem</td><td>Tiêu chí có trọng số, bằng chứng bắt buộc, hard-fail</td><td>Tỷ lệ việc qua cổng PASS/CONFIRM nhưng sau đó bị trả lại</td><td>Có lỗi nghiêm trọng lọt qua cổng PASS</td></tr>
+    <tr><td><b>H3.</b> Spec hai lớp (PRD nhẹ + SRS do agent soạn) rút ngắn việc chốt với khách</td><td>Khách xác nhận trên mockup và kịch bản; BA rà SRS</td><td>Thời gian từ yêu cầu đến khách xác nhận; số lần làm lại</td><td>Không giảm, hoặc tăng làm lại ở nghiệm thu</td></tr>
+    <tr><td><b>H4.</b> Phân tầng Xanh / Vàng / Đỏ đặt người đúng chỗ</td><td>Phân loại theo vùng file thực tế, có kiểm tra tự động</td><td>Số việc bị đổi tầng sau khi làm</td><td>Thường xuyên phân loại sai tầng Đỏ</td></tr>
+    <tr><td><b>H5.</b> Hàng đợi chờ người duyệt không thành nút cổ chai</td><td>WIP limit; cổng CONFIRM nhanh cho việc nhỏ</td><td>Thời gian chờ người / việc</td><td>Hàng đợi tăng liên tục</td></tr>
+  </table>
+  <p class="small">Ngưỡng cụ thể được đặt trước khi chạy pilot (mục 15) và hiệu chỉnh bằng dữ liệu thật. Tài liệu này không khẳng định các con số đó.</p>
+  <h3>Giả thuyết được xác định lại ở những điểm nào</h3>
+  <table>
+    <tr><th style="width:22%">Điểm</th><th>Cách đặt ban đầu</th><th>Cách đặt trong tài liệu này và lý do</th></tr>
+    <tr><td><b>BA</b></td><td>Đóng vai khách, chỉ tìm gap so với codebase và spec</td><td>BA là <b>đại diện</b> của khách, không thay được khách. AI làm việc tìm gap nhẹ đi, nhưng BA vẫn phải quyết gap nào quan trọng, hỏi lại khách thật và viết spec đủ chính xác vì spec là đầu vào thực thi trực tiếp.</td></tr>
+    <tr><td><b>Dev</b></td><td>Không còn tồn tại; thay bằng vai trò vận hành</td><td>Vai trò thay đổi, năng lực kỹ thuật thì không biến mất: Operator cần nền tảng của Dev để duyệt plan, canh agent lệch hướng và gỡ khi agent kẹt.</td></tr>
+    <tr><td><b>Review giải pháp</b></td><td>Một bước review riêng</td><td><b>SA</b> đảm nhiệm: review giải pháp (plan, thiết kế) ở việc Vàng/Đỏ, độc lập với người thiết kế. AI review chỉ là lớp lọc đầu vì cùng điểm mù với AI viết code. Nếu SA đồng thời là người thiết kế một việc Đỏ thì cần SA thứ hai hoặc đồng nghiệp review chéo.</td></tr>
+    <tr><td><b>Nghiệm thu</b></td><td>BA nghiệm thu</td><td>BA nghiệm thu nội bộ trước (kiểm tra bằng chứng); <b>khách / owner</b> chấp nhận cuối cùng, để tránh người viết spec tự chấm spec của mình.</td></tr>
+    <tr><td><b>Chưa có trong chuỗi</b></td><td>—</td><td>Thêm bảo mật (rào chắn ở mọi giai đoạn), người đặt luật (SA, PM) và vòng phản hồi từ production về BA.</td></tr>
+  </table>
+  <div class="callout"><b>Bốn điểm yếu của chuỗi tuần tự:</b> (1) waterfall hoá, mỗi lần bàn giao mất ngữ cảnh; (2) rubber-stamping vì diff do máy sinh trông hợp lý; (3) agent tự chấm bài mình khi cùng viết code và test; (4) spec drift âm thầm vì agent sửa nhanh. Quy trình trong tài liệu được thiết kế để trực tiếp xử lý bốn điểm này.</div>
+</section>
+
+<section id="nguyen-tac">
+  <h2><span class="n">2</span>Ba nguyên tắc bất biến</h2>
+  <p class="sub">Không đổi dù AI mạnh đến đâu. Mọi thứ khác (ai làm bước nào, bao nhiêu cổng) là tham số có thể điều chỉnh.</p>
+  <div class="grid3">
+    <div class="card"><h3 style="margin-top:0">① Truy ngược được</h3>Mọi thay đổi truy về một yêu cầu có người chịu trách nhiệm. Agent không chịu trách nhiệm được.</div>
+    <div class="card"><h3 style="margin-top:0">② Kiểm chứng độc lập</h3>Người kiểm chứng độc lập với người (hoặc agent) tạo ra. Test case sinh từ spec, không sinh từ code.</div>
+    <div class="card"><h3 style="margin-top:0">③ Bằng chứng chạy thật</h3>Log, kết quả test, ảnh/video, kết quả scan. Không chấp nhận lời khẳng định "đã xong".</div>
+  </div>
+</section>
+
+<section id="luong">
+  <h2><span class="n">3</span>Luồng chính: 5 giai đoạn, lát nhỏ</h2>
+  <p class="sub">Mỗi giai đoạn có người làm, agent làm, rào chắn bảo mật, cổng để qua và bằng chứng bắt buộc. Giai đoạn 6 (phản hồi từ production) đưa tín hiệu thật ngược về giai đoạn 1. Làm theo lát nhỏ (một AC mỗi vòng), không phải cả feature mỗi vòng.</p>
+  <div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" viewBox="0 0 1587 1123" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+<title>Quy trình phát triển phần mềm thời đại AI — Sơ đồ A3</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#12263f"/></marker><marker id="arrA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker></defs>
+<rect x="0.0" y="0.0" width="1587.0" height="1123.0" rx="0" fill="#ffffff" stroke="none" stroke-width="1.5" />
+<rect x="0.0" y="0.0" width="1587.0" height="92.0" rx="0" fill="#12263f" stroke="none" stroke-width="1.5" />
+<text x="40.0" y="44.0" font-size="30" fill="#ffffff" font-weight="700" text-anchor="start" >QUY TRÌNH PHÁT TRIỂN PHẦN MỀM THỜI ĐẠI AI</text>
+<text x="40.0" y="72.0" font-size="15" fill="#cbd5e1" font-weight="400" text-anchor="start" >Luồng 5 giai đoạn · spec hai lớp · bảo mật dịch sang trái · phân tầng rủi ro · phản hồi từ production</text>
+<text x="1547.0" y="44.0" font-size="15" fill="#cbd5e1" font-weight="600" text-anchor="end" >Đề xuất · v1.2</text>
+<text x="1547.0" y="72.0" font-size="13" fill="#94a3b8" font-weight="400" text-anchor="end" >2026-10-31 · khổ A3</text>
+<text x="40.0" y="106.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">BA NGUYÊN TẮC BẤT BIẾN</text>
+<rect x="40.0" y="114.0" width="488.0" height="52.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+<circle cx="68.0" cy="141" r="14" fill="#12263f"/>
+<text x="68.0" y="146.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >1</text>
+<text x="92.0" y="138.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >Mọi thay đổi truy ngược về một yêu cầu có người chịu</text>
+<text x="92.0" y="154.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >trách nhiệm</text>
+<rect x="549.5" y="114.0" width="488.0" height="52.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+<circle cx="577.5" cy="141" r="14" fill="#12263f"/>
+<text x="577.5" y="146.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >2</text>
+<text x="601.5" y="138.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >Người kiểm chứng độc lập với người (hoặc agent) tạo</text>
+<text x="601.5" y="154.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >ra</text>
+<rect x="1059.0" y="114.0" width="488.0" height="52.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+<circle cx="1087.0" cy="141" r="14" fill="#12263f"/>
+<text x="1087.0" y="146.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >3</text>
+<text x="1111.0" y="138.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >Bằng chứng chạy thật, không phải lời khẳng định</text>
+<path d="M205.0,190 h241 l18,34 l-18,34 h-241 z" fill="#12263f"/>
+<circle cx="239.0" cy="224" r="17" fill="#ffffff"/>
+<text x="239.0" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >1</text>
+<text x="265.0" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >ĐỊNH NGHĨA</text>
+<text x="265.0" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >BA + Khách · cổng G1</text>
+<path d="M474.5,190 h241 l18,34 l-18,34 h-241 l18,-34 z" fill="#12263f"/>
+<circle cx="508.5" cy="224" r="17" fill="#ffffff"/>
+<text x="508.5" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >2</text>
+<text x="534.5" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >LẬP KẾ HOẠCH</text>
+<text x="534.5" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >Operator + SA · cổng G2</text>
+<path d="M744.0,190 h241 l18,34 l-18,34 h-241 l18,-34 z" fill="#12263f"/>
+<circle cx="778.0" cy="224" r="17" fill="#ffffff"/>
+<text x="778.0" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >3</text>
+<text x="804.0" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >THỰC THI</text>
+<text x="804.0" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >Agent · cổng G3</text>
+<path d="M1013.5,190 h241 l18,34 l-18,34 h-241 l18,-34 z" fill="#12263f"/>
+<circle cx="1047.5" cy="224" r="17" fill="#ffffff"/>
+<text x="1047.5" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >4</text>
+<text x="1073.5" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >KIỂM CHỨNG</text>
+<text x="1073.5" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >QC + Security · cổng G4</text>
+<path d="M1283.0,190 h241 l18,34 l-18,34 h-241 l18,-34 z" fill="#12263f"/>
+<circle cx="1317.0" cy="224" r="17" fill="#ffffff"/>
+<text x="1317.0" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >5</text>
+<text x="1343.0" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >NGHIỆM THU</text>
+<text x="1343.0" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >Khách / Owner · cổng G5</text>
+<rect x="40.0" y="272.0" width="155.0" height="84.0" rx="8" fill="#2563eb" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="312.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >NGƯỜI</text>
+<text x="117.5" y="330.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >con người làm</text>
+<rect x="205.0" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="217.0" y="310.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >BA chốt PRD nhẹ + mockup với khách</text>
+<text x="217.0" y="327.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >(Đỏ: khách ký từng AC)</text>
+<rect x="474.5" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="486.5" y="310.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Operator duyệt plan; SA review</text>
+<text x="486.5" y="327.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >giải pháp (Vàng/Đỏ)</text>
+<rect x="744.0" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="756.0" y="310.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Operator canh agent, can thiệp khi</text>
+<text x="756.0" y="327.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >lệch hướng</text>
+<rect x="1013.5" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="1025.5" y="301.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >QC thiết kế chiến lược,</text>
+<text x="1025.5" y="318.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >exploratory; Security duyệt ngoại</text>
+<text x="1025.5" y="335.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >lệ</text>
+<rect x="1283.0" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="1295.0" y="310.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Khách / Owner nghiệm thu — không</text>
+<text x="1295.0" y="327.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >phải người viết spec</text>
+<rect x="40.0" y="364.0" width="155.0" height="84.0" rx="8" fill="#7c3aed" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="404.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >AGENT</text>
+<text x="117.5" y="422.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >máy làm</text>
+<rect x="205.0" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="217.0" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Soạn nháp SRS từ PRD; đối chiếu</text>
+<text x="217.0" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >codebase; liệt kê gap và giả định</text>
+<rect x="474.5" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="486.5" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Phân tích, đề xuất plan, đánh giá</text>
+<text x="486.5" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >tác động</text>
+<rect x="744.0" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="756.0" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Viết code, test đơn vị, tự review</text>
+<text x="756.0" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >vòng 1</text>
+<rect x="1013.5" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="1025.5" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Sinh TC từ spec (độc lập với</text>
+<text x="1025.5" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >code), chạy E2E, quét bảo mật</text>
+<rect x="1283.0" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="1295.0" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Chuẩn bị bản demo và danh sách</text>
+<text x="1295.0" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >thay đổi</text>
+<rect x="40.0" y="456.0" width="155.0" height="70.0" rx="8" fill="#dc2626" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="489.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >BẢO MẬT</text>
+<text x="117.5" y="507.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >rào chắn</text>
+<rect x="205.0" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="217.0" y="487.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Yêu cầu bảo mật và phân quyền nằm</text>
+<text x="217.0" y="504.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >trong spec</text>
+<rect x="474.5" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="486.5" y="487.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Mô hình đe doạ nhẹ (Vàng/Đỏ); đánh</text>
+<text x="486.5" y="504.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >dấu việc đụng auth, dữ liệu</text>
+<rect x="744.0" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="756.0" y="478.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Quét bí mật, phụ thuộc, SAST tự</text>
+<text x="756.0" y="495.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >động; agent chạy sandbox, quyền</text>
+<text x="756.0" y="512.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >tối thiểu</text>
+<rect x="1013.5" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="1025.5" y="487.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Review bảo mật; DAST; PoC xác thực</text>
+<text x="1025.5" y="504.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >lỗi (Đỏ)</text>
+<rect x="1283.0" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="1295.0" y="495.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Duyệt ngoại lệ: có lý do và có hạn</text>
+<rect x="40.0" y="534.0" width="155.0" height="58.0" rx="8" fill="#d97706" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="561.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >CỔNG</text>
+<text x="117.5" y="579.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >điều kiện qua</text>
+<rect x="205.0" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="217.0" y="559.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >AC kiểm chứng được; khách xác nhận</text>
+<text x="217.0" y="576.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >PRD + mockup</text>
+<rect x="474.5" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="486.5" y="567.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Phân loại rủi ro Xanh / Vàng / Đỏ</text>
+<rect x="744.0" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="756.0" y="559.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Build + test xanh, diff nhỏ, quét</text>
+<text x="756.0" y="576.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >bảo mật sạch</text>
+<rect x="1013.5" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="1025.5" y="567.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >TC pass + không lệch spec</text>
+<rect x="1283.0" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="1295.0" y="567.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Ký nhận</text>
+<rect x="40.0" y="600.0" width="155.0" height="58.0" rx="8" fill="#059669" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="627.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >BẰNG CHỨNG</text>
+<text x="117.5" y="645.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >bắt buộc kèm</text>
+<rect x="205.0" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="217.0" y="625.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >PRD + mockup đã xác nhận; SRS đã</text>
+<text x="217.0" y="642.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >rà, trỏ về PRD</text>
+<rect x="474.5" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="486.5" y="633.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Plan + mức rủi ro + phạm vi file</text>
+<rect x="744.0" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="756.0" y="625.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Log chạy thật, kết quả test và</text>
+<text x="756.0" y="642.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >scan</text>
+<rect x="1013.5" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="1025.5" y="625.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Báo cáo TC, ảnh/video, kết quả</text>
+<text x="1025.5" y="642.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >scan</text>
+<rect x="1283.0" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="1295.0" y="633.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Biên bản + bản demo</text>
+<rect x="205.0" y="682.0" width="1337.0" height="46.0" rx="10" fill="#fff7ed" stroke="#d97706" stroke-width="1.6" />
+<text x="221.0" y="702.0" font-size="13.5" fill="#d97706" font-weight="700" text-anchor="start" >6  PHẢN HỒI TỪ PRODUCTION</text>
+<text x="221.0" y="719.0" font-size="12.5" fill="#1f2937" font-weight="400" text-anchor="start" >Support gom tín hiệu thật → Agent phân loại, gợi ý gap mới → BA nhận vào giai đoạn 1</text>
+<path d="M1412.5,658 V682" stroke="#d97706" stroke-width="2.4" fill="none" marker-end="url(#arrA)"/>
+<path d="M205.0,705.0 H24 V224 H203.0" stroke="#d97706" stroke-width="2.4" fill="none" stroke-dasharray="7 5" marker-end="url(#arrA)"/>
+<text x="34.0" y="212.0" font-size="11" fill="#d97706" font-weight="600" text-anchor="start" >vòng lặp</text>
+<text x="40.0" y="758.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">PHÂN TẦNG RỦI RO — QUYẾT ĐỊNH ĐỘ DÀY CỦA LUỒNG</text>
+<rect x="40.0" y="770.0" width="770.0" height="150.0" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
+<text x="370.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >1</text>
+<text x="454.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >2</text>
+<text x="538.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >3</text>
+<text x="622.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >4</text>
+<text x="706.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >5</text>
+<circle cx="64" cy="812" r="9" fill="#16a34a"/>
+<text x="82.0" y="817.0" font-size="13.5" fill="#16a34a" font-weight="800" text-anchor="start" >XANH</text>
+<text x="140.0" y="810.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Phạm vi nhỏ, có test phủ, không đụng</text>
+<text x="140.0" y="824.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >dữ liệu/quyền</text>
+<circle cx="370" cy="812" r="10" fill="#16a34a33" stroke="#16a34a" stroke-width="2"/>
+<circle cx="454" cy="812" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="538" cy="812" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="622" cy="812" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="706" cy="812" r="10" fill="#16a34a33" stroke="#16a34a" stroke-width="2"/>
+<circle cx="64" cy="848" r="9" fill="#d97706"/>
+<text x="82.0" y="853.0" font-size="13.5" fill="#d97706" font-weight="800" text-anchor="start" >VÀNG</text>
+<text x="140.0" y="850.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Feature mới trong module có sẵn</text>
+<circle cx="370" cy="848" r="10" fill="#d97706"/>
+<circle cx="454" cy="848" r="10" fill="#d97706"/>
+<circle cx="538" cy="848" r="10" fill="#d9770633" stroke="#d97706" stroke-width="2"/>
+<circle cx="622" cy="848" r="10" fill="#d97706"/>
+<circle cx="706" cy="848" r="10" fill="#d97706"/>
+<circle cx="64" cy="884" r="9" fill="#dc2626"/>
+<text x="82.0" y="889.0" font-size="13.5" fill="#dc2626" font-weight="800" text-anchor="start" >ĐỎ</text>
+<text x="140.0" y="882.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Schema, quyền, tiền, tích hợp ngoài,</text>
+<text x="140.0" y="896.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >migration phá huỷ</text>
+<circle cx="370" cy="884" r="10" fill="#dc2626"/>
+<circle cx="454" cy="884" r="10" fill="#dc2626"/>
+<circle cx="538" cy="884" r="10" fill="#dc2626"/>
+<circle cx="622" cy="884" r="10" fill="#dc2626"/>
+<circle cx="706" cy="884" r="10" fill="#dc2626"/>
+<circle cx="130" cy="911" r="7" fill="#12263f"/>
+<text x="144.0" y="915.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >người bắt buộc</text>
+<circle cx="280" cy="911" r="7" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<text x="294.0" y="915.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >người xác nhận nhẹ</text>
+<circle cx="430" cy="911" r="7" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="444.0" y="915.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >tự động</text>
+<text x="52.0" y="915.0" font-size="11.5" fill="#64748b" font-weight="700" text-anchor="start" >Chú giải</text>
+<text x="798.0" y="915.0" font-size="11" fill="#dc2626" font-weight="600" text-anchor="end" >Đỏ: thêm SA, Security, khách</text>
+<text x="834.0" y="758.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">SỐ LIỆU ĐỂ NỚI HAY SIẾT TỪNG CỔNG</text>
+<rect x="834.0" y="770.0" width="713.0" height="150.0" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
+<circle cx="854.0" cy="794" r="4" fill="#059669"/>
+<text x="866.0" y="798.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Tỷ lệ lỗi lọt</text>
+<text x="866.0" y="814.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >bug sau nghiệm thu / tổng thay đổi</text>
+<circle cx="1202.5" cy="794" r="4" fill="#059669"/>
+<text x="1214.5" y="798.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Tỷ lệ làm lại</text>
+<text x="1214.5" y="814.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >agent bị trả về → sửa spec &amp; plan</text>
+<circle cx="854.0" cy="834" r="4" fill="#059669"/>
+<text x="866.0" y="838.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Số lần spec drift</text>
+<text x="866.0" y="854.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >cao → siết cổng tự động</text>
+<circle cx="1202.5" cy="834" r="4" fill="#059669"/>
+<text x="1214.5" y="838.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Thời gian chờ người</text>
+<text x="1214.5" y="854.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >điểm nghẽn thật cần tự động hoá</text>
+<circle cx="854.0" cy="874" r="4" fill="#059669"/>
+<text x="866.0" y="878.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Chi phí / thay đổi</text>
+<text x="866.0" y="894.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >token + giờ người → nền để định giá</text>
+<circle cx="1202.5" cy="874" r="4" fill="#059669"/>
+<text x="1214.5" y="878.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Điểm eval của agent</text>
+<text x="1214.5" y="894.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >chạy lại khi đổi model/prompt/skill</text>
+<text x="40.0" y="946.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">LỘ TRÌNH THÍCH ỨNG — THEO ĐIỀU KIỆN ĐO ĐƯỢC, KHÔNG THEO MỐC THỜI GIAN</text>
+<path d="M40.0,958 h466.3 l20,38 l-20,38 h-466.3  z" fill="#12263f"/>
+<text x="58.0" y="991.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >0–3 THÁNG · DỰNG NỀN</text>
+<text x="58.0" y="1011.0" font-size="9.5" fill="#ffffffaa" font-weight="700" text-anchor="start" letter-spacing="1">ĐIỀU KIỆN SANG BƯỚC SAU</text>
+<text x="58.0" y="1026.0" font-size="11.5" fill="#fff" font-weight="500" text-anchor="start" >Có 2–3 tháng số liệu liên tục</text>
+<text x="46.0" y="1058.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Spec hai lớp, phân tầng rủi ro, bằng chứng bắt buộc,</text>
+<text x="46.0" y="1073.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >quét bảo mật tự động, sandbox cho agent.</text>
+<path d="M550.3,958 h466.3 l20,38 l-20,38 h-466.3 l20,-38 l-20,-38 z" fill="#2563eb"/>
+<text x="586.3" y="991.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >3–9 THÁNG · NỚI TẦNG XANH</text>
+<text x="586.3" y="1011.0" font-size="9.5" fill="#ffffffaa" font-weight="700" text-anchor="start" letter-spacing="1">ĐIỀU KIỆN SANG BƯỚC SAU</text>
+<text x="586.3" y="1026.0" font-size="11.5" fill="#fff" font-weight="500" text-anchor="start" >Lỗi lọt tầng xanh dưới ngưỡng</text>
+<text x="556.3" y="1058.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Tầng xanh gần như tự động, người chỉ xác nhận cuối.</text>
+<text x="556.3" y="1073.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Operator điều phối nhiều agent song song.</text>
+<path d="M1060.7,958 h466.3 l20,38 l-20,38 h-466.3 l20,-38 l-20,-38 z" fill="#7c3aed"/>
+<text x="1096.7" y="991.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >9–18 THÁNG · DỊCH CHUYỂN VAI TRÒ</text>
+<text x="1096.7" y="1011.0" font-size="9.5" fill="#ffffffaa" font-weight="700" text-anchor="start" letter-spacing="1">ĐIỀU KIỆN SANG BƯỚC SAU</text>
+<text x="1096.7" y="1026.0" font-size="11.5" fill="#fff" font-weight="500" text-anchor="start" >Cổng kiểm chứng ổn định, eval đáng tin</text>
+<text x="1066.7" y="1058.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Việc vàng dần thành xanh. Người tập trung giai đoạn 1 và</text>
+<text x="1066.7" y="1073.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >5; SA / Agent owner thành vai trò cốt lõi.</text>
+<text x="40.0" y="1095.0" font-size="12.5" fill="#64748b" font-weight="400" text-anchor="start" >Nguyên tắc: đổi quy trình = đổi một tệp (rules / skill / kiểm tra tự động), rà soát mỗi quý, ghi lại lý do mỗi lần nới hoặc siết cổng.</text>
+<text x="1547.0" y="1095.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="end" >AI-Autopilot</text>
+</svg></div>
+  <p class="dl">⬇ Bản in khổ A3: <a href="diagrams/flow-A3.svg">diagrams/flow-A3.svg</a></p>
+</section>
+
+<section id="vai-tro">
+  <h2><span class="n">4</span>Phân cấp vai trò: ai làm gì</h2>
+  <p class="sub">Năm tầng: Khách hàng → Quản trị → Định nghĩa + Điều phối → Đội Agent → Kiểm chứng + Vận hành. Việc giao đi xuống theo tầng; bằng chứng đi lên theo tầng. Tầng Agent ánh xạ trực tiếp vào các agent đang có trong repo.</p>
+  <div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" viewBox="0 0 1587 1123" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+<title>Phân cấp vai trò trong quy trình phát triển phần mềm thời đại AI — Sơ đồ A3</title>
+<defs><marker id="rdn2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#12263f"/></marker><marker id="rup2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker></defs>
+<rect x="0.0" y="0.0" width="1587.0" height="1123.0" rx="0" fill="#fff" stroke="none" stroke-width="1.4"/>
+<rect x="0.0" y="0.0" width="1587.0" height="92.0" rx="0" fill="#12263f" stroke="none" stroke-width="1.4"/>
+<text x="40.0" y="44.0" font-size="30" fill="#fff" font-weight="700" text-anchor="start" >PHÂN CẤP VAI TRÒ — AI LÀM GÌ, NGƯỜI LÀM GÌ</text>
+<text x="40.0" y="72.0" font-size="15" fill="#cbd5e1" font-weight="400" text-anchor="start" >Mỗi vai trò: quyết định gì · làm gì · chịu trách nhiệm gì — từ Khách hàng xuống đội Agent rồi trở lên bằng bằng chứng</text>
+<text x="1547.0" y="44.0" font-size="15" fill="#cbd5e1" font-weight="600" text-anchor="end" >Đề xuất · v1.2</text>
+<text x="1547.0" y="72.0" font-size="13" fill="#94a3b8" font-weight="400" text-anchor="end" >2026-10-31 · khổ A3</text>
+<rect x="40.0" y="112.0" width="150.0" height="116.0" rx="10" fill="#475569" stroke="none" stroke-width="1.4"/>
+<text x="115.0" y="156.0" font-size="11" fill="#ffffffbb" font-weight="700" text-anchor="middle" letter-spacing="1.5">TẦNG 0</text>
+<text x="115.0" y="175.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >KHÁCH HÀNG</text>
+<text x="115.0" y="199.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >Nguồn nhu cầu và</text>
+<text x="115.0" y="212.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >người chấp nhận cuối</text>
+<rect x="210.0" y="112.0" width="1337.0" height="116.0" rx="10" fill="#f1f5f9" stroke="none" stroke-width="1.4"/>
+<rect x="222.0" y="122.0" width="1313.0" height="96.0" rx="8" fill="#fff" stroke="#475569" stroke-width="1.4"/>
+<text x="234.0" y="144.0" font-size="15" fill="#475569" font-weight="700" text-anchor="start" >Khách / Owner nghiệm thu</text>
+<text x="234.0" y="170.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="234.0" y="184.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Phạm vi, ưu tiên, chấp nhận hay từ chối bản giao.</text>
+<text x="663.7" y="170.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="663.7" y="184.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Cung cấp nghiệp vụ thật, xem demo, ký nhận. Không trùng người viết</text>
+<text x="663.7" y="199.5" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >spec.</text>
+<text x="1093.3" y="170.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="1093.3" y="184.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Ký nhận và chấp nhận rủi ro đã được trình bày.</text>
+<rect x="40.0" y="250.0" width="150.0" height="204.0" rx="10" fill="#12263f" stroke="none" stroke-width="1.4"/>
+<text x="115.0" y="338.0" font-size="11" fill="#ffffffbb" font-weight="700" text-anchor="middle" letter-spacing="1.5">TẦNG 1</text>
+<text x="115.0" y="357.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >QUẢN TRỊ</text>
+<text x="115.0" y="381.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >Đặt luật chơi, giữ</text>
+<text x="115.0" y="394.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >ranh giới</text>
+<rect x="210.0" y="250.0" width="1337.0" height="204.0" rx="10" fill="#e8eef6" stroke="none" stroke-width="1.4"/>
+<rect x="222.0" y="260.0" width="319.2" height="184.0" rx="8" fill="#fff" stroke="#12263f" stroke-width="1.4"/>
+<text x="234.0" y="282.0" font-size="15" fill="#12263f" font-weight="700" text-anchor="start" >PM</text>
+<text x="234.0" y="300.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="234.0" y="313.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Phạm vi, thứ tự ưu tiên, hợp đồng theo kết quả.</text>
+<text x="234.0" y="335.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="234.0" y="348.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Quản hàng đợi chờ duyệt (WIP), rủi ro, kỳ vọng</text>
+<text x="234.0" y="363.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >khách; báo cáo tự động.</text>
+<text x="234.0" y="385.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="234.0" y="398.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Tiến độ, chi phí / thay đổi, không để phạm vi trôi.</text>
+<rect x="553.2" y="260.0" width="319.2" height="184.0" rx="8" fill="#fff" stroke="#12263f" stroke-width="1.4"/>
+<text x="565.2" y="282.0" font-size="15" fill="#12263f" font-weight="700" text-anchor="start" >SA</text>
+<text x="565.2" y="300.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="565.2" y="313.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Kiến trúc; quyết định một chiều (schema, contract,</text>
+<text x="565.2" y="328.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >bảo mật).</text>
+<text x="565.2" y="350.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="565.2" y="363.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Review giải pháp (plan, thiết kế) mức Vàng/Đỏ; mã</text>
+<text x="565.2" y="378.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >hoá kiến trúc thành rules / skill / kiểm tra tự</text>
+<text x="565.2" y="393.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >động.</text>
+<text x="565.2" y="415.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="565.2" y="428.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Độ lệch codebase so với kiến trúc đích; giải pháp</text>
+<text x="565.2" y="443.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >được review độc lập.</text>
+<rect x="884.5" y="260.0" width="319.2" height="184.0" rx="8" fill="#fff" stroke="#12263f" stroke-width="1.4"/>
+<text x="896.5" y="282.0" font-size="15" fill="#12263f" font-weight="700" text-anchor="start" >Security</text>
+<text x="896.5" y="300.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="896.5" y="313.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Chính sách bảo mật, ngoại lệ, dữ liệu nào được đưa</text>
+<text x="896.5" y="328.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >vào AI.</text>
+<text x="896.5" y="350.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="896.5" y="363.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Quét tự động liên tục; review Vàng/Đỏ; DAST, PoC;</text>
+<text x="896.5" y="378.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >quyền tối thiểu cho agent.</text>
+<text x="896.5" y="400.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="896.5" y="413.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Bề mặt tấn công và rò rỉ dữ liệu không vượt kiểm</text>
+<text x="896.5" y="428.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >soát.</text>
+<rect x="1215.8" y="260.0" width="319.2" height="184.0" rx="8" fill="#fff" stroke="#12263f" stroke-width="1.4"/>
+<text x="1227.8" y="282.0" font-size="15" fill="#12263f" font-weight="700" text-anchor="start" >Agent owner + Eval</text>
+<text x="1227.8" y="300.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="1227.8" y="313.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Skill, prompt, quyền hạn agent; ngưỡng nới / siết</text>
+<text x="1227.8" y="328.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >cổng.</text>
+<text x="1227.8" y="350.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="1227.8" y="363.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Bảo trì đội agent; bộ eval cố định, chạy lại khi đổi</text>
+<text x="1227.8" y="378.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >model.</text>
+<text x="1227.8" y="400.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="1227.8" y="413.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Chất lượng đo được của đội agent.</text>
+<rect x="40.0" y="476.0" width="150.0" height="192.0" rx="10" fill="#2563eb" stroke="none" stroke-width="1.4"/>
+<text x="115.0" y="558.0" font-size="11" fill="#ffffffbb" font-weight="700" text-anchor="middle" letter-spacing="1.5">TẦNG 2</text>
+<text x="115.0" y="577.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >ĐỊNH NGHĨA +</text>
+<text x="115.0" y="595.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >ĐIỀU PHỐI</text>
+<text x="115.0" y="619.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >Biến nhu cầu thành</text>
+<text x="115.0" y="632.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >việc làm được</text>
+<rect x="210.0" y="476.0" width="1337.0" height="192.0" rx="10" fill="#dbeafe" stroke="none" stroke-width="1.4"/>
+<rect x="222.0" y="486.0" width="429.7" height="172.0" rx="8" fill="#fff" stroke="#2563eb" stroke-width="1.4"/>
+<text x="234.0" y="508.0" font-size="15" fill="#2563eb" font-weight="700" text-anchor="start" >BA</text>
+<text x="234.0" y="526.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="234.0" y="539.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >AC đã kiểm chứng được chưa; gap nào cần khách chốt.</text>
+<text x="234.0" y="561.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="234.0" y="574.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Chốt PRD nhẹ + mockup với khách; rà SRS do agent soạn; tìm gap;</text>
+<text x="234.0" y="589.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >comment lệch spec lên work item.</text>
+<text x="234.0" y="611.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="234.0" y="624.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Spec đủ chính xác để máy làm theo. Không tự nghiệm thu spec mình viết.</text>
+<rect x="663.7" y="486.0" width="429.7" height="172.0" rx="8" fill="#fff" stroke="#2563eb" stroke-width="1.4"/>
+<text x="675.7" y="508.0" font-size="15" fill="#2563eb" font-weight="700" text-anchor="start" >Operator (thay Dev)</text>
+<text x="675.7" y="526.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="675.7" y="539.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Duyệt hay từ chối plan; phân loại rủi ro; khi nào can thiệp.</text>
+<text x="675.7" y="561.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="675.7" y="574.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Điều phối agent, chia lát nhỏ, canh diff, gỡ khi agent kẹt hoặc vá cho</text>
+<text x="675.7" y="589.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >qua test.</text>
+<text x="675.7" y="611.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="675.7" y="624.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Kết quả cuối; giải thích được mọi thay đổi.</text>
+<rect x="1105.3" y="486.0" width="429.7" height="172.0" rx="8" fill="#fff" stroke="#2563eb" stroke-width="1.4"/>
+<text x="1117.3" y="508.0" font-size="15" fill="#2563eb" font-weight="700" text-anchor="start" >Chuyên sâu (Perf / DB / UX)</text>
+<text x="1117.3" y="526.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="1117.3" y="539.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Giải pháp ở mảng khó.</text>
+<text x="1117.3" y="561.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="1117.3" y="574.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Tham gia theo yêu cầu: hiệu năng, migration, trải nghiệm.</text>
+<text x="1117.3" y="596.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="1117.3" y="609.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Chất lượng mảng chuyên môn.</text>
+<rect x="40.0" y="690.0" width="150.0" height="186.0" rx="10" fill="#7c3aed" stroke="none" stroke-width="1.4"/>
+<text x="115.0" y="769.0" font-size="11" fill="#ffffffbb" font-weight="700" text-anchor="middle" letter-spacing="1.5">TẦNG 3</text>
+<text x="115.0" y="788.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >ĐỘI AGENT</text>
+<text x="115.0" y="812.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >Thực thi nhanh, luôn</text>
+<text x="115.0" y="825.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >có người sở hữu</text>
+<rect x="210.0" y="690.0" width="1337.0" height="186.0" rx="10" fill="#ede9fe" stroke="none" stroke-width="1.4"/>
+<rect x="40.0" y="898.0" width="150.0" height="164.0" rx="10" fill="#059669" stroke="none" stroke-width="1.4"/>
+<text x="115.0" y="966.0" font-size="11" fill="#ffffffbb" font-weight="700" text-anchor="middle" letter-spacing="1.5">TẦNG 4</text>
+<text x="115.0" y="985.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >KIỂM CHỨNG +</text>
+<text x="115.0" y="1003.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >VẬN HÀNH</text>
+<text x="115.0" y="1027.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >Xác nhận độc lập,</text>
+<text x="115.0" y="1040.0" font-size="10.5" fill="#ffffffcc" font-weight="400" text-anchor="middle" >đưa tín hiệu thật về</text>
+<rect x="210.0" y="898.0" width="1337.0" height="164.0" rx="10" fill="#d1fae5" stroke="none" stroke-width="1.4"/>
+<rect x="222.0" y="908.0" width="429.7" height="144.0" rx="8" fill="#fff" stroke="#059669" stroke-width="1.4"/>
+<text x="234.0" y="930.0" font-size="15" fill="#059669" font-weight="700" text-anchor="start" >QC</text>
+<text x="234.0" y="948.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="234.0" y="961.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Chiến lược test; tiêu chí pass.</text>
+<text x="234.0" y="983.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="234.0" y="996.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Duyệt TC sinh từ spec, exploratory, dữ liệu thật, báo bug.</text>
+<text x="234.0" y="1018.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="234.0" y="1031.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Tỷ lệ lỗi lọt thấp.</text>
+<rect x="663.7" y="908.0" width="429.7" height="144.0" rx="8" fill="#fff" stroke="#059669" stroke-width="1.4"/>
+<text x="675.7" y="930.0" font-size="15" fill="#059669" font-weight="700" text-anchor="start" >DevOps / SRE</text>
+<text x="675.7" y="948.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="675.7" y="961.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Cách release, khi nào rollback.</text>
+<text x="675.7" y="983.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="675.7" y="996.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Pipeline kiểm chứng, sandbox chạy agent, quyền và chi phí token,</text>
+<text x="675.7" y="1011.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >deploy.</text>
+<text x="675.7" y="1033.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="675.7" y="1046.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Triển khai an toàn, đảo ngược được.</text>
+<rect x="1105.3" y="908.0" width="429.7" height="144.0" rx="8" fill="#fff" stroke="#059669" stroke-width="1.4"/>
+<text x="1117.3" y="930.0" font-size="15" fill="#059669" font-weight="700" text-anchor="start" >Support</text>
+<text x="1117.3" y="948.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">QUYẾT ĐỊNH</text>
+<text x="1117.3" y="961.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Mức nghiêm trọng của sự cố.</text>
+<text x="1117.3" y="983.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="1117.3" y="996.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Gom tín hiệu production, phân loại, đưa ngược về BA.</text>
+<text x="1117.3" y="1018.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">CHỊU TRÁCH NHIỆM</text>
+<text x="1117.3" y="1031.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Vòng phản hồi không đứt.</text>
+<rect x="220.0" y="700.0" width="321.8" height="44.0" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="232.0" y="719.0" font-size="13.5" fill="#5b21b6" font-weight="700" text-anchor="start" >Phân tích yêu cầu</text>
+<text x="232.0" y="735.0" font-size="10.5" fill="#64748b" font-weight="400" text-anchor="start" >agent-requirement-analyst</text>
+<rect x="551.8" y="700.0" width="321.8" height="44.0" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="563.8" y="719.0" font-size="13.5" fill="#5b21b6" font-weight="700" text-anchor="start" >Thiết kế API</text>
+<text x="563.8" y="735.0" font-size="10.5" fill="#64748b" font-weight="400" text-anchor="start" >agent-api-designer</text>
+<rect x="883.5" y="700.0" width="321.8" height="44.0" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="895.5" y="719.0" font-size="13.5" fill="#5b21b6" font-weight="700" text-anchor="start" >Implement BE / FE</text>
+<text x="895.5" y="735.0" font-size="10.5" fill="#64748b" font-weight="400" text-anchor="start" >agent-backend- / frontend-implementer</text>
+<rect x="1215.2" y="700.0" width="321.8" height="44.0" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="1227.2" y="719.0" font-size="13.5" fill="#5b21b6" font-weight="700" text-anchor="start" >Viết test</text>
+<text x="1227.2" y="735.0" font-size="10.5" fill="#64748b" font-weight="400" text-anchor="start" >agent-test-writer</text>
+<rect x="220.0" y="752.0" width="321.8" height="44.0" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="232.0" y="771.0" font-size="13.5" fill="#5b21b6" font-weight="700" text-anchor="start" >Review code + bảo mật</text>
+<text x="232.0" y="787.0" font-size="10.5" fill="#64748b" font-weight="400" text-anchor="start" >agent-pr-reviewer · security-reviewer</text>
+<rect x="551.8" y="752.0" width="321.8" height="44.0" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="563.8" y="771.0" font-size="13.5" fill="#5b21b6" font-weight="700" text-anchor="start" >Cập nhật spec + tạo PR</text>
+<text x="563.8" y="787.0" font-size="10.5" fill="#64748b" font-weight="400" text-anchor="start" >agent-spec-updater · pr-author</text>
+<rect x="883.5" y="752.0" width="321.8" height="44.0" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="895.5" y="771.0" font-size="13.5" fill="#5b21b6" font-weight="700" text-anchor="start" >QC thủ công + E2E</text>
+<text x="895.5" y="787.0" font-size="10.5" fill="#64748b" font-weight="400" text-anchor="start" >agent-qc-manual · qc-automation</text>
+<rect x="1215.2" y="752.0" width="321.8" height="44.0" rx="8" fill="#fff" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="1227.2" y="771.0" font-size="13.5" fill="#5b21b6" font-weight="700" text-anchor="start" >Triển khai + kiểm tra sau deploy</text>
+<text x="1227.2" y="787.0" font-size="10.5" fill="#64748b" font-weight="400" text-anchor="start" >agent-deploy-runner</text>
+<rect x="220.0" y="802.0" width="1317.0" height="64.0" rx="8" fill="#fff7ed" stroke="#d97706" stroke-width="1.3"/>
+<text x="232.0" y="821.0" font-size="12.5" fill="#b45309" font-weight="700" text-anchor="start" >Ba quy tắc cứng:</text>
+<text x="362.0" y="821.0" font-size="12.5" fill="#1f2937" font-weight="400" text-anchor="start" >(1) Agent không tự chịu trách nhiệm — mỗi việc có Operator sở hữu.</text>
+<text x="362.0" y="838.0" font-size="12.5" fill="#1f2937" font-weight="400" text-anchor="start" >(2) Agent viết code ≠ agent sinh test case — không tự chấm bài mình.</text>
+<text x="362.0" y="855.0" font-size="12.5" fill="#1f2937" font-weight="400" text-anchor="start" >(3) Quyền tối thiểu, chạy sandbox; thao tác không đảo ngược (drop, xoá, force push, deploy) cần người duyệt.</text>
+<path d="M540,230 V248" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#rdn2)"/>
+<text x="552.0" y="243.0" font-size="11" fill="#12263f" font-weight="600" text-anchor="start" >↓ Phạm vi, ưu tiên</text>
+<path d="M1217,248 V230" stroke="#059669" stroke-width="2.4" fill="none" marker-end="url(#rup2)"/>
+<text x="1205.0" y="243.0" font-size="11" fill="#047857" font-weight="600" text-anchor="end" >↑ Nghiệm thu / từ chối</text>
+<path d="M540,456 V474" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#rdn2)"/>
+<text x="552.0" y="469.0" font-size="11" fill="#12263f" font-weight="600" text-anchor="start" >↓ Spec, AC, luật kiến trúc</text>
+<path d="M1217,474 V456" stroke="#059669" stroke-width="2.4" fill="none" marker-end="url(#rup2)"/>
+<text x="1205.0" y="469.0" font-size="11" fill="#047857" font-weight="600" text-anchor="end" >↑ Rủi ro, số liệu, ngoại lệ</text>
+<path d="M540,670 V688" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#rdn2)"/>
+<text x="552.0" y="683.0" font-size="11" fill="#12263f" font-weight="600" text-anchor="start" >↓ Plan đã duyệt, lát việc nhỏ</text>
+<path d="M1217,688 V670" stroke="#059669" stroke-width="2.4" fill="none" marker-end="url(#rup2)"/>
+<text x="1205.0" y="683.0" font-size="11" fill="#047857" font-weight="600" text-anchor="end" >↑ Diff, log chạy thật, demo</text>
+<path d="M540,878 V896" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#rdn2)"/>
+<text x="552.0" y="891.0" font-size="11" fill="#12263f" font-weight="600" text-anchor="start" >↓ Bản build + bằng chứng</text>
+<path d="M1217,896 V878" stroke="#059669" stroke-width="2.4" fill="none" marker-end="url(#rup2)"/>
+<text x="1205.0" y="891.0" font-size="11" fill="#047857" font-weight="600" text-anchor="end" >↑ Báo cáo TC, tín hiệu production</text>
+<text x="40.0" y="1095.0" font-size="12.5" fill="#64748b" font-weight="400" text-anchor="start" >↓ giao việc xuống theo tầng   ·   ↑ bằng chứng đi lên theo tầng   ·   Quyết định khó đảo ngược luôn do người: schema, contract, bảo mật, migration phá huỷ.</text>
+<text x="1547.0" y="1095.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="end" >AI-Autopilot</text>
+</svg></div>
+  <p class="dl">⬇ Bản in khổ A3: <a href="diagrams/roles-A3.svg">diagrams/roles-A3.svg</a></p>
+
+  <h3>Vai trò nào tăng, giữ, giảm</h3>
+  <table>
+    <tr><th>Xu hướng</th><th>Vai trò</th><th>Ghi chú</th></tr>
+    <tr><td><span class="pill p-g">Tăng</span></td><td>SA, PM, Security, DevOps / SRE, BA</td><td>Quyết định dày hơn vì tốc độ thay đổi tăng; sai hướng tốn kém nhanh hơn.</td></tr>
+    <tr><td><span class="pill p-n">Giữ</span></td><td>DBA, UX, Support</td><td>Migration phá huỷ cần người chốt; Support là nguồn tín hiệu thật từ production.</td></tr>
+    <tr><td><span class="pill p-r">Thu hẹp</span></td><td>Dev thuần (code theo ticket), QC thủ công, tech writer</td><td>Chuyển sang Operator, SA, chuyên sâu, hoặc duyệt đầu ra do máy sinh.</td></tr>
+    <tr><td><span class="pill p-v">Mới</span></td><td>Agent owner, Eval owner</td><td>Quản trị chất lượng đội agent và đo xem quy trình tốt lên hay tệ đi.</td></tr>
+  </table>
+</section>
+
+<section id="raci">
+  <h2><span class="n">5</span>Ma trận RACI theo giai đoạn</h2>
+  <p class="sub"><b class="raci"><span class="R">R</span></b> làm · <b class="raci"><span class="A">A</span></b> chịu trách nhiệm cuối · <b class="raci"><span class="C">C</span></b> được hỏi ý kiến · <b class="raci"><span class="I">I</span></b> được báo. Mỗi ô chỉ có một A.</p>
+  <table class="raci">
+    <tr><th>Vai trò</th><th class="c">1 Định nghĩa</th><th class="c">2 Kế hoạch</th><th class="c">3 Thực thi</th><th class="c">4 Kiểm chứng</th><th class="c">5 Nghiệm thu</th><th class="c">6 Phản hồi</th></tr>
+    <tr><td><b>Khách / Owner</b></td><td class="c C">C</td><td class="c I">I</td><td class="c">–</td><td class="c">–</td><td class="c A">A</td><td class="c I">I</td></tr>
+    <tr><td><b>PM</b></td><td class="c C">C</td><td class="c C">C</td><td class="c I">I</td><td class="c I">I</td><td class="c C">C</td><td class="c A">A</td></tr>
+    <tr><td><b>BA</b></td><td class="c A">A</td><td class="c C">C</td><td class="c">–</td><td class="c C">C</td><td class="c R">R</td><td class="c R">R</td></tr>
+    <tr><td><b>Operator</b></td><td class="c C">C</td><td class="c A">A</td><td class="c A">A</td><td class="c C">C</td><td class="c I">I</td><td class="c I">I</td></tr>
+    <tr><td><b>SA</b></td><td class="c C">C</td><td class="c R">R (Vàng/Đỏ)</td><td class="c">–</td><td class="c I">I</td><td class="c">–</td><td class="c">–</td></tr>
+    <tr><td><b>Security</b></td><td class="c">–</td><td class="c C">C</td><td class="c">–</td><td class="c R">R</td><td class="c">–</td><td class="c">–</td></tr>
+    <tr><td><b>QC</b></td><td class="c C">C</td><td class="c I">I</td><td class="c">–</td><td class="c A">A</td><td class="c C">C</td><td class="c">–</td></tr>
+    <tr><td><b>DevOps / SRE</b></td><td class="c">–</td><td class="c C">C</td><td class="c C">C</td><td class="c C">C</td><td class="c R">R (deploy)</td><td class="c R">R (giám sát)</td></tr>
+    <tr><td><b>Support</b></td><td class="c">–</td><td class="c">–</td><td class="c">–</td><td class="c">–</td><td class="c I">I</td><td class="c R">R</td></tr>
+    <tr><td><b>Agent owner / Eval</b></td><td class="c">–</td><td class="c I">I</td><td class="c C">C</td><td class="c C">C</td><td class="c">–</td><td class="c C">C</td></tr>
+    <tr><td><b>Đội Agent</b></td><td class="c R">R</td><td class="c R">R</td><td class="c R">R</td><td class="c R">R</td><td class="c R">R (demo)</td><td class="c R">R (phân loại)</td></tr>
+  </table>
+  <p class="small">Đội Agent chỉ có R, không bao giờ có A. Ở giai đoạn 5, người chịu trách nhiệm cuối là khách hoặc owner, không phải BA viết spec.</p>
+</section>
+
+<section id="spec">
+  <h2><span class="n">6</span>Spec: PRD, BRD hay SRS, và khi nào cần SRS</h2>
+  <p class="sub">Spec trong repo (FR, AC, Edge case, Data, Validation, UI Components, Business Rules) gần <b>SRS ở mức từng feature</b> nhất, pha chút PRD; không có phần BRD. Spec là trục trung tâm: agent làm theo nó, QC sinh test case từ nó, khách nghiệm thu theo nó.</p>
+  <table>
+    <tr><th></th><th>BRD</th><th>PRD</th><th>SRS</th></tr>
+    <tr><td><b>Trả lời</b></td><td>Vì sao doanh nghiệp cần</td><td>Cái gì phải làm cho người dùng</td><td>Hệ thống hành xử chính xác thế nào</td></tr>
+    <tr><td><b>Người đọc</b></td><td>Lãnh đạo, khách (ký)</td><td>Cả đội</td><td>Dev, QC, và giờ là <b>agent</b></td></tr>
+    <tr><td><b>Mức chi tiết</b></td><td>Thấp</td><td>Trung bình</td><td><b>Cao, kiểm chứng được</b></td></tr>
+  </table>
+  <h3>Spec hai lớp: chốt nhanh với khách, chính xác cho agent</h3>
+  <p>SRS viết tay tốn thời gian, còn khách xác nhận nhanh hơn trên PRD nhẹ và mockup. Hai người đọc khác nhau nên tách hai lớp, và để agent soạn nháp phần tốn công.</p>
+  <table>
+    <tr><th>Bước</th><th>Ai làm</th><th>Ghi chú</th></tr>
+    <tr><td>① PRD nhẹ + mockup + kịch bản</td><td>BA, agent hỗ trợ</td><td>Khách thấy và gật; AC viết bằng ngôn ngữ thường (Given / When / Then)</td></tr>
+    <tr><td>② Khách xác nhận</td><td>Khách + BA</td><td>Tầng Đỏ: khách ký từng AC</td></tr>
+    <tr><td>③ Soạn nháp SRS (FR, AC, edge, data)</td><td><b>Agent</b></td><td>Kèm danh sách giả định và câu hỏi mở để BA hỏi lại khách</td></tr>
+    <tr><td>④ Rà soát SRS, đối chiếu về PRD</td><td><b>BA</b> (+ SA nếu Đỏ)</td><td>Cổng chống lệch ý; mỗi FR trỏ về mục PRD</td></tr>
+  </table>
+  <div class="grid2" style="margin-top:18px">
+    <div class="card"><b>Nên làm SRS đầy đủ khi</b><ul>
+      <li>Đụng tiền, quyền, dữ liệu, tích hợp ngoài (hậu quả lớn, khó đảo ngược)</li>
+      <li>Nghiệm thu theo tài liệu đã ký</li>
+      <li>Feature nhiều luồng, trạng thái, edge case</li>
+      <li>Giao cho agent chạy tự động; QC sinh test độc lập</li>
+      <li>Nhiều người / nhiều agent cùng làm; hệ thống bảo trì nhiều năm</li></ul></div>
+    <div class="card"><b>Chỉ cần mức nhẹ (AC ngắn) khi</b><ul>
+      <li>Sửa nhãn, bug nhỏ, refactor có test phủ</li>
+      <li>Prototype, thử nghiệm bỏ đi</li>
+      <li>Đổi UI thuần, không đổi hành vi (mockup + ảnh trước/sau)</li>
+      <li>Hành vi đã rõ và có test bảo vệ</li></ul></div>
+  </div>
+  <div class="callout ok"><b>Quy tắc quyết định:</b> nếu agent hiểu sai mà hậu quả lớn, hoặc khó phát hiện, hoặc khó sửa thì viết SRS đầy đủ; còn lại AC ngắn là đủ. <b>Thời điểm đúng:</b> ngay sau khi khách xác nhận ý tưởng và trước khi agent bắt đầu code.</div>
+</section>
+
+<section id="artifact">
+  <h2><span class="n">7</span>Artifact: mỗi bên xuất tài liệu gì</h2>
+  <p class="sub">Mọi artifact khác là dẫn xuất từ spec hoặc là bằng chứng đối chiếu lại với spec. Tài liệu chỉ sinh khi có người dùng tiếp (QC, khách, reviewer, agent).</p>
+  <div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" viewBox="0 0 1587 1123" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+<title>Bản đồ artifact — spec ở trung tâm — Sơ đồ A3</title>
+<defs><marker id="ma3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#12263f"/></marker><marker id="mb3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker></defs>
+<rect x="0.0" y="0.0" width="1587.0" height="1123.0" rx="0" fill="#fff" stroke="none" stroke-width="1.4"/>
+<rect x="0.0" y="0.0" width="1587.0" height="92.0" rx="0" fill="#12263f" stroke="none" stroke-width="1.4"/>
+<text x="40.0" y="44.0" font-size="30" fill="#fff" font-weight="700" text-anchor="start" >BẢN ĐỒ ARTIFACT — SPEC Ở TRUNG TÂM</text>
+<text x="40.0" y="72.0" font-size="15" fill="#cbd5e1" font-weight="400" text-anchor="start" >Ai xuất tài liệu gì, ai dùng tiếp, truy ngược về đâu · spec hai lớp: chốt nhanh với khách, chính xác cho agent</text>
+<text x="1547.0" y="44.0" font-size="15" fill="#cbd5e1" font-weight="600" text-anchor="end" >Đề xuất · v1.2</text>
+<text x="1547.0" y="72.0" font-size="13" fill="#94a3b8" font-weight="400" text-anchor="end" >2026-10-31 · khổ A3</text>
+<text x="40.0" y="122.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">CHUỖI ARTIFACT THEO GIAI ĐOẠN</text>
+<path d="M258.1,134 v-8 h416.3 v8" fill="none" stroke="#d97706" stroke-width="2.4"/>
+<rect x="388.3" y="112.0" width="156.0" height="22.0" rx="11" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<text x="466.3" y="127.5" font-size="12" fill="#fff" font-weight="800" text-anchor="middle" letter-spacing="1.2">SPEC HAI LỚP</text>
+<rect x="40.0" y="138.0" width="198.1" height="196.0" rx="10" fill="#f8fafc" stroke="#475569" stroke-width="1.4"/>
+<circle cx="62.0" cy="162" r="12" fill="#475569"/>
+<text x="62.0" y="167.0" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >1</text>
+<text x="82.0" y="168.0" font-size="14" fill="#12263f" font-weight="700" text-anchor="start" >Yêu cầu gốc</text>
+<text x="52.0" y="218.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="52.0" y="231.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Khách / Owner</text>
+<text x="52.0" y="252.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="52.0" y="265.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >BA</text>
+<text x="52.0" y="286.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">KIỂM TRA</text>
+<text x="52.0" y="299.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Nguyên văn, có người chịu trách</text>
+<text x="52.0" y="313.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >nhiệm</text>
+<path d="M240.1,236.0 h16" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#ma3)"/>
+<rect x="258.1" y="138.0" width="198.1" height="196.0" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2.6"/>
+<circle cx="280.1428571428571" cy="162" r="12" fill="#d97706"/>
+<text x="280.1" y="167.0" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >2</text>
+<text x="300.1" y="168.0" font-size="14" fill="#d97706" font-weight="700" text-anchor="start" >PRD nhẹ + Mockup</text>
+<text x="270.1" y="218.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="270.1" y="231.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >BA (agent hỗ trợ)</text>
+<text x="270.1" y="252.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="270.1" y="265.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Khách xác nhận; Agent soạn SRS</text>
+<text x="270.1" y="286.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">KIỂM TRA</text>
+<text x="270.1" y="299.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Khách thấy và gật; Đỏ: ký từng AC</text>
+<path d="M458.3,236.0 h16" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#ma3)"/>
+<rect x="476.3" y="138.0" width="198.1" height="196.0" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="2.6"/>
+<circle cx="498.2857142857143" cy="162" r="12" fill="#d97706"/>
+<text x="498.3" y="167.0" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >3</text>
+<text x="518.3" y="168.0" font-size="14" fill="#d97706" font-weight="700" text-anchor="start" >SRS: FR · AC ·</text>
+<text x="518.3" y="185.0" font-size="14" fill="#d97706" font-weight="700" text-anchor="start" >Edge · Data</text>
+<text x="488.3" y="218.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="488.3" y="231.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Agent soạn nháp, BA + SA rà</text>
+<text x="488.3" y="252.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="488.3" y="265.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Operator, Agent, QC</text>
+<text x="488.3" y="286.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">KIỂM TRA</text>
+<text x="488.3" y="299.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >AC kiểm chứng được; trỏ về PRD</text>
+<path d="M676.4,236.0 h16" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#ma3)"/>
+<rect x="694.4" y="138.0" width="198.1" height="196.0" rx="10" fill="#f8fafc" stroke="#2563eb" stroke-width="1.4"/>
+<circle cx="716.4285714285714" cy="162" r="12" fill="#2563eb"/>
+<text x="716.4" y="167.0" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >4</text>
+<text x="736.4" y="168.0" font-size="14" fill="#2563eb" font-weight="700" text-anchor="start" >Plan + mức rủi ro</text>
+<text x="706.4" y="218.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="706.4" y="231.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Operator; SA review (Vàng/Đỏ)</text>
+<text x="706.4" y="252.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="706.4" y="265.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Agent, Reviewer</text>
+<text x="706.4" y="286.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">KIỂM TRA</text>
+<text x="706.4" y="299.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Mỗi bước trỏ về FR</text>
+<path d="M894.6,236.0 h16" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#ma3)"/>
+<rect x="912.6" y="138.0" width="198.1" height="196.0" rx="10" fill="#f8fafc" stroke="#7c3aed" stroke-width="1.4"/>
+<circle cx="934.5714285714286" cy="162" r="12" fill="#7c3aed"/>
+<text x="934.6" y="167.0" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >5</text>
+<text x="954.6" y="168.0" font-size="14" fill="#7c3aed" font-weight="700" text-anchor="start" >Code + test + log</text>
+<text x="954.6" y="185.0" font-size="14" fill="#7c3aed" font-weight="700" text-anchor="start" >chạy</text>
+<text x="924.6" y="218.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="924.6" y="231.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Đội Agent</text>
+<text x="924.6" y="252.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="924.6" y="265.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Reviewer, QC, Security</text>
+<text x="924.6" y="286.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">KIỂM TRA</text>
+<text x="924.6" y="299.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Quét bí mật, phụ thuộc, SAST sạch</text>
+<path d="M1112.7,236.0 h16" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#ma3)"/>
+<rect x="1130.7" y="138.0" width="198.1" height="196.0" rx="10" fill="#f8fafc" stroke="#059669" stroke-width="1.4"/>
+<circle cx="1152.7142857142858" cy="162" r="12" fill="#059669"/>
+<text x="1152.7" y="167.0" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >6</text>
+<text x="1172.7" y="168.0" font-size="14" fill="#059669" font-weight="700" text-anchor="start" >TC + kết quả +</text>
+<text x="1172.7" y="185.0" font-size="14" fill="#059669" font-weight="700" text-anchor="start" >scan</text>
+<text x="1142.7" y="218.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="1142.7" y="231.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >QC, Security, Agent</text>
+<text x="1142.7" y="252.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="1142.7" y="265.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >BA, Operator, Khách</text>
+<text x="1142.7" y="286.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">KIỂM TRA</text>
+<text x="1142.7" y="299.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Mỗi TC trỏ về AC; sinh từ spec</text>
+<path d="M1330.9,236.0 h16" stroke="#12263f" stroke-width="2.4" fill="none" marker-end="url(#ma3)"/>
+<rect x="1348.9" y="138.0" width="198.1" height="196.0" rx="10" fill="#f8fafc" stroke="#475569" stroke-width="1.4"/>
+<circle cx="1370.857142857143" cy="162" r="12" fill="#475569"/>
+<text x="1370.9" y="167.0" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >7</text>
+<text x="1390.9" y="168.0" font-size="14" fill="#12263f" font-weight="700" text-anchor="start" >Biên bản + demo</text>
+<text x="1360.9" y="218.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">LÀM</text>
+<text x="1360.9" y="231.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Khách / Owner ký</text>
+<text x="1360.9" y="252.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="1360.9" y="265.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >PM, BA</text>
+<text x="1360.9" y="286.0" font-size="9" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">KIỂM TRA</text>
+<text x="1360.9" y="299.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Đối chiếu AC đã ký</text>
+<rect x="258.1" y="344.0" width="416.3" height="52.0" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.2"/>
+<text x="270.1" y="362.0" font-size="11.5" fill="#92400e" font-weight="500" text-anchor="start" >Lớp 1 (PRD nhẹ + mockup): người đọc là khách. Lớp 2 (SRS): người đọc là</text>
+<text x="270.1" y="376.0" font-size="11.5" fill="#92400e" font-weight="500" text-anchor="start" >agent và QC. Khách không đọc SRS; AC viết bằng ngôn ngữ thường là cầu</text>
+<text x="270.1" y="390.0" font-size="11.5" fill="#92400e" font-weight="500" text-anchor="start" >nối giữa hai lớp.</text>
+<rect x="40.0" y="406.0" width="1507.0" height="34.0" rx="8" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="52.0" y="428.0" font-size="11.5" fill="#12263f" font-weight="800" text-anchor="start" >TRUY NGƯỢC:</text>
+<text x="160.0" y="428.0" font-size="12.5" fill="#1f2937" font-weight="600" text-anchor="start" >mỗi FR ↔ mục PRD  ·  mỗi bước plan ↔ FR  ·  mỗi thay đổi ↔ plan  ·  mỗi TC ↔ AC  ·  biên bản ↔ AC đã ký  ·  code lệch spec ⇒ comment điều chỉnh lên work item</text>
+<rect x="40.0" y="450.0" width="1507.0" height="30.0" rx="8" fill="#fff7ed" stroke="#d97706" stroke-width="1.4"/>
+<text x="52.0" y="470.0" font-size="11.5" fill="#d97706" font-weight="800" text-anchor="start" >6  PHẢN HỒI:</text>
+<text x="160.0" y="470.0" font-size="12.5" fill="#1f2937" font-weight="600" text-anchor="start" >Ticket production (Support) có liên kết ngược tới yêu cầu gốc → Agent phân loại → BA nhận thành gap mới → quay về bước 2</text>
+<text x="40.0" y="508.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">ARTIFACT THEO VAI TRÒ</text>
+<rect x="40.0" y="516.0" width="741.5" height="26.0" rx="6" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="50.0" y="533.0" font-size="10" fill="#12263f" font-weight="700" text-anchor="start" letter-spacing="1">VAI TRÒ</text>
+<text x="168.0" y="533.0" font-size="10" fill="#12263f" font-weight="700" text-anchor="start" letter-spacing="1">ARTIFACT ĐẦU RA</text>
+<text x="426.0" y="533.0" font-size="10" fill="#12263f" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="544.0" y="533.0" font-size="10" fill="#12263f" font-weight="700" text-anchor="start" letter-spacing="1">BẮT BUỘC</text>
+<rect x="40.0" y="542.0" width="741.5" height="44.0" rx="0" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="50.0" y="568.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Khách / Owner</text>
+<text x="168.0" y="562.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Yêu cầu gốc; biên bản nghiệm thu</text>
+<text x="426.0" y="563.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >BA, PM</text>
+<text x="544.0" y="568.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Biên bản ký</text>
+<rect x="40.0" y="586.0" width="741.5" height="44.0" rx="0" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text x="50.0" y="612.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >PM</text>
+<text x="168.0" y="603.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Phạm vi và ưu tiên đã chốt; hợp đồng theo</text>
+<text x="168.0" y="616.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >kết quả; báo cáo rủi ro</text>
+<text x="426.0" y="607.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Cả đội, Khách</text>
+<text x="544.0" y="612.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Phạm vi</text>
+<rect x="40.0" y="630.0" width="741.5" height="44.0" rx="0" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="50.0" y="656.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >BA</text>
+<text x="168.0" y="647.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >PRD nhẹ + mockup; SRS đã rà; danh sách gap</text>
+<text x="168.0" y="660.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >và giả định; comment lệch spec</text>
+<text x="426.0" y="645.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Agent, QC,</text>
+<text x="426.0" y="658.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Operator, Khách</text>
+<text x="544.0" y="656.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Spec + AC</text>
+<rect x="40.0" y="674.0" width="741.5" height="44.0" rx="0" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text x="50.0" y="700.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >SA</text>
+<text x="168.0" y="691.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Quyết định kiến trúc; rules / skill / kiểm</text>
+<text x="168.0" y="704.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >tra tự động; review giải pháp Vàng/Đỏ</text>
+<text x="426.0" y="695.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Agent, Operator</text>
+<text x="544.0" y="700.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Với việc Đỏ</text>
+<rect x="40.0" y="718.0" width="741.5" height="44.0" rx="0" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="50.0" y="744.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Operator</text>
+<text x="168.0" y="735.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Plan đã duyệt (phạm vi file, mức rủi ro);</text>
+<text x="168.0" y="748.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >PR description; fix-note</text>
+<text x="426.0" y="739.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Reviewer, QC, SA</text>
+<text x="544.0" y="744.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Plan + rủi ro</text>
+<rect x="40.0" y="762.0" width="741.5" height="44.0" rx="0" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text x="50.0" y="788.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Đội Agent</text>
+<text x="168.0" y="779.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Code + test; log chạy thật; TC sinh từ</text>
+<text x="168.0" y="792.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >spec; báo cáo scan; bản demo</text>
+<text x="426.0" y="777.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Operator, QC,</text>
+<text x="426.0" y="790.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Security</text>
+<text x="544.0" y="788.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Log chạy thật</text>
+<rect x="805.5" y="516.0" width="741.5" height="26.0" rx="6" fill="#eef2f7" stroke="#cbd5e1" stroke-width="1"/>
+<text x="815.5" y="533.0" font-size="10" fill="#12263f" font-weight="700" text-anchor="start" letter-spacing="1">VAI TRÒ</text>
+<text x="933.5" y="533.0" font-size="10" fill="#12263f" font-weight="700" text-anchor="start" letter-spacing="1">ARTIFACT ĐẦU RA</text>
+<text x="1191.5" y="533.0" font-size="10" fill="#12263f" font-weight="700" text-anchor="start" letter-spacing="1">DÙNG TIẾP</text>
+<text x="1309.5" y="533.0" font-size="10" fill="#12263f" font-weight="700" text-anchor="start" letter-spacing="1">BẮT BUỘC</text>
+<rect x="805.5" y="542.0" width="741.5" height="44.0" rx="0" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="815.5" y="568.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >QC</text>
+<text x="933.5" y="559.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Chiến lược test; bộ TC + kết quả; bug có</text>
+<text x="933.5" y="572.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >ảnh/video</text>
+<text x="1191.5" y="563.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >BA, Operator, Khách</text>
+<text x="1309.5" y="568.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Báo cáo TC</text>
+<rect x="805.5" y="586.0" width="741.5" height="44.0" rx="0" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text x="815.5" y="612.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Security</text>
+<text x="933.5" y="603.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Kết quả quét và review; PoC xác thực;</text>
+<text x="933.5" y="616.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >ngoại lệ có lý do và hạn</text>
+<text x="1191.5" y="607.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >SA, Operator</text>
+<text x="1309.5" y="612.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Vàng / Đỏ</text>
+<rect x="805.5" y="630.0" width="741.5" height="44.0" rx="0" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="815.5" y="656.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >DevOps / SRE</text>
+<text x="933.5" y="647.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Kết quả pipeline; lệnh deploy / rollback;</text>
+<text x="933.5" y="660.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >health check; nhật ký hành động agent</text>
+<text x="1191.5" y="651.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Operator, PM</text>
+<text x="1309.5" y="656.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Khi triển khai</text>
+<rect x="805.5" y="674.0" width="741.5" height="44.0" rx="0" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text x="815.5" y="700.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Support</text>
+<text x="933.5" y="691.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Ticket production liên kết ngược tới yêu</text>
+<text x="933.5" y="704.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >cầu gốc</text>
+<text x="1191.5" y="695.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >BA</text>
+<text x="1309.5" y="700.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Vòng phản hồi</text>
+<rect x="805.5" y="718.0" width="741.5" height="44.0" rx="0" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+<text x="815.5" y="744.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Agent owner</text>
+<text x="933.5" y="735.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Bộ eval; báo cáo chất lượng agent; lịch sử</text>
+<text x="933.5" y="748.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >đổi prompt / skill</text>
+<text x="1191.5" y="739.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Cả đội</text>
+<text x="1309.5" y="744.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Nên có</text>
+<rect x="805.5" y="762.0" width="741.5" height="44.0" rx="0" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text x="815.5" y="788.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Reviewer</text>
+<text x="933.5" y="779.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >Kết luận review có dẫn chứng theo dòng;</text>
+<text x="933.5" y="792.0" font-size="11" fill="#1f2937" font-weight="400" text-anchor="start" >danh sách vấn đề đã xử lý</text>
+<text x="1191.5" y="783.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Operator, SA</text>
+<text x="1309.5" y="788.0" font-size="11" fill="#047857" font-weight="700" text-anchor="start" >Vàng / Đỏ</text>
+<text x="40.0" y="826.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">SRS: LÀM DÀY ĐẾN ĐÂU</text>
+<rect x="40.0" y="834.0" width="489.0" height="225.0" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="62" cy="864.0" r="8" fill="#059669"/>
+<text x="78.0" y="869.0" font-size="12.5" fill="#059669" font-weight="800" text-anchor="start" >XANH</text>
+<text x="134.0" y="865.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Một đoạn mô tả + AC vài dòng; agent soạn, BA liếc nhanh</text>
+<circle cx="62" cy="925.6666666666666" r="8" fill="#d97706"/>
+<text x="78.0" y="930.7" font-size="12.5" fill="#d97706" font-weight="800" text-anchor="start" >VÀNG</text>
+<text x="134.0" y="926.7" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >PRD nhẹ + mockup; SRS đầy đủ FR + AC + edge; BA rà</text>
+<circle cx="62" cy="987.3333333333334" r="8" fill="#dc2626"/>
+<text x="78.0" y="992.3" font-size="12.5" fill="#dc2626" font-weight="800" text-anchor="start" >ĐỎ</text>
+<text x="134.0" y="988.3" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >AC khách ký từng dòng; SRS rà kỹ bởi BA + SA; có mục bảo mật</text>
+<text x="549.0" y="826.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">ARTIFACT BẢO MẬT</text>
+<rect x="549.0" y="834.0" width="489.0" height="225.0" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="569.0" cy="858.0" r="4" fill="#dc2626"/>
+<text x="581.0" y="862.0" font-size="12" fill="#1f2937" font-weight="700" text-anchor="start" >Trong spec</text>
+<text x="691.0" y="862.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >Mục phân quyền và dữ liệu nhạy cảm</text>
+<circle cx="569.0" cy="895.8" r="4" fill="#dc2626"/>
+<text x="581.0" y="899.8" font-size="12" fill="#1f2937" font-weight="700" text-anchor="start" >Trong plan</text>
+<text x="691.0" y="899.8" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >Ghi chú rủi ro; việc đụng auth hoặc dữ liệu được đánh</text>
+<text x="691.0" y="913.8" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >dấu</text>
+<circle cx="569.0" cy="933.6" r="4" fill="#dc2626"/>
+<text x="581.0" y="937.6" font-size="12" fill="#1f2937" font-weight="700" text-anchor="start" >Khi thực thi</text>
+<text x="691.0" y="937.6" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >Kết quả quét bí mật, phụ thuộc, SAST</text>
+<circle cx="569.0" cy="971.4" r="4" fill="#dc2626"/>
+<text x="581.0" y="975.4" font-size="12" fill="#1f2937" font-weight="700" text-anchor="start" >Khi kiểm chứng</text>
+<text x="691.0" y="975.4" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >Báo cáo review; DAST; PoC xác thực</text>
+<circle cx="569.0" cy="1009.2" r="4" fill="#dc2626"/>
+<text x="581.0" y="1013.2" font-size="12" fill="#1f2937" font-weight="700" text-anchor="start" >Khi nghiệm thu</text>
+<text x="691.0" y="1013.2" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >Danh sách ngoại lệ: lý do, người duyệt, hạn</text>
+<text x="1058.0" y="826.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">BA ARTIFACT SỐNG CÒN</text>
+<rect x="1058.0" y="834.0" width="489.0" height="225.0" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="1080.0" cy="864.0" r="12" fill="#12263f"/>
+<text x="1080.0" y="869.0" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >1</text>
+<text x="1102.0" y="863.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Spec có AC kiểm chứng được</text>
+<text x="1102.0" y="879.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >Đầu vào cho agent, QC, nghiệm thu; sai một chỗ là lan cả ba</text>
+<circle cx="1080.0" cy="925.6666666666666" r="12" fill="#12263f"/>
+<text x="1080.0" y="930.7" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >2</text>
+<text x="1102.0" y="924.7" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Bằng chứng chạy thật</text>
+<text x="1102.0" y="940.7" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >Log, TC, ảnh, scan; thay cho lời khẳng định đã xong</text>
+<circle cx="1080.0" cy="987.3333333333334" r="12" fill="#12263f"/>
+<text x="1080.0" y="992.3" font-size="13" fill="#fff" font-weight="800" text-anchor="middle" >3</text>
+<text x="1102.0" y="986.3" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="start" >Comment điều chỉnh khi lệch spec</text>
+<text x="1102.0" y="1002.3" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >Agent sửa nhanh nên spec drift nhanh; không có thì QC fail oan</text>
+<text x="40.0" y="1095.0" font-size="12.5" fill="#64748b" font-weight="400" text-anchor="start" >Tài liệu chỉ sinh khi có người dùng tiếp (QC, khách, reviewer, agent). Tài liệu không ai đọc là chi phí, không phải bằng chứng.</text>
+<text x="1547.0" y="1095.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="end" >AI-Autopilot</text>
+</svg></div>
+  <p class="dl">⬇ Bản in khổ A3: <a href="diagrams/artifacts-A3.svg">diagrams/artifacts-A3.svg</a></p>
+  <table style="margin-top:18px">
+    <tr><th>Vai trò</th><th>Artifact đầu ra</th><th>Dùng tiếp bởi</th></tr>
+    <tr><td><b>Khách / Owner</b></td><td>Yêu cầu gốc; biên bản nghiệm thu</td><td>BA, PM</td></tr>
+    <tr><td><b>PM</b></td><td>Phạm vi và ưu tiên đã chốt; hợp đồng theo kết quả; báo cáo rủi ro</td><td>Cả đội, Khách</td></tr>
+    <tr><td><b>BA</b></td><td>PRD nhẹ + mockup; SRS đã rà; danh sách gap và giả định; comment lệch spec</td><td>Agent, QC, Operator, Khách</td></tr>
+    <tr><td><b>SA</b></td><td>Quyết định kiến trúc; rules / skill / kiểm tra tự động; review giải pháp Vàng/Đỏ</td><td>Agent, Operator</td></tr>
+    <tr><td><b>Operator</b></td><td>Plan đã duyệt (phạm vi file, mức rủi ro); PR description; fix-note</td><td>Reviewer, QC, SA</td></tr>
+    <tr><td><b>Đội Agent</b></td><td>Code + test; log chạy thật; TC sinh từ spec; báo cáo scan; bản demo</td><td>Operator, QC, Security</td></tr>
+    <tr><td><b>QC</b></td><td>Chiến lược test; bộ TC + kết quả; bug có ảnh/video</td><td>BA, Operator, Khách</td></tr>
+    <tr><td><b>Security</b></td><td>Kết quả quét và review; PoC xác thực; ngoại lệ có lý do và hạn</td><td>SA, Operator</td></tr>
+    <tr><td><b>DevOps / SRE</b></td><td>Kết quả pipeline; lệnh deploy / rollback; health check; nhật ký hành động agent</td><td>Operator, PM</td></tr>
+    <tr><td><b>Support</b></td><td>Ticket production liên kết ngược tới yêu cầu gốc</td><td>BA</td></tr>
+    <tr><td><b>Agent owner / Eval</b></td><td>Bộ eval; báo cáo chất lượng agent; lịch sử đổi prompt / skill</td><td>Cả đội</td></tr>
+  </table>
+  <div class="callout"><b>Ba artifact sống còn:</b> (1) spec có AC kiểm chứng được; (2) bằng chứng chạy thật; (3) comment điều chỉnh khi code lệch spec. Agent sửa nhanh nên spec drift nhanh; không có comment thì QC fail oan và khách nhận bản không khớp tài liệu.</div>
+</section>
+
+<section id="bao-mat">
+  <h2><span class="n">8</span>Bảo mật trong thời đại AI</h2>
+  <p class="sub">Bảo mật là chỗ nên đầu tư thêm, không phải bớt: code sinh nhanh nên bề mặt tấn công mở rộng nhanh, và agent là một bề mặt mới. Con người không còn xem hết từng dòng, nên bảo mật chuyển từ "kiểm tra cuối" sang <b>rào chắn tự động ở mọi giai đoạn</b>.</p>
+  <div class="grid2">
+    <div>
+      <h3 style="margin-top:0">A. Rủi ro trong sản phẩm do AI viết ra</h3>
+      <table>
+        <tr><th>Rủi ro</th><th>Biểu hiện</th></tr>
+        <tr><td><b>Lỗ hổng trong code</b></td><td>Thiếu kiểm tra quyền (BOLA / IDOR), injection, validate yếu; code trông hợp lý nên dễ qua mắt</td></tr>
+        <tr><td><b>Lộ bí mật</b></td><td>Key, token, chuỗi kết nối nhúng vào code hoặc log</td></tr>
+        <tr><td><b>Thư viện giả / chuỗi cung ứng</b></td><td>Agent gợi ý package không tồn tại hoặc độc hại</td></tr>
+        <tr><td><b>Cấu hình lỏng</b></td><td>CORS mở, bật debug, quyền rộng vì ưu tiên "chạy được"</td></tr>
+        <tr><td><b>Lỗi logic phân quyền</b></td><td>Qua test vì test sinh cùng lúc với code, cùng điểm mù</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3 style="margin-top:0">B. Rủi ro từ chính agent</h3>
+      <table>
+        <tr><th>Rủi ro</th><th>Giảm thiểu</th></tr>
+        <tr><td><b>Prompt injection</b> trong ticket, file, web</td><td>Coi nội dung đọc vào là dữ liệu, không phải lệnh; tách quyền đọc và quyền hành động</td></tr>
+        <tr><td><b>Quyền quá rộng</b></td><td>Quyền tối thiểu; sandbox; không có quyền production mặc định</td></tr>
+        <tr><td><b>Rò rỉ dữ liệu</b> sang dịch vụ AI</td><td>Phân loại dữ liệu; quy định loại nào không được đưa ra ngoài</td></tr>
+        <tr><td><b>Hành động không đảo ngược</b></td><td>Drop, xoá, force push, deploy cần người duyệt; có sao lưu và rollback</td></tr>
+        <tr><td><b>Tin lời agent</b></td><td>Bằng chứng quét chạy thật bắt buộc</td></tr>
+      </table>
+    </div>
+  </div>
+  <h3>Bảo mật gắn vào từng giai đoạn (dịch sang trái)</h3>
+  <table>
+    <tr><th>Giai đoạn</th><th>Việc bảo mật</th><th>Artifact</th></tr>
+    <tr><td><b>1 Định nghĩa</b></td><td>Yêu cầu bảo mật và phân quyền nằm trong spec</td><td>Mục "Bảo mật / Phân quyền"</td></tr>
+    <tr><td><b>2 Kế hoạch</b></td><td>Mô hình đe doạ nhẹ cho việc Vàng / Đỏ; đánh dấu thay đổi đụng auth, dữ liệu</td><td>Ghi chú rủi ro trong plan</td></tr>
+    <tr><td><b>3 Thực thi</b></td><td>Quét bí mật, phụ thuộc, SAST tự động mỗi thay đổi; agent chạy sandbox, quyền tối thiểu</td><td>Kết quả quét</td></tr>
+    <tr><td><b>4 Kiểm chứng</b></td><td>Review bảo mật; DAST trên bản chạy thật; PoC xác thực để loại báo động giả</td><td>Báo cáo + bằng chứng</td></tr>
+    <tr><td><b>5 Nghiệm thu</b></td><td>Duyệt ngoại lệ còn lại: có lý do và có hạn</td><td>Danh sách ngoại lệ</td></tr>
+    <tr><td><b>6 Phản hồi</b></td><td>Sự cố và cảnh báo production quay về thành gap mới</td><td>Ticket liên kết ngược</td></tr>
+  </table>
+  <p class="small">Repo đã có nền cho việc này: <code>security-review</code> (OWASP, chế độ Fast / Deep), <code>security-dast</code>, <code>security-verify-poc</code> và <code>agent-security-reviewer</code>. Phần cần bổ sung là nối chúng thành cổng bắt buộc theo mức rủi ro.</p>
+  <table style="margin-top:14px">
+    <tr><th>Tầng</th><th>Bảo mật tối thiểu</th></tr>
+    <tr><td><span class="pill p-g">XANH</span></td><td>Quét tự động (bí mật, phụ thuộc, SAST); không đụng auth, dữ liệu, quyền</td></tr>
+    <tr><td><span class="pill p-a">VÀNG</span></td><td>Thêm review bảo mật (Fast); kiểm tra phân quyền cho endpoint mới</td></tr>
+    <tr><td><span class="pill p-r">ĐỎ</span></td><td>Review sâu (Deep), DAST, PoC xác thực, Security người thật ký duyệt, ngoại lệ có hạn</td></tr>
+  </table>
+  <div class="callout">Đụng <b>auth, phân quyền, tiền, dữ liệu cá nhân, tích hợp ngoài</b> thì mặc định là tầng Đỏ, bất kể việc nhỏ đến đâu.</div>
+  <div class="callout info"><b>Điều cần thừa nhận:</b> quét tự động không thay được phán đoán con người ở logic nghiệp vụ và phân quyền; prompt injection chưa có giải pháp triệt để, cách phòng thủ thực tế là giới hạn quyền chứ không phải lọc hết nội dung độc hại; chính sách dữ liệu với dịch vụ AI cần theo hợp đồng và pháp lý của từng khách.</div>
+</section>
+
+<section id="rui-ro">
+  <h2><span class="n">9</span>Phân tầng rủi ro: núm vặn chính</h2>
+  <p class="sub">Mức rủi ro (xác định ở giai đoạn 2) quyết định độ dày của luồng. Khi AI đáng tin hơn, dịch ngưỡng: việc vàng thành xanh, việc đỏ thành vàng.</p>
+  <table>
+    <tr><th>Tầng</th><th>Điều kiện</th><th>Giai đoạn bắt buộc có người</th></tr>
+    <tr><td><span class="pill p-g">XANH</span></td><td>Phạm vi nhỏ, có test phủ, không đụng dữ liệu / quyền. Ví dụ: sửa nhãn, bug UI, refactor có test.</td><td>Giai đoạn 1 nhẹ và 5 xác nhận nhanh. Phần giữa chủ yếu tự động (AI review + test + quét bảo mật).</td></tr>
+    <tr><td><span class="pill p-a">VÀNG</span></td><td>Feature mới trong module có sẵn.</td><td>1, 2, 4, 5 có người; 3 có người canh.</td></tr>
+    <tr><td><span class="pill p-r">ĐỎ</span></td><td>Schema, phân quyền, tiền, tích hợp ngoài, migration phá huỷ.</td><td>Tất cả giai đoạn có người; SA / Security chốt; khách nghiệm thu; SA review giải pháp.</td></tr>
+  </table>
+</section>
+
+<section id="cham-diem">
+  <h2><span class="n">10</span>Cơ chế chấm điểm cổng</h2>
+  <p class="sub">Mỗi giai đoạn có một cổng (G1–G5) chấm 0–100 từ các tiêu chí có trọng số. <b>Điểm</b> trả lời "làm tốt đến đâu"; <b>quyết định</b> trả lời "có cần người xem trước khi đi tiếp". Hai thứ này tách bạch: hard-fail và yêu cầu người luôn thắng điểm.</p>
+  <div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto" viewBox="0 0 1587 1123" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+<title>Cơ chế chấm điểm cổng — Sơ đồ A3</title>
+<rect x="0.0" y="0.0" width="1587.0" height="1123.0" rx="0" fill="#fff" stroke="none" stroke-width="1.4"/>
+<rect x="0.0" y="0.0" width="1587.0" height="92.0" rx="0" fill="#12263f" stroke="none" stroke-width="1.4"/>
+<text x="40.0" y="44.0" font-size="30" fill="#fff" font-weight="700" text-anchor="start" >CƠ CHẾ CHẤM ĐIỂM CỔNG (GATE SCORECARD)</text>
+<text x="40.0" y="72.0" font-size="15" fill="#cbd5e1" font-weight="400" text-anchor="start" >Năm cổng G1–G5 · tiêu chí có trọng số · ngưỡng theo tầng rủi ro · hard-fail thắng điểm · không bằng chứng thì không tính là đạt</text>
+<text x="1547.0" y="44.0" font-size="15" fill="#cbd5e1" font-weight="600" text-anchor="end" >Đề xuất · v1.2</text>
+<text x="1547.0" y="72.0" font-size="13" fill="#94a3b8" font-weight="400" text-anchor="end" >2026-10-31 · khổ A3</text>
+<text x="40.0" y="118.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">CÁCH TÍNH ĐIỂM</text>
+<rect x="40.0" y="126.0" width="489.0" height="76.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="54.0" y="148.0" font-size="13.5" fill="#12263f" font-weight="700" text-anchor="start" >Giá trị tiêu chí</text>
+<text x="54.0" y="166.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >pass 1,0 · partial 0,5 · unknown 0,5 · fail 0 · n/a bỏ khỏi phép tính (trọng</text>
+<text x="54.0" y="180.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >số chuẩn hoá lại).</text>
+<rect x="549.0" y="126.0" width="489.0" height="76.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="563.0" y="148.0" font-size="13.5" fill="#12263f" font-weight="700" text-anchor="start" >Quy tắc bằng chứng</text>
+<text x="563.0" y="166.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >pass / partial mà không có bằng chứng bị hạ xuống unknown. Thiếu dữ liệu cũng</text>
+<text x="563.0" y="180.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >là unknown, không phải điểm tối đa.</text>
+<rect x="1058.0" y="126.0" width="489.0" height="76.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="1072.0" y="148.0" font-size="13.5" fill="#12263f" font-weight="700" text-anchor="start" >Điểm cổng (0–100)</text>
+<text x="1072.0" y="166.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Σ(trọng số × giá trị) ÷ Σ trọng số áp dụng × 100. Điểm trả lời 'làm tốt đến</text>
+<text x="1072.0" y="180.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >đâu'; quyết định trả lời 'có cần người xem'.</text>
+<text x="40.0" y="224.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">TIÊU CHÍ VÀ TRỌNG SỐ THEO CỔNG   (chấm xanh / vàng / đỏ = áp dụng cho tầng đó · viền đỏ = hard-fail: fail là BLOCK)</text>
+<rect x="40.0" y="232.0" width="290.2" height="254.0" rx="10" fill="#fff" stroke="#475569" stroke-width="1.6"/>
+<rect x="40.0" y="232.0" width="290.2" height="32.0" rx="10" fill="#475569" stroke="none" stroke-width="1.4"/>
+<rect x="40.0" y="248.0" width="290.2" height="16.0" rx="0" fill="#475569" stroke="none" stroke-width="1.4"/>
+<text x="54.0" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G1 · Định nghĩa</text>
+<text x="316.2" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="316.2" y="286.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >30</text>
+<text x="54.0" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Mỗi FR có AC kiểm chứng được</text>
+<circle cx="246.2" cy="280" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="261.2" cy="280" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="276.2" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="50.0" y1="308" x2="320.2" y2="308" stroke="#e2e8f0"/>
+<text x="316.2" y="328.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >25</text>
+<text x="54.0" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Khách/Owner xác nhận PRD nhẹ +</text>
+<text x="54.0" y="335.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >mockup</text>
+<circle cx="246.2" cy="322" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="261.2" cy="322" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="276.2" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="50.0" y1="350" x2="320.2" y2="350" stroke="#e2e8f0"/>
+<text x="316.2" y="370.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >20</text>
+<text x="54.0" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >SRS trỏ về PRD, không FR mồ côi</text>
+<circle cx="246.2" cy="364" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="261.2" cy="364" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="276.2" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="50.0" y1="392" x2="320.2" y2="392" stroke="#e2e8f0"/>
+<text x="316.2" y="412.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >15</text>
+<text x="54.0" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Giả định và câu hỏi mở đã xử lý</text>
+<circle cx="246.2" cy="406" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="261.2" cy="406" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="276.2" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="50.0" y1="434" x2="320.2" y2="434" stroke="#e2e8f0"/>
+<text x="316.2" y="454.0" font-size="18" fill="#475569" font-weight="800" text-anchor="end" >10</text>
+<text x="54.0" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Yêu cầu bảo mật và phân quyền</text>
+<text x="54.0" y="461.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >có trong spec</text>
+<circle cx="246.2" cy="448" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="261.2" cy="448" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="276.2" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<rect x="344.2" y="232.0" width="290.2" height="254.0" rx="10" fill="#fff" stroke="#2563eb" stroke-width="1.6"/>
+<rect x="344.2" y="232.0" width="290.2" height="32.0" rx="10" fill="#2563eb" stroke="none" stroke-width="1.4"/>
+<rect x="344.2" y="248.0" width="290.2" height="16.0" rx="0" fill="#2563eb" stroke="none" stroke-width="1.4"/>
+<text x="358.2" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G2 · Kế hoạch</text>
+<text x="620.4" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="620.4" y="286.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >25</text>
+<text x="358.2" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Mỗi bước plan trỏ về FR</text>
+<circle cx="550.4" cy="280" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="565.4" cy="280" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="580.4" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="354.2" y1="308" x2="624.4" y2="308" stroke="#e2e8f0"/>
+<text x="620.4" y="328.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >25</text>
+<text x="358.2" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Đã phân loại Xanh/Vàng/Đỏ, khớp</text>
+<text x="358.2" y="335.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >vùng file thực tế</text>
+<circle cx="550.4" cy="322" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="565.4" cy="322" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="580.4" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="354.2" y1="350" x2="624.4" y2="350" stroke="#e2e8f0"/>
+<text x="620.4" y="370.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >15</text>
+<text x="358.2" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Phạm vi file ước lượng trong</text>
+<text x="358.2" y="377.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >ngưỡng</text>
+<circle cx="550.4" cy="364" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="565.4" cy="364" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="580.4" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="354.2" y1="392" x2="624.4" y2="392" stroke="#e2e8f0"/>
+<text x="620.4" y="412.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >25</text>
+<text x="358.2" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >SA review giải pháp (độc lập</text>
+<text x="358.2" y="419.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >với người thiết kế)</text>
+<circle cx="550.4" cy="406" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="565.4" cy="406" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="580.4" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="354.2" y1="434" x2="624.4" y2="434" stroke="#e2e8f0"/>
+<text x="620.4" y="454.0" font-size="18" fill="#2563eb" font-weight="800" text-anchor="end" >10</text>
+<text x="358.2" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Ghi chú đe doạ cho việc đụng</text>
+<text x="358.2" y="461.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >auth/dữ liệu</text>
+<circle cx="550.4" cy="448" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="565.4" cy="448" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="580.4" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<rect x="648.4" y="232.0" width="290.2" height="296.0" rx="10" fill="#fff" stroke="#7c3aed" stroke-width="1.6"/>
+<rect x="648.4" y="232.0" width="290.2" height="32.0" rx="10" fill="#7c3aed" stroke="none" stroke-width="1.4"/>
+<rect x="648.4" y="248.0" width="290.2" height="16.0" rx="0" fill="#7c3aed" stroke="none" stroke-width="1.4"/>
+<text x="662.4" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G3 · Thực thi</text>
+<text x="924.6" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="924.6" y="286.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >30</text>
+<text x="662.4" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Build + test đơn vị xanh</text>
+<circle cx="854.5999999999999" cy="280" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="869.5999999999999" cy="280" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="308" x2="928.5999999999999" y2="308" stroke="#e2e8f0"/>
+<text x="924.6" y="328.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >10</text>
+<text x="662.4" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Không lộ bí mật (key, token,</text>
+<text x="662.4" y="335.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >chuỗi kết nối)</text>
+<circle cx="854.5999999999999" cy="322" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="869.5999999999999" cy="322" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="350" x2="928.5999999999999" y2="350" stroke="#e2e8f0"/>
+<text x="924.6" y="370.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >15</text>
+<text x="662.4" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >SAST và phụ thuộc sạch</text>
+<circle cx="854.5999999999999" cy="364" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="869.5999999999999" cy="364" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="392" x2="928.5999999999999" y2="392" stroke="#e2e8f0"/>
+<text x="924.6" y="412.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >20</text>
+<text x="662.4" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Auto-review không có lỗi</text>
+<text x="662.4" y="419.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >critical</text>
+<circle cx="854.5999999999999" cy="406" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="869.5999999999999" cy="406" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="434" x2="928.5999999999999" y2="434" stroke="#e2e8f0"/>
+<text x="924.6" y="454.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >15</text>
+<text x="662.4" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Diff trong ngưỡng, không chạm</text>
+<text x="662.4" y="461.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >đường dẫn bảo vệ</text>
+<circle cx="854.5999999999999" cy="448" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="869.5999999999999" cy="448" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="884.5999999999999" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="658.4" y1="476" x2="928.5999999999999" y2="476" stroke="#e2e8f0"/>
+<text x="924.6" y="496.0" font-size="18" fill="#7c3aed" font-weight="800" text-anchor="end" >10</text>
+<text x="662.4" y="490.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Chạy trong sandbox/worktree,</text>
+<text x="662.4" y="503.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >quyền tối thiểu</text>
+<circle cx="854.5999999999999" cy="490" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="869.5999999999999" cy="490" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="884.5999999999999" cy="490" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<rect x="952.6" y="232.0" width="290.2" height="254.0" rx="10" fill="#fff" stroke="#059669" stroke-width="1.6"/>
+<rect x="952.6" y="232.0" width="290.2" height="32.0" rx="10" fill="#059669" stroke="none" stroke-width="1.4"/>
+<rect x="952.6" y="248.0" width="290.2" height="16.0" rx="0" fill="#059669" stroke="none" stroke-width="1.4"/>
+<text x="966.6" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G4 · Kiểm chứng</text>
+<text x="1228.8" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="1228.8" y="286.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >35</text>
+<text x="966.6" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >TC sinh từ spec: tất cả pass</text>
+<text x="966.6" y="293.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >(không fail, không blocked)</text>
+<circle cx="1158.8" cy="280" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1173.8" cy="280" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1188.8" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="962.5999999999999" y1="308" x2="1232.8" y2="308" stroke="#e2e8f0"/>
+<text x="1228.8" y="328.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >20</text>
+<text x="966.6" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Mỗi AC có ít nhất một TC</text>
+<circle cx="1158.8" cy="322" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="1173.8" cy="322" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1188.8" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="962.5999999999999" y1="350" x2="1232.8" y2="350" stroke="#e2e8f0"/>
+<text x="1228.8" y="370.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >10</text>
+<text x="966.6" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Exploratory / dữ liệu thật</text>
+<circle cx="1158.8" cy="364" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="1173.8" cy="364" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1188.8" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="962.5999999999999" y1="392" x2="1232.8" y2="392" stroke="#e2e8f0"/>
+<text x="1228.8" y="412.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >20</text>
+<text x="966.6" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Review bảo mật + DAST/PoC xác</text>
+<text x="966.6" y="419.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >thực</text>
+<circle cx="1158.8" cy="406" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="1173.8" cy="406" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1188.8" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="962.5999999999999" y1="434" x2="1232.8" y2="434" stroke="#e2e8f0"/>
+<text x="1228.8" y="454.0" font-size="18" fill="#059669" font-weight="800" text-anchor="end" >15</text>
+<text x="966.6" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Không còn spec drift chưa xử lý</text>
+<circle cx="1158.8" cy="448" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="1173.8" cy="448" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1188.8" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<rect x="1256.8" y="232.0" width="290.2" height="254.0" rx="10" fill="#fff" stroke="#d97706" stroke-width="1.6"/>
+<rect x="1256.8" y="232.0" width="290.2" height="32.0" rx="10" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<rect x="1256.8" y="248.0" width="290.2" height="16.0" rx="0" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<text x="1270.8" y="254.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >G5 · Nghiệm thu</text>
+<text x="1533.0" y="254.0" font-size="11" fill="#ffffffcc" font-weight="600" text-anchor="end" >Σ 100</text>
+<text x="1533.0" y="286.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >40</text>
+<text x="1270.8" y="280.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Đối chiếu AC đã ký</text>
+<text x="1270.8" y="293.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >(khách/owner)</text>
+<circle cx="1463.0" cy="280" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1478.0" cy="280" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1493.0" cy="280" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="1266.8" y1="308" x2="1537.0" y2="308" stroke="#e2e8f0"/>
+<text x="1533.0" y="328.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >20</text>
+<text x="1270.8" y="322.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Demo chạy thật trên bản build</text>
+<circle cx="1463.0" cy="322" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="1478.0" cy="322" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1493.0" cy="322" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="1.2"/>
+<line x1="1266.8" y1="350" x2="1537.0" y2="350" stroke="#e2e8f0"/>
+<text x="1533.0" y="370.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >15</text>
+<text x="1270.8" y="364.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Ngoại lệ bảo mật còn hạn, có</text>
+<text x="1270.8" y="377.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >người duyệt</text>
+<circle cx="1463.0" cy="364" r="5.5" fill="#16a34a" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1478.0" cy="364" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1493.0" cy="364" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="1266.8" y1="392" x2="1537.0" y2="392" stroke="#e2e8f0"/>
+<text x="1533.0" y="412.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >15</text>
+<text x="1270.8" y="406.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Spec đã đồng bộ với bản giao</text>
+<circle cx="1463.0" cy="406" r="5.5" fill="#16a34a" stroke="#16a34a" stroke-width="1.2"/>
+<circle cx="1478.0" cy="406" r="5.5" fill="#d97706" stroke="#dc2626" stroke-width="2.6"/>
+<circle cx="1493.0" cy="406" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<line x1="1266.8" y1="434" x2="1537.0" y2="434" stroke="#e2e8f0"/>
+<text x="1533.0" y="454.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >10</text>
+<text x="1270.8" y="448.0" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >Có kế hoạch rollback / ghi chú</text>
+<text x="1270.8" y="461.5" font-size="11.2" fill="#1f2937" font-weight="500" text-anchor="start" >triển khai</text>
+<circle cx="1463.0" cy="448" r="5.5" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="1478.0" cy="448" r="5.5" fill="#d97706" stroke="#d97706" stroke-width="1.2"/>
+<circle cx="1493.0" cy="448" r="5.5" fill="#dc2626" stroke="#dc2626" stroke-width="2.6"/>
+<text x="40.0" y="556.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">NGƯỠNG THEO TẦNG RỦI RO VÀ YÊU CẦU NGƯỜI</text>
+<rect x="40.0" y="566.0" width="760.0" height="184.0" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<text x="60.0" y="592.0" font-size="10" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1">TẦNG</text>
+<text x="170.0" y="592.0" font-size="10" fill="#64748b" font-weight="700" text-anchor="middle" letter-spacing="1">PASS khi ≥</text>
+<text x="262.0" y="592.0" font-size="10" fill="#64748b" font-weight="700" text-anchor="middle" letter-spacing="1">REVIEW khi ≥</text>
+<text x="400.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G1</text>
+<text x="474.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G2</text>
+<text x="548.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G3</text>
+<text x="622.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G4</text>
+<text x="696.0" y="592.0" font-size="11" fill="#12263f" font-weight="800" text-anchor="middle" >G5</text>
+<text x="768.0" y="592.0" font-size="10" fill="#1f2937" font-weight="400" text-anchor="start" ></text>
+<circle cx="68" cy="619" r="9" fill="#16a34a"/>
+<text x="84.0" y="624.0" font-size="13.5" fill="#16a34a" font-weight="800" text-anchor="start" >XANH</text>
+<text x="170.0" y="624.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >85</text>
+<text x="262.0" y="624.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >60</text>
+<circle cx="400" cy="619" r="10" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<circle cx="474" cy="619" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="548" cy="619" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="622" cy="619" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="696" cy="619" r="10" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<circle cx="68" cy="659" r="9" fill="#d97706"/>
+<text x="84.0" y="664.0" font-size="13.5" fill="#d97706" font-weight="800" text-anchor="start" >VÀNG</text>
+<text x="170.0" y="664.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >90</text>
+<text x="262.0" y="664.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >70</text>
+<circle cx="400" cy="659" r="10" fill="#12263f"/>
+<circle cx="474" cy="659" r="10" fill="#12263f"/>
+<circle cx="548" cy="659" r="10" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<circle cx="622" cy="659" r="10" fill="#12263f"/>
+<circle cx="696" cy="659" r="10" fill="#12263f"/>
+<circle cx="68" cy="699" r="9" fill="#dc2626"/>
+<text x="84.0" y="704.0" font-size="13.5" fill="#dc2626" font-weight="800" text-anchor="start" >ĐỎ</text>
+<text x="170.0" y="704.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >—</text>
+<text x="262.0" y="704.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="middle" >80</text>
+<circle cx="400" cy="699" r="10" fill="#12263f"/>
+<circle cx="474" cy="699" r="10" fill="#12263f"/>
+<circle cx="548" cy="699" r="10" fill="#12263f"/>
+<circle cx="622" cy="699" r="10" fill="#12263f"/>
+<circle cx="696" cy="699" r="10" fill="#12263f"/>
+<circle cx="70" cy="728" r="6" fill="#12263f"/>
+<text x="82.0" y="732.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >người xem đầy đủ</text>
+<circle cx="260" cy="728" r="6" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<text x="272.0" y="732.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >người xác nhận nhanh</text>
+<circle cx="450" cy="728" r="6" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="462.0" y="732.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >tự động đi tiếp</text>
+<text x="786.0" y="732.0" font-size="11" fill="#dc2626" font-weight="600" text-anchor="end" >Đỏ: không bao giờ tự đi tiếp (dấu — ở cột PASS)</text>
+<text x="824.0" y="556.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">QUYẾT ĐỊNH — ÁP DỤNG THEO THỨ TỰ</text>
+<rect x="824.0" y="566.0" width="723.0" height="184.0" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.2"/>
+<circle cx="846" cy="596" r="10" fill="#12263f"/>
+<text x="846.0" y="600.0" font-size="11.5" fill="#fff" font-weight="800" text-anchor="middle" >1</text>
+<text x="866.0" y="600.0" font-size="12" fill="#1f2937" font-weight="500" text-anchor="start" >Có tiêu chí hard-fail ở trạng thái fail</text>
+<rect x="1377.0" y="586.0" width="74.0" height="20.0" rx="10" fill="#dc2626" stroke="none" stroke-width="1.4"/>
+<text x="1414.0" y="601.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >BLOCK</text>
+<text x="1461.0" y="600.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >bất kể điểm</text>
+<circle cx="846" cy="627" r="10" fill="#12263f"/>
+<text x="846.0" y="631.0" font-size="11.5" fill="#fff" font-weight="800" text-anchor="middle" >2</text>
+<text x="866.0" y="631.0" font-size="12" fill="#1f2937" font-weight="500" text-anchor="start" >Điểm &lt; ngưỡng REVIEW</text>
+<rect x="1377.0" y="617.0" width="74.0" height="20.0" rx="10" fill="#dc2626" stroke="none" stroke-width="1.4"/>
+<text x="1414.0" y="632.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >BLOCK</text>
+<text x="1461.0" y="631.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >trả lại</text>
+<circle cx="846" cy="658" r="10" fill="#12263f"/>
+<text x="846.0" y="662.0" font-size="11.5" fill="#fff" font-weight="800" text-anchor="middle" >3</text>
+<text x="866.0" y="662.0" font-size="12" fill="#1f2937" font-weight="500" text-anchor="start" >Ngưỡng REVIEW ≤ điểm &lt; ngưỡng PASS</text>
+<rect x="1377.0" y="648.0" width="74.0" height="20.0" rx="10" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<text x="1414.0" y="663.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >REVIEW</text>
+<text x="1461.0" y="662.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >người xem</text>
+<circle cx="846" cy="689" r="10" fill="#12263f"/>
+<text x="846.0" y="693.0" font-size="11.5" fill="#fff" font-weight="800" text-anchor="middle" >4</text>
+<text x="866.0" y="693.0" font-size="12" fill="#1f2937" font-weight="500" text-anchor="start" >Điểm ≥ ngưỡng PASS: cổng 'tự động'</text>
+<rect x="1377.0" y="679.0" width="74.0" height="20.0" rx="10" fill="#16a34a" stroke="none" stroke-width="1.4"/>
+<text x="1414.0" y="694.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >PASS</text>
+<text x="1461.0" y="693.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >đi tiếp</text>
+<text x="866.0" y="724.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >… cổng 'xác nhận nhanh' → CONFIRM · cổng 'xem đầy đủ' → REVIEW</text>
+<text x="40.0" y="774.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">VÍ DỤ TÍNH ĐIỂM (chạy bằng gates/gate_score.py trên gates/examples/)</text>
+<rect x="40.0" y="784.0" width="741.5" height="275.0" rx="10" fill="#fff" stroke="#d97706" stroke-width="2"/>
+<text x="56.0" y="810.0" font-size="14" fill="#12263f" font-weight="700" text-anchor="start" >G3 · tầng Vàng — Thực thi</text>
+<rect x="681.5" y="794.0" width="84.0" height="20.0" rx="10" fill="#d97706" stroke="none" stroke-width="1.4"/>
+<text x="723.5" y="809.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >REVIEW</text>
+<text x="665.5" y="809.0" font-size="18" fill="#d97706" font-weight="800" text-anchor="end" >78/100</text>
+<text x="56.0" y="838.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Build + test đơn vị xanh</text>
+<text x="631.5" y="838.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >partial</text>
+<text x="765.5" y="838.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >15 / 30</text>
+<text x="56.0" y="857.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Không lộ bí mật (key, token, chuỗi kết nối)</text>
+<text x="631.5" y="857.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="765.5" y="857.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >10 / 10</text>
+<text x="56.0" y="876.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >SAST và phụ thuộc sạch</text>
+<text x="631.5" y="876.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >partial</text>
+<text x="765.5" y="876.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >7.5 / 15</text>
+<text x="56.0" y="895.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Auto-review không có lỗi critical</text>
+<text x="631.5" y="895.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="765.5" y="895.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >20 / 20</text>
+<text x="56.0" y="914.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Diff trong ngưỡng, không chạm đường dẫn bảo vệ</text>
+<text x="631.5" y="914.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="765.5" y="914.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >15 / 15</text>
+<text x="56.0" y="933.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Chạy trong sandbox/worktree, quyền tối thiểu</text>
+<text x="631.5" y="933.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="765.5" y="933.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >10 / 10</text>
+<line x1="56.0" y1="946" x2="765.5" y2="946" stroke="#e2e8f0"/>
+<text x="56.0" y="958.0" font-size="11.5" fill="#d97706" font-weight="600" text-anchor="start" >→ điểm 78 nằm giữa 70 và 90: người phải xem</text>
+<rect x="56.0" y="1013.0" width="709.5" height="32.0" rx="6" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+<text x="66.0" y="1033.0" font-size="11" fill="#334155" font-weight="600" text-anchor="start" font-family="Consolas, monospace">python gates/gate_score.py gates/gate-scorecard.json gates/examples/g3-yellow-review.json</text>
+<rect x="805.5" y="784.0" width="741.5" height="275.0" rx="10" fill="#fff" stroke="#dc2626" stroke-width="2"/>
+<text x="821.5" y="810.0" font-size="14" fill="#12263f" font-weight="700" text-anchor="start" >G4 · tầng Đỏ — Kiểm chứng</text>
+<rect x="1447.0" y="794.0" width="84.0" height="20.0" rx="10" fill="#dc2626" stroke="none" stroke-width="1.4"/>
+<text x="1489.0" y="809.0" font-size="11" fill="#fff" font-weight="800" text-anchor="middle" >BLOCK</text>
+<text x="1431.0" y="809.0" font-size="18" fill="#dc2626" font-weight="800" text-anchor="end" >55/100</text>
+<text x="821.5" y="838.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >TC sinh từ spec: tất cả pass (không fail, không blocked)</text>
+<text x="1397.0" y="838.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >fail</text>
+<text x="1531.0" y="838.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >0 / 35</text>
+<text x="821.5" y="857.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Mỗi AC có ít nhất một TC</text>
+<text x="1397.0" y="857.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="1531.0" y="857.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >20 / 20</text>
+<text x="821.5" y="876.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Exploratory / dữ liệu thật</text>
+<text x="1397.0" y="876.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="1531.0" y="876.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >10 / 10</text>
+<text x="821.5" y="895.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Review bảo mật + DAST/PoC xác thực</text>
+<text x="1397.0" y="895.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >partial</text>
+<text x="1531.0" y="895.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >10 / 20</text>
+<text x="821.5" y="914.0" font-size="11.5" fill="#1f2937" font-weight="400" text-anchor="start" >Không còn spec drift chưa xử lý</text>
+<text x="1397.0" y="914.0" font-size="11.5" fill="#64748b" font-weight="600" text-anchor="end" >pass</text>
+<text x="1531.0" y="914.0" font-size="11.5" fill="#1f2937" font-weight="700" text-anchor="end" >15 / 15</text>
+<line x1="821.5" y1="927" x2="1531.0" y2="927" stroke="#e2e8f0"/>
+<text x="821.5" y="939.0" font-size="11.5" fill="#dc2626" font-weight="600" text-anchor="start" >→ tc_pass: KHÔNG ĐẠT - TC sinh từ spec: tất cả pass (không fail, không blocked)</text>
+<text x="821.5" y="955.0" font-size="11.5" fill="#dc2626" font-weight="600" text-anchor="start" >→ hard-fail: tc_pass -&gt; BLOCK bất kể điểm</text>
+<rect x="821.5" y="1013.0" width="709.5" height="32.0" rx="6" fill="#f1f5f9" stroke="#e2e8f0" stroke-width="1"/>
+<text x="831.5" y="1033.0" font-size="11" fill="#334155" font-weight="600" text-anchor="start" font-family="Consolas, monospace">python gates/gate_score.py gates/gate-scorecard.json gates/examples/g4-red-block.json</text>
+<text x="40.0" y="1095.0" font-size="12" fill="#64748b" font-weight="400" text-anchor="start" >Khớp với pr_scorer.py của AI-Autopilot: ngưỡng 85/60, tín hiệu chưa biết chấm trung tính-thấp, test case fail ép escalate bất kể điểm. Bộ này mở rộng sang yêu cầu, bảo mật và nghiệm thu.</text>
+<text x="1547.0" y="1095.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="end" >AI-Autopilot</text>
+</svg></div>
+  <p class="dl">⬇ Bản in khổ A3: <a href="diagrams/gates-A3.svg">diagrams/gates-A3.svg</a> · Cấu hình: <a href="gates/gate-scorecard.json">gates/gate-scorecard.json</a> · Bộ tính điểm: <a href="gates/gate_score.py">gates/gate_score.py</a></p>
+  <h3>Nguyên tắc thiết kế</h3>
+  <table>
+    <tr><th style="width:24%">Nguyên tắc</th><th>Nội dung</th><th style="width:26%">Lý do</th></tr>
+    <tr><td><b>Không bằng chứng thì không đạt</b></td><td>Tiêu chí ghi <code>pass</code>/<code>partial</code> mà không kèm đường dẫn bằng chứng bị hạ xuống <code>unknown</code> (0,5). Thiếu dữ liệu cũng là <code>unknown</code>.</td><td>Nguyên tắc 3: bằng chứng chạy thật. Cùng triết lý với <code>pr_scorer.py</code>: "không có bằng chứng về chất lượng không có nghĩa là chất lượng cao".</td></tr>
+    <tr><td><b>Hard-fail thắng điểm</b></td><td>Tiêu chí <code>fail</code> mà được đánh dấu hard cho tầng hiện tại thì cổng là <b>BLOCK</b> bất kể điểm (ví dụ: TC không đạt, lộ bí mật, AC không kiểm chứng được).</td><td>Điểm trung bình hoá lỗi nghiêm trọng. Repo đã làm vậy cho test case fail.</td></tr>
+    <tr><td><b>Tầng Đỏ không bao giờ tự đi tiếp</b></td><td>Ngưỡng PASS của tầng Đỏ không tồn tại; mọi cổng cần người xem đầy đủ. Tầng Vàng cần người ở G1, G2, G4, G5 và xác nhận nhanh ở G3.</td><td>Hậu quả sai ở tầng Đỏ khó đảo ngược; điểm không nhìn thấy điều đó.</td></tr>
+    <tr><td><b>Tiêu chí không áp dụng thì bỏ ra</b></td><td>Ví dụ SA review chỉ áp dụng cho Vàng/Đỏ; trọng số được chuẩn hoá lại cho các tiêu chí còn lại.</td><td>Không phạt việc nhỏ vì thiếu thứ nó không cần.</td></tr>
+    <tr><td><b>Ngưỡng là tham số hiệu chỉnh</b></td><td>85/60 cho Xanh khớp cấu hình hiện tại của AI-Autopilot; 90/70 (Vàng) và 80 (Đỏ) là đề xuất ban đầu, chưa hiệu chỉnh.</td><td>Hiệu chỉnh bằng dữ liệu pilot, không bằng cảm giác.</td></tr>
+  </table>
+  <h3>Cách dùng</h3>
+  <pre style="background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px 16px;overflow:auto;font-size:13px;line-height:1.55">python gates/gate_score.py gates/gate-scorecard.json gates/examples/g3-yellow-review.json
+# G3 | tầng yellow | điểm 78/100 | quyết định: REVIEW
+#   - điểm 78 nằm giữa 70 và 90: người phải xem
+
+python -m unittest test_gate_score -v        # chạy trong thư mục gates/ (17 test)</pre>
+  <p class="small">Mã thoát của CLI: 0 = PASS hoặc CONFIRM, 1 = REVIEW, 2 = BLOCK, để nối được vào pipeline hoặc script kiểm tra. Mỗi cổng điền theo danh mục bằng chứng ở <code>templates/04-bang-chung.md</code>.</p>
+  <h3>Nới hay siết cổng</h3>
+  <table>
+    <tr><th>Tín hiệu (đo trong chu kỳ rà soát)</th><th>Hành động</th><th>Ví dụ chỉnh trong scorecard</th></tr>
+    <tr><td>Lỗi lọt ở tầng X vượt ngưỡng hai chu kỳ liên tiếp</td><td><b>Siết</b></td><td>Đổi <code>human</code> của cổng liên quan từ <code>none</code> sang <code>confirm</code>, hoặc từ <code>confirm</code> sang <code>full</code>; nâng <code>auto_min</code></td></tr>
+    <tr><td>Cổng PASS/CONFIRM hiếm khi bị trả lại trong một khoảng đủ dài, và không có lỗi nghiêm trọng</td><td><b>Nới</b></td><td>Đổi <code>human</code> từ <code>confirm</code> sang <code>none</code> ở tầng Xanh; hạ <code>auto_min</code> từng bậc nhỏ</td></tr>
+    <tr><td>Một tiêu chí luôn <code>unknown</code> vì không có nguồn dữ liệu</td><td><b>Sửa hạ tầng, không sửa điểm</b></td><td>Nối nguồn dữ liệu (ví dụ kết quả quét bảo mật vào cổng G3) thay vì bỏ tiêu chí</td></tr>
+    <tr><td>Người xác nhận CONFIRM thường xuyên đổi ý</td><td><b>Siết</b> cổng đó</td><td>Chuyển sang <code>full</code> và điều tra tiêu chí nào thiếu</td></tr>
+  </table>
+</section>
+
+<section id="dev">
+  <h2><span class="n">11</span>Dev đi về đâu</h2>
+  <p class="sub">"Người gõ code" thu hẹp mạnh. Nghề tách thành các hướng; nên chọn một hướng trong 6–12 tháng tới thay vì giữ vị trí làm theo ticket.</p>
+  <table>
+    <tr><th>Hướng</th><th>Mô tả</th><th>Nhu cầu</th></tr>
+    <tr><td><b>Operator</b></td><td>Điều phối agent, duyệt plan, can thiệp khi lệch hướng.</td><td><span class="pill p-g">Cao, nhiều chỗ nhất</span></td></tr>
+    <tr><td><b>SA / Platform</b></td><td>Mã hoá kiến trúc thành guardrail; quản lý skill và rules của đội agent.</td><td><span class="pill p-g">Cao, ít chỗ hơn</span></td></tr>
+    <tr><td><b>Chuyên sâu mảng khó</b></td><td>Hiệu năng, bảo mật, dữ liệu lớn, real-time, nhúng, thuật toán.</td><td><span class="pill p-g">Bền</span></td></tr>
+    <tr><td><b>Nghiệp vụ + kỹ thuật</b></td><td>Hiểu miền nghiệp vụ và biến thành spec chính xác (lai BA).</td><td><span class="pill p-g">Cao, ngày càng giá trị</span></td></tr>
+    <tr><td><b>Eval / Quality của agent</b></td><td>Đo, thử nghiệm, cải tiến chất lượng đầu ra.</td><td><span class="pill p-n">Mới, ít chỗ</span></td></tr>
+    <tr><td><b>Dev thuần theo ticket</b></td><td>Nhận task rõ, tự code.</td><td><span class="pill p-r">Thu hẹp mạnh</span></td></tr>
+  </table>
+  <div class="grid2" style="margin-top:18px">
+    <div class="card"><b>Kỹ năng tăng giá trị</b><ul><li>Đọc và đánh giá code nhanh, bắt lỗi tinh vi</li><li>Gỡ lỗi hệ thống phức tạp khi agent kẹt</li><li>Diễn đạt yêu cầu chính xác, chia việc đúng cỡ</li><li>Hiểu kiến trúc và hệ quả dài hạn; phán đoán rủi ro</li></ul></div>
+    <div class="card"><b>Kỹ năng giảm giá trị</b><ul><li>Gõ code nhanh, thuộc cú pháp</li><li>Boilerplate, CRUD</li><li>Nhớ API</li><li>Chuyên về một công nghệ đơn lẻ</li></ul></div>
+  </div>
+  <div class="callout"><b>Nghịch lý cần tính trước:</b> kỹ năng đánh giá code cần có nền tảng tự viết code mới hình thành. Nếu junior chỉ duyệt output của máy thì vài năm nữa sẽ thiếu người đủ giỏi làm Operator và SA. Nên giữ chủ đích một phần việc để junior tự làm và tự gỡ lỗi.</div>
+</section>
+
+<section id="scrum">
+  <h2><span class="n">12</span>SDLC, Scrum và Kanban thay đổi thế nào</h2>
+  <p class="sub">Nút cổ chai trước đây là <i>cài đặt</i>; nay chuyển sang <i>làm rõ yêu cầu, kiểm chứng và nghiệm thu</i>. Mọi quy trình cần thiết kế lại quanh nút cổ chai mới này.</p>
+  <div class="grid2">
+    <div>
+      <h3 style="margin-top:0">Scrum: giữ gì, bỏ gì</h3>
+      <table>
+        <tr><th>Thành phần</th><th>Còn phù hợp?</th></tr>
+        <tr><td>Sprint 2 tuần</td><td><span class="pill p-a">Kém</span> quá dài cho thực thi, quá ngắn cho nghiệm thu</td></tr>
+        <tr><td>Story point / Velocity</td><td><span class="pill p-r">Mất ý nghĩa</span> đo công sức Dev, dễ bóp méo</td></tr>
+        <tr><td>Daily standup</td><td><span class="pill p-a">Đổi</span> thành "đang chờ ai, chặn ở đâu"</td></tr>
+        <tr><td>Backlog refinement</td><td><span class="pill p-g">Giữ, quan trọng hơn</span> chính là chuẩn bị spec</td></tr>
+        <tr><td>Sprint review, Retro</td><td><span class="pill p-g">Giữ</span> retro thêm chất lượng agent và cổng</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3 style="margin-top:0">Chọn mô hình</h3>
+      <table>
+        <tr><th>Mô hình</th><th>Phù hợp</th></tr>
+        <tr><td>Scrum thuần</td><td><span class="pill p-a">Kém</span> bỏ story point và velocity nếu giữ</td></tr>
+        <tr><td>Kanban</td><td><span class="pill p-g">Tốt nhất cho thực thi</span> dòng chảy + WIP</td></tr>
+        <tr><td><b>Scrumban phân tầng</b></td><td><span class="pill p-g">Khuyến nghị</span> thực tế nhất</td></tr>
+        <tr><td>Shape Up</td><td><span class="pill p-b">Hợp việc lớn</span> "appetite" thay estimate</td></tr>
+        <tr><td>Waterfall</td><td><span class="pill p-r">Không</span> nhưng pha yêu cầu cần kỹ hơn xưa</td></tr>
+      </table>
+    </div>
+  </div>
+  <h3>Đề xuất: Scrumban phân tầng rủi ro</h3>
+  <div class="grid3">
+    <div class="card"><span class="pill p-g">Xanh</span><p>Chạy Kanban liên tục, hầu như tự động; người xác nhận cuối.</p></div>
+    <div class="card"><span class="pill p-a">Vàng</span><p>Theo nhịp tuần: refinement đầu tuần, review cuối tuần.</p></div>
+    <div class="card"><span class="pill p-r">Đỏ</span><p>Chu kỳ dài hơn (kiểu Shape Up) với đủ cổng.</p></div>
+  </div>
+  <p class="small"><b>Chỉ số dùng:</b> lead time, WIP, tỷ lệ làm lại, tỷ lệ lỗi lọt. <b>Bỏ:</b> story point và velocity. <b>WIP limit</b> quan trọng hơn xưa vì agent sinh việc nhanh hơn người duyệt.</p>
+</section>
+
+<section id="so-lieu">
+  <h2><span class="n">13</span>Số liệu để nới hay siết từng cổng</h2>
+  <p class="sub">Quyết định nới hay siết phải dựa trên số liệu, với điều kiện rõ ràng ghi trước (ví dụ "lỗi lọt dưới X% trong 2 tháng thì chuyển tầng").</p>
+  <table>
+    <tr><th>Chỉ số</th><th>Ý nghĩa</th><th>Hành động</th></tr>
+    <tr><td><b>Tỷ lệ lỗi lọt</b></td><td>Bug phát hiện sau nghiệm thu / tổng thay đổi</td><td>Tăng thì siết; thấp bền vững thì nới</td></tr>
+    <tr><td><b>Tỷ lệ làm lại</b></td><td>Agent bị trả về</td><td>Cao thì sửa giai đoạn 1 và 2, không phải sửa agent</td></tr>
+    <tr><td><b>Số lần spec drift</b></td><td>Kỷ luật spec</td><td>Cao thì siết cổng tự động</td></tr>
+    <tr><td><b>Thời gian chờ con người</b></td><td>Điểm nghẽn thật</td><td>Dồn ở đâu thì tự động hoá hoặc thêm người ở đó</td></tr>
+    <tr><td><b>Chi phí / thay đổi</b></td><td>Token + giờ người</td><td>Nền tảng để định giá với khách</td></tr>
+    <tr><td><b>Điểm eval của agent</b></td><td>Chất lượng trên bộ tác vụ chuẩn</td><td>Chạy lại khi đổi model, prompt hoặc skill</td></tr>
+  </table>
+</section>
+
+<section id="ai-autopilot">
+  <h2><span class="n">14</span>Đối chiếu với AI-Autopilot: dùng nó có phù hợp quy trình không</h2>
+  <p class="sub">Kết quả rà soát mã nguồn (<code>ai_autopilot/</code>), cấu hình mặc định (<code>config.py</code>, <code>sdlc_presets.py</code>), tài liệu và test. <b>Kết luận:</b> AI-Autopilot đã hiện thực phần lớn hạ tầng cổng cho giai đoạn 2–4 và phù hợp làm nền thực thi cho quy trình; nhưng chưa phủ giai đoạn 1 và 5, và điểm cổng của nó chưa nhìn thấy spec và bảo mật.</p>
+  <div class="callout ok"><b>Phù hợp để làm nền:</b> cổng chấm điểm 0–100 có ngưỡng, cổng rủi ro (blast radius) giữ việc cho người bất kể điểm, thang tự chủ theo bằng chứng, vòng kín nhiều chặng, chuyền vai BA → Dev → QC → Review, báo lệch spec, quét bảo mật, đo sức khoẻ quy trình. <b>Chưa đủ:</b> điểm cổng chưa gồm spec và bảo mật; chưa có bước nghiệm thu của khách; review giải pháp chưa định tuyến tới SA.</div>
+  <div class="callout info"><b>Cập nhật sau rà soát.</b> Bảng dưới là hiện trạng khi rà soát <b>v2.88.0</b>. Từ <b>v2.89.0</b> AI-Autopilot đã xử lý một phần các khoảng trống: <b>#1</b> độ phủ tiêu chí chấp nhận (test case mang mã AC) vào cổng điểm qua <code>spec_conformance_min</code>, chỉ chặn đường tự động chứ không chặn cứng, phần bảo mật vẫn chưa nối; <b>#2</b> có ghi nhận khách xác nhận và nghiệm thu ở trang <i>Bàn BA</i> (người phụ trách <i>ghi lại</i> điều khách đã nói, không có liên kết công khai cho khách); <b>#6</b> có kiểm tra độ sẵn sàng của spec và gói xác nhận một trang cho khách. Các khoảng trống <b>#3, #4, #5, #7, #8</b> chưa đổi (riêng #7: test case nay mang mã AC, nhưng nguồn sinh test case vẫn chưa được kiểm chứng).</div>
+  <h3>Đã có (kèm vị trí trong mã)</h3>
+  <table>
+    <tr><th style="width:22%">Thành phần quy trình</th><th>AI-Autopilot hiện có</th><th style="width:16%">Mức phủ</th></tr>
+    <tr><td><b>Cổng chấm điểm</b></td><td><code>execution/pr_scorer.py</code>: điểm 0–100, hạng A–F, cổng auto / review / escalate. Rubric: giao 35, review 30, CI 20, phạm vi 15. Ngưỡng <code>pr_score_auto_min=85</code>, <code>pr_score_review_min=60</code>. Tín hiệu chưa biết chấm trung tính-thấp. Test case fail hoặc blocked <b>ép escalate bất kể điểm</b>.</td><td><span class="pill p-g">Đủ về cơ chế</span></td></tr>
+    <tr><td><b>Phân tầng rủi ro</b></td><td><code>risk.py</code>: phân loại theo file thay đổi (migration, auth, deploy, manifest phụ thuộc, hơn 25 file) rồi <b>giữ việc cho người bất kể điểm</b>, gắn tag <code>autopilot-risk-review</code>. Bật mặc định.</td><td><span class="pill p-a">Một phần</span> chỉ hai mức (cao / thường), chưa ba tầng</td></tr>
+    <tr><td><b>Rào cứng</b></td><td><code>policy.py</code>: <code>policy_protected_paths</code>, <code>policy_max_files_changed</code>; chặn sau khi agent sửa, trước khi mở PR.</td><td><span class="pill p-a">Có nhưng tắt</span> mặc định rỗng / 0</td></tr>
+    <tr><td><b>Núm vặn nới/siết</b></td><td><code>trust.py</code>: thang tự chủ 0–3 theo (dự án, loại việc), tính lại từ lịch sử, <code>trust_max_level=2</code>. Đúng tinh thần "nới theo bằng chứng".</td><td><span class="pill p-g">Đủ</span></td></tr>
+    <tr><td><b>Vòng kín nhiều chặng</b></td><td><code>execution/sdlc_loop.py</code>: chạy theo profile (ba / dev / qc / review / design / full), chấm cổng từng chặng bằng <code>score_run</code>, ngân sách sửa chung <code>sdlc_max_iterations</code>, hết ngân sách thì escalate. Mặc định tắt (opt-in).</td><td><span class="pill p-g">Đủ</span></td></tr>
+    <tr><td><b>Chuyền vai</b></td><td><code>sdlc_presets.py</code>: preset <code>scrum</code> chuyền BA → Dev → QC → Review qua state ADO; bước Review dừng cho người (<code>auto=False</code>). Preset <code>safe</code> và <code>autonomous</code> cho hai đầu.</td><td><span class="pill p-g">Đủ</span> cho Vàng</td></tr>
+    <tr><td><b>Báo lệch spec</b></td><td><code>spec_drift.py</code>, <code>services/spec_guard.py</code>: agent báo điều đã tự quyết, comment tiền tố <code>⚠️ SPEC-DRIFT</code>, gắn tag, BA tick khi đã cập nhật spec. Khớp rule <code>spec-drift-reporting</code>.</td><td><span class="pill p-a">Một phần</span> <code>spec_drift_holds_item</code> mặc định False: báo nhưng không giữ việc</td></tr>
+    <tr><td><b>Quét bảo mật</b></td><td><code>security_scan/</code>: SAST, AI-SAST, DAST, xác thực PoC, SARIF, suppression, đồng bộ ADO. Test riêng cho từng phần.</td><td><span class="pill p-a">Có năng lực</span> chưa nối vào điểm cổng</td></tr>
+    <tr><td><b>QC</b></td><td><code>services/poller_qc.py</code>, <code>qc_create_test_case_items</code>: tạo và ghi test case, kết quả; test case fail ép escalate.</td><td><span class="pill p-a">Một phần</span> chưa kiểm chứng test case sinh từ spec hay từ code</td></tr>
+    <tr><td><b>Đo quy trình</b></td><td><code>process_health.py</code> (lỗi lọt, việc kẹt, rác tag), <code>north_star.py</code> (KPI kết quả; không có dữ liệu thì hiện "—", không hiện 0), <code>analytics.py</code>.</td><td><span class="pill p-g">Đủ về khung</span> chưa có dữ liệu</td></tr>
+    <tr><td><b>Kiểm thử cấu hình agent</b></td><td><code>evals.py</code> + thư mục <code>evals/</code>: hồi quy cho skill, rules, CLAUDE.md. Đúng vai "Eval owner".</td><td><span class="pill p-g">Đủ</span></td></tr>
+    <tr><td><b>Cô lập và kiểm soát truy cập</b></td><td><code>use_worktrees</code>, <code>rbac.py</code> (quyền theo vai trong dashboard), <code>audit_ocsf.py</code> (nhật ký kiểm toán gồm đăng nhập thất bại, từ chối, IP nguồn, xuất OCSF; commit <code>6e78cf1</code>, phát hành 2.88.0).</td><td><span class="pill p-a">Một phần</span> chưa kiểm chứng phòng thủ prompt injection</td></tr>
+  </table>
+  <h3>Khoảng trống so với quy trình đề xuất</h3>
+  <table>
+    <tr><th style="width:4%">#</th><th style="width:26%">Khoảng trống</th><th>Bằng chứng từ rà soát</th><th style="width:30%">Khuyến nghị</th></tr>
+    <tr><td>1</td><td><b>Điểm cổng chưa gồm spec và bảo mật</b></td><td>Rubric của <code>score_run</code> chỉ gồm giao / review / CI / phạm vi. Không thấy kết quả quét bảo mật hay độ phủ AC trong <code>pr_scorer.py</code>, <code>sdlc_loop.py</code> hay <code>poller.py</code>.</td><td>Thêm hai thành phần vào <code>ScoreInput</code>: tuân thủ spec (AC có TC, không drift) và bảo mật (kết quả quét). Dùng scorecard này làm đặc tả.</td></tr>
+    <tr><td>2</td><td><b>Không có nghiệm thu của khách / owner</b></td><td>Chuỗi preset <code>scrum</code> kết thúc ở vai Review do người duyệt; không có state hay bản ghi "khách chấp nhận AC".</td><td>Thêm state ADO "Customer Accepted" và biên bản <code>05-nghiem-thu.md</code>; cổng G5 chấm <code>ac_signed</code>.</td></tr>
+    <tr><td>3</td><td><b>Review giải pháp chưa tới SA</b></td><td>Cổng rủi ro giữ việc cho "một người" qua tag <code>autopilot-risk-review</code>, không chỉ định vai.</td><td>Định tuyến tag này tới SA (nhóm / người) ở việc Vàng/Đỏ; ghi comment duyệt làm bằng chứng cho <code>sa_review</code>.</td></tr>
+    <tr><td>4</td><td><b>Spec drift chưa chặn mặc định</b></td><td><code>spec_drift_holds_item: bool = False</code> trong <code>config.py</code>.</td><td>Bật <code>True</code> khi pilot ở tầng Vàng/Đỏ để phù hợp tiêu chí <code>no_open_drift</code>.</td></tr>
+    <tr><td>5</td><td><b>Rào cứng đang tắt</b></td><td><code>policy_protected_paths</code> mặc định rỗng; <code>policy_max_files_changed</code> = 0.</td><td>Khai báo đường dẫn bảo vệ (k8s, Dockerfile, pipeline, secret) trước khi chạy tự động.</td></tr>
+    <tr><td>6</td><td><b>Spec hai lớp chưa có artifact rõ</b></td><td>Có skill <code>analyze-requirement</code>, <code>spec-with-ui-mockup</code>; không có mẫu PRD nhẹ do khách xác nhận.</td><td>Dùng <code>templates/01-prd-nhe.md</code> + <code>02-srs.md</code>; để agent soạn nháp SRS ở chặng <code>analyze</code>.</td></tr>
+    <tr><td>7</td><td><b>Nguồn của test case chưa kiểm chứng</b></td><td>Chưa đọc kỹ <code>poller_qc.py</code> để xác định TC sinh từ spec hay từ code.</td><td>Kiểm tra trước pilot; nếu sinh từ code thì chuyển nguồn sang spec (nguyên tắc 2).</td></tr>
+    <tr><td>8</td><td><b>Phòng thủ prompt injection chưa kiểm chứng</b></td><td>Có worktree và RBAC nhưng chưa thấy kiểm thử tấn công.</td><td>Thêm ca kiểm thử vào <code>evals/</code> (nội dung ticket chứa chỉ thị ẩn).</td></tr>
+  </table>
+  <h3>Cấu hình khuyến nghị cho pilot</h3>
+  <p class="small">Tên khoá đã được đối chiếu trong <code>config.py</code> và <code>sdlc_presets.py</code>; <b>chưa chạy thử ở runtime</b>.</p>
+  <table>
+    <tr><th>Khoá</th><th>Mặc định</th><th>Pilot</th><th>Lý do</th></tr>
+    <tr><td><code>autonomy_level</code></td><td>assisted</td><td>assisted</td><td>PR nháp, người duyệt</td></tr>
+    <tr><td><code>trust_max_level</code></td><td>2</td><td>2</td><td>Không merge không người</td></tr>
+    <tr><td><code>risk_gate_enabled</code> / <code>risk_max_files</code></td><td>True / 25</td><td>giữ nguyên</td><td>Tầng Đỏ tự động</td></tr>
+    <tr><td><code>policy_protected_paths</code></td><td>[]</td><td><code>k8s/**</code>, <code>**/Dockerfile</code>, <code>.github/workflows/**</code>, <code>azure-pipelines*.yml</code></td><td>Rào cứng, agent không tự đi qua</td></tr>
+    <tr><td><code>spec_drift_enabled</code> / <code>spec_drift_holds_item</code></td><td>True / False</td><td>True / <b>True</b></td><td>Tiêu chí <code>no_open_drift</code></td></tr>
+    <tr><td><code>pr_score_auto_min</code> / <code>pr_score_review_min</code></td><td>85 / 60</td><td>giữ nguyên</td><td>Khớp ngưỡng tầng Xanh</td></tr>
+    <tr><td><code>sdlc_max_iterations</code></td><td>3</td><td>3–4</td><td>Ngân sách sửa chung</td></tr>
+    <tr><td><code>use_worktrees</code>, <code>auto_review_enabled</code></td><td>tuỳ preset</td><td>True</td><td>Cô lập và review vòng 1</td></tr>
+    <tr><td>Preset</td><td>—</td><td><code>safe</code> cho Xanh; <code>scrum</code> cho Vàng</td><td>Tránh bật <code>autonomous</code> trước khi có dữ liệu</td></tr>
+  </table>
+  <div class="callout info"><b>Giới hạn của rà soát này:</b> đọc mã và cấu hình, chạy 92 test của các mô-đun cổng (pr_scorer, risk_gate, trust_ladder, spec_drift, sdlc_loop, sdlc_presets: tất cả pass), <b>không chạy hệ thống đầu cuối</b>. Cơ sở dữ liệu <code>autopilot.db</code> trên máy này không có lượt chạy nào, nên chưa có dữ liệu thực nghiệm về hành vi thật. Không có thay đổi nào được thực hiện trong mã AI-Autopilot.</div>
+</section>
+
+<section id="kiem-chung">
+  <h2><span class="n">15</span>Quy trình này đã được kiểm chứng đến đâu</h2>
+  <p class="sub">Phân biệt rõ điều đã có cơ sở, điều mới chỉ là lập luận và điều chưa biết. Quy trình đúng hay không sẽ được quyết định bởi dữ liệu pilot, không bởi tài liệu này.</p>
+  <table>
+    <tr><th style="width:18%">Mức</th><th>Nội dung</th><th style="width:30%">Cơ sở</th></tr>
+    <tr><td><span class="pill p-g">Đã có cơ sở</span></td><td>Cơ chế cổng chấm điểm, cổng rủi ro, thang tự chủ, vòng kín, báo lệch spec <b>tồn tại và được kiểm thử</b> trong AI-Autopilot.</td><td>Đọc mã; 92 test pass (exit 0) trên các mô-đun tương ứng</td></tr>
+    <tr><td><span class="pill p-a">Lập luận, chưa đo</span></td><td>Phân tầng Xanh/Vàng/Đỏ đặt người đúng chỗ; spec hai lớp rút ngắn việc chốt với khách; scorecard bắt đúng việc cần người xem; các ngưỡng 90/70/80.</td><td>Suy luận từ thực hành và từ thiết kế của repo; <b>chưa có dữ liệu chạy thật</b></td></tr>
+    <tr><td><span class="pill p-r">Chưa biết</span></td><td>Tỷ lệ lỗi lọt thật của agent ở từng tầng; thời gian chờ người có thành nút cổ chai không; chi phí token trên mỗi thay đổi; phòng thủ prompt injection hiệu quả đến đâu.</td><td><code>autopilot.db</code> trống; chưa chạy hệ thống đầu cuối</td></tr>
+  </table>
+  <h3>Cách kiểm chứng: pilot có đối chứng</h3>
+  <div class="grid3">
+    <div class="card phase"><h4>1. Đo baseline</h4>Lead time, tỷ lệ làm lại, lỗi lọt, thời gian chờ người, trên cùng loại việc, <b>trước</b> khi áp dụng. Khung đo có sẵn trong <code>process_health.py</code> và <code>north_star.py</code>.</div>
+    <div class="card phase b"><h4>2. Chạy Xanh rồi Vàng</h4>Ghi điểm cổng G1–G5, quyết định cổng và <b>kết quả thật</b> của từng việc. Bảng ghi ở <code>templates/06-ke-hoach-pilot.md</code>.</div>
+    <div class="card phase v"><h4>3. Hiệu chỉnh hoặc bác bỏ</h4>So điểm cổng với kết quả; đổi ngưỡng và cổng theo mục 10; bác bỏ giả thuyết con nào không đạt điều kiện ở mục 1.</div>
+  </div>
+  <div class="callout"><b>Điều kiện dừng:</b> bất kỳ sự cố bảo mật hoặc mất dữ liệu liên quan agent là dừng ngay và rà soát cổng, quyền. Lỗi lọt tầng Xanh vượt ngưỡng hai chu kỳ liên tiếp là siết cổng (mục 10).</div>
+</section>
+
+<section id="lo-trinh">
+  <h2><span class="n">16</span>Lộ trình thích ứng</h2>
+  <p class="sub">Theo điều kiện đo được, không theo mốc thời gian: không ai dự đoán được tốc độ cải thiện cụ thể của 12 tháng tới.</p>
+  <div class="grid3">
+    <div class="card phase"><h4>0–3 tháng · Dựng nền</h4>Spec hai lớp (PRD nhẹ + SRS), phân tầng rủi ro, bằng chứng bắt buộc, quét bảo mật tự động, sandbox cho agent, bắt đầu đo số liệu.<div class="cond"><b>Sang bước sau khi:</b> có 2–3 tháng số liệu liên tục.</div></div>
+    <div class="card phase b"><h4>3–9 tháng · Nới tầng xanh</h4>Tầng xanh gần như tự động, người chỉ xác nhận cuối. Operator điều phối nhiều agent song song.<div class="cond"><b>Sang bước sau khi:</b> lỗi lọt tầng xanh dưới ngưỡng đã đặt.</div></div>
+    <div class="card phase v"><h4>9–18 tháng · Dịch chuyển vai trò</h4>Việc vàng dần thành xanh. Người tập trung giai đoạn 1 và 5; SA / Agent owner thành vai trò cốt lõi.<div class="cond"><b>Điều kiện:</b> cổng kiểm chứng ổn định, eval đáng tin.</div></div>
+  </div>
+  <h3>Cách để quy trình không lỗi thời</h3>
+  <ul>
+    <li><b>Quy tắc ở dạng mã</b> (rules, skill, kiểm tra tự động), không ở tài liệu Word. Đổi quy trình chỉ là đổi một tệp.</li>
+    <li><b>Rà soát mỗi quý</b>: xem số liệu, quyết định nới hay siết từng cổng, ghi lại lý do.</li>
+    <li><b>Bộ eval cố định</b>: mỗi lần đổi model hay prompt, chạy lại để biết chất lượng tốt lên hay tụt.</li>
+    <li><b>Mỗi cổng có người sở hữu</b> và điều kiện nới rõ ràng, tránh nới theo cảm tính.</li>
+  </ul>
+</section>
+
+<section id="rui-ro-chuyen-doi">
+  <h2><span class="n">17</span>Rủi ro chuyển đổi và điều chưa chắc</h2>
+  <table>
+    <tr><th>Rủi ro</th><th>Biểu hiện</th><th>Giảm thiểu</th></tr>
+    <tr><td><b>Đo sai thước</b></td><td>Đo "số commit / PR" hoặc "dòng code do AI sinh"</td><td>Đo giá trị chuyển giao và lỗi lọt</td></tr>
+    <tr><td><b>Tồn đọng chờ duyệt</b></td><td>Agent sinh nhanh, người duyệt không kịp</td><td>WIP limit, giới hạn kích thước thay đổi</td></tr>
+    <tr><td><b>Dev mất động lực</b></td><td>Cảm giác "chỉ duyệt máy"</td><td>Lộ trình nghề rõ ràng, giữ phần việc thú vị</td></tr>
+    <tr><td><b>Mất tri thức</b></td><td>Không ai hiểu code máy viết</td><td>Người duyệt phải giải thích được thay đổi</td></tr>
+    <tr><td><b>Hợp đồng lệch</b></td><td>Khách đòi giá theo giờ công đã giảm</td><td>PM đàm phán theo kết quả và phạm vi</td></tr>
+  </table>
+  <div class="callout info"><b>Điều chưa chắc (nên thừa nhận):</b> tốc độ cải thiện cụ thể của model trong 12 tháng tới; chi phí token và độ trễ có thể đổi và ảnh hưởng cổng nào nên tự động; yếu tố pháp lý (ai chịu trách nhiệm khi AI sai) chưa có chuẩn chung nên PM và pháp chế cần cập nhật song song.</div>
+</section>
+
+<section id="ap-dung">
+  <h2><span class="n">18</span>Áp dụng: các bước và nội dung gói</h2>
+  <p class="sub">Trình tự nên làm, ai chịu trách nhiệm từng bước, và gói gồm những gì.</p>
+  <table>
+    <tr><th style="width:14%">Bước</th><th>Việc cần làm</th><th style="width:20%">Người chịu trách nhiệm</th><th style="width:22%">Dùng tài liệu</th></tr>
+    <tr><td><b>0. Chuẩn bị</b> (1 tuần)</td><td>Gán vai: Operator, SA, owner phía khách, Agent owner. Chọn một đội và một dự án cho pilot. Đo baseline. Bật cấu hình khuyến nghị ở mục 14. Tập huấn bộ mẫu.</td><td>PM + SA</td><td>Mục 14, <code>06-ke-hoach-pilot.md</code></td></tr>
+    <tr><td><b>1. Pilot Xanh</b> (2 tuần)</td><td>Chạy việc phạm vi nhỏ, có test phủ. Mỗi việc: PRD nhẹ ngắn, SRS do agent soạn, bằng chứng đầy đủ, chấm điểm cổng. Ghi kết quả thật.</td><td>Operator</td><td><code>01</code>, <code>02</code>, <code>04</code>, <code>gate_score.py</code></td></tr>
+    <tr><td><b>2. Pilot Vàng</b> (2 tuần)</td><td>Thêm feature mới trong module có sẵn. Có SA review giải pháp; spec drift giữ việc; khách xác nhận PRD và mockup.</td><td>Operator + SA</td><td><code>03</code>, <code>05</code></td></tr>
+    <tr><td><b>3. Rà soát</b></td><td>So điểm cổng với kết quả thật; chỉnh ngưỡng và cổng; quyết định bác bỏ hay giữ từng giả thuyết con (mục 1); thêm điểm bảo mật và spec vào <code>score_run</code> nếu cần.</td><td>PM + SA + Agent owner</td><td>Mục 10, 15</td></tr>
+    <tr><td><b>4. Mở rộng</b></td><td>Mở rộng đội và loại việc theo từng tầng; tầng Đỏ giữ đủ cổng. Rà soát mỗi quý.</td><td>PM</td><td>Mục 16</td></tr>
+  </table>
+  <h3>Điều kiện trước khi bắt đầu pilot</h3>
+  <ul>
+    <li>☐ Đã chỉ định Operator, SA, owner phía khách và Agent owner (từng người, có tên)</li>
+    <li>☐ Đã chọn một dự án có test bảo vệ để chạy việc Xanh</li>
+    <li>☐ <code>policy_protected_paths</code> đã khai báo; <code>spec_drift_holds_item</code> đã bật</li>
+    <li>☐ Đã đo baseline và ghi lại</li>
+    <li>☐ Đã có chỗ ghi kết quả pilot (bảng ở <code>06-ke-hoach-pilot.md</code>)</li>
+    <li>☐ Đã xác nhận nguồn test case (khoảng trống #7 ở mục 14)</li>
+  </ul>
+  <h3>Nội dung gói</h3>
+  <table>
+    <tr><th style="width:36%">Tệp</th><th>Nội dung</th></tr>
+    <tr><td><code>handbook.html</code></td><td>Tài liệu này: giả thuyết, quy trình, vai trò, RACI, spec, artifact, bảo mật, chấm điểm cổng, đối chiếu AI-Autopilot, kiểm chứng, áp dụng</td></tr>
+    <tr><td><code>diagrams/flow-A3.svg</code></td><td>Luồng 5 giai đoạn, hàng bảo mật, phân tầng rủi ro, số liệu, lộ trình</td></tr>
+    <tr><td><code>diagrams/roles-A3.svg</code></td><td>Phân cấp vai trò, mỗi vai trò quyết định / làm / chịu trách nhiệm</td></tr>
+    <tr><td><code>diagrams/artifacts-A3.svg</code></td><td>Bản đồ artifact, spec hai lớp ở trung tâm</td></tr>
+    <tr><td><code>diagrams/gates-A3.svg</code></td><td>Cơ chế chấm điểm cổng, ngưỡng, quyết định, ví dụ tính điểm (sinh từ scorecard)</td></tr>
+    <tr><td><code>gates/gate-scorecard.json</code></td><td>Cấu hình: tiêu chí, trọng số, hard-fail, ngưỡng theo tầng</td></tr>
+    <tr><td><code>gates/gate_score.py</code>, <code>test_gate_score.py</code>, <code>examples/</code></td><td>Bộ tính điểm chạy được (thư viện chuẩn), 17 test, 4 ví dụ</td></tr>
+    <tr><td><code>templates/01…06</code></td><td>PRD nhẹ, SRS, plan, danh mục bằng chứng, biên bản nghiệm thu, kế hoạch pilot</td></tr>
+  </table>
+</section>
+
+</main>
+
+<footer><div class="wrap"><b>AI-Autopilot</b> · Gói quy trình v1.2 · 2026-10-31 · Sơ đồ A3: <a style="color:#93c5fd" href="diagrams/flow-A3.svg">luồng</a> · <a style="color:#93c5fd" href="diagrams/roles-A3.svg">vai trò</a> · <a style="color:#93c5fd" href="diagrams/artifacts-A3.svg">artifact</a> · <a style="color:#93c5fd" href="diagrams/gates-A3.svg">chấm điểm cổng</a></div></footer>
+</body>
+</html>

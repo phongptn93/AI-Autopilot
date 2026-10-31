@@ -1,0 +1,11 @@
+{
+  "gate": "G1",
+  "tier": "green",
+  "criteria": {
+    "ac_verifiable":      {"status": "pass", "evidence": "WI#1201 AC-1..AC-3"},
+    "customer_confirmed": {"status": "pass", "evidence": "anh mockup + xac nhan chat"},
+    "srs_traceable":      {"status": "pass", "evidence": "bang truy vet"},
+    "open_questions":     {"status": "pass", "evidence": "khong con"},
+    "security_in_spec":   {"status": "na"}
+  }
+}

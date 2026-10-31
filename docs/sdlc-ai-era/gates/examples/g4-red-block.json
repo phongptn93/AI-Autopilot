@@ -1,0 +1,11 @@
+{
+  "gate": "G4",
+  "tier": "red",
+  "criteria": {
+    "tc_pass":         {"status": "fail",    "evidence": "TC-14 va TC-19 khong dat"},
+    "ac_coverage":     {"status": "pass",    "evidence": "bang truy vet"},
+    "exploratory":     {"status": "pass",    "evidence": "phien 2026-11-02"},
+    "security_verify": {"status": "partial", "evidence": "DAST xong, chua co PoC"},
+    "no_open_drift":   {"status": "pass",    "evidence": "khong co SPEC-DRIFT mo"}
+  }
+}

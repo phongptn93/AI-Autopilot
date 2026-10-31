@@ -1,0 +1,91 @@
+{
+  "version": "1.0",
+  "description": "Gate scorecard cho quy trình phát triển phần mềm thời đại AI. Mỗi cổng (G1-G5) chấm 0-100 từ các tiêu chí có trọng số; quyết định = f(điểm, ngưỡng theo tầng rủi ro, hard-fail, yêu cầu người).",
+  "status_values": {
+    "pass": 1.0,
+    "partial": 0.5,
+    "unknown": 0.5,
+    "fail": 0.0,
+    "na": null
+  },
+  "evidence_rule": "Tiêu chí ở trạng thái pass hoặc partial mà không có bằng chứng (evidence) bị hạ xuống unknown. Không có bằng chứng không bằng chất lượng cao.",
+  "tiers": {
+    "green": {
+      "label": "Xanh",
+      "auto_min": 85,
+      "review_min": 60,
+      "human": {"G1": "confirm", "G2": "none", "G3": "none", "G4": "none", "G5": "confirm"}
+    },
+    "yellow": {
+      "label": "Vàng",
+      "auto_min": 90,
+      "review_min": 70,
+      "human": {"G1": "full", "G2": "full", "G3": "confirm", "G4": "full", "G5": "full"}
+    },
+    "red": {
+      "label": "Đỏ",
+      "auto_min": 101,
+      "review_min": 80,
+      "human": {"G1": "full", "G2": "full", "G3": "full", "G4": "full", "G5": "full"}
+    }
+  },
+  "outcomes": {
+    "PASS": "Tự động đi tiếp (chỉ khi điểm đủ cao, không hard-fail, tầng/cổng không đòi người).",
+    "CONFIRM": "Điểm đủ cao; một người xác nhận nhanh rồi đi tiếp.",
+    "REVIEW": "Một người phải xem đầy đủ trước khi đi tiếp (điểm trung bình, hoặc cổng bắt buộc có người).",
+    "BLOCK": "Dừng và trả lại: điểm thấp hoặc có hard-fail."
+  },
+  "gates": {
+    "G1": {
+      "name": "Định nghĩa",
+      "criteria": [
+        {"id": "ac_verifiable", "label": "Mỗi FR có AC kiểm chứng được", "weight": 30, "hard": ["green", "yellow", "red"]},
+        {"id": "customer_confirmed", "label": "Khách/Owner xác nhận PRD nhẹ + mockup", "weight": 25, "hard": ["red"]},
+        {"id": "srs_traceable", "label": "SRS trỏ về PRD, không FR mồ côi", "weight": 20},
+        {"id": "open_questions", "label": "Giả định và câu hỏi mở đã xử lý", "weight": 15},
+        {"id": "security_in_spec", "label": "Yêu cầu bảo mật và phân quyền có trong spec", "weight": 10, "hard": ["red"]}
+      ]
+    },
+    "G2": {
+      "name": "Kế hoạch",
+      "criteria": [
+        {"id": "plan_traces_fr", "label": "Mỗi bước plan trỏ về FR", "weight": 25},
+        {"id": "risk_classified", "label": "Đã phân loại Xanh/Vàng/Đỏ, khớp vùng file thực tế", "weight": 25, "hard": ["green", "yellow", "red"]},
+        {"id": "scope_bounded", "label": "Phạm vi file ước lượng trong ngưỡng", "weight": 15},
+        {"id": "sa_review", "label": "SA review giải pháp (độc lập với người thiết kế)", "weight": 25, "applies": ["yellow", "red"], "hard": ["red"]},
+        {"id": "threat_note", "label": "Ghi chú đe doạ cho việc đụng auth/dữ liệu", "weight": 10, "applies": ["yellow", "red"]}
+      ]
+    },
+    "G3": {
+      "name": "Thực thi",
+      "criteria": [
+        {"id": "build_tests", "label": "Build + test đơn vị xanh", "weight": 30, "hard": ["yellow", "red"]},
+        {"id": "secrets_clean", "label": "Không lộ bí mật (key, token, chuỗi kết nối)", "weight": 10, "hard": ["green", "yellow", "red"]},
+        {"id": "sast_deps", "label": "SAST và phụ thuộc sạch", "weight": 15, "hard": ["yellow", "red"]},
+        {"id": "auto_review", "label": "Auto-review không có lỗi critical", "weight": 20, "hard": ["green", "yellow", "red"]},
+        {"id": "diff_bounded", "label": "Diff trong ngưỡng, không chạm đường dẫn bảo vệ", "weight": 15, "hard": ["green", "yellow", "red"]},
+        {"id": "sandbox_least_priv", "label": "Chạy trong sandbox/worktree, quyền tối thiểu", "weight": 10, "hard": ["red"]}
+      ]
+    },
+    "G4": {
+      "name": "Kiểm chứng",
+      "criteria": [
+        {"id": "tc_pass", "label": "TC sinh từ spec: tất cả pass (không fail, không blocked)", "weight": 35, "hard": ["green", "yellow", "red"]},
+        {"id": "ac_coverage", "label": "Mỗi AC có ít nhất một TC", "weight": 20},
+        {"id": "exploratory", "label": "Exploratory / dữ liệu thật", "weight": 10, "applies": ["yellow", "red"]},
+        {"id": "security_verify", "label": "Review bảo mật + DAST/PoC xác thực", "weight": 20, "applies": ["yellow", "red"], "hard": ["red"]},
+        {"id": "no_open_drift", "label": "Không còn spec drift chưa xử lý", "weight": 15, "hard": ["yellow", "red"]}
+      ]
+    },
+    "G5": {
+      "name": "Nghiệm thu",
+      "criteria": [
+        {"id": "ac_signed", "label": "Đối chiếu AC đã ký (khách/owner)", "weight": 40, "hard": ["green", "yellow", "red"]},
+        {"id": "demo_real", "label": "Demo chạy thật trên bản build", "weight": 20},
+        {"id": "exceptions_ok", "label": "Ngoại lệ bảo mật còn hạn, có người duyệt", "weight": 15, "hard": ["green", "yellow", "red"]},
+        {"id": "spec_synced", "label": "Spec đã đồng bộ với bản giao", "weight": 15, "hard": ["yellow", "red"]},
+        {"id": "rollback_ready", "label": "Có kế hoạch rollback / ghi chú triển khai", "weight": 10, "applies": ["yellow", "red"], "hard": ["red"]}
+      ]
+    }
+  }
+}

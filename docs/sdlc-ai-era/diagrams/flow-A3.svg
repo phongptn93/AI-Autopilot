@@ -1,0 +1,224 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420mm" height="297mm" viewBox="0 0 1587 1123" font-family="Segoe UI, Arial, Helvetica, sans-serif">
+<title>Quy trình phát triển phần mềm thời đại AI — Sơ đồ A3</title>
+<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#12263f"/></marker><marker id="arrA" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker></defs>
+<rect x="0.0" y="0.0" width="1587.0" height="1123.0" rx="0" fill="#ffffff" stroke="none" stroke-width="1.5" />
+<rect x="0.0" y="0.0" width="1587.0" height="92.0" rx="0" fill="#12263f" stroke="none" stroke-width="1.5" />
+<text x="40.0" y="44.0" font-size="30" fill="#ffffff" font-weight="700" text-anchor="start" >QUY TRÌNH PHÁT TRIỂN PHẦN MỀM THỜI ĐẠI AI</text>
+<text x="40.0" y="72.0" font-size="15" fill="#cbd5e1" font-weight="400" text-anchor="start" >Luồng 5 giai đoạn · spec hai lớp · bảo mật dịch sang trái · phân tầng rủi ro · phản hồi từ production</text>
+<text x="1547.0" y="44.0" font-size="15" fill="#cbd5e1" font-weight="600" text-anchor="end" >Đề xuất · v1.2</text>
+<text x="1547.0" y="72.0" font-size="13" fill="#94a3b8" font-weight="400" text-anchor="end" >2026-10-31 · khổ A3</text>
+<text x="40.0" y="106.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">BA NGUYÊN TẮC BẤT BIẾN</text>
+<rect x="40.0" y="114.0" width="488.0" height="52.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+<circle cx="68.0" cy="141" r="14" fill="#12263f"/>
+<text x="68.0" y="146.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >1</text>
+<text x="92.0" y="138.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >Mọi thay đổi truy ngược về một yêu cầu có người chịu</text>
+<text x="92.0" y="154.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >trách nhiệm</text>
+<rect x="549.5" y="114.0" width="488.0" height="52.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+<circle cx="577.5" cy="141" r="14" fill="#12263f"/>
+<text x="577.5" y="146.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >2</text>
+<text x="601.5" y="138.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >Người kiểm chứng độc lập với người (hoặc agent) tạo</text>
+<text x="601.5" y="154.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >ra</text>
+<rect x="1059.0" y="114.0" width="488.0" height="52.0" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5" />
+<circle cx="1087.0" cy="141" r="14" fill="#12263f"/>
+<text x="1087.0" y="146.0" font-size="14" fill="#fff" font-weight="700" text-anchor="middle" >3</text>
+<text x="1111.0" y="138.0" font-size="13" fill="#1f2937" font-weight="600" text-anchor="start" >Bằng chứng chạy thật, không phải lời khẳng định</text>
+<path d="M205.0,190 h241 l18,34 l-18,34 h-241 z" fill="#12263f"/>
+<circle cx="239.0" cy="224" r="17" fill="#ffffff"/>
+<text x="239.0" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >1</text>
+<text x="265.0" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >ĐỊNH NGHĨA</text>
+<text x="265.0" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >BA + Khách · cổng G1</text>
+<path d="M474.5,190 h241 l18,34 l-18,34 h-241 l18,-34 z" fill="#12263f"/>
+<circle cx="508.5" cy="224" r="17" fill="#ffffff"/>
+<text x="508.5" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >2</text>
+<text x="534.5" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >LẬP KẾ HOẠCH</text>
+<text x="534.5" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >Operator + SA · cổng G2</text>
+<path d="M744.0,190 h241 l18,34 l-18,34 h-241 l18,-34 z" fill="#12263f"/>
+<circle cx="778.0" cy="224" r="17" fill="#ffffff"/>
+<text x="778.0" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >3</text>
+<text x="804.0" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >THỰC THI</text>
+<text x="804.0" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >Agent · cổng G3</text>
+<path d="M1013.5,190 h241 l18,34 l-18,34 h-241 l18,-34 z" fill="#12263f"/>
+<circle cx="1047.5" cy="224" r="17" fill="#ffffff"/>
+<text x="1047.5" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >4</text>
+<text x="1073.5" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >KIỂM CHỨNG</text>
+<text x="1073.5" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >QC + Security · cổng G4</text>
+<path d="M1283.0,190 h241 l18,34 l-18,34 h-241 l18,-34 z" fill="#12263f"/>
+<circle cx="1317.0" cy="224" r="17" fill="#ffffff"/>
+<text x="1317.0" y="230.0" font-size="18" fill="#12263f" font-weight="800" text-anchor="middle" >5</text>
+<text x="1343.0" y="221.0" font-size="16" fill="#fff" font-weight="700" text-anchor="start" >NGHIỆM THU</text>
+<text x="1343.0" y="242.0" font-size="12.5" fill="#cbd5e1" font-weight="400" text-anchor="start" >Khách / Owner · cổng G5</text>
+<rect x="40.0" y="272.0" width="155.0" height="84.0" rx="8" fill="#2563eb" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="312.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >NGƯỜI</text>
+<text x="117.5" y="330.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >con người làm</text>
+<rect x="205.0" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="217.0" y="310.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >BA chốt PRD nhẹ + mockup với khách</text>
+<text x="217.0" y="327.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >(Đỏ: khách ký từng AC)</text>
+<rect x="474.5" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="486.5" y="310.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Operator duyệt plan; SA review</text>
+<text x="486.5" y="327.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >giải pháp (Vàng/Đỏ)</text>
+<rect x="744.0" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="756.0" y="310.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Operator canh agent, can thiệp khi</text>
+<text x="756.0" y="327.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >lệch hướng</text>
+<rect x="1013.5" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="1025.5" y="301.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >QC thiết kế chiến lược,</text>
+<text x="1025.5" y="318.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >exploratory; Security duyệt ngoại</text>
+<text x="1025.5" y="335.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >lệ</text>
+<rect x="1283.0" y="272.0" width="259.0" height="84.0" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2" />
+<text x="1295.0" y="310.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Khách / Owner nghiệm thu — không</text>
+<text x="1295.0" y="327.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >phải người viết spec</text>
+<rect x="40.0" y="364.0" width="155.0" height="84.0" rx="8" fill="#7c3aed" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="404.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >AGENT</text>
+<text x="117.5" y="422.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >máy làm</text>
+<rect x="205.0" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="217.0" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Soạn nháp SRS từ PRD; đối chiếu</text>
+<text x="217.0" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >codebase; liệt kê gap và giả định</text>
+<rect x="474.5" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="486.5" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Phân tích, đề xuất plan, đánh giá</text>
+<text x="486.5" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >tác động</text>
+<rect x="744.0" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="756.0" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Viết code, test đơn vị, tự review</text>
+<text x="756.0" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >vòng 1</text>
+<rect x="1013.5" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="1025.5" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Sinh TC từ spec (độc lập với</text>
+<text x="1025.5" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >code), chạy E2E, quét bảo mật</text>
+<rect x="1283.0" y="364.0" width="259.0" height="84.0" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2" />
+<text x="1295.0" y="402.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Chuẩn bị bản demo và danh sách</text>
+<text x="1295.0" y="419.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >thay đổi</text>
+<rect x="40.0" y="456.0" width="155.0" height="70.0" rx="8" fill="#dc2626" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="489.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >BẢO MẬT</text>
+<text x="117.5" y="507.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >rào chắn</text>
+<rect x="205.0" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="217.0" y="487.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Yêu cầu bảo mật và phân quyền nằm</text>
+<text x="217.0" y="504.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >trong spec</text>
+<rect x="474.5" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="486.5" y="487.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Mô hình đe doạ nhẹ (Vàng/Đỏ); đánh</text>
+<text x="486.5" y="504.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >dấu việc đụng auth, dữ liệu</text>
+<rect x="744.0" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="756.0" y="478.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Quét bí mật, phụ thuộc, SAST tự</text>
+<text x="756.0" y="495.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >động; agent chạy sandbox, quyền</text>
+<text x="756.0" y="512.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >tối thiểu</text>
+<rect x="1013.5" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="1025.5" y="487.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Review bảo mật; DAST; PoC xác thực</text>
+<text x="1025.5" y="504.0" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >lỗi (Đỏ)</text>
+<rect x="1283.0" y="456.0" width="259.0" height="70.0" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2" />
+<text x="1295.0" y="495.5" font-size="13" fill="#1f2937" font-weight="400" text-anchor="start" >Duyệt ngoại lệ: có lý do và có hạn</text>
+<rect x="40.0" y="534.0" width="155.0" height="58.0" rx="8" fill="#d97706" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="561.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >CỔNG</text>
+<text x="117.5" y="579.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >điều kiện qua</text>
+<rect x="205.0" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="217.0" y="559.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >AC kiểm chứng được; khách xác nhận</text>
+<text x="217.0" y="576.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >PRD + mockup</text>
+<rect x="474.5" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="486.5" y="567.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Phân loại rủi ro Xanh / Vàng / Đỏ</text>
+<rect x="744.0" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="756.0" y="559.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Build + test xanh, diff nhỏ, quét</text>
+<text x="756.0" y="576.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >bảo mật sạch</text>
+<rect x="1013.5" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="1025.5" y="567.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >TC pass + không lệch spec</text>
+<rect x="1283.0" y="534.0" width="259.0" height="58.0" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.2" />
+<text x="1295.0" y="567.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Ký nhận</text>
+<rect x="40.0" y="600.0" width="155.0" height="58.0" rx="8" fill="#059669" stroke="none" stroke-width="1.5" />
+<text x="117.5" y="627.0" font-size="13.5" fill="#fff" font-weight="700" text-anchor="middle" >BẰNG CHỨNG</text>
+<text x="117.5" y="645.0" font-size="11" fill="#ffffffcc" font-weight="400" text-anchor="middle" >bắt buộc kèm</text>
+<rect x="205.0" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="217.0" y="625.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >PRD + mockup đã xác nhận; SRS đã</text>
+<text x="217.0" y="642.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >rà, trỏ về PRD</text>
+<rect x="474.5" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="486.5" y="633.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Plan + mức rủi ro + phạm vi file</text>
+<rect x="744.0" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="756.0" y="625.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Log chạy thật, kết quả test và</text>
+<text x="756.0" y="642.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >scan</text>
+<rect x="1013.5" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="1025.5" y="625.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Báo cáo TC, ảnh/video, kết quả</text>
+<text x="1025.5" y="642.0" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >scan</text>
+<rect x="1283.0" y="600.0" width="259.0" height="58.0" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.2" />
+<text x="1295.0" y="633.5" font-size="13" fill="#1f2937" font-weight="500" text-anchor="start" >Biên bản + bản demo</text>
+<rect x="205.0" y="682.0" width="1337.0" height="46.0" rx="10" fill="#fff7ed" stroke="#d97706" stroke-width="1.6" />
+<text x="221.0" y="702.0" font-size="13.5" fill="#d97706" font-weight="700" text-anchor="start" >6  PHẢN HỒI TỪ PRODUCTION</text>
+<text x="221.0" y="719.0" font-size="12.5" fill="#1f2937" font-weight="400" text-anchor="start" >Support gom tín hiệu thật → Agent phân loại, gợi ý gap mới → BA nhận vào giai đoạn 1</text>
+<path d="M1412.5,658 V682" stroke="#d97706" stroke-width="2.4" fill="none" marker-end="url(#arrA)"/>
+<path d="M205.0,705.0 H24 V224 H203.0" stroke="#d97706" stroke-width="2.4" fill="none" stroke-dasharray="7 5" marker-end="url(#arrA)"/>
+<text x="34.0" y="212.0" font-size="11" fill="#d97706" font-weight="600" text-anchor="start" >vòng lặp</text>
+<text x="40.0" y="758.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">PHÂN TẦNG RỦI RO — QUYẾT ĐỊNH ĐỘ DÀY CỦA LUỒNG</text>
+<rect x="40.0" y="770.0" width="770.0" height="150.0" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
+<text x="370.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >1</text>
+<text x="454.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >2</text>
+<text x="538.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >3</text>
+<text x="622.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >4</text>
+<text x="706.0" y="794.0" font-size="13" fill="#12263f" font-weight="700" text-anchor="middle" >5</text>
+<circle cx="64" cy="812" r="9" fill="#16a34a"/>
+<text x="82.0" y="817.0" font-size="13.5" fill="#16a34a" font-weight="800" text-anchor="start" >XANH</text>
+<text x="140.0" y="810.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Phạm vi nhỏ, có test phủ, không đụng</text>
+<text x="140.0" y="824.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >dữ liệu/quyền</text>
+<circle cx="370" cy="812" r="10" fill="#16a34a33" stroke="#16a34a" stroke-width="2"/>
+<circle cx="454" cy="812" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="538" cy="812" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="622" cy="812" r="10" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<circle cx="706" cy="812" r="10" fill="#16a34a33" stroke="#16a34a" stroke-width="2"/>
+<circle cx="64" cy="848" r="9" fill="#d97706"/>
+<text x="82.0" y="853.0" font-size="13.5" fill="#d97706" font-weight="800" text-anchor="start" >VÀNG</text>
+<text x="140.0" y="850.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Feature mới trong module có sẵn</text>
+<circle cx="370" cy="848" r="10" fill="#d97706"/>
+<circle cx="454" cy="848" r="10" fill="#d97706"/>
+<circle cx="538" cy="848" r="10" fill="#d9770633" stroke="#d97706" stroke-width="2"/>
+<circle cx="622" cy="848" r="10" fill="#d97706"/>
+<circle cx="706" cy="848" r="10" fill="#d97706"/>
+<circle cx="64" cy="884" r="9" fill="#dc2626"/>
+<text x="82.0" y="889.0" font-size="13.5" fill="#dc2626" font-weight="800" text-anchor="start" >ĐỎ</text>
+<text x="140.0" y="882.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >Schema, quyền, tiền, tích hợp ngoài,</text>
+<text x="140.0" y="896.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >migration phá huỷ</text>
+<circle cx="370" cy="884" r="10" fill="#dc2626"/>
+<circle cx="454" cy="884" r="10" fill="#dc2626"/>
+<circle cx="538" cy="884" r="10" fill="#dc2626"/>
+<circle cx="622" cy="884" r="10" fill="#dc2626"/>
+<circle cx="706" cy="884" r="10" fill="#dc2626"/>
+<circle cx="130" cy="911" r="7" fill="#12263f"/>
+<text x="144.0" y="915.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >người bắt buộc</text>
+<circle cx="280" cy="911" r="7" fill="#12263f33" stroke="#12263f" stroke-width="2"/>
+<text x="294.0" y="915.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >người xác nhận nhẹ</text>
+<circle cx="430" cy="911" r="7" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+<text x="444.0" y="915.0" font-size="11.5" fill="#64748b" font-weight="400" text-anchor="start" >tự động</text>
+<text x="52.0" y="915.0" font-size="11.5" fill="#64748b" font-weight="700" text-anchor="start" >Chú giải</text>
+<text x="798.0" y="915.0" font-size="11" fill="#dc2626" font-weight="600" text-anchor="end" >Đỏ: thêm SA, Security, khách</text>
+<text x="834.0" y="758.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">SỐ LIỆU ĐỂ NỚI HAY SIẾT TỪNG CỔNG</text>
+<rect x="834.0" y="770.0" width="713.0" height="150.0" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
+<circle cx="854.0" cy="794" r="4" fill="#059669"/>
+<text x="866.0" y="798.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Tỷ lệ lỗi lọt</text>
+<text x="866.0" y="814.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >bug sau nghiệm thu / tổng thay đổi</text>
+<circle cx="1202.5" cy="794" r="4" fill="#059669"/>
+<text x="1214.5" y="798.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Tỷ lệ làm lại</text>
+<text x="1214.5" y="814.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >agent bị trả về → sửa spec &amp; plan</text>
+<circle cx="854.0" cy="834" r="4" fill="#059669"/>
+<text x="866.0" y="838.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Số lần spec drift</text>
+<text x="866.0" y="854.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >cao → siết cổng tự động</text>
+<circle cx="1202.5" cy="834" r="4" fill="#059669"/>
+<text x="1214.5" y="838.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Thời gian chờ người</text>
+<text x="1214.5" y="854.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >điểm nghẽn thật cần tự động hoá</text>
+<circle cx="854.0" cy="874" r="4" fill="#059669"/>
+<text x="866.0" y="878.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Chi phí / thay đổi</text>
+<text x="866.0" y="894.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >token + giờ người → nền để định giá</text>
+<circle cx="1202.5" cy="874" r="4" fill="#059669"/>
+<text x="1214.5" y="878.0" font-size="13" fill="#1f2937" font-weight="700" text-anchor="start" >Điểm eval của agent</text>
+<text x="1214.5" y="894.0" font-size="11" fill="#64748b" font-weight="400" text-anchor="start" >chạy lại khi đổi model/prompt/skill</text>
+<text x="40.0" y="946.0" font-size="11" fill="#64748b" font-weight="700" text-anchor="start" letter-spacing="1.5">LỘ TRÌNH THÍCH ỨNG — THEO ĐIỀU KIỆN ĐO ĐƯỢC, KHÔNG THEO MỐC THỜI GIAN</text>
+<path d="M40.0,958 h466.3 l20,38 l-20,38 h-466.3  z" fill="#12263f"/>
+<text x="58.0" y="991.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >0–3 THÁNG · DỰNG NỀN</text>
+<text x="58.0" y="1011.0" font-size="9.5" fill="#ffffffaa" font-weight="700" text-anchor="start" letter-spacing="1">ĐIỀU KIỆN SANG BƯỚC SAU</text>
+<text x="58.0" y="1026.0" font-size="11.5" fill="#fff" font-weight="500" text-anchor="start" >Có 2–3 tháng số liệu liên tục</text>
+<text x="46.0" y="1058.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Spec hai lớp, phân tầng rủi ro, bằng chứng bắt buộc,</text>
+<text x="46.0" y="1073.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >quét bảo mật tự động, sandbox cho agent.</text>
+<path d="M550.3,958 h466.3 l20,38 l-20,38 h-466.3 l20,-38 l-20,-38 z" fill="#2563eb"/>
+<text x="586.3" y="991.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >3–9 THÁNG · NỚI TẦNG XANH</text>
+<text x="586.3" y="1011.0" font-size="9.5" fill="#ffffffaa" font-weight="700" text-anchor="start" letter-spacing="1">ĐIỀU KIỆN SANG BƯỚC SAU</text>
+<text x="586.3" y="1026.0" font-size="11.5" fill="#fff" font-weight="500" text-anchor="start" >Lỗi lọt tầng xanh dưới ngưỡng</text>
+<text x="556.3" y="1058.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Tầng xanh gần như tự động, người chỉ xác nhận cuối.</text>
+<text x="556.3" y="1073.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Operator điều phối nhiều agent song song.</text>
+<path d="M1060.7,958 h466.3 l20,38 l-20,38 h-466.3 l20,-38 l-20,-38 z" fill="#7c3aed"/>
+<text x="1096.7" y="991.0" font-size="14" fill="#fff" font-weight="700" text-anchor="start" >9–18 THÁNG · DỊCH CHUYỂN VAI TRÒ</text>
+<text x="1096.7" y="1011.0" font-size="9.5" fill="#ffffffaa" font-weight="700" text-anchor="start" letter-spacing="1">ĐIỀU KIỆN SANG BƯỚC SAU</text>
+<text x="1096.7" y="1026.0" font-size="11.5" fill="#fff" font-weight="500" text-anchor="start" >Cổng kiểm chứng ổn định, eval đáng tin</text>
+<text x="1066.7" y="1058.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >Việc vàng dần thành xanh. Người tập trung giai đoạn 1 và</text>
+<text x="1066.7" y="1073.0" font-size="12" fill="#1f2937" font-weight="400" text-anchor="start" >5; SA / Agent owner thành vai trò cốt lõi.</text>
+<text x="40.0" y="1095.0" font-size="12.5" fill="#64748b" font-weight="400" text-anchor="start" >Nguyên tắc: đổi quy trình = đổi một tệp (rules / skill / kiểm tra tự động), rà soát mỗi quý, ghi lại lý do mỗi lần nới hoặc siết cổng.</text>
+<text x="1547.0" y="1095.0" font-size="12.5" fill="#12263f" font-weight="700" text-anchor="end" >AI-Autopilot</text>
+</svg>

@@ -1,0 +1,12 @@
+{
+  "gate": "G3",
+  "tier": "yellow",
+  "criteria": {
+    "build_tests":        {"status": "pass",    "evidence": "pipeline#4821"},
+    "secrets_clean":      {"status": "pass",    "evidence": "scan#912"},
+    "sast_deps":          {"status": "partial", "evidence": "scan#912: 2 canh bao trung binh"},
+    "auto_review":        {"status": "pass",    "evidence": "review#77"},
+    "diff_bounded":       {"status": "pass",    "evidence": "PR#310: 7 file"},
+    "sandbox_least_priv": {"status": "pass",    "evidence": "worktree"}
+  }
+}

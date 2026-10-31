@@ -24,13 +24,17 @@
     <input type="text" name="action" value="{{ action }}" placeholder="vd. config. / pr." aria-label="Lọc theo action" title="Lọc theo tiền tố action, vd. config. / item. / pr."
            style="background:var(--bg-card);color:var(--text);border:1px solid var(--border,#23232b);border-radius:8px;padding:6px 10px;font-size:13px;min-width:180px">
     <button type="submit" class="btn-ghost">Lọc</button>
+    {% if can('users.manage') %}
+    <a class="btn-ghost" href="/dashboard/audit/export.ocsf{% if action %}?action={{ action|urlencode }}{% endif %}"
+       title="Tải nhật ký theo chuẩn OCSF (NDJSON) để nạp vào SIEM — Sentinel, Splunk, Security Lake">⬇ OCSF</a>
+    {% endif %}
   </form>
 </div>
 
 {% if events %}
 <div class="card" style="padding:4px 8px">
   <table class="a-table">
-    <thead><tr><th>Thời điểm (UTC)</th><th>Thao tác</th><th>Ai làm</th><th>Nguồn</th><th>Đối tượng</th><th>Chi tiết</th></tr></thead>
+    <thead><tr><th>Thời điểm (UTC)</th><th>Thao tác</th><th>Ai làm</th><th>Nguồn</th><th>IP</th><th>Đối tượng</th><th>Chi tiết</th></tr></thead>
     <tbody>
       {% for e in events %}
         <tr>
@@ -38,6 +42,7 @@
           <td class="a-act">{{ AREA_VI.get(e.action.split('.')[0], '') }}<code>{{ e.action }}</code></td>
           <td>{{ e.actor }}</td>
           <td>{{ e.source }}</td>
+          <td style="white-space:nowrap;color:var(--text-dim)">{{ e.src_ip or '' }}</td>
           <td>{{ e.target }}</td>
           <td class="a-detail">{{ e.detail }}</td>
         </tr>

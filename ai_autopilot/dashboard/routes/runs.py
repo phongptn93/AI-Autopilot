@@ -436,6 +436,24 @@ def create_router() -> APIRouter:
             _ctx(request, "audit", events=events, action=action, actions=actions),
         )
 
+    @router.get("/audit/export.ocsf")
+    async def audit_export_ocsf(request: Request, action: str = "", limit: int = 5000):
+        """The trail as OCSF NDJSON, for a SIEM. Needs users.manage (rbac): unlike
+        the page, an export is the whole history with source addresses, in bulk."""
+        from ai_autopilot import audit_ocsf
+
+        c: Container = request.app.state.container
+        events = await c.audit_repo.recent(limit=max(1, min(limit, 50_000)), action=action)
+        await c.audit_repo.record(actor="dashboard", source="dashboard",
+                                  action="dashboard.audit_export",
+                                  target=action or "*", detail=f"{len(events)} events")
+        return PlainTextResponse(
+            audit_ocsf.dumps_ndjson(events, product_version=request.app.version),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition":
+                     f'attachment; filename="{audit_ocsf.filename()}"'},
+        )
+
     @router.get("/quality", response_class=HTMLResponse)
     async def quality_page(
         request: Request, days: int = 30, kind: str = "", view: str = "all", q: str = "",

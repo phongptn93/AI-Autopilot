@@ -100,6 +100,7 @@ _RULES: list[tuple[str, str, str]] = [
     # itself users.manage, or set test_command and have the next run execute it.)
     ("POST", r"/settings/import-full$", ADMIN),
     ("*", r"/users(/.*)?$", "users.manage"),
+    ("GET", r"/audit/export\.ocsf$", "users.manage"),       # bulk history + source IPs
     ("GET", r".*", "view"),
     ("POST", r"/(board/run|sessions/[^/]+/cancel|feedback/[^/]+)$", "runs.start"),
     ("POST", r"/(board/move|inbox/.*|queue/resume|planning/.*|conflicts/.*|history/.*)$",

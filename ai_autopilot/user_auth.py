@@ -34,6 +34,7 @@ FLOW_COOKIE = "autopilot_sso_flow"
 USER_TTL_HOURS = 12
 BREAKGLASS = "breakglass"
 current_actor: contextvars.ContextVar[str] = contextvars.ContextVar("current_actor", default="")
+current_ip: contextvars.ContextVar[str] = contextvars.ContextVar("current_ip", default="")
 
 _key_cache: dict[str, bytes] = {}
 _user_cache: dict[int, tuple[float, object]] = {}

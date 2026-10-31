@@ -462,6 +462,8 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(String(100), default="")  # e.g. "item.resumed"
     target: Mapped[str] = mapped_column(String(300), default="")  # item id / PR / config keys
     detail: Mapped[str] = mapped_column(String(2000), default="")
+    # The peer the request came from — what a SIEM correlates failed logins on.
+    src_ip: Mapped[str | None] = mapped_column(String(64), nullable=True, default="")
 
 
 class FleetWorker(Base):

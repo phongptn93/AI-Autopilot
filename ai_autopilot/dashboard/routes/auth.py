@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import secrets
+import time
 from datetime import UTC, datetime
 from urllib.parse import quote
 
@@ -26,6 +27,30 @@ from ai_autopilot import oidc, rbac, security, user_auth
 from ai_autopilot.dashboard.common import _TEMPLATES, _log
 
 _FLOW_TTL = 600
+_FAIL_WINDOW = 600
+_FAIL_PER_PEER = 20
+_fail_seen: dict[str, list[float]] = {}
+
+
+async def _audit_failure(c, peer: str, *, actor: str, detail: str) -> None:
+    """Record a failed sign-in — at most ``_FAIL_PER_PEER`` rows per address per window.
+
+    These pages answer before anyone has signed in, so one row per attempt would let
+    anybody on the network grow the database without bound. Past the cap the attempt
+    is still in the application log; the trail keeps the first ones, which are the
+    ones that say a guessing run started.
+    """
+    now = time.monotonic()
+    if len(_fail_seen) > 5000:
+        _fail_seen.clear()
+    hits = [t for t in _fail_seen.get(peer, []) if now - t < _FAIL_WINDOW]
+    _fail_seen[peer] = hits
+    if len(hits) >= _FAIL_PER_PEER:
+        return
+    hits.append(now)
+    with contextlib.suppress(Exception):
+        await c.audit_repo.record(actor=actor, source="dashboard",
+                                  action="dashboard.login_failed", target=peer, detail=detail)
 
 
 def _safe_next(raw: str | None) -> str:
@@ -119,6 +144,9 @@ def create_router() -> APIRouter:
                 security.verify_password, password, row.password_hash)
             if not ok or row.status != "active":
                 _log.warning("dashboard login failed", client=client, email=str(form.get("email")))
+                await _audit_failure(c, client, actor=str(form.get("email"))[:200],
+                                     detail="local: " + (f"account {row.status}" if ok
+                                                         else "wrong email or password"))
                 msg = ("Tài khoản đang chờ duyệt hoặc đã bị khoá." if ok
                        else "Email hoặc mật khẩu không đúng.")
                 return page(request, nxt=nxt, error=msg, status=401)
@@ -136,6 +164,9 @@ def create_router() -> APIRouter:
                         status=401)
         if not await _shared_password_ok(cfg, password):
             _log.warning("dashboard login failed", client=client)
+            await _audit_failure(
+                c, client, actor=user_auth.BREAKGLASS if user_auth.enabled(cfg) else "dashboard",
+                detail="shared password")
             # 401, not 200: a failed login is not a successful page view, and the status
             # is what monitoring and fail2ban-style tooling actually key on.
             return page(request, nxt=nxt, error="Mật khẩu không đúng.", status=401,
@@ -151,6 +182,18 @@ def create_router() -> APIRouter:
 
     @router.post("/logout")
     async def logout(request: Request):
+        c = request.app.state.container
+        # /logout is public, so the guard set no actor — read it from the session.
+        session = user_auth.unsign(request.cookies.get(user_auth.USER_COOKIE)) or {}
+        row = await c.user_repo.get(int(session["uid"])) if session.get("uid") else None
+        if row is not None or security.verify_session_token(
+                request.cookies.get(security.SESSION_COOKIE), c.config):
+            with contextlib.suppress(Exception):
+                await c.audit_repo.record(
+                    actor=row.email if row is not None else (
+                        user_auth.BREAKGLASS if user_auth.enabled(c.config) else "dashboard"),
+                    source="dashboard", action="dashboard.logout",
+                    target=request.client.host if request.client else "")
         response = RedirectResponse("/dashboard/login", status_code=303)
         response.delete_cookie(security.SESSION_COOKIE, path="/dashboard")
         response.delete_cookie(user_auth.USER_COOKIE, path="/dashboard")
@@ -180,11 +223,14 @@ def create_router() -> APIRouter:
         cfg = c.config
         flow = user_auth.unsign(request.cookies.get(user_auth.FLOW_COOKIE))
         q = request.query_params
+        peer = request.client.host if request.client else "?"
         if q.get("error"):
             why = q.get("error_description") or q.get("error")
+            await _audit_failure(c, peer, actor="sso", detail=f"sso: idp error {why}"[:300])
             return _back(f"Nhà cung cấp SSO báo lỗi: {why}")
         if not flow or not q.get("state") or not secrets.compare_digest(
                 str(q.get("state")), str(flow.get("state"))):
+            await _audit_failure(c, peer, actor="sso", detail="sso: missing or forged state")
             return _back("Phiên đăng nhập hết hạn hoặc không hợp lệ — thử lại.")
         try:
             meta = await oidc.discovery(c.http, cfg)
@@ -192,6 +238,7 @@ def create_router() -> APIRouter:
                                         redirect_uri(request, cfg))
         except Exception as exc:  # noqa: BLE001
             _log.warning("sso sign-in failed", error=_why(exc))
+            await _audit_failure(c, peer, actor="sso", detail=f"sso: {_why(exc)}"[:300])
             return _back(_why(exc))
 
         row = await c.user_repo.by_email(ident.email)
@@ -225,6 +272,7 @@ def create_router() -> APIRouter:
         response = RedirectResponse(target, status_code=303)
         response.delete_cookie(user_auth.FLOW_COOKIE, path="/dashboard")
         if row.status == "disabled":
+            await _audit_failure(c, peer, actor=row.email, detail="sso: account disabled")
             return _back("Tài khoản đã bị khoá — liên hệ Admin.")
         _cookie(response, user_auth.USER_COOKIE, user_auth.session_for(row.id), request,
                 user_auth.USER_TTL_HOURS * 3600)

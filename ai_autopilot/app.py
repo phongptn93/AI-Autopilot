@@ -423,6 +423,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def _security_guard(request: Request, call_next):
+        # The peer address, for every audit row this request writes (AuditRepository).
+        ip = user_auth.current_ip.set(request.client.host if request.client else "")
+        try:
+            return await _guard(request, call_next)
+        finally:
+            user_auth.current_ip.reset(ip)
+
+    async def _guard(request: Request, call_next):
         """Opt-in auth for the network-exposed web surface.
 
         Both gates are no-ops until configured, so existing setups are unchanged —
@@ -462,6 +470,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 if user is None:
                     return _sign_in_first(request, why)
                 if not user.can(needed):
+                    # A signed-in person probing past their role is exactly what an
+                    # audit trail is for; record() never raises into the request.
+                    await app.state.container.audit_repo.record(
+                        actor=user.email if user.kind == "user" else user.kind,
+                        source="dashboard", action="dashboard.denied",
+                        target=f"{request.method} {path}"[:300], detail=needed)
                     return _forbidden(request, user, needed)
                 request.state.user = user
                 token = user_auth.current_actor.set(

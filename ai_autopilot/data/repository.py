@@ -919,21 +919,24 @@ class AuditRepository:
         self._db = db
 
     async def record(
-        self, *, actor: str, source: str, action: str, target: str = "", detail: str = ""
+        self, *, actor: str, source: str, action: str, target: str = "", detail: str = "",
+        src_ip: str = "",
     ) -> None:
         # In users/sso mode the request guard knows WHO acted; call sites still pass the
         # generic "dashboard", so the person is filled in here, once, for all of them.
-        if actor in ("", "dashboard"):
-            from ai_autopilot.user_auth import current_actor
+        # The peer address comes the same way: the guard sets it for every request.
+        from ai_autopilot.user_auth import current_actor, current_ip
 
+        if actor in ("", "dashboard"):
             actor = current_actor.get() or actor
+        src_ip = src_ip or current_ip.get()
         try:
             async with self._db.session() as session:
                 session.add(AuditEvent(
                     at=datetime.now(UTC).replace(tzinfo=None),
                     actor=(actor or "")[:200], source=(source or "")[:50],
                     action=(action or "")[:100], target=(target or "")[:300],
-                    detail=(detail or "")[:2000],
+                    detail=(detail or "")[:2000], src_ip=(src_ip or "")[:64],
                 ))
                 await session.commit()
         except Exception:  # noqa: BLE001 — auditing must never break the audited action

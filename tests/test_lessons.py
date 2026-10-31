@@ -41,7 +41,9 @@ def test_lessons_brief_empty_when_none(tmp_path):
 
 def test_lessons_brief_lists_across_repos(tmp_path):
     ws = str(tmp_path)
-    now = datetime(2026, 7, 29)
+    # Today, not a fixed date: the brief drops lessons older than STALE_AFTER_DAYS, so a
+    # pinned date turned this test red once the calendar moved past it.
+    now = datetime.now()  # noqa: DTZ005 — local day, the clock lessons.py uses
     lessons.record_lessons(ws, "BE", ["BE lesson"], now=now)
     lessons.record_lessons(ws, "FE", ["FE lesson"], now=now)
     brief = lessons.lessons_brief(ws, ["BE", "FE"])
@@ -57,7 +59,7 @@ def test_read_missing_is_empty(tmp_path):
 def test_brief_and_injected_count_agree(tmp_path):
     """The badge counts the SAME list the brief carries — no over-claiming."""
     ws = str(tmp_path)
-    now = datetime(2026, 7, 29)
+    now = datetime.now()  # noqa: DTZ005 — see test_lessons_brief_lists_across_repos
     lessons.record_lessons(ws, "BE", [f"lesson {i}" for i in range(10)], now=now)
     picked = lessons.recent(ws, ["BE"], limit=3)
     brief = lessons.lessons_brief(ws, ["BE"], limit=3)

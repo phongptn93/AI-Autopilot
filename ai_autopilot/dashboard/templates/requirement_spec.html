@@ -31,6 +31,15 @@
     border-radius:8px; padding:7px 9px; font-size:13px; width:140px; }
   .sp-btns { display:flex; gap:8px; flex-wrap:wrap; }
   .sp-hint { font-size:11.5px; color:var(--text-dim); line-height:1.5; }
+  .sp-find { margin:0; padding-left:18px; font-size:12.5px; line-height:1.55; color:var(--text-muted); }
+  .sp-pill { display:inline-block; font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:20px; border:1px solid var(--border); }
+  .sp-pill.green { color:#3fb950; border-color:#3fb95066; } .sp-pill.amber { color:#d29922; border-color:#d2992266; }
+  .sp-pill.red { color:#e5484d; border-color:#e5484d66; } .sp-pill.muted { color:var(--text-dim); }
+  .sp-body input[type=text], .sp-body select { background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border);
+    border-radius:8px; padding:6px 9px; font-size:13px; font-family:inherit; width:100%; }
+  .sp-ac { display:grid; grid-template-columns:1fr; gap:4px; padding:7px 0; border-top:1px solid var(--border-soft,var(--border)); }
+  .sp-ac:first-of-type { border-top:0; }
+  .sp-ac .t { font-size:12.5px; }
   .sp-sib a { display:block; font-family:var(--mono,monospace); font-size:12px; color:var(--accent-hover); text-decoration:none; padding:3px 0; }
 </style>
 
@@ -89,6 +98,111 @@
           nơi QC và khách đọc. Góp ý không đổi trạng thái item.</div>
       </div>
     </form>
+
+    {# ─── BA: readiness ─── #}
+    <div class="sp-card" id="ba-ready">
+      <header>{{ readiness.icon }} Độ sẵn sàng giao agent</header>
+      <div class="sp-body">
+        <div><b>{{ readiness.label }}</b> · điểm <b>{{ readiness.score }}/100</b> <span class="sp-hint">(ngưỡng {{ ready_min }})</span></div>
+        <div class="sp-hint">AC kiểm chứng được: {{ readiness.stats.ac_verifiable }}/{{ readiness.stats.ac }}
+          · FR chưa có AC: {{ readiness.stats.fr_without_ac }} · từ mơ hồ: {{ readiness.stats.vague }}
+          · câu hỏi mở: {{ readiness.stats.open_questions }}</div>
+        {% if readiness.findings %}
+        <ul class="sp-find">
+          {% for f in readiness.findings[:8] %}
+          <li>{{ '⛔' if f.severity == 'critical' else ('🟡' if f.severity == 'warning' else 'ℹ️') }} {{ f.message }}{% if f.line %} <span class="sp-hint">(dòng {{ f.line }})</span>{% endif %}</li>
+          {% endfor %}
+          {% if readiness.findings|length > 8 %}<li class="sp-hint">… và {{ readiness.findings|length - 8 }} mục nữa</li>{% endif %}
+        </ul>
+        {% endif %}
+        {% if item_id and can('tracker.write') %}
+        <form method="post" action="/dashboard/ba/readiness/comment">
+          <input type="hidden" name="path" value="{{ rel }}"><input type="hidden" name="item_id" value="{{ item_id }}">
+          <button class="btn-ghost btn-sm" type="submit">📋 Gửi nhận xét lên work item</button>
+        </form>
+        {% endif %}
+        {% if ledger.open_count %}<div class="sp-hint">❔ <a href="/dashboard/ba?tab=questions" style="color:var(--accent-hover)">{{ ledger.open_count }} câu hỏi / giả định chưa trả lời</a></div>{% endif %}
+      </div>
+    </div>
+
+    {# ─── BA: what the customer confirmed ─── #}
+    {% set cf = confirmation %}
+    <div class="sp-card" id="ba-customer">
+      <header>🤝 Khách xác nhận
+        {% if cf.state == 'confirmed' %}<span class="sp-pill green">Đã xác nhận</span>
+        {% elif cf.state == 'stale' %}<span class="sp-pill amber">Đã đổi sau xác nhận</span>
+        {% elif cf.state == 'rejected' %}<span class="sp-pill red">Khách từ chối</span>
+        {% else %}<span class="sp-pill muted">Chưa xác nhận</span>{% endif %}</header>
+      <div class="sp-body">
+        {% if cf.row %}
+        <div class="sp-hint">Lần gần nhất: <b>{{ cf.row.confirmed_by }}</b>{% if cf.row.channel %} ({{ cf.row.channel }}){% endif %} · {{ cf.row.created_at.strftime('%Y-%m-%d %H:%M') }}{% if cf.row.note %}<br>{{ cf.row.note }}{% endif %}</div>
+        {% endif %}
+        {% if cf.state == 'stale' %}
+        <div class="sp-hint" style="color:var(--amber)">Khách đã xác nhận bản cũ. Từ đó:</div>
+        <ul class="sp-find">
+          {% for a in cf.impact.changed %}<li>đổi <b>{{ a.id or 'AC' }}</b>: “{{ a.before }}” → “{{ a.after }}”</li>{% endfor %}
+          {% for a in cf.impact.removed %}<li>bỏ <b>{{ a.id or 'AC' }}</b>: “{{ a.text }}”</li>{% endfor %}
+          {% for a in cf.impact.added %}<li>thêm <b>{{ a.id or 'AC' }}</b>: “{{ a.text }}”</li>{% endfor %}
+        </ul>
+        <div class="sp-hint">Khách chưa thấy những thay đổi này — cần xác nhận lại, và QC cần rà test case.</div>
+        {% if item_id and can('tracker.write') %}
+        <form method="post" action="/dashboard/ba/impact/notify">
+          <input type="hidden" name="path" value="{{ rel }}"><input type="hidden" name="item_id" value="{{ item_id }}">
+          <button class="btn-ghost btn-sm" type="submit">🔄 Báo QC các tiêu chí đã đổi</button>
+        </form>
+        {% endif %}
+        {% endif %}
+        <div class="sp-btns"><a class="btn-ghost btn-sm" href="/dashboard/ba/pack?path={{ q }}" target="_blank" rel="noopener">🖨️ Gói xác nhận cho khách</a></div>
+        {% if can('requirements.approve') %}
+        <form method="post" action="/dashboard/ba/confirm" style="display:flex;flex-direction:column;gap:8px">
+          <input type="hidden" name="path" value="{{ rel }}">
+          {% if item_id %}<input type="hidden" name="item_id" value="{{ item_id }}">{% endif %}
+          <input type="text" name="confirmed_by" placeholder="Ai phía khách đã nói? (tên, chức danh)" required>
+          <input type="text" name="channel" placeholder="Qua đâu: họp, email, chat…">
+          <select name="outcome"><option value="confirmed">Khách đồng ý</option><option value="rejected">Khách không đồng ý</option></select>
+          <textarea name="note" placeholder="Ghi chú (tuỳ chọn)"></textarea>
+          <button class="btn-success btn-sm" type="submit">Ghi nhận</button>
+        </form>
+        <div class="sp-hint">Ghi lại điều khách ĐÃ nói, kèm các tiêu chí đúng như họ được xem. Hệ thống không gửi gì cho khách.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# ─── BA: acceptance of the delivery ─── #}
+    <div class="sp-card" id="ba-accept">
+      <header>📑 Nghiệm thu
+        {% if accept_ready %}<span class="sp-pill green">Đủ điều kiện</span>{% else %}<span class="sp-pill muted">Chưa đủ điều kiện</span>{% endif %}</header>
+      <div class="sp-body">
+        {% if not accept_ready and accept_reasons %}<ul class="sp-find">{% for r in accept_reasons %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+        {% if drifts_open %}<div class="sp-hint" style="color:var(--amber)">{{ drifts_open }} điểm lệch spec chưa quyết — <a href="/dashboard/specs" style="color:var(--accent-hover)">quyết trước khi nghiệm thu</a>.</div>{% endif %}
+        {% if acceptance %}
+        <div class="sp-hint">Biên bản gần nhất: {{ acceptance.confirmed_by }} · {{ acceptance.created_at.strftime('%Y-%m-%d') }} ·
+          <a href="/dashboard/ba/acceptance?path={{ q }}" target="_blank" rel="noopener" style="color:var(--accent-hover)">in</a> ·
+          <a href="/dashboard/ba/acceptance?path={{ q }}&fmt=md" target="_blank" rel="noopener" style="color:var(--accent-hover)">Markdown</a></div>
+        {% endif %}
+        {% if can('requirements.approve') and acs %}
+        <form method="post" action="/dashboard/ba/accept" style="display:flex;flex-direction:column;gap:6px">
+          <input type="hidden" name="path" value="{{ rel }}">
+          {% if item_id %}<input type="hidden" name="item_id" value="{{ item_id }}">{% endif %}
+          {% for a in acs %}
+          <div class="sp-ac">
+            <div class="t"><b>{{ a.id }}</b> {{ a.text }}</div>
+            <select name="res_{{ loop.index0 }}">
+              {% for k, label in results.items() %}<option value="{{ k }}" {{ 'selected' if a.result == k else '' }}>{{ label }}</option>{% endfor %}
+            </select>
+            <input type="text" name="ev_{{ loop.index0 }}" value="{{ a.evidence }}" placeholder="Bằng chứng: id TC, link, ảnh…">
+          </div>
+          {% endfor %}
+          <input type="text" name="confirmed_by" placeholder="Ai phía khách nhận bản giao?" required>
+          <input type="text" name="channel" placeholder="Qua đâu: họp nghiệm thu, email…">
+          <select name="outcome"><option value="confirmed">Khách nhận</option><option value="rejected">Khách từ chối</option></select>
+          <textarea name="note" placeholder="Ghi chú (tuỳ chọn)"></textarea>
+          <button class="btn-success btn-sm" type="submit">Ghi nhận nghiệm thu</button>
+        </form>
+        <div class="sp-hint">Tiêu chí lấy từ chính file spec. “Khách nhận” chỉ ghi được khi mọi tiêu chí Đạt và không còn điểm lệch spec chưa quyết.</div>
+        {% elif not acs %}<div class="sp-hint">Spec chưa có tiêu chí chấp nhận nào để nghiệm thu.</div>{% endif %}
+      </div>
+    </div>
 
     {% if siblings %}
     <div class="sp-card sp-sib">

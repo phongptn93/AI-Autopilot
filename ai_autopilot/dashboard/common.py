@@ -180,6 +180,36 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
     "req_feedback_sent": ("green", "💬 Đã gửi góp ý lên work item."),
     "req_approved": ("green", "✅ Đã duyệt spec (comment SPEC APPROVED trên work item)."),
     "req_approved_dev": ("green", "✅ Đã duyệt spec và giao cho vai Dev."),
+    "req_not_ready": ("red", "⛔ Spec chưa sẵn sàng giao (xem hộp <b>Độ sẵn sàng</b>). Sửa "
+                             "spec, hoặc tắt <code>spec_readiness_blocks_approve</code> nếu bạn "
+                             "biết điều văn bản chưa viết."),
+    "ba_no_spec": ("red", "⛔ Không mở được spec này (chỉ file .md/.html trong thư mục spec)."),
+    "ba_no_name": ("red", "⛔ Cần tên người phía khách đã nói — ghi nhận không có tên thì không "
+                          "chứng minh được gì."),
+    "ba_no_item": ("red", "⛔ Spec này chưa gắn work item — nhập mã work item trước."),
+    "ba_confirmed": ("green", "✅ Đã ghi nhận khách xác nhận <b>bản spec này</b>. Nếu tiêu chí đổi "
+                              "về sau, trang sẽ báo xác nhận đã cũ."),
+    "ba_rejected": ("amber", "⛔ Đã ghi nhận khách <b>không đồng ý</b> bản spec này."),
+    "ba_saved_dry": ("amber", "Đã lưu ghi nhận, nhưng máy đang <code>dry_run</code> nên chưa "
+                              "comment lên work item."),
+    "ba_accepted": ("green", "✅ Đã ghi nhận nghiệm thu. Biên bản in được ở hộp "
+                             "<b>Nghiệm thu</b>."),
+    "ba_accept_rejected": ("amber", "⛔ Đã ghi nhận khách <b>từ chối</b> nghiệm thu."),
+    "ba_accept_blocked": ("red", "⛔ Chưa đủ điều kiện nghiệm thu: còn tiêu chí chưa đạt hoặc "
+                                 "điểm lệch spec chưa quyết. Chọn “Từ chối” nếu khách không "
+                                 "nhận bản giao."),
+    "ba_readiness_posted": ("green", "📋 Đã đăng nhận xét độ sẵn sàng lên work item."),
+    "ba_impact_posted": ("green", "🔄 Đã báo QC các tiêu chí đã đổi sau khi khách xác nhận."),
+    "ba_no_change": ("amber", "Không có tiêu chí nào đổi so với bản khách đã xác nhận."),
+    "ba_answered": ("green", "💬 Đã ghi câu trả lời."),
+    "ba_answer_empty": ("amber", "Viết câu trả lời trước khi lưu."),
+    "ba_question_gone": ("amber", "Câu hỏi này không còn trong spec (có thể vừa được sửa) — tải "
+                                  "lại trang."),
+    "ba_cluster_gone": ("amber", "Nhóm ticket này không còn nữa (đổi trong lúc bạn xem) — "
+                                 "tải lại."),
+    "ba_prod_created": ("green", "✅ Đã tạo yêu cầu nháp từ nhóm ticket production (tag "
+                                 "<code>requirement-draft</code>)."),
+    "ba_prod_failed": ("red", "⛔ Tracker từ chối tạo work item — xem log."),
     "lesson_promoted": ("green", "📌 Đã nâng thành quy tắc — từ giờ nó nằm trong file rule mà "
                                  "mọi run đều nạp, không còn là suy đoán trong skill."),
     "lessons_pruned": ("green", "🧹 Đã dọn các bài học cũ chỉ gặp một lần."),

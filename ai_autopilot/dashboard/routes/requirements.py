@@ -20,8 +20,9 @@ from urllib.parse import quote
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
-from ai_autopilot import markdown_lite, spec_library
+from ai_autopilot import markdown_lite, spec_library, spec_readiness
 from ai_autopilot.container import Container
+from ai_autopilot.dashboard import ba_view
 from ai_autopilot.dashboard.common import (
     _FLASH_COOKIE,
     _TEMPLATES,
@@ -138,6 +139,8 @@ def create_router() -> APIRouter:
         spec = next((s for s in spec_library.discover(cfg.workspace_directory)
                      if s.rel == path), None)
         item_id = spec.item_id if spec else spec_library.item_ref(text[:6000])
+        _t, plain, _k = ba_view.load_spec(cfg, path)
+        panel = await ba_view.spec_panel(c, cfg, path, plain, item_id or 0)
         flash = _take_flash(request)
         response = _TEMPLATES.TemplateResponse(
             request, "requirement_spec.html",
@@ -146,7 +149,7 @@ def create_router() -> APIRouter:
                  body=markdown_lite.render(text) if kind == "md" else "",
                  siblings=[{"rel": r, "q": quote(r), "name": r.rsplit("/", 1)[-1]}
                            for r in (spec.siblings if spec else [])],
-                 item_id=item_id, item_url=_item_url(cfg, item_id)),
+                 item_id=item_id, item_url=_item_url(cfg, item_id), **panel),
         )
         if flash is not None:
             response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
@@ -189,6 +192,12 @@ def create_router() -> APIRouter:
         decision = str(form.get("decision", "")).strip()
         note = str(form.get("note", "")).strip()[:4000]
         spec_name = html_mod.escape(str(form.get("path", "")))
+        if decision == "approve" and cfg.spec_readiness_blocks_approve:
+            # Opt-in: a spec an agent cannot verify its work against should not be handed
+            # on. Off by default, because the BA may know what the text does not say.
+            _t, plain, _k = ba_view.load_spec(cfg, str(form.get("path", "")))
+            if not spec_readiness.check(plain, ready_min=cfg.spec_readiness_min).ready:
+                return _flash(back, "req_not_ready")
         if decision == "approve":
             await c.ado.add_comment(item_id, (
                 "<div><b>✅ SPEC APPROVED</b> — duyệt trên AI-Autopilot."

@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .ba-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .ba-tab { font-size:13px; padding:6px 14px; border-radius:20px; border:1px solid var(--border); color:var(--text-muted);
+    text-decoration:none; background:var(--bg-card); }
+  .ba-tab.on { color:var(--text); border-color:var(--accent); background:var(--bg-input,var(--bg-card)); font-weight:600; }
+  .ba-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-bottom:14px; }
+  .ba-card > header { padding:11px 16px; border-bottom:1px solid var(--border-soft,var(--border)); font-weight:650; font-size:13.5px;
+    display:flex; flex-wrap:wrap; gap:6px 12px; align-items:baseline; }
+  .ba-card > header small { color:var(--text-dim); font-weight:400; font-size:12px; }
+  .ba-body { padding:13px 16px; font-size:13px; display:flex; flex-direction:column; gap:10px; }
+  .ba-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .ba-table th, .ba-table td { padding:8px 12px; text-align:left; border-bottom:1px solid var(--border-soft,var(--border)); vertical-align:top; }
+  .ba-table th { color:var(--text-muted); font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; font-weight:600; }
+  .ba-table a { color:var(--accent-hover); text-decoration:none; }
+  .ba-pill { display:inline-block; font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:20px; border:1px solid var(--border); white-space:nowrap; }
+  .ba-pill.green { color:#3fb950; border-color:#3fb95066; } .ba-pill.amber { color:#d29922; border-color:#d2992266; }
+  .ba-pill.red { color:#e5484d; border-color:#e5484d66; } .ba-pill.muted { color:var(--text-dim); }
+  .ba-tiles { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:16px; }
+  @media (max-width: 1100px) { .ba-tiles { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .ba-tile { background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+  .ba-tile .n { font-size:24px; font-weight:700; line-height:1.15; }
+  .ba-tile .l { color:var(--text-muted); font-size:11px; margin-top:3px; text-transform:uppercase; letter-spacing:.04em; }
+  .ba-tile .s { color:var(--text-dim); font-size:11.5px; margin-top:2px; }
+  .ba-tile.good .n { color:#3fb950; } .ba-tile.warn .n { color:#d29922; } .ba-tile.bad .n { color:#e5484d; }
+  .ba-q { border-top:1px solid var(--border-soft,var(--border)); padding:11px 16px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); gap:12px; }
+  @media (max-width: 900px) { .ba-q { grid-template-columns:1fr; } }
+  .ba-q:first-of-type { border-top:0; }
+  .ba-q form { display:flex; gap:8px; align-items:flex-start; }
+  .ba-q textarea, .ba-in { background:var(--bg-input,var(--bg)); color:var(--text); border:1px solid var(--border); border-radius:8px;
+    padding:7px 10px; font-size:13px; font-family:inherit; }
+  .ba-q textarea { flex:1; min-height:54px; resize:vertical; }
+  .ba-answer { color:var(--text-muted); font-size:12.5px; }
+  .ba-empty { padding:26px; text-align:center; color:var(--text-muted); font-size:13px; }
+  .ba-hint { font-size:12px; color:var(--text-dim); line-height:1.5; }
+  .ba-tickets { font-size:12.5px; color:var(--text-muted); margin:6px 0 0; padding-left:18px; }
+  .ba-tickets a { color:var(--accent-hover); text-decoration:none; }
+  .ba-kind { font-family:var(--mono,monospace); font-size:12px; }
+</style>
+
+<div class="page-header">
+  <h2 class="page-title">{{ page_title("ba") }}</h2>
+  <p>{{ page_hint("ba") }}</p>
+</div>
+
+{% if flash %}
+<div class="ba-card" style="border-color:var(--{{ flash[0] }})">
+  <div style="padding:12px 16px;color:var(--{{ flash[0] }})">{{ flash[1]|safe }}</div>
+</div>
+{% endif %}
+
+<div class="ba-tabs">
+  {% set labels = {"specs": "📄 Spec", "questions": "❔ Câu hỏi mở", "production": "📣 Phản hồi production", "metrics": "📊 Chỉ số"} %}
+  {% for t in tabs %}<a class="ba-tab {{ 'on' if t == tab else '' }}" href="/dashboard/ba?tab={{ t }}">{{ labels[t] }}</a>{% endfor %}
+</div>
+
+{# ───────────────────────── Spec ───────────────────────── #}
+{% if tab == "specs" %}
+<div class="ba-card">
+  <header>Độ sẵn sàng của từng spec <small>chấm trước khi giao agent · tệ nhất ở trên</small></header>
+  {% if not specs %}
+  <div class="ba-empty">Chưa có spec nào trong thư mục <code>specs/</code>, <code>specs-dxfac/</code> hay <code>docs/specs/</code> của workspace.</div>
+  {% else %}
+  <table class="ba-table">
+    <tr><th>Spec</th><th>Item</th><th>Sẵn sàng</th><th>AC kiểm chứng được</th><th>Câu hỏi mở</th><th>Khách</th><th>Sửa</th></tr>
+    {% for s in specs %}
+    {% set r = s.readiness %}{% set cf = s.confirmation %}
+    <tr>
+      <td><a href="/dashboard/requirements/spec?path={{ s.q }}">{{ s.title }}</a><div class="ba-hint ba-kind">{{ s.rel }}</div></td>
+      <td>{% if s.item_id %}{% if s.item_url %}<a href="{{ s.item_url }}" target="_blank" rel="noopener">#{{ s.item_id }} ↗</a>{% else %}#{{ s.item_id }}{% endif %}{% else %}—{% endif %}</td>
+      <td><span class="ba-pill {{ 'green' if r.verdict == 'ready' else ('amber' if r.verdict == 'needs_work' else 'red') }}" title="{{ r.label }}">{{ r.icon }} {{ r.score }}/100</span></td>
+      <td>{{ r.stats.ac_verifiable }}/{{ r.stats.ac }}</td>
+      <td>{% if s.open_questions %}<a href="/dashboard/ba?tab=questions">{{ s.open_questions }}</a>{% else %}0{% endif %}</td>
+      <td>
+        {% if cf.state == 'confirmed' %}<span class="ba-pill green" title="{{ cf.row.confirmed_by }}">✅ Đã xác nhận</span>
+        {% elif cf.state == 'stale' %}<span class="ba-pill amber" title="Spec đã đổi tiêu chí sau khi khách xác nhận">🔄 Đã đổi sau xác nhận</span>
+        {% elif cf.state == 'rejected' %}<span class="ba-pill red">⛔ Khách từ chối</span>
+        {% else %}<span class="ba-pill muted">Chưa xác nhận</span>{% endif %}
+      </td>
+      <td class="ba-hint">{{ s.modified }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+<p class="ba-hint">Điểm sẵn sàng = AC có kiểm chứng được không (Given/When/Then hoặc kết quả quan sát được), FR nào chưa có AC, từ mơ hồ, câu hỏi mở, thiếu mục bảo mật. Ngưỡng và việc có chặn nút Duyệt hay không chỉnh ở Thiết lập → 🧭 Bàn làm việc BA.</p>
+{% endif %}
+
+{# ───────────────────────── Câu hỏi mở ───────────────────────── #}
+{% if tab == "questions" %}
+{% if not groups %}
+<div class="ba-card"><div class="ba-empty">Không spec nào còn câu hỏi hay giả định chưa chốt. ✅</div></div>
+{% endif %}
+{% for g in groups %}
+<div class="ba-card">
+  <header><a href="/dashboard/requirements/spec?path={{ g.q }}" style="color:inherit">{{ g.title }}</a>
+    <small>{{ g.ledger.open_count }} mở · {{ g.ledger.answered|length }} đã trả lời{% if g.item_id %} · #{{ g.item_id }}{% endif %}</small></header>
+  {% for q in g.ledger.open %}
+  <div class="ba-q">
+    <div><span class="ba-pill {{ 'amber' if q.kind == 'assumption' else 'red' }}">{{ 'Giả định' if q.kind == 'assumption' else 'Câu hỏi' }}</span>
+      <div style="margin-top:6px">{{ q.text }}</div><div class="ba-hint">dòng {{ q.line }}{% if q.section %} · {{ q.section }}{% endif %}</div></div>
+    {% if can('requirements.approve') %}
+    <form method="post" action="/dashboard/ba/questions/answer">
+      <input type="hidden" name="path" value="{{ g.rel }}"><input type="hidden" name="key" value="{{ q.key }}">
+      <input type="hidden" name="item_id" value="{{ g.item_id or '' }}">
+      <textarea name="answer" placeholder="Câu trả lời của khách / PO — ghi rõ ai chốt." required></textarea>
+      <button class="btn-success btn-sm" type="submit">Lưu</button>
+    </form>
+    {% else %}<div class="ba-hint">Cần quyền duyệt yêu cầu để trả lời.</div>{% endif %}
+  </div>
+  {% endfor %}
+  {% for q, a in g.ledger.answered %}
+  <div class="ba-q" style="opacity:.8">
+    <div><span class="ba-pill green">Đã chốt</span><div style="margin-top:6px">{{ q.text }}</div></div>
+    <div class="ba-answer"><b>{{ a.answer }}</b><div class="ba-hint">{{ a.answered_by }}{% if a.answered_at %} · {{ a.answered_at[:10] }}{% endif %}</div></div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+<p class="ba-hint">Câu trả lời được lưu ở đây và (nếu spec gắn work item) đăng thành comment <code>💬 SPEC-ANSWER</code>. Câu hỏi đổi chữ nghĩa là câu hỏi mới — câu trả lời cũ không tự áp sang.</p>
+{% endif %}
+
+{# ───────────────────────── Production ───────────────────────── #}
+{% if tab == "production" %}
+{% if production.error %}<div class="ba-card" style="border-color:var(--amber)"><div class="ba-body" style="color:var(--amber)">{{ production.error }}</div></div>{% endif %}
+{% if not production.tags %}
+<div class="ba-card"><div class="ba-empty">Chưa khai báo tag ticket production. Vào Thiết lập → 🧭 Bàn làm việc BA → <b>Tag của ticket production / support</b>.</div></div>
+{% elif not production.clusters %}
+<div class="ba-card"><div class="ba-empty">Không có nhóm ticket nào lặp lại trong cửa sổ đã chọn (tag: {{ production.tags|join(", ") }}).</div></div>
+{% endif %}
+{% for x in production.clusters %}
+{% set cl = x.cluster %}
+<div class="ba-card">
+  <header>{{ cl.label }}
+    <span class="ba-pill {{ 'red' if x.rising else 'muted' }}">{{ cl.size }} ticket{% if x.rising %} · 📈 đang tăng{% endif %}</span>
+    <small>{{ x.project }} · còn mở {{ x.open }}{% if cl.last_seen %} · gần nhất {{ cl.last_seen.strftime('%Y-%m-%d') }}{% endif %}</small></header>
+  <div class="ba-body">
+    <ul class="ba-tickets">
+      {% for t in x.tickets %}<li>{% if t.url %}<a href="{{ t.url }}" target="_blank" rel="noopener">#{{ t.id }}</a>{% else %}#{{ t.id }}{% endif %} — {{ t.title }} <span class="ba-hint">({{ t.state }})</span></li>{% endfor %}
+      {% if x.more %}<li class="ba-hint">… và {{ x.more }} ticket nữa</li>{% endif %}
+    </ul>
+    {% if can('requirements.write') %}
+    <form method="post" action="/dashboard/ba/production/create" onsubmit="return confirm('Tạo yêu cầu nháp từ nhóm ticket này?')">
+      <input type="hidden" name="key" value="{{ cl.key }}"><input type="hidden" name="project" value="{{ x.project }}">
+      <button class="btn-ghost btn-sm" type="submit">➕ Tạo yêu cầu nháp để BA phân tích</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+<p class="ba-hint">Ticket được gom theo từ khoá chung trong tiêu đề (không phân biệt dấu). Đây là gợi ý để BA nhìn ra một lỗ hổng lặp lại — không thay việc đọc ticket. Yêu cầu nháp mang tag <code>requirement-draft</code>, không tự giao cho agent.</p>
+{% endif %}
+
+{# ───────────────────────── Chỉ số ───────────────────────── #}
+{% if tab == "metrics" %}
+<div class="ba-tiles">
+  {% for k in metrics.kpis %}
+  <div class="ba-tile {{ k.tone }}" title="{{ k.hint }}">
+    <div class="n">{{ k.value }}</div><div class="l">{{ k.icon }} {{ k.label }}</div>{% if k.sub %}<div class="s">{{ k.sub }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% if metrics.quality.worst %}
+<div class="ba-card">
+  <header>Spec cần chỉnh nhất</header>
+  <table class="ba-table">
+    <tr><th>Spec</th><th>Điểm</th></tr>
+    {% for w in metrics.quality.worst %}<tr><td><a href="/dashboard/requirements/spec?path={{ w.rel|urlencode }}">{{ w.title }}</a></td><td>{{ w.score }}/100</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+{% if metrics.drift.by_kind %}
+<div class="ba-card">
+  <header>Điểm lệch spec theo loại <small>{{ metrics.drift.total }} điểm · {{ metrics.drift.open }} mở · {{ metrics.drift.overdue }} quá hạn</small></header>
+  <table class="ba-table">
+    <tr><th>Loại</th><th>Số điểm</th></tr>
+    {% for kind, n in metrics.drift.by_kind.items() %}<tr><td class="ba-kind">{{ kind }}</td><td>{{ n }}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+<p class="ba-hint">Không có dữ liệu thì hiện “—”, không hiện 0. Tỷ lệ spec-fault = phần điểm lệch do spec mơ hồ/thiếu so với code đi lệch; tỷ lệ xác nhận cũ = khách đã xác nhận một bản mà tiêu chí sau đó đã đổi. Rê chuột vào từng ô để xem nó đếm gì.</p>
+{% endif %}
+{% endblock %}

@@ -56,6 +56,9 @@ GROUPS: tuple[NavGroup, ...] = (
                 "Bảng việc theo vai — bấm ▶ để chạy một item ngay."),
         NavItem("requirements", "/dashboard/requirements", "📋", "Yêu cầu & Spec",
                 "BA viết yêu cầu, đọc spec do BA agent viết, góp ý hoặc duyệt."),
+        NavItem("ba", "/dashboard/ba", "🗒️", "Bàn BA",
+                "Spec nào đủ chính xác để giao agent, câu hỏi nào còn mở, khách đã xác nhận "
+                "chưa, ticket production nào cứ lặp lại."),
         NavItem("planning", "/dashboard/planning", "🧭", "Lập kế hoạch",
                 "Chấm điểm, xếp thứ tự và hẹn giờ chạy backlog."),
         NavItem("reviews", "/dashboard/reviews", "👀", "PR Reviews",

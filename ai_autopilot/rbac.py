@@ -111,6 +111,12 @@ _RULES: list[tuple[str, str, str]] = [
      "tracker.write"),
     ("POST", r"/requirements$", "requirements.write"),
     ("POST", r"/(requirements/review|specs/(decide|resolve))$", "requirements.approve"),
+    # The BA workbench. Recording what the customer said and answering open questions are
+    # BA decisions; posting findings to a work item is a tracker write; creating a draft
+    # requirement from production tickets is the same act as writing one by hand.
+    ("POST", r"/ba/(confirm|accept|questions/answer)$", "requirements.approve"),
+    ("POST", r"/ba/(readiness/comment|impact/notify)$", "tracker.write"),
+    ("POST", r"/ba/production/create$", "requirements.write"),
     ("POST", r"/security/(rescan|\d+/(verify|suppress|reopen))$", "security.run"),
     ("POST", r"/learning/.*$", "knowledge.edit"),
     ("POST", r"/(settings(/.*)?|workspaces|setup(/.*)?|security/settings)$", "settings.edit"),

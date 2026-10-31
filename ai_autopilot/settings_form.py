@@ -625,6 +625,29 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "📐 Lệch spec & truy vết PR",
           "Mặc định tắt: drift là nợ tài liệu, không phải lý do dừng giao hàng. Bật để chặn item "
           "tiến lên khi spec của nó đã lỗi thời."),
+    # ── BA workbench ──
+    Field("spec_readiness_min", "Điểm sẵn sàng tối thiểu của spec", "int",
+          "🧭 Bàn làm việc BA",
+          "Spec được chấm 0–100 trước khi giao agent (AC có kiểm chứng được không, FR nào mồ côi, "
+          "từ mơ hồ, câu hỏi mở, thiếu mục bảo mật). Đạt điểm này và không có lỗi nghiêm trọng "
+          "thì mới gọi là sẵn sàng."),
+    Field("spec_readiness_blocks_approve", "↳ Chặn duyệt spec chưa sẵn sàng", "bool",
+          "🧭 Bàn làm việc BA",
+          "Mặc định tắt: chỉ cảnh báo, vì BA có thể biết điều văn bản chưa viết. Bật để nút "
+          "Duyệt từ chối spec chưa đạt điểm."),
+    Field("spec_conformance_min", "Độ phủ AC tối thiểu để chạy tiếp (%)", "int",
+          "🧭 Bàn làm việc BA",
+          "Tỷ lệ tiêu chí chấp nhận có test case đạt. Dưới mức này, run bị giữ lại chờ người dù "
+          "điểm cao. 0 = tắt (chỉ hiển thị)."),
+    Field("production_feedback_tags", "Tag của ticket production / support", "list",
+          "🧭 Bàn làm việc BA",
+          "Ticket mang các tag này được gom theo nội dung trên tab Phản hồi production."),
+    Field("production_feedback_window_days", "↳ Cửa sổ xem xét (ngày)", "int",
+          "🧭 Bàn làm việc BA",
+          "Chỉ xét ticket thay đổi trong số ngày này."),
+    Field("production_feedback_min_cluster", "↳ Số ticket tối thiểu của một nhóm", "int",
+          "🧭 Bàn làm việc BA",
+          "Nhóm ít ticket hơn mức này không được đề xuất thành yêu cầu."),
     Field("pr_require_work_item_link", "Mỗi PR phải gắn work item", "bool",
           "📐 Lệch spec & truy vết PR",
           "Kiểm tra lại với ADO sau khi tạo, và tự gắn nếu thiếu. Một chỉ dẫn trong brief chỉ là "

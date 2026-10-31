@@ -2024,6 +2024,25 @@ class Settings(BaseSettings):
     # Hold the item for a human instead of letting it advance while the spec is stale.
     # Off by default: a drift is a documentation debt, not a reason to stop delivery.
     spec_drift_holds_item: bool = False
+
+    # ── BA workbench: spec readiness, customer confirmation, production feedback ──
+    # A spec an agent cannot verify its work against is the cheapest place to lose a
+    # day. The readiness check scores a specification 0–100 BEFORE it is handed on;
+    # this is the score a spec with no critical finding must reach to be called ready.
+    spec_readiness_min: int = 80
+    # Refuse to approve (hand to Dev) a spec that is not ready, instead of only warning.
+    # Off by default: the BA may know something the text does not say.
+    spec_readiness_blocks_approve: bool = False
+    # Share of acceptance criteria that must be covered by a passing test case
+    # (0–100) for a run to be allowed to advance on its score alone. A run below it is
+    # held for a person, like a failed test case. 0 = off (the signal is only shown).
+    spec_conformance_min: int = 0
+    # Tags that mark a work item as a production / support ticket. Tickets sharing the
+    # same complaint are grouped into one candidate gap on the BA workbench.
+    production_feedback_tags: list[str] = Field(default_factory=lambda: ["Support"])
+    production_feedback_window_days: int = 30
+    # A group needs at least this many tickets before it is worth a BA's attention.
+    production_feedback_min_cluster: int = 2
     # ── 🧭 Review Studio ── spec / report / question checked against the code, read-only.
     # A spec review reads the whole spec and walks the code behind every item, so it
     # needs far more room than a chat turn: turns and time are sized for that.

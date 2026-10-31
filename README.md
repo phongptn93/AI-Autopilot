@@ -203,6 +203,11 @@ Most‑used keys:
 | `spec_drift_enabled` | `true` | Agent reports what it had to decide that the item never settled; the autopilot files it as a **⚠️ SPEC-DRIFT** comment + tag + a row on `/dashboard/specs` |
 | `spec_drift_tag` | `spec-update-needed` | Tag applied until a human marks the spec updated |
 | `spec_drift_holds_item` | `false` | Hold the item for a human instead of letting it advance while the spec is stale |
+| `spec_readiness_min` | `80` | Score (0–100) a spec with no critical finding must reach to be called **ready** to hand to an agent — AC checkable? orphan FRs, vague words, open questions, missing security section |
+| `spec_readiness_blocks_approve` | `false` | Refuse **Approve** on a spec below the bar instead of only warning |
+| `spec_conformance_min` | `0` | % of acceptance criteria covered by a passing test case below which a run is held for a person regardless of score. `0` = off |
+| `production_feedback_tags` | `["Support"]` | Tags marking a production/support ticket; tickets with the same complaint are grouped on the BA workbench |
+| `production_feedback_window_days` / `production_feedback_min_cluster` | `30` / `2` | Look-back window, and the smallest group worth a BA's attention |
 | `pr_require_work_item_link` | `true` | Verify every PR names its work item — and attach the link when it does not |
 | `process_health_enabled` | `false` | Periodic **process-health digest**: ad-hoc ratio, escaped defects per module, stuck items, tag rot. Read-only — it reports, never edits |
 | `process_health_interval_hours` | `168` | How often the digest runs (0 = on demand only) |

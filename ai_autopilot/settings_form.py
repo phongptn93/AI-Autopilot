@@ -637,8 +637,9 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Duyệt từ chối spec chưa đạt điểm."),
     Field("spec_conformance_min", "Độ phủ AC tối thiểu để chạy tiếp (%)", "int",
           "🧭 Bàn làm việc BA",
-          "Tỷ lệ tiêu chí chấp nhận có test case đạt. Dưới mức này, run bị giữ lại chờ người dù "
-          "điểm cao. 0 = tắt (chỉ hiển thị)."),
+          "Tỷ lệ tiêu chí chấp nhận có test case đạt. Dưới mức này, run không được tự coi là "
+          "xong mà phải qua review của người, dù điểm cao (không escalate như test fail). "
+          "0 = tắt. Không đo được thì bỏ qua."),
     Field("production_feedback_tags", "Tag của ticket production / support", "list",
           "🧭 Bàn làm việc BA",
           "Ticket mang các tag này được gom theo nội dung trên tab Phản hồi production."),

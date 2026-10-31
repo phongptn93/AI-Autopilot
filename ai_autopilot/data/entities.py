@@ -305,6 +305,62 @@ class SpecDrift(Base):
     decision_note: Mapped[str] = mapped_column(Text, default="")
 
 
+class CustomerConfirmation(Base):
+    """A customer's word that a specification — or a delivery — is what they asked for.
+
+    The BA records it after the customer has said it (in a meeting, by e-mail, in chat);
+    this row is the evidence that it happened, who said it, and EXACTLY what they were
+    shown. ``spec_hash`` and ``ac_json`` freeze the acceptance criteria as they stood, so
+    when the spec is edited afterwards the page can say "the customer confirmed an older
+    version" and list the criteria that changed, instead of the confirmation silently
+    covering text the customer never saw.
+
+    ``kind`` is ``spec_confirm`` (before the build: do these scenarios describe what you
+    need?) or ``acceptance`` (after: each criterion with its result and evidence).
+    """
+
+    __tablename__ = "customer_confirmations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(20), default="spec_confirm", index=True)
+    #: ``confirmed`` or ``rejected`` — a refusal is as much a fact to keep as an approval.
+    outcome: Mapped[str] = mapped_column(String(20), default="confirmed")
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    spec_path: Mapped[str] = mapped_column(String(500), default="", index=True)
+    spec_hash: Mapped[str] = mapped_column(String(64), default="")
+    #: JSON list of the criteria at that moment: ``[{"id","text","result","evidence"}]``.
+    ac_json: Mapped[str] = mapped_column(Text, default="[]")
+    confirmed_by: Mapped[str] = mapped_column(String(200), default="")
+    channel: Mapped[str] = mapped_column(String(100), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    recorded_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AssumptionAnswer(Base):
+    """The answer to one open question or assumption of a spec.
+
+    Keyed by the question's wording (see :mod:`ai_autopilot.assumptions`), so an answer
+    outlives a re-ordered spec; one row per (spec, question) — answering again replaces
+    the answer rather than stacking a second, contradicting one.
+    """
+
+    __tablename__ = "assumption_answers"
+    __table_args__ = (
+        UniqueConstraint("spec_path", "question_key", name="uq_assumption_spec_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    spec_path: Mapped[str] = mapped_column(String(500), default="", index=True)
+    work_item_id: Mapped[int] = mapped_column(Integer, default=0)
+    question_key: Mapped[str] = mapped_column(String(20), default="")
+    question: Mapped[str] = mapped_column(Text, default="")
+    answer: Mapped[str] = mapped_column(Text, default="")
+    answered_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class DeferredVerification(Base):
     """A test case that can only be checked once the item is DEPLOYED.
 

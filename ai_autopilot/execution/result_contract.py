@@ -99,6 +99,9 @@ class TestCase:
     steps: list[str] = field(default_factory=list)
     expected: str = ""
     preconditions: str = ""
+    # The acceptance criteria this case verifies, "AC-01, AC-03". Optional: a case with
+    # none is still filed, it just cannot be counted towards a criterion's coverage.
+    ac: str = ""
 
     @property
     def is_empty(self) -> bool:
@@ -143,6 +146,9 @@ class CaseOutcome:
     title: str = ""
     outcome: str = _DEFAULT_OUTCOME   # one of TEST_OUTCOMES
     note: str = ""                    # what happened — required reading when not a pass
+    # The criteria this result speaks to, when the run says so; otherwise the case of the
+    # same title carries it (see traceability).
+    ac: str = ""
 
     @property
     def is_empty(self) -> bool:
@@ -284,6 +290,7 @@ def _parse_case_outcomes(raw: object) -> list[CaseOutcome]:
                 title=str(entry.get("title", "") or entry.get("case", "")).strip(),
                 outcome=_normalise_outcome(raw_outcome),
                 note=str(entry.get("note", "") or entry.get("detail", "")).strip(),
+                ac=_ac_text(entry),
             )
         else:
             continue
@@ -325,12 +332,29 @@ def _parse_test_cases(raw: object) -> list[TestCase]:
                 steps=steps,
                 expected=str(entry.get("expected", "")).strip(),
                 preconditions=str(entry.get("preconditions", "")).strip(),
+                ac=_ac_text(entry),
             )
         else:
             continue
         if not case.is_empty:
             out.append(case)
     return out
+
+
+def _ac_text(entry: dict) -> str:
+    """The acceptance-criteria ids a case names, as one "AC-01, AC-03" string.
+
+    Models write this field as a string, a list, or under a nearby name; all of them mean
+    the same thing, and a case that names its criteria must not lose them to the shape.
+    """
+    raw = entry.get("ac")
+    if raw is None:
+        raw = entry.get("acs") or entry.get("acceptance_criteria") or entry.get("criteria")
+    if isinstance(raw, (list, tuple)):
+        parts = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        parts = [str(raw or "").strip()]
+    return ", ".join(p for p in parts if p)
 
 
 def _truthy(value: object) -> bool:

@@ -1743,7 +1743,9 @@ class ClaudeExecutor:
                 f"plane renders them as a table onto #{item.id} — do NOT write that comment "
                 "yourself, and do NOT report outcomes in `summary` instead: a summary is "
                 "prose nobody can count. Cases you only WROTE and did not run belong in "
-                "`test_cases` alone."
+                "`test_cases` alone. Name the acceptance criteria each case verifies in `ac` "
+                "(\"AC-01\" as the item names it; an unnamed list is numbered by order, so "
+                "the second criterion is AC-02): that is how the item's coverage is counted."
             )
             # blocked vs pending_deploy: the first is an incident and holds the item; the
             # second is the pipeline's normal order and is handed to QC after the deploy.
@@ -1842,10 +1844,12 @@ class ClaudeExecutor:
             '                  "needs_decision":false}],',
             '   "test_cases":[{"title":"<short, specific>","steps":["<step>","<step>"],',
             '                  "expected":"<what must be true afterwards>",',
-            '                  "preconditions":"<state needed first, or empty>"}],',
+            '                  "preconditions":"<state needed first, or empty>",',
+            '                  "ac":"<AC ids it verifies, e.g. AC-01,AC-02; or empty>"}],',
             '   "test_results":[{"title":"<the case you ran>",',
             '                    "outcome":"pass|fail|blocked|pending_deploy",',
-            '                    "note":"<what happened — REQUIRED unless pass>"}],',
+            '                    "note":"<what happened — REQUIRED unless pass>",',
+            '                    "ac":"<AC ids it speaks to, or empty>"}],',
             '   "plan":"<Markdown implementation plan — plan-only runs; else omit>"}',
             completion_rule,
             "",

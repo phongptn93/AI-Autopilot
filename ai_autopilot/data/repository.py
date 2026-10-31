@@ -15,8 +15,10 @@ from ai_autopilot.data.database import Database
 from ai_autopilot.data.entities import (
     AiConflict,
     AlertState,
+    AssumptionAnswer,
     AuditEvent,
     ClaudeSession,
+    CustomerConfirmation,
     DashboardUser,
     DeferredVerification,
     ExecutionRecord,
@@ -1628,6 +1630,132 @@ class DeferredVerificationRepository:
                 row.released_state = (state or "")[:100]
             await session.commit()
         return len(found)
+
+
+class CustomerConfirmationRepository:
+    """Customer confirmations and acceptances, kept as evidence.
+
+    Append-only on purpose: a confirmation is a fact about a moment, so a later edit or a
+    second confirmation adds a row rather than rewriting the first — the history of what
+    the customer agreed to, and when, is the thing worth keeping.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def add(
+        self, *, kind: str, spec_path: str = "", work_item_id: int = 0,
+        spec_hash: str = "", ac_json: str = "[]", confirmed_by: str = "",
+        channel: str = "", note: str = "", recorded_by: str = "",
+        outcome: str = "confirmed",
+    ) -> int:
+        row = CustomerConfirmation(
+            kind=kind, outcome=outcome, work_item_id=work_item_id, spec_path=spec_path,
+            spec_hash=spec_hash, ac_json=ac_json, confirmed_by=confirmed_by[:200],
+            channel=channel[:100], note=note, recorded_by=recorded_by[:200],
+            created_at=datetime.now(UTC),
+        )
+        async with self._db.session() as session:
+            session.add(row)
+            await session.flush()
+            new_id = int(row.id)
+            await session.commit()
+        return new_id
+
+    async def latest(
+        self, spec_path: str, kind: str = "spec_confirm"
+    ) -> CustomerConfirmation | None:
+        """The most recent record of ``kind`` for a spec, or None."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(CustomerConfirmation)
+                .where(CustomerConfirmation.spec_path == spec_path,
+                       CustomerConfirmation.kind == kind)
+                .order_by(CustomerConfirmation.created_at.desc(),
+                          CustomerConfirmation.id.desc())
+                .limit(1)
+            )
+            return rows.scalars().first()
+
+    async def for_spec(self, spec_path: str, limit: int = 20) -> list[CustomerConfirmation]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(CustomerConfirmation)
+                .where(CustomerConfirmation.spec_path == spec_path)
+                .order_by(CustomerConfirmation.created_at.desc(),
+                          CustomerConfirmation.id.desc())
+                .limit(limit)
+            )
+            return list(rows.scalars().all())
+
+    async def recent(self, limit: int = 500) -> list[CustomerConfirmation]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(CustomerConfirmation)
+                .order_by(CustomerConfirmation.created_at.desc(),
+                          CustomerConfirmation.id.desc())
+                .limit(limit)
+            )
+            return list(rows.scalars().all())
+
+
+class AssumptionRepository:
+    """Answers to a spec's open questions, one per (spec, question)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def answer(
+        self, *, spec_path: str, question_key: str, question: str, answer: str,
+        answered_by: str = "", work_item_id: int = 0,
+    ) -> None:
+        """Record or replace the answer. The unique (spec, key) pair makes this an upsert,
+        so answering twice leaves one answer, the later one."""
+        now = datetime.now(UTC)
+        async with self._db.session() as session:
+            existing = (await session.execute(
+                select(AssumptionAnswer).where(
+                    AssumptionAnswer.spec_path == spec_path,
+                    AssumptionAnswer.question_key == question_key,
+                )
+            )).scalars().first()
+            if existing is None:
+                session.add(AssumptionAnswer(
+                    spec_path=spec_path, work_item_id=work_item_id,
+                    question_key=question_key, question=question, answer=answer,
+                    answered_by=answered_by[:200], created_at=now, updated_at=now,
+                ))
+            else:
+                existing.answer = answer
+                existing.question = question
+                existing.answered_by = answered_by[:200]
+                existing.updated_at = now
+                if work_item_id:
+                    existing.work_item_id = work_item_id
+            await session.commit()
+
+    async def answers_for(self, spec_path: str) -> dict[str, dict[str, str]]:
+        """``{question_key: {"answer", "answered_by", "answered_at"}}`` for one spec."""
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(AssumptionAnswer).where(AssumptionAnswer.spec_path == spec_path)
+            )
+            return {
+                r.question_key: {
+                    "answer": r.answer, "answered_by": r.answered_by,
+                    "answered_at": r.updated_at.isoformat() if r.updated_at else "",
+                }
+                for r in rows.scalars().all()
+            }
+
+    async def recent(self, limit: int = 100) -> list[AssumptionAnswer]:
+        async with self._db.session() as session:
+            rows = await session.execute(
+                select(AssumptionAnswer)
+                .order_by(AssumptionAnswer.updated_at.desc())
+                .limit(limit)
+            )
+            return list(rows.scalars().all())
 
 
 class SpecDriftRepository:

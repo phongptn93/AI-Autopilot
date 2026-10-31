@@ -53,6 +53,11 @@ class ScoreInput:
     # to one that found nothing, so the verdict had no authority over the pipeline.
     tests_failed: int = 0
     tests_blocked: int = 0
+    # Share (0..1) of the item's acceptance criteria covered by a passing test case
+    # (traceability.conformance). None = not measured: the item named no criteria, or the
+    # run wrote no cases. Like ``tests_failed`` it never touches the score — it only
+    # decides whether a run may be resolved on its score alone.
+    spec_conformance: float | None = None
 
 
 @dataclass
@@ -74,7 +79,9 @@ def _grade(score: int) -> str:
     )
 
 
-def score_run(inp: ScoreInput, *, auto_min: int = 85, review_min: int = 60) -> RunScore:
+def score_run(
+    inp: ScoreInput, *, auto_min: int = 85, review_min: int = 60, conformance_min: int = 0
+) -> RunScore:
     """Grade a run 0–100 from its signals; decide the gate against the thresholds."""
     comp: dict[str, int] = {}
     why: list[str] = []
@@ -148,6 +155,22 @@ def score_run(inp: ScoreInput, *, auto_min: int = 85, review_min: int = 60) -> R
             why.append(f"{inp.tests_failed} test case KHÔNG ĐẠT — người phải quyết định")
         if inp.tests_blocked:
             why.append(f"{inp.tests_blocked} test case chưa chạy được — chưa có kết luận")
+
+    # Thin coverage is not a failure, so it does not escalate; it only withholds the
+    # automatic path. A run that "went well" while verifying a third of what the item
+    # asked for should be looked at by a person before it is called done, not after.
+    # Off when ``conformance_min`` is 0, and silent when coverage was not measured.
+    if (
+        conformance_min > 0
+        and inp.spec_conformance is not None
+        and inp.spec_conformance * 100 < conformance_min
+        and gate == "auto"
+    ):
+        gate = "review"
+        why.append(
+            f"test case mới phủ {round(inp.spec_conformance * 100)}% tiêu chí chấp nhận "
+            f"(ngưỡng {conformance_min}%) — cần người xem trước khi coi là xong"
+        )
 
     return RunScore(score=total, grade=_grade(total), gate=gate, components=comp, reasons=why)
 

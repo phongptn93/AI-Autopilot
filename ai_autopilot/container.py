@@ -16,8 +16,10 @@ from ai_autopilot.config import BotIdentity, Settings
 from ai_autopilot.data import (
     AiConflictRepository,
     AlertStateRepository,
+    AssumptionRepository,
     AuditRepository,
     ClaudeSessionRepository,
+    CustomerConfirmationRepository,
     Database,
     DeferredVerificationRepository,
     ExecutionRepository,
@@ -93,6 +95,8 @@ class Container:
         self.scheduler_history_repo = SchedulerHistoryRepository(self.database)
         self.pr_command_repo = PrCommandRepository(self.database)
         self.spec_drift_repo = SpecDriftRepository(self.database)
+        self.customer_confirm_repo = CustomerConfirmationRepository(self.database)
+        self.assumption_repo = AssumptionRepository(self.database)
         self.deferred_repo = DeferredVerificationRepository(self.database)
         self.pr_reviewer_repo = PrReviewerRepository(self.database)
         self.claude_session_repo = ClaudeSessionRepository(self.database)

@@ -2034,8 +2034,9 @@ class Settings(BaseSettings):
     # Off by default: the BA may know something the text does not say.
     spec_readiness_blocks_approve: bool = False
     # Share of acceptance criteria that must be covered by a passing test case
-    # (0–100) for a run to be allowed to advance on its score alone. A run below it is
-    # held for a person, like a failed test case. 0 = off (the signal is only shown).
+    # (0–100) for a run to be resolved on its score alone. Below it the run goes to
+    # review instead of being called done — thin coverage is not a failure, so unlike a
+    # failed test case it does not escalate. 0 = off. Unmeasured coverage is ignored.
     spec_conformance_min: int = 0
     # Tags that mark a work item as a production / support ticket. Tickets sharing the
     # same complaint are grouped into one candidate gap on the BA workbench.

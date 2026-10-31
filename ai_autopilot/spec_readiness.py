@@ -256,6 +256,20 @@ def _scan(text: str) -> _Scan:
                  has_security_section, has_edge_section)
 
 
+def numbered_acs_from_html(markup: str) -> list[dict[str, str]]:
+    """The acceptance criteria of a tracker field (an HTML list), each with an id.
+
+    A work item's "Acceptance criteria" field is usually an unnamed list. Coverage needs
+    something to point at, so a criterion the text does not name is numbered by its
+    position: the second one is ``AC-02``. A named one keeps its own id.
+    """
+    text = "## Acceptance Criteria\n" + plain_text_from_html(markup or "")
+    out: list[dict[str, str]] = []
+    for n, ac in enumerate(_scan(text).ac_items, start=1):
+        out.append({"id": ac.id or f"AC-{n:02d}", "text": ac.text})
+    return out
+
+
 def extract_acs(text: str) -> list[AcItem]:
     """The acceptance criteria of a spec, in document order. Shared by everything that
     needs to talk about "AC-03" the way the readiness check does."""

@@ -13,7 +13,7 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 from html import escape as html_escape
 
-from ai_autopilot import claims, markdown_lite, metrics, risk, trust
+from ai_autopilot import claims, markdown_lite, metrics, risk, spec_readiness, traceability, trust
 from ai_autopilot.board import handoff_states
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
 from ai_autopilot.container import Container
@@ -2145,7 +2145,36 @@ class AdoPollerService(QcReporting):
                      "releases it, but wipes the item's SDLC progress.)",
             )
 
-    def _score_run(self, result: ExecutionResult) -> RunScore | None:
+    @staticmethod
+    def _spec_conformance(
+        item: WorkItemInfo | None, result: ExecutionResult
+    ) -> float | None:
+        """Share of the item's acceptance criteria covered by a passing test case.
+
+        None whenever it cannot be said honestly: the item names no criteria, or the run
+        wrote and ran no cases. Cases and results are joined on title, because the agent
+        writes a case once and reports its outcome separately.
+        """
+        if item is None:
+            return None
+        acs = spec_readiness.numbered_acs_from_html(item.acceptance_criteria or "")
+        if not acs:
+            return None
+        cases: dict[str, dict[str, str]] = {}
+        for c in result.test_cases or []:
+            cases[c.title.strip().lower()] = {"title": c.title, "ac": c.ac, "outcome": ""}
+        for r in result.test_results or []:
+            key = r.title.strip().lower()
+            row = cases.setdefault(key, {"title": r.title, "ac": r.ac, "outcome": ""})
+            row["outcome"] = r.outcome
+            row["ac"] = row["ac"] or r.ac
+        if not cases:
+            return None
+        return traceability.conformance(traceability.coverage(acs, list(cases.values())))
+
+    def _score_run(
+        self, result: ExecutionResult, item: WorkItemInfo | None = None
+    ) -> RunScore | None:
         """Grade a successful run from its objective signals (None if disabled)."""
         cfg = self._config
         if not cfg.pr_scoring_enabled:
@@ -2172,9 +2201,11 @@ class AdoPollerService(QcReporting):
             tests_blocked=sum(
                 1 for r in (result.test_results or []) if getattr(r, "outcome", "") == "blocked"
             ),
+            spec_conformance=self._spec_conformance(item, result),
         )
         return score_run(
-            inp, auto_min=cfg.pr_score_auto_min, review_min=cfg.pr_score_review_min
+            inp, auto_min=cfg.pr_score_auto_min, review_min=cfg.pr_score_review_min,
+            conformance_min=cfg.spec_conformance_min,
         )
 
     async def _add_reviewers(self, item: WorkItemInfo, result: ExecutionResult) -> None:
@@ -2488,7 +2519,7 @@ class AdoPollerService(QcReporting):
 
         if result.success:
             c.retry_policy.record_success(item.id)
-            score = self._score_run(result)
+            score = self._score_run(result, item)
             # "get a score" gate: a verified-weak run is held for a human rather
             # than silently going to review/done. Skipped in report mode (L1, no PR
             # is expected) and when scoring is disabled.

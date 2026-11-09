@@ -79,6 +79,9 @@ _USAGE = """usage: ai-autopilot [doctor | pr-doctor <url> | evals [dir] [--min-p
                  build replay cases from the repo's merged work (git history)
   evals replay [dir] [--case NAME] [--min-pass-rate R] [--json PATH]
                  replay real past tasks in throwaway worktrees and score the agent
+  canary [--status]
+                 ask the configured model five known-answer questions; exit 1 on an empty,
+                 truncated or wrong answer. Run it after changing the model or its effort.
   scan [...]     security scan (SAST + SCA + secrets, optional AI review) of a repo;
                  exit 1 when a NEW unsuppressed finding is at/above --fail-on.
                  `ai-autopilot scan --help` for options.
@@ -148,6 +151,12 @@ def main() -> None:
             from ai_autopilot.security_scan import cli as scan_cli
 
             sys.exit(scan_cli.run(argv[1:]))
+        if argv[0] in ("canary", "--canary"):
+            # Run after any change to the model or its effort settings; needs no live
+            # autopilot, only the config and a working Claude.
+            from ai_autopilot import model_canary
+
+            sys.exit(model_canary.run_cli(argv[1:]))
         if argv[0] in ("evals", "--evals"):
             # Same spirit as `doctor`: it must run without a live autopilot, because it
             # is what CI calls on a change to the skills and rules that steer the agent.

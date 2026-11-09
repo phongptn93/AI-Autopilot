@@ -895,7 +895,7 @@ footer b{color:#fff}
         <tr><th>Rủi ro</th><th>Biểu hiện</th></tr>
         <tr><td><b>Lỗ hổng trong code</b></td><td>Thiếu kiểm tra quyền (BOLA / IDOR), injection, validate yếu; code trông hợp lý nên dễ qua mắt</td></tr>
         <tr><td><b>Lộ bí mật</b></td><td>Key, token, chuỗi kết nối nhúng vào code hoặc log</td></tr>
-        <tr><td><b>Thư viện giả / chuỗi cung ứng</b></td><td>Agent gợi ý package không tồn tại hoặc độc hại</td></tr>
+        <tr><td><b>Thư viện giả / chuỗi cung ứng</b></td><td>Agent gợi ý package không tồn tại hoặc độc hại. Kiểm tra xác định, không tốn token: <code>pkgguard</code> hỏi registry với từng phụ thuộc <i>mới</i> trong diff (có thật không, bao nhiêu ngày tuổi, phiên bản ghim có thật không)</td></tr>
         <tr><td><b>Cấu hình lỏng</b></td><td>CORS mở, bật debug, quyền rộng vì ưu tiên "chạy được"</td></tr>
         <tr><td><b>Lỗi logic phân quyền</b></td><td>Qua test vì test sinh cùng lúc với code, cùng điểm mù</td></tr>
       </table>
@@ -1332,6 +1332,14 @@ python -m unittest test_gate_score -v        # chạy trong thư mục gates/ (1
     <div class="card"><b>Kỹ năng giảm giá trị</b><ul><li>Gõ code nhanh, thuộc cú pháp</li><li>Boilerplate, CRUD</li><li>Nhớ API</li><li>Chuyên về một công nghệ đơn lẻ</li></ul></div>
   </div>
   <div class="callout"><b>Nghịch lý cần tính trước:</b> kỹ năng đánh giá code cần có nền tảng tự viết code mới hình thành. Nếu junior chỉ duyệt output của máy thì vài năm nữa sẽ thiếu người đủ giỏi làm Operator và SA. Nên giữ chủ đích một phần việc để junior tự làm và tự gỡ lỗi.</div>
+  <div class="card" style="margin-top:14px"><b>Đề xuất nấc thang cho junior (chưa kiểm chứng, đo trong pilot)</b>
+    <ol>
+      <li><b>Tự làm, không agent:</b> mỗi tuần một việc nhỏ trong vùng Xanh, tự viết và tự gỡ lỗi. Mục đích là giữ nền tảng, không phải năng suất.</li>
+      <li><b>Duyệt có đối chứng:</b> đọc diff của agent <i>trước</i> khi xem kết luận của auto-review, ghi lại lỗi tự tìm được; sau đó so với auto-review. Số lỗi tự bắt được là thước đo tiến bộ.</li>
+      <li><b>Viết bằng chứng:</b> tự viết test và AC cho một thay đổi do agent làm; senior chỉ ra test nào không thể fail (công cụ <code>testguard</code> gợi ý sẵn).</li>
+      <li><b>Trực vận hành có kèm:</b> đứng cạnh người chịu trách nhiệm vận hành khi có cảnh báo thật (xem <code>runbook-van-hanh-sau-go-live.md</code>).</li>
+    </ol>
+    <span class="sub">Điều kiện chuyển bậc là bằng chứng (lỗi tự bắt được, sự cố tự gỡ được), không phải thời gian làm việc.</span></div>
 </section>
 
 <section id="scrum">
@@ -1399,7 +1407,7 @@ python -m unittest test_gate_score -v        # chạy trong thư mục gates/ (1
     <tr><td><b>Vòng kín nhiều chặng</b></td><td><code>execution/sdlc_loop.py</code>: chạy theo profile (ba / dev / qc / review / design / full), chấm cổng từng chặng bằng <code>score_run</code>, ngân sách sửa chung <code>sdlc_max_iterations</code>, hết ngân sách thì escalate. Mặc định tắt (opt-in).</td><td><span class="pill p-g">Đủ</span></td></tr>
     <tr><td><b>Chuyền vai</b></td><td><code>sdlc_presets.py</code>: preset <code>scrum</code> chuyền BA → Dev → QC → Review qua state ADO; bước Review dừng cho người (<code>auto=False</code>). Preset <code>safe</code> và <code>autonomous</code> cho hai đầu.</td><td><span class="pill p-g">Đủ</span> cho Vàng</td></tr>
     <tr><td><b>Báo lệch spec</b></td><td><code>spec_drift.py</code>, <code>services/spec_guard.py</code>: agent báo điều đã tự quyết, comment tiền tố <code>⚠️ SPEC-DRIFT</code>, gắn tag, BA tick khi đã cập nhật spec. Khớp rule <code>spec-drift-reporting</code>.</td><td><span class="pill p-a">Một phần</span> <code>spec_drift_holds_item</code> mặc định False: báo nhưng không giữ việc</td></tr>
-    <tr><td><b>Quét bảo mật</b></td><td><code>security_scan/</code>: SAST, AI-SAST, DAST, xác thực PoC, SARIF, suppression, đồng bộ ADO. Test riêng cho từng phần.</td><td><span class="pill p-a">Có năng lực</span> chưa nối vào điểm cổng</td></tr>
+    <tr><td><b>Quét bảo mật</b></td><td><code>security_scan/</code>: SAST, AI-SAST, DAST, xác thực PoC, SARIF, suppression, đồng bộ ADO. Test riêng cho từng phần.</td><td><span class="pill p-a">Có năng lực</span> nối vào tiêu chí <code>deps_verified</code> (G3) qua <code>pkgguard</code>; còn lại chưa nối vào điểm cổng. Thêm: <code>testguard</code> (test không thể fail), SBOM CycloneDX + quét lại bằng <code>scan --audit-sbom</code>, <code>canary</code> khi đổi model.</td></tr>
     <tr><td><b>QC</b></td><td><code>services/poller_qc.py</code>, <code>qc_create_test_case_items</code>: tạo và ghi test case, kết quả; test case fail ép escalate.</td><td><span class="pill p-a">Một phần</span> chưa kiểm chứng test case sinh từ spec hay từ code</td></tr>
     <tr><td><b>Đo quy trình</b></td><td><code>process_health.py</code> (lỗi lọt, việc kẹt, rác tag), <code>north_star.py</code> (KPI kết quả; không có dữ liệu thì hiện "—", không hiện 0), <code>analytics.py</code>.</td><td><span class="pill p-g">Đủ về khung</span> chưa có dữ liệu</td></tr>
     <tr><td><b>Kiểm thử cấu hình agent</b></td><td><code>evals.py</code> + thư mục <code>evals/</code>: hồi quy cho skill, rules, CLAUDE.md. Đúng vai "Eval owner".</td><td><span class="pill p-g">Đủ</span></td></tr>
@@ -1477,6 +1485,7 @@ python -m unittest test_gate_score -v        # chạy trong thư mục gates/ (1
     <tr><td><b>Tồn đọng chờ duyệt</b></td><td>Agent sinh nhanh, người duyệt không kịp</td><td>WIP limit, giới hạn kích thước thay đổi</td></tr>
     <tr><td><b>Dev mất động lực</b></td><td>Cảm giác "chỉ duyệt máy"</td><td>Lộ trình nghề rõ ràng, giữ phần việc thú vị</td></tr>
     <tr><td><b>Mất tri thức</b></td><td>Không ai hiểu code máy viết</td><td>Người duyệt phải giải thích được thay đổi</td></tr>
+    <tr><td><b>Phần chìm vận hành</b></td><td>Đĩa đầy, chứng chỉ hết hạn, node tự nâng cấp, job chạy chồng; sau go-live không ai theo dõi</td><td>Chỉ định người chịu trách nhiệm trong biên bản nghiệm thu; chạy probe định kỳ theo <code>runbook-van-hanh-sau-go-live.md</code></td></tr>
     <tr><td><b>Hợp đồng lệch</b></td><td>Khách đòi giá theo giờ công đã giảm</td><td>PM đàm phán theo kết quả và phạm vi</td></tr>
   </table>
   <div class="callout info"><b>Điều chưa chắc (nên thừa nhận):</b> tốc độ cải thiện cụ thể của model trong 12 tháng tới; chi phí token và độ trễ có thể đổi và ảnh hưởng cổng nào nên tự động; yếu tố pháp lý (ai chịu trách nhiệm khi AI sai) chưa có chuẩn chung nên PM và pháp chế cần cập nhật song song.</div>

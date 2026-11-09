@@ -53,9 +53,11 @@ class ToolStatus:
             return f"skipped ({self.skipped_reason or 'n/a'})"
         # What was deliberately left out is part of the answer: "0 findings" and
         # "0 findings, 4 excused inline" are different statements about a codebase.
+        plain = ("cache", "scope")
         excused = ", ".join(
-            f"{self.extra[k]} {k.replace('_', ' ')}" if k != "cache" else str(self.extra[k])
-            for k in ("inline_ignored", "allowlisted", "epss_scored", "passes", "cache")
+            f"{self.extra[k]} {k.replace('_', ' ')}" if k not in plain else str(self.extra[k])
+            for k in ("scope", "unchecked", "inline_ignored", "allowlisted", "epss_scored",
+                      "passes", "cache")
             if self.extra.get(k)
         )
         base = f"{self.findings} finding(s) in {self.duration_seconds:.1f}s"

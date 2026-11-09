@@ -30,6 +30,7 @@ from ai_autopilot.security_scan import fingerprint as fp_mod
 from ai_autopilot.security_scan import suppressions as sup_mod
 from ai_autopilot.security_scan.tools import ALL_TOOLS, registry
 from ai_autopilot.security_scan.tools.base import ToolStatus, run_process
+from ai_autopilot.security_scan.tools.pkgguard import PkgGuardScanner
 
 _log = get_logger("security_scan.runner")
 
@@ -253,6 +254,9 @@ async def run_scan(
         adapters["semgrep"] = type(adapters["semgrep"])(rulesets=req.semgrep_config)
     if req.gitleaks_log_opts:
         adapters["gitleaks"] = type(adapters["gitleaks"])(log_opts=req.gitleaks_log_opts)
+    pkg_guard = adapters.get("pkgguard")
+    if isinstance(pkg_guard, PkgGuardScanner):
+        pkg_guard.base_ref = req.base_branch or "main"
     wanted = [t for t in req.tools if t in adapters and t != "ai"]
     scanner_findings: list[Finding] = []
 

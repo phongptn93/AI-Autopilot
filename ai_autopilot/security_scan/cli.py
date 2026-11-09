@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dast", default="", metavar="TARGET",
                    help="Phase 4: dynamic probe of a configured, owner-confirmed DAST target "
                         "instead of a code scan")
+    p.add_argument("--sbom", default="", metavar="PATH",
+                   help="write a CycloneDX SBOM of the repo to PATH (use '-' for the default "
+                        "<workspace>/.autopilot/sbom/) instead of a code scan")
+    p.add_argument("--audit-sbom", default="", metavar="FILE",
+                   help="re-audit a stored CycloneDX SBOM against today's OSV + CISA KEV; "
+                        "needs no repo and no checkout of that release")
     p.add_argument("--quiet", "-q", action="store_true")
     return p
 
@@ -114,6 +120,10 @@ async def _main(args: argparse.Namespace) -> int:
 
     if args.dast:
         return await _run_dast(args, config, scoped)
+    if args.audit_sbom:
+        return await _run_sbom_audit(args, config, workspace)
+    if args.sbom:
+        return _run_sbom_build(args, repo_path, workspace)
 
     ai_mode = "off" if args.no_ai else (args.mode or sec.ai_mode or "off")
     if args.verify:
@@ -214,6 +224,53 @@ async def _run_dast(args: argparse.Namespace, config, scoped) -> int:
         print(f"  {f.severity:<9}{(f.cwe or ''):<9}{f.title}")
     blocking = [f for f in out.findings
                 if SEVERITIES.index(f.severity) <= SEVERITIES.index(config.security_scan.fail_on)]
+    return 1 if blocking else 0
+
+
+def _run_sbom_build(args: argparse.Namespace, repo_path: Path, workspace: str) -> int:
+    from ai_autopilot.security_scan import sbom
+
+    doc = sbom.build_sbom(str(repo_path))
+    target = (sbom.default_path(workspace, doc["metadata"]["component"]["name"])
+              if args.sbom == "-" else Path(args.sbom))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
+    unversioned = sum(1 for c in doc["components"] if "version" not in c)
+    print(f"SBOM: {len(doc['components'])} component(s), {unversioned} without an exact "
+          f"version -> {target}")
+    return 0
+
+
+async def _run_sbom_audit(args: argparse.Namespace, config, workspace: str) -> int:
+    from ai_autopilot.security_scan import fingerprint as fp_mod
+    from ai_autopilot.security_scan import intel, sbom
+
+    try:
+        doc = sbom.load_sbom(args.audit_sbom)
+    except (OSError, ValueError) as exc:
+        print(f"cannot read SBOM: {exc}", file=sys.stderr)
+        return 2
+    sec = config.security_scan
+    findings, stats = await sbom.audit_sbom(doc, osv_url=sec.intel_osv_url.rsplit("/vulns", 1)[0])
+    findings = fp_mod.stamp(findings)
+    kev_note = ""
+    if sec.intel_enabled and findings:
+        st = await intel.run_intel(findings, workspace=workspace, cfg=sec, store=False)
+        kev_note = f" · intel: {st.label}"
+    findings.sort(key=lambda f: SEVERITIES.index(f.severity))
+    when = (doc.get("metadata") or {}).get("timestamp", "?")
+    print(f"SBOM audit - built {when}: {stats['audited']} audited, "
+          f"{stats['unversioned']} without a version, {stats['vulnerable']} vulnerable"
+          f"{kev_note}")
+    if stats["error"]:
+        print(f"  ⚠ NOT FULLY AUDITED: {stats['error']}", file=sys.stderr)
+    for f in findings:
+        flag = " KEV" if f.kev else ""
+        print(f"  {f.severity:<9}{f.cve or f.rule_id:<20}{f.title}{flag}")
+    floor = SEVERITIES.index(args.fail_on or sec.fail_on)
+    blocking = [f for f in findings if f.kev or SEVERITIES.index(f.severity) <= floor]
+    if stats["error"] and not findings:
+        return 3
     return 1 if blocking else 0
 
 

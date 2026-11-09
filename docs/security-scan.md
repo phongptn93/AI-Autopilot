@@ -260,3 +260,17 @@ tool status says `offline` — enrichment never sinks a scan. Air-gapped runners
 Two boundaries to know: the **pre-PR gate does not run intel** (it is diff-scoped and
 store-less; KEV escalations belong to the nightly/full scan), and intel is
 **config.yaml-only** — there is deliberately no dashboard form field for it.
+
+## Package guard, test guard, SBOM, model canary
+
+| Công cụ | Chạy thế nào | Bắt được gì | Không bắt được |
+|---|---|---|---|
+| `pkgguard` (trong `--tools`, mặc định bật, có trong cổng PR) | tự chạy cùng `scan` | Phụ thuộc **mới** trong diff mà registry không có (tên do AI bịa, `high`), phiên bản ghim không tồn tại (`high`), gói mới công bố < `pkgguard_min_age_days` ngày (`high`), gói còn quá ít lịch sử (`medium`) | Gói có thật nhưng độc hại và đủ tuổi (việc của SCA/KEV); gói trên feed riêng (đặt tiền tố vào `pkgguard_internal_prefixes`) |
+| `testguard` | tự chạy cùng `scan` | Test **không có assertion** hoặc chỉ assert hằng đúng (`assert True`, `Assert.True(true)`, `expect(true).toBe(true)`); mức `medium` | Test assert sai thứ (cần review hoặc mutation test) |
+| SBOM | `ai-autopilot scan --sbom -` (ghi CycloneDX 1.5 vào `<workspace>/.autopilot/sbom/`) | Ghi lại đang chạy thành phần nào, phiên bản nào (ưu tiên lockfile) | |
+| Quét lại SBOM | `ai-autopilot scan --audit-sbom FILE` | CVE mới công bố (OSV) và KEV cho bản **đã phát hành**, không cần checkout code. Mã thoát `1` nếu ≥ `fail_on` hoặc KEV, `3` nếu không kiểm tra được | Thành phần không có phiên bản chính xác (được đếm riêng) |
+| Canary | `ai-autopilot canary` / `--status` | Model trả lời rỗng, bị cắt hoặc sai khi đổi model/effort; `doctor` cảnh báo nếu cấu hình đổi mà chưa chạy lại | Chất lượng review (dùng `evals replay`) |
+
+Mọi tra cứu registry/OSV đều **fail-soft**: không gọi được thì báo `unchecked` / `NOT FULLY AUDITED`, không bao giờ báo "sạch".
+
+Cấu hình (`security_scan:`): `pkgguard_min_age_days` (mặc định 14), `pkgguard_internal_prefixes` (mặc định rỗng).

@@ -32,7 +32,23 @@
 - Đảo ngược được? ☐ Có ☐ Không (lưu ý: ____)
 - Lệnh / kế hoạch rollback: ____
 
-## 5. Quyết định
+## 5. Vận hành sau go-live — ai đứng tên
+
+> Phần mềm chạm tiền, dữ liệu khách hoặc dây chuyền thì cần một **người cụ thể** trả lời khi hệ thống hỏng lúc 3 giờ sáng. "Đội" hoặc "AI viết" không phải là câu trả lời. Chi tiết: `runbook-van-hanh-sau-go-live.md`.
+
+| Mục | Nội dung |
+|---|---|
+| Người chịu trách nhiệm vận hành (tên) | ____ |
+| Người thay thế khi vắng | ____ |
+| Kênh nhận cảnh báo | ____ |
+| Thời gian phản hồi cam kết | ____ |
+| Người được quyền rollback | ____ |
+| SBOM của bản giao đã lưu và gửi kèm? | ☐ Có (đường dẫn: ____) ☐ Không |
+| Probe đĩa / chứng chỉ đã đặt lịch? | ☐ Có ☐ Không (lý do: ____) |
+
+**Chưa điền đủ bảng này thì không ký nghiệm thu bản dành cho khách.**
+
+## 6. Quyết định
 - [ ] BA nội bộ: ☐ Đạt ☐ Trả lại — ____ (ngày ____)
 - [ ] **Khách / Owner:** ☐ Chấp nhận ☐ Từ chối — ____ (ngày ____)
 

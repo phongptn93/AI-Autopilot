@@ -17,6 +17,7 @@ _RANK = {"critical": 95.0, "high": 80.0, "medium": 50.0, "low": 20.0, "info": 5.
 _TOOL_URI = {
     "semgrep": "https://semgrep.dev", "gitleaks": "https://github.com/gitleaks/gitleaks",
     "sca": "https://github.com/aquasecurity/trivy", "builtin": "https://github.com/",
+    "pkgguard": "https://github.com/", "testguard": "https://github.com/",
     "ai": "https://claude.com/claude-code", "dast": "https://owasp.org/API-Security/",
     "poc": "https://claude.com/claude-code",
 }

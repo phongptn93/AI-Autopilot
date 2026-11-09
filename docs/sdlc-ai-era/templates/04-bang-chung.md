@@ -28,7 +28,8 @@
 |---|---|---|
 | build_tests | | Id pipeline / log test |
 | secrets_clean | | Kết quả quét bí mật |
-| sast_deps | | Báo cáo SAST + phụ thuộc |
+| sast_deps | | Báo cáo SAST + CVE phụ thuộc (có KEV/EPSS) |
+| deps_verified | | Kết quả `pkgguard`: mọi phụ thuộc mới có trên registry, đủ tuổi, phiên bản ghim có thật |
 | auto_review | | Kết luận auto-review (số critical/warning) |
 | diff_bounded | | Số file trong PR; không chạm đường dẫn bảo vệ |
 | sandbox_least_priv | | Worktree / sandbox, quyền đã cấp |

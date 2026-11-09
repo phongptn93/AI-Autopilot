@@ -110,11 +110,11 @@ def _readiness(cfg) -> list[dict]:
     sec = cfg.security_scan
     adapters = registry(sec)
     rows = []
-    for name in ("builtin", "gitleaks", "semgrep", "sca"):
+    for name in ("builtin", "pkgguard", "testguard", "gitleaks", "semgrep", "sca"):
         ok = adapters[name].available()
         rows.append({
             "name": name, "ok": ok, "on": name in sec.tools,
-            "note": ("luôn sẵn có" if name == "builtin" else
+            "note": ("luôn sẵn có" if name in ("builtin", "pkgguard", "testguard") else
                      ("đã cài" if ok else "chưa cài — sẽ bỏ qua")),
             "install": [] if ok else INSTALL_HINTS.get(name, []),
         })
@@ -228,7 +228,7 @@ def create_router() -> APIRouter:
                  readiness=_readiness(cfg), progress=prog, running_row=running_row,
                  feed_url=(f"/dashboard/activity/{activity.security_key(Path(repo).name)}"
                            if repo else ""),
-                 all_tools=("builtin", "gitleaks", "semgrep", "sca"),
+                 all_tools=("builtin", "gitleaks", "semgrep", "sca", "pkgguard", "testguard"),
                  config_file=str(config_file_path())),
         )
         if flash:

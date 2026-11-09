@@ -25,6 +25,7 @@ sdlc-ai-era/
 │   ├── roles-A3.svg             Phân cấp vai trò: quyết định / làm / chịu trách nhiệm
 │   ├── artifacts-A3.svg         Bản đồ artifact, spec hai lớp ở trung tâm
 │   └── gates-A3.svg             Cơ chế chấm điểm cổng (sinh từ scorecard)
+├── runbook-van-hanh-sau-go-live.md  Phần chìm: đĩa, chứng chỉ, nâng cấp, job chạy chồng, đổi model, CVE
 ├── gates/
 │   ├── gate-scorecard.json      Cấu hình: tiêu chí, trọng số, hard-fail, ngưỡng theo tầng
 │   ├── gate_score.py            Bộ tính điểm (thư viện chuẩn Python)
@@ -46,7 +47,7 @@ Chỉ cần Python 3.10 trở lên, không cần cài thêm gói.
 ```bash
 cd gates
 python gate_score.py gate-scorecard.json examples/g3-yellow-review.json
-# G3 | tầng yellow | điểm 78/100 | quyết định: REVIEW
+# G3 | tầng yellow | điểm 80/100 | quyết định: REVIEW
 
 python -m unittest test_gate_score -v
 ```
@@ -63,4 +64,5 @@ Input là JSON: `{"gate": "G3", "tier": "yellow", "criteria": {"build_tests": {"
 
 - Ngưỡng 90/70 (Vàng) và 80 (Đỏ) là đề xuất ban đầu; chỉ ngưỡng 85/60 của tầng Xanh khớp cấu hình hiện có của AI-Autopilot (`pr_score_auto_min`, `pr_score_review_min`).
 - Scorecard là **đặc tả** cho phần điểm cổng mà `pr_scorer.py` chưa có (tuân thủ spec, bảo mật). Gói không sửa mã AI-Autopilot.
+- `diagrams/gates-A3.svg` chưa được sinh lại sau khi thêm tiêu chí `deps_verified` vào G3 và đổi trọng số `sast_deps` 15 → 10 (script sinh sơ đồ không nằm trong gói). JSON là nguồn đúng; sơ đồ cần sinh lại.
 - Chưa kiểm chứng: nguồn test case (từ spec hay từ code), phòng thủ prompt injection, hành vi hệ thống đầu cuối.

@@ -61,7 +61,8 @@
       "criteria": [
         {"id": "build_tests", "label": "Build + test đơn vị xanh", "weight": 30, "hard": ["yellow", "red"]},
         {"id": "secrets_clean", "label": "Không lộ bí mật (key, token, chuỗi kết nối)", "weight": 10, "hard": ["green", "yellow", "red"]},
-        {"id": "sast_deps", "label": "SAST và phụ thuộc sạch", "weight": 15, "hard": ["yellow", "red"]},
+        {"id": "sast_deps", "label": "SAST và lỗ hổng phụ thuộc (CVE) sạch", "weight": 10, "hard": ["yellow", "red"]},
+        {"id": "deps_verified", "label": "Phụ thuộc mới có thật, đủ tuổi, đã ghim phiên bản (pkgguard)", "weight": 5, "hard": ["green", "yellow", "red"]},
         {"id": "auto_review", "label": "Auto-review không có lỗi critical", "weight": 20, "hard": ["green", "yellow", "red"]},
         {"id": "diff_bounded", "label": "Diff trong ngưỡng, không chạm đường dẫn bảo vệ", "weight": 15, "hard": ["green", "yellow", "red"]},
         {"id": "sandbox_least_priv", "label": "Chạy trong sandbox/worktree, quyền tối thiểu", "weight": 10, "hard": ["red"]}

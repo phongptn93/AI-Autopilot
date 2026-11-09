@@ -911,14 +911,14 @@ class SecurityScanSettings(BaseModel):
     """
 
     enabled: bool = True
-    tools: list[str] = ["builtin", "gitleaks", "semgrep", "sca"]
+    tools: list[str] = ["builtin", "gitleaks", "semgrep", "sca", "pkgguard", "testguard"]
     ai_mode: str = "fast"                  # off | fast | deep
     ai_agents: list[str] = ["agent-security-reviewer"]
     semgrep_config: list[str] = ["p/owasp-top-ten", "p/secrets", "p/csharp", "p/typescript"]
     # New, unsuppressed findings at or above this severity fail the scan (exit 1).
     fail_on: str = "high"
     # Which deterministic scanners the pre-PR review gate runs on the branch diff.
-    pr_gate_tools: list[str] = ["builtin", "gitleaks"]
+    pr_gate_tools: list[str] = ["builtin", "gitleaks", "pkgguard", "testguard"]
     # Cap per tool so a pathological repo cannot flood the report.
     max_findings_per_tool: int = 500
     # Noise control at the RULE and PATH level — the two knobs that make a scanner
@@ -939,6 +939,11 @@ class SecurityScanSettings(BaseModel):
     # ── Phase 4: DAST ──
     dast_enabled: bool = False
     dast_targets: list[DastTarget] = []
+    # ── Package guard: does a dependency this change adds exist, and is it old enough ──
+    # A hallucinated or days-old package name is the slopsquatting shape. Packages on a
+    # private feed are listed by name prefix and never looked up on a public registry.
+    pkgguard_min_age_days: int = 14
+    pkgguard_internal_prefixes: list[str] = []
     # ── Phase 5: threat intel (CISA KEV + FIRST EPSS) on SCA findings ──
     # A dependency CVE listed in CISA's Known Exploited Vulnerabilities catalog is
     # escalated to critical and FAILS the gate even when it is old news to the baseline

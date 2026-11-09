@@ -5,6 +5,7 @@
     "build_tests":        {"status": "partial", "evidence": "pipeline#4830: 1 test bi bo qua"},
     "secrets_clean":      {"status": "pass",    "evidence": "scan#915"},
     "sast_deps":          {"status": "partial", "evidence": "scan#915: 2 canh bao trung binh"},
+    "deps_verified":      {"status": "pass", "evidence": "pkgguard: 0 finding, 2 phu thuoc moi deu co tren registry"},
     "auto_review":        {"status": "pass",    "evidence": "review#80"},
     "diff_bounded":       {"status": "pass",    "evidence": "PR#312: 9 file"},
     "sandbox_least_priv": {"status": "pass",    "evidence": "worktree"}

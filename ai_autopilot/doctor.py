@@ -1579,6 +1579,27 @@ def check_scheduled_loops(config: Settings) -> list[Finding]:
     )]
 
 
+def check_model_canary(config: Settings) -> list[Finding]:
+    """The model/effort settings moved since the last passing canary, or it failed.
+
+    A canary that was never run says nothing (that would warn every fresh install);
+    what is worth a line is a *change* nobody re-tested, or a failure nobody acted on.
+    """
+    from ai_autopilot import model_canary
+
+    workspace = getattr(config, "workspace_directory", "") or ""
+    if not workspace:
+        return []
+    state, message = model_canary.status(workspace, model_canary.fingerprint(config))
+    if state == "stale":
+        return [Finding(WARN, "Model settings changed without a canary", message,
+                        "Run `ai-autopilot canary` before relying on the new model/effort.")]
+    if state == "failed":
+        return [Finding(ERROR, "Model canary is failing", message,
+                        "Run `ai-autopilot canary`; do not ship until every probe passes.")]
+    return []
+
+
 def check_security_scan(config: Settings) -> list[Finding]:
     """The security scanner is configured to use tools that are not on this machine.
 
@@ -1593,7 +1614,7 @@ def check_security_scan(config: Settings) -> list[Finding]:
     if not sec.enabled:
         return [Finding(OK, "Security scan: disabled")]
     out: list[Finding] = []
-    wanted = [t for t in sec.tools if t not in ("builtin", "ai")]
+    wanted = [t for t in sec.tools if t not in ("builtin", "pkgguard", "testguard", "ai")]
     binaries = {"semgrep": ["semgrep"], "gitleaks": ["gitleaks"],
                 "sca": ["trivy", "dotnet", "npm", "pip-audit"]}
     for tool in wanted:
@@ -1601,7 +1622,7 @@ def check_security_scan(config: Settings) -> list[Finding]:
         if names is None:
             out.append(Finding(
                 WARN, f"Security scan lists an unknown tool '{tool}'",
-                "It is ignored. Known: builtin, gitleaks, semgrep, sca.",
+                "It is ignored. Known: builtin, gitleaks, semgrep, sca, pkgguard, testguard.",
                 "Fix security_scan.tools in config.yaml.",
             ))
         elif not any(shutil.which(b) for b in names):
@@ -1894,7 +1915,7 @@ CHECKS = (
     check_teams_bot,
     check_command_hints, check_reviewer_reminders, check_pr_review, check_state_flows,
     check_board_processes,
-    check_assignee_scoping, check_scheduled_loops, check_security_scan,
+    check_assignee_scoping, check_scheduled_loops, check_security_scan, check_model_canary,
     check_release_note,
 )
 

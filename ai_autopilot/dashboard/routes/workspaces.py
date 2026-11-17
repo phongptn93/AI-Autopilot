@@ -25,6 +25,30 @@ from ai_autopilot.dashboard.routes._shared import _ctx
 from ai_autopilot.workspace import discover_repos
 
 
+def _ado_mcp_auth_by_workspace(config, views) -> dict[str, list[dict]]:
+    """Per workspace: each Azure DevOps MCP server in its .mcp.json and how an agent run
+    will sign it in — ``pat`` / ``own`` / ``popup``. Shown on the card so a missing PAT is
+    seen where it is fixed, not discovered as a sign-in window mid-run. Names only, never
+    a secret's value; an unreadable file just shows nothing."""
+    from ai_autopilot.ado.mcp_auth import audit
+    from ai_autopilot.execution.claude_executor import _load_mcp_servers
+
+    out: dict[str, list[dict]] = {}
+    for ws in views:
+        try:
+            scoped = config.scoped_for_project(ws.projects[0]) if ws.projects else config
+            directory = ws.directory or scoped.workspace_directory
+            if not directory:
+                continue
+            out[ws.id] = [
+                {"name": s.server.name, "org": s.server.organization, "mode": s.mode}
+                for s in audit(_load_mcp_servers(directory), scoped)
+            ]
+        except Exception:  # noqa: BLE001 — a status chip must never break the page
+            continue
+    return out
+
+
 def create_router() -> APIRouter:
     router = APIRouter(tags=["dashboard"])
 
@@ -47,12 +71,13 @@ def create_router() -> APIRouter:
             }
         except Exception:  # noqa: BLE001 — the page must render on an unreadable disk
             discovered = {}
+        mcp_auth = _ado_mcp_auth_by_workspace(c.config, views)
         response = _TEMPLATES.TemplateResponse(
             request, "workspaces.html",
             _ctx(
                 request, "workspaces", flash=flash, views=views,
                 errors=rejected.get("errors") or [], discovered=discovered,
-                projects=c.config.effective_ado_projects,
+                projects=c.config.effective_ado_projects, mcp_auth=mcp_auth,
             ),
         )
         if flash is not None:

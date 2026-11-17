@@ -2163,7 +2163,7 @@ async def _agentic_turn(
     """One genuine agent turn over the message. Returns True when it handled the
     reply; False on any failure so the caller falls back to the classifier path."""
     from ai_autopilot.execution.claude_client import run_claude
-    from ai_autopilot.execution.claude_executor import _load_mcp_servers
+    from ai_autopilot.execution.claude_executor import load_agent_mcp_servers
 
     # Runs in the MAIN workspace on purpose — no git worktree, unlike task execution and
     # review_pr (which get one via _acquire_agent_scratch). Chat is overwhelmingly Q&A, so
@@ -2174,8 +2174,8 @@ async def _agentic_turn(
     # Consequence worth knowing: answers reflect the checkout AS IT IS on the machine
     # running autopilot, uncommitted changes included — not a clean base branch.
     workspace = config.workspace_directory
-    mcp = _load_mcp_servers(workspace) if workspace else None
-    email = await _teams_email(context) or "(không rõ)"
+    mcp = load_agent_mcp_servers(workspace, config) if workspace else None
+    email =await _teams_email(context) or "(không rõ)"
     # Continue this thread's session so the reply knows what was already said. run_claude
     # falls back to a fresh session by itself if the stored id can't be resumed.
     conv_key, resume = await _load_session(config, container, context.activity)

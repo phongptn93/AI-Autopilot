@@ -99,6 +99,13 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "giống nhau. (Cấu hình chéo project.)"),
     Field("ado_pat", "Personal Access Token (PAT)", "password", "🔌 Kết nối Azure DevOps",
           "Để trống = giữ token hiện tại."),
+    Field("ado_mcp_pat_auth", "ADO MCP đăng nhập bằng PAT", "bool", "🔌 Kết nối Azure DevOps",
+          "Server @azure-devops/mcp trong .mcp.json mặc định bật cửa sổ đăng nhập Microsoft "
+          "mỗi lượt chạy. Bật = mỗi lượt chạy tự đưa PAT của đúng organization cho server "
+          "đó (chỉ process đó thấy token). Không sửa .mcp.json, không ảnh hưởng team."),
+    Field("ado_mcp_version", "↳ Ghim phiên bản ADO MCP", "text", "🔌 Kết nối Azure DevOps",
+          "Thay @latest bằng phiên bản này khi chạy agent — khởi động nhanh, không đổi bất "
+          "ngờ. Để trống = giữ nguyên như .mcp.json.", placeholder="2.11.0"),
     # ── Tags & Trigger ──
     # Two independent ways an item becomes THIS machine's — shown as such. The old labels
     # hung "↳ do ai xử lý" under the machine tag, which read as a filter on it; it never

@@ -548,6 +548,56 @@ def check_second_organization(config: Settings) -> list[Finding]:
     return out
 
 
+def check_ado_mcp_auth(config: Settings) -> list[Finding]:
+    """Will the Azure DevOps MCP server in each workspace sign in without a human?
+
+    ``@azure-devops/mcp`` defaults to an interactive Microsoft login held only in that
+    process's memory, so without a PAT every agent run pops a sign-in window on the
+    desktop and stalls on it. Runs hand the server the PAT of its organization
+    (ado/mcp_auth.py) — this says, per workspace and server, whether one exists.
+
+    Offline: reads each workspace's .mcp.json, never a secret's value.
+    """
+    from ai_autopilot.ado.mcp_auth import audit
+    from ai_autopilot.execution.claude_executor import _load_mcp_servers
+
+    dirs: list[tuple[str, Settings]] = []
+    if (config.workspace_directory or "").strip():
+        dirs.append((config.workspace_directory, config))
+    for ws in config.effective_workspaces:
+        scoped = config.scoped_for_project(ws.ado_projects[0]) if ws.ado_projects else config
+        if (scoped.workspace_directory or "").strip():
+            dirs.append((scoped.workspace_directory, scoped))
+    seen: set[str] = set()
+    covered: list[str] = []
+    out: list[Finding] = []
+    for directory, scoped in dirs:
+        if directory.lower() in seen:
+            continue
+        seen.add(directory.lower())
+        for status in audit(_load_mcp_servers(directory), scoped):
+            s = status.server
+            label = f"{s.name} ({s.organization or '?'})"
+            if status.mode == "popup":
+                why = ("ado_mcp_pat_auth is off" if not config.ado_mcp_pat_auth
+                       else f"no PAT is configured for organization '{s.organization}'")
+                out.append(Finding(
+                    WARN, f"ADO MCP '{s.name}' will open a sign-in popup on every run",
+                    f"{directory}: {why}, so the server falls back to an interactive "
+                    "Microsoft login — the run stalls until someone signs in.",
+                    "Add a PAT for that organization (Settings → Kết nối Azure DevOps, or "
+                    "the workspace's own on /dashboard/workspaces), or set "
+                    "'-a azcli' in .mcp.json if this machine is signed in to Azure CLI.",
+                ))
+            else:
+                covered.append(label)
+    if out:
+        return out
+    if covered:
+        return [Finding(OK, "ADO MCP signs in without a popup: " + ", ".join(sorted(set(covered))))]
+    return []
+
+
 def check_fleet(config: Settings) -> list[Finding]:
     """Fleet mode wired half-way — the failure mode is silence, on both sides.
 
@@ -1906,7 +1956,7 @@ CHECKS = (
     check_role_doors_vs_triggers, check_run_now_tags, check_role_chain_cycle,
     check_relay_hands_over, check_default_profile_is_not_a_doorway,
     check_sdlc_needs_headless, check_fleet, check_providers,
-    check_second_organization,
+    check_second_organization, check_ado_mcp_auth,
     check_workspace_context, check_workspace_skills, check_deploy_stage,
     check_workspace, check_workspaces,
     check_concurrency, check_delivery, check_effort, check_test_gate_per_repo,

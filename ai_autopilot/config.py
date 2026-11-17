@@ -1016,6 +1016,13 @@ class Settings(BaseSettings):
     ado_pat: str = ""
     oauth_app_id: str = ""
     oauth_app_secret: str = ""
+    # The Azure DevOps MCP server (@azure-devops/mcp) in a workspace's .mcp.json signs in
+    # interactively by default — a browser popup on EVERY agent run. On, each run hands
+    # it the PAT of its organization instead (see ado/mcp_auth.py); .mcp.json untouched.
+    ado_mcp_pat_auth: bool = True
+    # Replaces ``@latest``/unpinned in that server's npx spec on agent runs. Blank = keep
+    # whatever .mcp.json says. A pinned version starts faster and cannot change under you.
+    ado_mcp_version: str = "2.11.0"
 
     # ── Triggering ──
     # Default is host-specific (``<hostname>-autopilot``) so each machine claims a

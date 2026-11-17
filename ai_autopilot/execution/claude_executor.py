@@ -2514,7 +2514,8 @@ class ClaudeExecutor:
             # Opt into loading the workspace's .claude skills/rules/settings, its
             # MCP servers, and grant access to the target repo subfolder.
             setting_sources = ["user", "project", "local"]
-            workspace_mcp = _load_mcp_servers(self._config.workspace_directory) or {}
+            workspace_mcp = load_agent_mcp_servers(
+                self._config.workspace_directory, self._config) or {}
             if override:
                 # The caller owns the tool surface. The CLI still loads servers from
                 # the workspace and user settings, so deny every one of those by name.
@@ -2754,6 +2755,26 @@ def _load_mcp_servers(workspace: str) -> dict | None:
         if servers:
             return servers
     return None
+
+
+def load_agent_mcp_servers(workspace: str, config) -> dict | None:
+    """The workspace's MCP servers as an agent run should start them.
+
+    Same as ``_load_mcp_servers`` plus credentials: an interactive Azure DevOps MCP server
+    gets the PAT of its organization, so the run never stops on a sign-in popup. The
+    result holds secrets — pass it to the SDK, never log or persist it.
+    """
+    from ai_autopilot.ado.mcp_auth import audit, with_pat_auth
+
+    servers = _load_mcp_servers(workspace)
+    for status in audit(servers, config):
+        if status.will_prompt:
+            _log.warning(
+                "ADO MCP server has no PAT for its organization — it will open a Microsoft "
+                "sign-in popup and the run may stall on it",
+                server=status.server.name, organization=status.server.organization,
+            )
+    return with_pat_auth(servers, config)
 
 
 def _branch_name(item: WorkItemInfo) -> str:

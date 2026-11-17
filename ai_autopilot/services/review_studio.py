@@ -235,12 +235,12 @@ class ReviewStudio:
     async def _agent(self, prompt: str, *, resume: str | None = None, turns: int | None = None,
                      cwd: str | None = None):
         from ai_autopilot.execution.claude_client import run_claude
-        from ai_autopilot.execution.claude_executor import _load_mcp_servers
+        from ai_autopilot.execution.claude_executor import load_agent_mcp_servers
         from ai_autopilot.teams_agent import _agent_allowed_tools
 
         cfg = self._c.config
         base = cwd or cfg.workspace_directory
-        mcp = _load_mcp_servers(base) if base else None   # a review tree carries a copy
+        mcp = load_agent_mcp_servers(base, cfg) if base else None   # a review tree carries a copy
         return await run_claude(
             prompt, base or tempfile.gettempdir(),
             timeout_seconds=float(getattr(cfg, "review_timeout_seconds", 900) or 900),

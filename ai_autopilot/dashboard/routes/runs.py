@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
@@ -30,6 +31,63 @@ from ai_autopilot.data.entities import PipelineState, QualityKind
 from ai_autopilot.execution import sdlc_plan
 from ai_autopilot.logging_config import describe_exc
 from ai_autopilot.services import planning_analyzer
+
+# ── "Cần người xử lý": what KIND of hold an item is in, read from the agent's reason ──
+# The reason is free text written by the agent; this only sorts it into a handful of
+# buckets so a person can triage a long queue at a glance and see the next move. Order
+# matters — the first bucket whose pattern matches wins, most actionable first.
+# key → (icon, label, tone, next-step hint, pattern)
+_HOLD_KINDS: dict[str, tuple[str, str, str, str, re.Pattern[str] | None]] = {
+    "decision": ("🧭", "Chờ quyết định", "violet",
+                 "Chốt nghiệp vụ với BA / khách, ghi kết luận lên work item rồi bấm Tiếp tục.",
+                 re.compile(r"\b(BA|spec|clarif|ambigu|confirm|decide|decision)\b|chốt|xác nhận"
+                            r"|quyết định|làm rõ", re.I)),
+    "manual_pr": ("🔀", "Cần tạo PR tay", "amber",
+                  "Branch đã push — tạo PR thủ công rồi bấm Đã xong, "
+                  "hoặc sửa kết nối rồi Tiếp tục.",
+                  re.compile(r"create (a )?(draft )?(PR|pull request)|open the PR|tạo PR", re.I)),
+    "conflict": ("⚔️", "Xung đột code", "amber",
+                 "Giải conflict trên branch rồi bấm Tiếp tục.",
+                 re.compile(r"conflict|merge failed|rebase", re.I)),
+    "infra": ("🔌", "Lỗi kết nối", "red",
+              "Kiểm tra MCP / CLI / PAT trên máy chạy autopilot rồi bấm Tiếp tục.",
+              re.compile(r"timeout|timed out|MCP|CLI|credential|token|unavailable|unauthori[sz]ed"
+                         r"|\b40[13]\b|connect|network|not installed", re.I)),
+    "other": ("❔", "Khác", "dim", "Đọc lý do, xử lý rồi bấm Tiếp tục hoặc Đã xong.", None),
+}
+_BRANCH_RE = re.compile(r"\b(?:feature|bugfix|hotfix|fix|release|users)/[\w./-]*\w")
+
+
+def _hold_kind(reason: str) -> str:
+    for key, (*_, pattern) in _HOLD_KINDS.items():
+        if pattern is not None and pattern.search(reason):
+            return key
+    return "other"
+
+
+def _branch_in(reason: str) -> str:
+    m = _BRANCH_RE.search(reason)
+    return m.group(0) if m else ""
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
+
+
+def _waited(now: datetime, since: datetime | None) -> str:
+    """'5 phút' / '3 giờ' / '2 ngày' — how long the item has been waiting."""
+    if since is None:
+        return ""
+    mins = max(0, int((now - since).total_seconds() // 60))
+    if mins < 60:
+        return f"{mins} phút"
+    if mins < 60 * 24:
+        return f"{mins // 60} giờ"
+    return f"{mins // (60 * 24)} ngày"
+
+
+def _form_ids(form: Any) -> list[int]:
+    return list(dict.fromkeys(int(str(x)) for x in form.getlist("ids") if str(x).strip().isdigit()))
 
 
 async def _scope_rows(request: Request, c: Container, rows: list) -> list:
@@ -375,28 +433,92 @@ def create_router() -> APIRouter:
         c: Container = request.app.state.container
         link_base = work_item_link_base(c.config)
         held = [s for s in await c.state_repo.all() if s.state == PipelineState.NEEDS_HUMAN]
-        held.sort(key=lambda s: s.updated_at or datetime.min, reverse=True)
+        # Oldest first: the item that has waited longest is the one to look at first.
+        held.sort(key=lambda s: _aware(s.updated_at) or datetime.max.replace(tzinfo=UTC))
         held = await _scope_rows(request, c, held)
-        items = [
-            {
+        now = datetime.now(UTC)
+        items = []
+        for s in held:
+            kind = _hold_kind(s.detail or "")
+            updated = _aware(s.updated_at)
+            items.append({
                 "id": s.work_item_id, "title": s.title or f"#{s.work_item_id}",
                 "detail": s.detail or "", "pr_url": s.pr_url or "",
                 "url": f"{link_base}/{s.work_item_id}" if link_base else "",
-                "updated": s.updated_at,
-            }
-            for s in held
-        ]
-        return _TEMPLATES.TemplateResponse(
-            request, "queue.html", _ctx(request, "queue", items=items, resumed=resumed)
+                "updated": updated, "waited": _waited(now, updated),
+                "stale": bool(updated and now - updated > timedelta(days=2)),
+                "kind": kind, "branch": _branch_in(s.detail or ""),
+            })
+        counts: dict[str, int] = {}
+        for it in items:
+            counts[it["kind"]] = counts.get(it["kind"], 0) + 1
+        kinds = [(k, *_HOLD_KINDS[k][:3], counts[k]) for k in _HOLD_KINDS if k in counts]
+        flash = _take_flash(request)
+        response = _TEMPLATES.TemplateResponse(
+            request, "queue.html",
+            _ctx(request, "queue", items=items, resumed=resumed, kinds=kinds,
+                 hold_kinds=_HOLD_KINDS, flash=flash,
+                 stale=sum(1 for it in items if it["stale"])),
         )
+        if flash:
+            response.delete_cookie(_FLASH_COOKIE, path="/dashboard")
+        return response
+
+    @router.post("/queue/done")
+    async def queue_done(request: Request):
+        """✓ A person finished the work by hand (e.g. opened the PR the agent could not):
+        apply the ``done`` outcome so the board and ADO agree, and drop it from the queue."""
+        c: Container = request.app.state.container
+        ids = _form_ids(await request.form())
+        if not ids:
+            return RedirectResponse("/dashboard/queue", status_code=303)
+        from ai_autopilot.outcomes import apply_outcome
+
+        ado_ok = True
+        for iid in ids:
+            try:
+                item = await c.ado.get_work_item(iid)
+                wit = getattr(item, "work_item_type", "") if item else ""
+                ado_ok &= await apply_outcome(c.ado, c.config, iid, "done", wit, log=_log)
+            except Exception as exc:  # noqa: BLE001 — local state still moves; banner says so
+                ado_ok = False
+                _log.warning("queue: mark-done could not update ADO", id=iid,
+                             error=describe_exc(exc))
+            await c.state_repo.set(iid, PipelineState.DONE,
+                                   detail="✓ Người xử lý đánh dấu xong trên dashboard")
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="item.marked_done",
+            target=", ".join(f"#{i}" for i in ids)[:300],
+        )
+        return _flash("/dashboard/queue", "queue_done" if ado_ok else "queue_done_ado_failed")
+
+    @router.post("/queue/skip")
+    async def queue_skip(request: Request):
+        """⏭ Stop tracking: the item leaves this queue (board → Failed) but its ADO tags
+        are left alone, so the poller still skips it — nothing is written to the tracker."""
+        c: Container = request.app.state.container
+        ids = _form_ids(await request.form())
+        if not ids:
+            return RedirectResponse("/dashboard/queue", status_code=303)
+        for iid in ids:
+            prev = await c.state_repo.get(iid)
+            reason = (prev.detail or "") if prev else ""
+            await c.state_repo.set(
+                iid, PipelineState.FAILED,
+                detail=("⏭ Đã bỏ qua trên dashboard" + (f" — {reason}" if reason else ""))[:2000],
+            )
+        await c.audit_repo.record(
+            actor="dashboard", source="dashboard", action="item.skipped",
+            target=", ".join(f"#{i}" for i in ids)[:300],
+        )
+        return _flash("/dashboard/queue", "queue_skipped")
 
     @router.post("/queue/resume")
     async def queue_resume(request: Request):
         """Approve/resume held items: clear the hold tag and hand them back to the
         poller (trigger tag + state), so work continues without a manual restart."""
         c: Container = request.app.state.container
-        form = await request.form()
-        ids = [int(str(x)) for x in form.getlist("ids") if str(x).strip().isdigit()]
+        ids = _form_ids(await request.form())
         if not ids:
             return RedirectResponse("/dashboard/queue", status_code=303)
         # EVERY outcome tag, not just the hold: the poller skips an item carrying any of

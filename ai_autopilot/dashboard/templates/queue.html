@@ -1,48 +1,241 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .q-table { width:100%; border-collapse:collapse; font-size:13px; }
-  .q-table th, .q-table td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--border,#23232b); vertical-align:top; }
-  .q-reason { color:var(--text-dim); max-width:640px; }
+  .hq-flash { padding:11px 16px; margin-bottom:14px; border:1px solid var(--border-soft); border-radius:var(--radius-sm);
+              background:var(--bg-card); font-size:12.5px; }
+  .hq-flash.ok { border-color:rgba(46,204,113,.4); color:var(--green); }
+  .hq-flash.warn { border-color:rgba(245,166,35,.45); color:var(--amber); }
+
+  /* summary + filters */
+  .hq-bar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:4px 0 12px; }
+  .hq-stat { display:flex; align-items:baseline; gap:6px; padding:8px 14px; border:1px solid var(--border);
+             border-radius:var(--radius-sm); background:var(--bg-card); font-size:12px; color:var(--text-muted); }
+  .hq-stat b { font-size:18px; color:var(--text); font-variant-numeric:tabular-nums; }
+  .hq-stat.warn b { color:var(--amber); }
+  .hq-filters { display:flex; flex-wrap:wrap; gap:6px; }
+  .hq-fchip { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:20px; cursor:pointer;
+              font:inherit; font-size:12px; font-weight:600; background:transparent; border:1px solid var(--border); color:var(--text-muted); }
+  .hq-fchip:hover { border-color:var(--accent); color:var(--text); }
+  .hq-fchip[aria-pressed="true"] { background:var(--accent-bg); border-color:rgba(99,102,241,.55); color:var(--accent-hover); }
+  .hq-fchip .n { font-variant-numeric:tabular-nums; opacity:.8; }
+  .hq-search { margin-left:auto; min-width:240px; flex:0 1 320px; }
+  .hq-search input { width:100%; }
+
+  /* bulk action bar — appears once something is selected */
+  .hq-bulk { position:sticky; top:0; z-index:15; display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+             padding:10px 14px; margin-bottom:10px; border:1px solid rgba(99,102,241,.45); border-radius:var(--radius-sm);
+             background:var(--bg-sticky); backdrop-filter:blur(8px); }
+  .hq-bulk[hidden] { display:none; }
+  .hq-bulk .count { font-size:13px; font-weight:650; margin-right:auto; }
+
+  /* list */
+  .hq-list { border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-card); overflow:visible; }
+  .hq-head { display:flex; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--border);
+             font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-dim); }
+  .hq-row { display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:14px; padding:14px 16px;
+            border-bottom:1px solid var(--border-soft); transition:background .12s; }
+  .hq-row:last-child { border-bottom:none; }
+  .hq-row:hover { background:var(--bg-hover); }
+  .hq-row.sel { background:var(--accent-bg); }
+  .hq-row > input { margin-top:3px; }
+  .hq-title { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:14px; line-height:1.4; }
+  .hq-title a.num { font-weight:700; color:var(--accent-hover); text-decoration:none; font-variant-numeric:tabular-nums; }
+  .hq-title a.num:hover { text-decoration:underline; }
+  .hq-title .t { color:var(--text); font-weight:600; }
+  .hq-kind { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:700; white-space:nowrap; }
+  .tone-violet { background:var(--violet-bg); color:var(--violet); }
+  .tone-amber { background:var(--amber-bg); color:var(--amber); }
+  .tone-red { background:var(--red-bg); color:var(--red); }
+  .tone-dim { background:var(--bg-hover); color:var(--text-muted); }
+  .hq-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; margin-top:6px; font-size:12px; color:var(--text-dim); }
+  .hq-meta .stale { color:var(--amber); font-weight:600; }
+  .hq-meta a { color:var(--text-muted); }
+  .hq-branch { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11.5px; color:var(--text-muted);
+               background:var(--bg-input); border:1px solid var(--border); border-radius:6px; padding:1px 4px 1px 8px; }
+  .hq-branch button { background:none; border:none; color:var(--text-dim); cursor:pointer; padding:0 3px; font-size:12px; }
+  .hq-branch button:hover { color:var(--text); }
+  .hq-reason { margin-top:10px; padding:10px 12px; border-left:3px solid var(--border); border-radius:0 8px 8px 0;
+               background:var(--bg-input); font-size:12.5px; line-height:1.55; color:var(--text-muted); white-space:pre-line; word-break:break-word; }
+  .hq-reason.clamp > span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .hq-reason.k-red { border-left-color:var(--red); } .hq-reason.k-amber { border-left-color:var(--amber); }
+  .hq-reason.k-violet { border-left-color:var(--violet); }
+  .hq-more { background:none; border:none; padding:0; margin-top:4px; color:var(--accent-hover); font:inherit; font-size:12px; cursor:pointer; }
+  .hq-hint { margin-top:8px; font-size:12px; color:var(--text-muted); }
+  .hq-hint b { color:var(--text); font-weight:600; }
+
+  /* per-row actions + overflow menu */
+  .hq-acts { display:flex; align-items:flex-start; gap:6px; }
+  .hq-menu { position:relative; }
+  .hq-menu > summary { list-style:none; }
+  .hq-menu > summary::-webkit-details-marker { display:none; }
+  .hq-pop { position:absolute; right:0; top:calc(100% + 4px); z-index:30; min-width:230px; padding:6px;
+            background:var(--bg-elev); border:1px solid var(--border); border-radius:var(--radius-sm); box-shadow:var(--shadow); }
+  .hq-pop :is(a, button) { display:flex; align-items:center; gap:9px; width:100%; padding:8px 10px; border:none; border-radius:7px;
+            background:none; color:var(--text); font:inherit; font-size:12.5px; text-align:left; text-decoration:none; cursor:pointer; box-sizing:border-box; }
+  .hq-pop :is(a, button):hover { background:var(--bg-hover); }
+  .hq-pop .sep { height:1px; margin:5px 4px; background:var(--border-soft); }
+  .hq-pop .danger { color:var(--red); }
+  .hq-pop small { display:block; color:var(--text-dim); font-size:11px; }
+
+  .hq-empty { padding:48px 20px; text-align:center; color:var(--text-muted); }
+  .hq-empty .big { font-size:34px; margin-bottom:8px; }
+  .hq-nomatch { padding:28px; text-align:center; color:var(--text-dim); font-size:13px; }
+
+  @media (max-width: 760px) {
+    .hq-row { grid-template-columns:20px minmax(0,1fr); }
+    .hq-acts { grid-column:2; flex-wrap:wrap; }
+    .hq-search { margin-left:0; flex:1 1 100%; min-width:0; }
+  }
 </style>
 
 <div class="page-header">
   <h2 class="page-title">{{ page_title("queue") }}</h2>
-  <p>Item autopilot đã chuyển cho người xử lý. <b>Tiếp tục</b> = gỡ trạng thái giữ và trả item lại cho autopilot.</p>
+  <p>Item autopilot đã dừng và chuyển cho người. Đọc lý do, xử lý phần bị chặn, rồi chọn:
+    <b>Tiếp tục</b> (trả lại cho autopilot) · <b>Đã xong</b> (bạn đã tự làm nốt) · <b>Bỏ qua</b> (không làm nữa).</p>
 </div>
 
-{% if resumed %}
-<div class="card" style="border-color:var(--green)"><div style="padding:12px 18px;color:var(--green)">
-  ▶ Đã tiếp tục {{ resumed }} item — đã trả lại cho autopilot.
-</div></div>
-{% endif %}
+{% if flash %}<div class="hq-flash {{ 'ok' if flash[0] == 'green' else 'warn' }}" role="status">{{ flash[1]|safe }}</div>{% endif %}
+{% if resumed %}<div class="hq-flash ok" role="status">▶ Đã trả {{ resumed }} item lại cho autopilot — poller sẽ nhận ở vòng kế tiếp.</div>{% endif %}
 
 {% if items %}
-<form method="post" action="/dashboard/queue/resume">
-  <div style="display:flex;justify-content:flex-end;margin:8px 0">
-    <button type="submit" class="btn-ghost">▶ Tiếp tục các item đã chọn</button>
+<form id="qbulk" method="post" action="/dashboard/queue/resume"></form>
+<form id="qrow" method="post" action="/dashboard/queue/resume"></form>
+
+<div class="hq-bar">
+  <div class="hq-stat"><b>{{ items|length }}</b> đang chờ</div>
+  {% if stale %}<div class="hq-stat warn" title="Chờ hơn 2 ngày"><b>{{ stale }}</b> quá 2 ngày</div>{% endif %}
+  <div class="hq-filters" role="group" aria-label="Lọc theo loại">
+    <button type="button" class="hq-fchip" data-kind="" aria-pressed="true">Tất cả <span class="n">{{ items|length }}</span></button>
+    {% for key, icon, label, tone, n in kinds %}
+    <button type="button" class="hq-fchip" data-kind="{{ key }}" aria-pressed="false">{{ icon }} {{ label }} <span class="n">{{ n }}</span></button>
+    {% endfor %}
   </div>
-  <div class="card" style="padding:4px 8px">
-    <table class="q-table">
-      <thead><tr><th style="width:24px"></th><th>Work item</th><th>Lý do giữ lại</th><th>Cập nhật</th></tr></thead>
-      <tbody>
-        {% for it in items %}
-          <tr>
-            <td><input type="checkbox" name="ids" value="{{ it.id }}" aria-label="Chọn #{{ it.id }}"></td>
-            <td>
-              <a href="{{ it.url }}" target="_blank" rel="noopener">#{{ it.id }}</a> — {{ it.title }}
-              {% if it.pr_url %}<br/><a href="{{ it.pr_url }}" target="_blank" rel="noopener" style="font-size:12px">PR</a>{% endif %}
-            </td>
-            <td class="q-reason">{{ it.detail or '—' }}</td>
-            <td style="white-space:nowrap;color:var(--text-dim)">{{ it.updated.strftime('%Y-%m-%d %H:%M') if it.updated else '' }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="hq-search"><input type="search" id="hq-q" placeholder="Tìm theo mã, tiêu đề, lý do…" aria-label="Tìm"></div>
+</div>
+
+<div class="hq-bulk" id="hq-bulk" hidden>
+  <span class="count"><span id="hq-n">0</span> item đã chọn</span>
+  <button type="submit" form="qbulk" class="btn-primary btn-sm" formaction="/dashboard/queue/resume"
+          data-confirm="Trả {n} item đã chọn lại cho autopilot làm tiếp?">▶ Tiếp tục</button>
+  <button type="submit" form="qbulk" class="btn-secondary btn-sm" formaction="/dashboard/queue/done"
+          data-confirm="Đánh dấu {n} item là ĐÃ XONG? Tag + state trên ADO sẽ chuyển sang hoàn tất.">✓ Đã xong</button>
+  <button type="submit" form="qbulk" class="btn-danger btn-sm" formaction="/dashboard/queue/skip"
+          data-confirm="Bỏ qua {n} item? Chúng rời hàng chờ và autopilot sẽ không tự nhận lại.">⏭ Bỏ qua</button>
+  <button type="button" class="btn-quiet btn-sm" id="hq-clear">Bỏ chọn</button>
+</div>
+
+<div class="hq-list">
+  <div class="hq-head">
+    <input type="checkbox" class="chk" id="hq-all" aria-label="Chọn tất cả item đang hiển thị">
+    <span>Work item · lý do giữ lại</span>
+    <span style="margin-left:auto">Chờ lâu nhất ở trên</span>
   </div>
-</form>
+  {% for it in items %}
+  {% set k = hold_kinds[it.kind] %}
+  <div class="hq-row" data-kind="{{ it.kind }}" data-text="{{ (it.id ~ ' ' ~ it.title ~ ' ' ~ it.detail)|lower }}">
+    <input type="checkbox" class="chk hq-cb" form="qbulk" name="ids" value="{{ it.id }}" aria-label="Chọn #{{ it.id }}">
+    <div style="min-width:0">
+      <div class="hq-title">
+        <a class="num" href="/dashboard/task/{{ it.id }}" title="Mở phòng task">#{{ it.id }}</a>
+        <span class="t">{{ it.title }}</span>
+        <span class="hq-kind tone-{{ k[2] }}">{{ k[0] }} {{ k[1] }}</span>
+      </div>
+      <div class="hq-meta">
+        {% if it.waited %}<span class="{{ 'stale' if it.stale }}" title="Cập nhật {{ it.updated.strftime('%d/%m/%Y %H:%M') }}">⏱ chờ {{ it.waited }}</span>{% endif %}
+        {% if it.branch %}<span class="hq-branch" title="Branch">⎇ {{ it.branch }}<button type="button" data-copy="{{ it.branch }}" title="Copy tên branch">⧉</button></span>{% endif %}
+        {% if it.pr_url %}<a href="{{ it.pr_url }}" target="_blank" rel="noopener">PR ↗</a>{% endif %}
+      </div>
+      {% if it.detail %}
+      <div class="hq-reason clamp k-{{ k[2] }}"><span>{{ it.detail }}</span></div>
+      <button type="button" class="hq-more" hidden>Xem đầy đủ</button>
+      {% endif %}
+      <div class="hq-hint">→ <b>Gợi ý:</b> {{ k[3] }}</div>
+    </div>
+    <div class="hq-acts">
+      <button type="submit" form="qrow" class="btn-soft btn-sm" formaction="/dashboard/queue/resume" name="ids" value="{{ it.id }}"
+              data-confirm="Trả #{{ it.id }} lại cho autopilot làm tiếp?">▶ Tiếp tục</button>
+      <a class="btn-secondary btn-sm" href="/dashboard/task/{{ it.id }}">Mở task</a>
+      <details class="hq-menu">
+        <summary class="btn-quiet btn-sm" aria-label="Thêm thao tác cho #{{ it.id }}" title="Thêm thao tác">⋯</summary>
+        <div class="hq-pop" role="menu">
+          <button type="submit" form="qrow" formaction="/dashboard/queue/done" name="ids" value="{{ it.id }}" role="menuitem"
+                  data-confirm="Đánh dấu #{{ it.id }} là ĐÃ XONG? Tag + state trên ADO sẽ chuyển sang hoàn tất.">
+            ✓ <span>Đánh dấu đã xong<small>Bạn đã tự làm nốt (vd. tạo PR tay)</small></span></button>
+          {% if it.url %}<a href="{{ it.url }}" target="_blank" rel="noopener" role="menuitem">↗ <span>Mở trên Azure DevOps</span></a>{% endif %}
+          {% if it.detail %}<button type="button" data-copy="{{ it.detail }}" role="menuitem">⧉ <span>Copy lý do</span></button>{% endif %}
+          <a href="/dashboard/trigger-check?id={{ it.id }}" role="menuitem">🔎 <span>Vì sao (không) chạy?</span></a>
+          <div class="sep"></div>
+          <button type="submit" form="qrow" class="danger" formaction="/dashboard/queue/skip" name="ids" value="{{ it.id }}" role="menuitem"
+                  data-confirm="Bỏ qua #{{ it.id }}? Item rời hàng chờ và autopilot sẽ không tự nhận lại.">
+            ⏭ <span>Bỏ qua<small>Không làm nữa — ADO giữ nguyên</small></span></button>
+        </div>
+      </details>
+    </div>
+  </div>
+  {% endfor %}
+  <div class="hq-nomatch" id="hq-nomatch" hidden>Không có item nào khớp bộ lọc.</div>
+</div>
+
+<script>
+(function () {
+  const rows = [...document.querySelectorAll('.hq-row')];
+  const all = document.getElementById('hq-all'), bulk = document.getElementById('hq-bulk');
+  const nEl = document.getElementById('hq-n'), q = document.getElementById('hq-q');
+  let kind = '';
+  const visible = () => rows.filter((r) => !r.hidden);
+  function sync() {
+    const picked = rows.filter((r) => r.querySelector('.hq-cb').checked);
+    rows.forEach((r) => r.classList.toggle('sel', r.querySelector('.hq-cb').checked));
+    nEl.textContent = picked.length; bulk.hidden = picked.length === 0;
+    const vis = visible();
+    all.checked = vis.length > 0 && vis.every((r) => r.querySelector('.hq-cb').checked);
+    all.indeterminate = !all.checked && vis.some((r) => r.querySelector('.hq-cb').checked);
+  }
+  function filter() {
+    const term = (q.value || '').trim().toLowerCase();
+    rows.forEach((r) => {
+      r.hidden = (kind && r.dataset.kind !== kind) || (term && !r.dataset.text.includes(term));
+      if (r.hidden) r.querySelector('.hq-cb').checked = false;   // never act on what you can't see
+    });
+    document.getElementById('hq-nomatch').hidden = visible().length > 0;
+    sync();
+  }
+  document.querySelectorAll('.hq-fchip').forEach((b) => b.addEventListener('click', () => {
+    kind = b.dataset.kind;
+    document.querySelectorAll('.hq-fchip').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    filter();
+  }));
+  q.addEventListener('input', filter);
+  rows.forEach((r) => r.querySelector('.hq-cb').addEventListener('change', sync));
+  all.addEventListener('change', () => { visible().forEach((r) => { r.querySelector('.hq-cb').checked = all.checked; }); sync(); });
+  document.getElementById('hq-clear').addEventListener('click', () => { rows.forEach((r) => { r.querySelector('.hq-cb').checked = false; }); sync(); });
+
+  // confirm every action; {n} = selected count for bulk buttons
+  document.querySelectorAll('[data-confirm]').forEach((b) => b.addEventListener('click', (e) => {
+    if (!confirm(b.dataset.confirm.replace('{n}', nEl.textContent))) e.preventDefault();
+  }));
+  // [data-copy] (branch, reason) is handled once in base.html
+  // "Xem đầy đủ" only where the reason is actually clamped
+  document.querySelectorAll('.hq-reason.clamp').forEach((el) => {
+    const more = el.nextElementSibling, txt = el.firstElementChild;
+    if (txt.scrollHeight > txt.clientHeight + 2) {
+      more.hidden = false;
+      more.addEventListener('click', () => { const open = el.classList.toggle('clamp'); more.textContent = open ? 'Xem đầy đủ' : 'Thu gọn'; });
+    }
+  });
+  // one open menu at a time; click outside closes
+  document.addEventListener('click', (e) => {
+    document.querySelectorAll('.hq-menu[open]').forEach((d) => { if (!d.contains(e.target)) d.open = false; });
+  });
+  sync();
+})();
+</script>
 {% else %}
-<div class="card"><div style="padding:16px 20px;color:var(--text-dim)">✅ Không có item nào đang bị giữ — autopilot chưa chuyển việc nào cho người xử lý.
-  Theo dõi việc đang chạy ở <a class="table-link" href="/dashboard/board">Board</a>.</div></div>
+<div class="hq-list"><div class="hq-empty">
+  <div class="big">✅</div>
+  <div style="font-size:15px;color:var(--text);font-weight:600;margin-bottom:4px">Không có item nào đang chờ người xử lý</div>
+  <div>Autopilot chưa chuyển việc nào cho bạn. Theo dõi việc đang chạy ở <a class="table-link" href="/dashboard/board">Board</a>
+    hoặc <a class="table-link" href="/dashboard/now">Đang chạy</a>.</div>
+</div></div>
 {% endif %}
 {% endblock %}

@@ -296,7 +296,15 @@ FLASH_MESSAGES: dict[str, tuple[str, str]] = {
                                     "kiểm tra lại (đường dẫn tuyệt đối, trên chính máy này)."),
     "session_closed": ("green", "✕ Đã đóng phiên — branch không bị thay đổi, thread trên PR đã "
                                 "được báo."),
-    "session_not_open": ("amber", "Phiên này không còn mở (có thể vừa xong)."),
+    "queue_done": ("green", "✓ Đã đánh dấu xong — work item chuyển sang trạng thái hoàn tất "
+                            "trên Board và ADO."),
+    "queue_done_ado_failed": ("amber", "✓ Đã đánh dấu xong trên dashboard, nhưng <b>không cập "
+                                       "nhật được ADO</b> (tag/state) — kiểm tra kết nối rồi sửa "
+                                       "tay trên work item."),
+    "queue_skipped": ("green", "⏭ Đã bỏ qua — item rời hàng chờ (Board: cột Failed). Tag trên "
+                               "ADO giữ nguyên nên autopilot không tự nhận lại; muốn chạy lại "
+                               "dùng ▶ Chạy ngay ở trang task."),
+    "session_not_open":("amber", "Phiên này không còn mở (có thể vừa xong)."),
     "conflict_resolve_started": ("green", "🔧 Đang giải conflict ở nền — kết quả hiện ở dòng "
                                           "tương ứng và trong comment trên PR."),
     "conflict_scan_started": ("green", "🔄 Đang quét PR — làm mới trang sau ít giây."),

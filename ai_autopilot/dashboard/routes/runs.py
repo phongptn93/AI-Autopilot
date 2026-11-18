@@ -437,7 +437,7 @@ def create_router() -> APIRouter:
         held.sort(key=lambda s: _aware(s.updated_at) or datetime.max.replace(tzinfo=UTC))
         held = await _scope_rows(request, c, held)
         now = datetime.now(UTC)
-        items = []
+        items: list[dict[str, Any]] = []
         for s in held:
             kind = _hold_kind(s.detail or "")
             updated = _aware(s.updated_at)

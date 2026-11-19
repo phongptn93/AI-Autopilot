@@ -85,7 +85,8 @@
 <button class="print" onclick="window.print()">🖨 In / Lưu PDF</button>
 <div class="page">
   <div class="bar">
-    <span>🧭 Báo cáo rà soát · AI Autopilot</span>
+    {% set is_fg = row.kind == 'fitgap' %}
+    <span>{{ '🤝 Đánh giá fit-gap' if is_fg else '🧭 Báo cáo rà soát' }} · AI Autopilot</span>
     <span class="badge {{ 'ext' if external else 'int' }}">{{ 'Bản chia sẻ — không kèm mã nguồn' if external else 'Tài liệu nội bộ' }}</span>
   </div>
 
@@ -93,7 +94,8 @@
   <div class="meta">
     <span>{{ kind_label.get(row.kind, row.kind) }}</span>
     {% if row.kind == 'spec' %}<span>Loại tài liệu: <b>{{ doc_types.get(row.doc_type, ('Spec',))[0] }}</b></span>{% endif %}
-    {% if row.kind != 'question' %}<span>Nguồn: <b>{{ source }}</b></span>{% endif %}
+    {% if is_fg %}<span>Khách hàng: <b>{{ fitgap.customer }}</b></span>{% if fitgap.modules %}<span>Phạm vi: <b>{{ fitgap.modules }}</b></span>{% endif %}{% if fitgap.deadline %}<span>Thời hạn demo: <b>{{ fitgap.deadline }}</b></span>{% endif %}
+    {% elif row.kind != 'question' %}<span>Nguồn: <b>{{ source }}</b></span>{% endif %}
     {% if row.work_item_id %}<span>Work item: <b>#{{ row.work_item_id }}</b></span>{% endif %}
     <span>Rà lúc: <b>{{ row.finished_at.strftime('%d/%m/%Y %H:%M') if row.finished_at else '—' }}</b></span>
     <span>Phiên: <b>#{{ row.id }}</b></span>
@@ -106,7 +108,7 @@
   <div class="exec">
     <div class="score">
       {% if score is not none %}<div class="n" style="color:var(--{{ tone }})">{{ score|round|int }}%</div>
-      <div class="l">{{ 'Độ bao phủ' if row.kind == 'spec' else 'Finding còn hiệu lực' }}</div>
+      <div class="l">{{ 'Độ bao phủ' if row.kind == 'spec' else ('Mức đáp ứng' if is_fg else 'Finding còn hiệu lực') }}</div>
       {% else %}<div class="n">💬</div><div class="l">Hỏi đáp</div>{% endif %}
       {% if prev and prev.score is not none and score is not none %}
       {% set d = (score - prev.score)|round(1) %}
@@ -120,17 +122,18 @@
       <div class="counts">
         {% for k, n in counts.items() %}{% if n %}<span class="chip">{{ statuses[k][0] }} {{ statuses[k][1] }}: {{ n }}</span>{% endif %}{% endfor %}
       </div>
+      {% if is_fg and efforts.values()|sum %}<div class="summary">🛠 Phần phải làm: {% for k, n in efforts.items() if n %}{{ n }} mục cỡ {{ k }} ({{ effort_sizes[k] }}){{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}
       {% endif %}
     </div>
   </div>
 
   {% if groups|length > 1 %}
-  <h2>Độ bao phủ theo nhóm yêu cầu</h2>
+  <h2>{{ 'Mức đáp ứng theo module' if is_fg else 'Độ bao phủ theo nhóm yêu cầu' }}</h2>
   <div class="groups">
     {% for g in groups %}
     <div class="grp"><div class="h"><span>{{ g.kind }}</span><span>{{ g.score|round|int }}%</span></div>
       <div class="gbar"><i class="d" style="width:{{ 100 * g.done / g.total }}%"></i><i class="p" style="width:{{ 100 * g.partial / g.total }}%"></i><i class="b" style="width:{{ 100 * g.bad / g.total }}%"></i></div>
-      <small>{{ g.done }}/{{ g.total }} đã có{% if g.bad %} · {{ g.bad }} thiếu/trái{% endif %}</small></div>
+      <small>{{ g.done }}/{{ g.total }} {{ 'đáp ứng' if is_fg else 'đã có' }}{% if g.bad %} · {{ g.bad }} {{ 'phải làm mới' if is_fg else 'thiếu/trái' }}{% endif %}</small></div>
     {% endfor %}
   </div>
   {% endif %}
@@ -138,19 +141,28 @@
   {% if answer_html %}<h2>Trả lời</h2><div class="answer">{{ answer_html|safe }}</div>{% endif %}
 
   {% if result.traces %}
-  <h2>{{ 'Ma trận truy vết' if row.kind == 'spec' else 'Kiểm chứng từng finding' }}</h2>
+  <h2>{{ 'Ma trận truy vết' if row.kind == 'spec' else ('Bảng fit-gap' if is_fg else 'Kiểm chứng từng finding') }}</h2>
   <table class="mx">
     <colgroup><col class="c-ref"><col class="c-req"><col class="c-st"><col class="c-now"><col class="c-fix"></colgroup>
-    <tr><th>Mục</th><th>Yêu cầu</th><th>Trạng thái</th><th>Hiện trạng hệ thống</th><th>Đề xuất</th></tr>
+    <tr><th>Mục</th><th>{{ 'Nhu cầu khách' if is_fg else 'Yêu cầu' }}</th><th>{{ 'Mức đáp ứng' if is_fg else 'Trạng thái' }}</th><th>{{ 'Sản phẩm hiện có' if is_fg else 'Hiện trạng hệ thống' }}</th><th>{{ 'Việc cần làm' if is_fg else 'Đề xuất' }}</th></tr>
     {% for t in result.traces %}{% set s = statuses.get(t.status, ('❔', t.status, 'muted')) %}
     <tr><td><span class="ref">{{ t.ref }}</span><span class="kind">{{ t.kind }}</span></td>
       <td>{{ t.spec or '—' }}</td>
-      <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span>{% if t.side %}<span class="side">→ {{ sides.get(t.side, t.side) }}</span>{% endif %}</td>
+      <td><span class="st {{ s[2] }}">{{ s[0] }} {{ s[1] }}</span>{% if t.module %}<span class="side">{{ t.module }}</span>{% endif %}{% if t.effort %}<span class="side">Effort {{ t.effort }} · {{ effort_sizes.get(t.effort, '') }}</span>{% endif %}{% if t.side %}<span class="side">→ {{ sides.get(t.side, t.side) }}</span>{% endif %}</td>
       <td>{{ t.code or '—' }}
         {% if not external %}{% for e in t.evidence %}{% if e.where %}<span class="ev" title="{{ e.where }}">{{ e.where|short_path }}</span>{% endif %}{% endfor %}{% endif %}</td>
-      <td>{{ t.fix or '—' }}</td></tr>
+      <td>{{ t.fix or '—' }}{% if t.demo %}<span class="side">🎬 Demo: {{ t.demo }}</span>{% endif %}</td></tr>
     {% endfor %}
   </table>
+  {% endif %}
+
+  {% if result.demo_plan %}
+  <h2>Kịch bản demo</h2>
+  <ol>{% for d in result.demo_plan %}<li><b>{{ d.step }}</b>{% if d.refs %} <i>({{ d.refs|join(', ') }})</i>{% endif %}{% if d.detail %} — {{ d.detail }}{% endif %}</li>{% endfor %}</ol>
+  {% endif %}
+  {% if result.prep %}
+  <h2>Chuẩn bị môi trường demo</h2>
+  <ul>{% for x in result.prep %}<li>☐ {{ x }}</li>{% endfor %}</ul>
   {% endif %}
 
   {% set updates = result.traces|selectattr('doc_text')|list %}
@@ -193,7 +205,7 @@
   {% endif %}
 
   {% if result.questions %}
-  <h2>Câu hỏi cần BA / khách hàng chốt</h2>
+  <h2>{{ 'Câu hỏi khảo sát khách hàng' if is_fg else 'Câu hỏi cần BA / khách hàng chốt' }}</h2>
   {% for q in result.questions %}
   <div class="q"><div class="t">{{ loop.index }}. {% if q.ref %}[{{ q.ref }}] {% endif %}{{ q.text }}</div>
     {% if q.why %}<div class="w">{{ q.why }}</div>{% endif %}
@@ -210,7 +222,7 @@
   {% endif %}
 
   {% if result.extras %}
-  <h2>Hành vi hệ thống ngoài tài liệu</h2>
+  <h2>{{ 'Năng lực nên giới thiệu thêm' if is_fg else 'Hành vi hệ thống ngoài tài liệu' }}</h2>
   <ul>{% for x in result.extras %}<li>{{ x }}</li>{% endfor %}</ul>
   {% endif %}
 

@@ -23,6 +23,12 @@
   .rv-tab.on { color:var(--text); border-bottom-color:var(--accent); }
   .rv-pane { padding:14px 18px 18px; }
   .rv-pane[hidden] { display:none; }
+  .fg-lede { margin:0 0 12px; font-size:13px; color:var(--text-muted); line-height:1.55; }
+  .fg-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; margin-bottom:10px; }
+  .fg-grid label { display:flex; flex-direction:column; gap:4px; font-size:12px; font-weight:600; color:var(--text-muted); }
+  .fg-grid input { height:38px; padding:0 12px; border-radius:9px; font:inherit; font-weight:400; font-size:13px;
+    background:var(--bg-input); color:var(--text); border:1px solid var(--border); }
+  .fg-grid input:focus { outline:none; border-color:var(--accent); }
 
   .rv-search { width:100%; max-width:460px; height:36px; padding:0 12px; border-radius:9px; font:inherit; font-size:13px;
     background:var(--bg-input); color:var(--text); border:1px solid var(--border); margin-bottom:10px; }
@@ -235,6 +241,7 @@
   <div class="rv-tabs" role="tablist">
     <button type="button" class="rv-tab on" data-pane="p-spec" role="tab">📄 Tài liệu yêu cầu ↔ code</button>
     <button type="button" class="rv-tab" data-pane="p-report" role="tab">🛡️ Kiểm chứng báo cáo</button>
+    <button type="button" class="rv-tab" data-pane="p-fit" role="tab">🤝 Fit-gap khách hàng</button>
     <button type="button" class="rv-tab" data-pane="p-ask" role="tab">💬 Hỏi về hệ thống</button>
   </div>
 
@@ -245,7 +252,7 @@
     </div>
 
     <form id="src-up" class="rv-src-p" method="post" action="/dashboard/review/upload" enctype="multipart/form-data">
-      {% if upload_error %}<div class="rv-err">⛔ {{ upload_error }}</div>{% endif %}
+      {% if upload_error and request.query_params.get('pane') != 'p-fit' %}<div class="rv-err">⛔ {{ upload_error }}</div>{% endif %}
       <label class="rv-drop" id="rv-drop">
         <input type="file" name="file" id="rv-file" accept="{{ accept }}" required>
         <span class="ic">📎</span>
@@ -331,6 +338,28 @@
     {% endif %}
   </div>
 
+  <div class="rv-pane" id="p-fit" hidden>
+    <form method="post" action="/dashboard/review/fitgap" enctype="multipart/form-data">
+      {% if upload_error and request.query_params.get('pane') == 'p-fit' %}<div class="rv-err">⛔ {{ upload_error }}</div>{% endif %}
+      <p class="fg-lede">Dán email / biên bản nhu cầu của khách (hoặc tải file). Agent đọc <b>tài liệu sản phẩm và code thật</b> trong workspace,
+        chấm từng nhu cầu: <b>✅ đáp ứng sẵn · ⚙️ chỉ cần cấu hình · 🟡 cần tùy biến · ❌ phải phát triển</b> — kèm ước lượng công,
+        <b>kịch bản demo</b>, việc chuẩn bị môi trường demo và câu hỏi khảo sát gửi khách.</p>
+      <div class="fg-grid">
+        <label>Khách hàng<input type="text" name="customer" required maxlength="200" placeholder="vd CTCP LAVO — mỹ phẩm tóc, ODM"></label>
+        <label>Module chào bán / phạm vi demo<input type="text" name="modules" maxlength="200" placeholder="vd DxMPM, DxWMS"></label>
+        <label>Thời hạn demo<input type="text" name="deadline" maxlength="60" placeholder="vd 23/11/2026"></label>
+      </div>
+      <textarea class="rv-q" name="text" maxlength="60000" style="min-height:170px"
+        placeholder="Dán nguyên văn yêu cầu khách hàng — vd:&#10;• Hệ thống hiện tại: MISA + thủ công&#10;• Thiết lập quy trình sản xuất theo đặc thù nhà máy&#10;• Tự động lập kế hoạch sản xuất từ PO/đơn đặt hàng&#10;• Tự động phân bổ máy móc, nhân sự, khu vực, vật tư theo kế hoạch&#10;• Quy trình nhiều công đoạn theo từng SKU, không giới hạn số bước"></textarea>
+      <div class="rv-go">
+        {{ ws_select() }}
+        <input type="file" name="file" accept="{{ accept }}" aria-label="Hoặc tải file yêu cầu" style="flex:0 1 260px;min-width:0">
+        <input type="text" name="focus" placeholder="(Tuỳ chọn) tập trung vào: vd 'liên thông kho ↔ sản xuất'" maxlength="300">
+        <button class="btn-save" type="submit">🤝 Đánh giá fit-gap</button>
+      </div>
+    </form>
+  </div>
+
   <div class="rv-pane" id="p-ask" hidden>
     <form method="post" action="/dashboard/review/start">
       <input type="hidden" name="kind" value="question">
@@ -383,6 +412,9 @@
       document.querySelectorAll('.rv-pane').forEach(function (p) { p.hidden = p.id !== t.dataset.pane; });
     });
   });
+  var want = new URLSearchParams(location.search).get('pane');
+  var wantTab = want && document.querySelector('.rv-tab[data-pane="' + want.replace(/[^\w-]/g, '') + '"]');
+  if (wantTab) wantTab.click();
   document.querySelectorAll('[data-filter]').forEach(function (inp) {
     var list = document.querySelector(inp.dataset.filter);
     inp.addEventListener('input', function () {

@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from starlette.datastructures import UploadFile
 
 from ai_autopilot import markdown_lite, review_docs, review_snapshot, spec_library
 from ai_autopilot import review_studio as rs
@@ -27,7 +28,13 @@ from ai_autopilot.services.review_studio import studio_for
 
 _log = get_logger(__name__)
 _KIND_LABEL = {rs.KIND_SPEC: "📄 Tài liệu ↔ code", rs.KIND_REPORT: "🛡️ Kiểm chứng báo cáo",
-               rs.KIND_QUESTION: "💬 Hỏi đáp"}
+               rs.KIND_QUESTION: "💬 Hỏi đáp", rs.KIND_FITGAP: "🤝 Fit-gap khách hàng"}
+
+
+def _groups(kind: str, result: rs.ReviewResult) -> list[dict]:
+    if kind == rs.KIND_FITGAP:
+        return rs.by_module(result)
+    return rs.by_kind(result) if kind == rs.KIND_SPEC else []
 
 
 def _ago(dt: datetime | None) -> str:
@@ -191,6 +198,34 @@ def create_router() -> APIRouter:
                                   target=f"review #{rid}", detail=(up.filename or "")[:200])
         return RedirectResponse(f"/dashboard/review/{rid}", status_code=303)
 
+    @router.post("/review/fitgap")
+    async def review_fitgap(request: Request):
+        """🤝 A customer's needs vs the product — pasted text, an uploaded file, or both."""
+        c: Container = request.app.state.container
+        form = await request.form()
+        text = str(form.get("text") or "").strip()
+        up = form.get("file")
+        name = ""
+        try:
+            if isinstance(up, UploadFile) and up.filename:
+                name = up.filename
+                data = await up.read(review_docs.MAX_BYTES + 1)
+                extracted = review_docs.extract(name, data)
+                text = f"{text}\n\n{extracted}".strip() if text else extracted
+            rid = await studio_for(c).start_fitgap(
+                text, customer=str(form.get("customer") or ""),
+                modules=str(form.get("modules") or ""),
+                deadline=str(form.get("deadline") or ""),
+                focus=str(form.get("focus") or "").strip(), by="dashboard",
+                workspace=str(form.get("workspace") or "").strip())
+        except (review_docs.DocumentError, ValueError) as exc:
+            return RedirectResponse("/dashboard/review?pane=p-fit&upload_error="
+                                    + quote(str(exc)), status_code=303)
+        await c.audit_repo.record(actor="dashboard", source="dashboard", action="review.fitgap",
+                                  target=f"review #{rid}",
+                                  detail=(str(form.get("customer") or "") + " " + name)[:200])
+        return RedirectResponse(f"/dashboard/review/{rid}", status_code=303)
+
     @router.post("/review/sweep")
     async def review_sweep(request: Request):
         c: Container = request.app.state.container
@@ -221,7 +256,8 @@ def create_router() -> APIRouter:
                            if w.id == (row.workspace or "")), ""),
             sides=rs.SIDES, confidence=rs.CONFIDENCE, doc_issues=rs.DOC_ISSUES,
             unreasonable=rs.unreasonable,
-            groups=rs.by_kind(result) if row.kind == rs.KIND_SPEC else [], changes=changes,
+            groups=_groups(row.kind, result), changes=changes,
+            efforts=rs.effort_total(result), effort_sizes=rs.EFFORT_SIZES,
             started_iso=(row.started_at.replace(tzinfo=UTC) if row.started_at.tzinfo is None
                          else row.started_at).isoformat(),
             safe=c.config.review_safe_mode, gap_tag=c.config.review_gap_tag or 'review-gap',
@@ -305,7 +341,9 @@ def create_router() -> APIRouter:
             "doc_issues": rs.DOC_ISSUES, "unreasonable": rs.unreasonable,
             "row": row, "result": result, "external": external, "prev": prev,
             "statuses": rs.statuses_for(row.kind), "counts": result.counts(row.kind),
-            "groups": rs.by_kind(result) if row.kind == rs.KIND_SPEC else [],
+            "groups": _groups(row.kind, result),
+            "efforts": rs.effort_total(result), "effort_sizes": rs.EFFORT_SIZES,
+            "fitgap": rs.fitgap_unpack(row.source_text) if row.kind == rs.KIND_FITGAP else {},
             "doc_types": rs.DOC_TYPES, "kind_label": _KIND_LABEL,
             "chat": [(r, markdown_lite.render(
                 rs.hide_locations(rs.redact(t)) if external else rs.redact(t))) for r, t in chat],

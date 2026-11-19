@@ -150,6 +150,27 @@ class ReviewStudio:
         _spawn(self._run(rid, rs.KIND_REPORT, rs.report_prompt(title, findings, focus=focus)))
         return rid
 
+    async def start_fitgap(self, text: str, *, customer: str, modules: str = "",
+                           deadline: str = "", focus: str = "", by: str = "",
+                           workspace: str = "") -> int:
+        """A customer's needs (pasted email / notes / extracted file) vs the product."""
+        body = (text or "").strip()
+        if not body:
+            raise ValueError("Chưa có nội dung yêu cầu của khách hàng")
+        self.workspace_dir(workspace)
+        customer = (customer or "").strip() or "Khách hàng"
+        source = rs.fitgap_pack(body[: self._cap()], customer=customer, modules=modules,
+                                deadline=deadline)
+        rid = await self._c.review_repo.create(
+            kind=rs.KIND_FITGAP, target=f"fitgap:{customer}"[:1000],
+            title=f"{customer}" + (f" · {modules.strip()}" if modules.strip() else ""),
+            focus=focus, requested_by=by, doc_type="fitgap", source_text=source,
+            workspace=workspace)
+        prompt = rs.fitgap_prompt(body[: self._cap()], customer=customer, modules=modules,
+                                  deadline=deadline, focus=focus)
+        _spawn(self._run(rid, rs.KIND_FITGAP, prompt))
+        return rid
+
     async def start_question(self, question: str, *, by: str = "", workspace: str = "") -> int:
         q = question.strip()
         if not q:
@@ -172,6 +193,12 @@ class ReviewStudio:
         if row.kind == rs.KIND_SPEC:
             return await self.start_spec(row.target, focus=row.focus, by=by,
                                          doc_type=row.doc_type, workspace=row.workspace or "")
+        if row.kind == rs.KIND_FITGAP:
+            src = rs.fitgap_unpack(row.source_text)
+            return await self.start_fitgap(
+                src["text"], customer=src["customer"] or row.target.split(":", 1)[-1],
+                modules=src["modules"], deadline=src["deadline"], focus=row.focus, by=by,
+                workspace=row.workspace or "")
         if row.kind == rs.KIND_REPORT:
             return await self.start_report(int(row.target.split(":", 1)[1]), focus=row.focus,
                                            by=by, workspace=row.workspace or "")

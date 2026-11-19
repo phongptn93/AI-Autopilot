@@ -106,6 +106,10 @@ _BASE_FIELDS: tuple[Field, ...] = (
     Field("ado_mcp_version", "↳ Ghim phiên bản ADO MCP", "text", "🔌 Kết nối Azure DevOps",
           "Thay @latest bằng phiên bản này khi chạy agent — khởi động nhanh, không đổi bất "
           "ngờ. Để trống = giữ nguyên như .mcp.json.", placeholder="2.11.0"),
+    Field("mcp_tool_timeout_seconds", "↳ Giới hạn mỗi lời gọi MCP (giây)", "int",
+          "🔌 Kết nối Azure DevOps",
+          "Một lời gọi MCP (vd. đọc work item) quá thời gian này thì báo lỗi để agent làm "
+          "tiếp, thay vì treo hàng chục phút. 0 = theo mặc định của Claude Code."),
     # ── Tags & Trigger ──
     # Two independent ways an item becomes THIS machine's — shown as such. The old labels
     # hung "↳ do ai xử lý" under the machine tag, which read as a filter on it; it never

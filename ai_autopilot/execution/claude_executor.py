@@ -1148,7 +1148,15 @@ class ClaudeExecutor:
                 "confirmed; a prompt injection in the work item runs unasked",
                 session=session,
             )
+        # The console's CLI reads .mcp.json itself, so the PAT sign-in that headless runs
+        # get through the SDK never reached it: the ADO MCP server opened its Microsoft
+        # sign-in in the background and every work-item lookup hung until CONNECT_TIMEOUT.
+        # A per-session --mcp-config overrides those servers BY NAME. It goes FIRST:
+        # the flag is variadic, and the next "--flag" is what ends it — placed last it
+        # would swallow the prompt.
+        mcp_config = self._write_console_mcp_config(cwd, session)
         cli_args = [
+            *(["--mcp-config", mcp_config] if mcp_config else []),
             "--remote-control", session,
             "--permission-mode", interactive_perm,
             # Boolean flag, so it can't swallow the positional prompt (see NOTE in
@@ -1164,17 +1172,71 @@ class ClaudeExecutor:
                 # ONLY on a non-zero exit, so a startup error is still readable.
                 proc = subprocess.Popen(  # noqa: ASYNC220 — fire-and-forget launch
                     ["cmd", "/c", "claude", *cli_args, "||", "pause"], cwd=cwd,
-                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE, env=self._console_env(),
                 )
             else:
                 claude = shutil.which("claude") or "claude"
                 proc = subprocess.Popen(  # noqa: ASYNC220
-                    [claude, *cli_args], cwd=cwd, start_new_session=True
+                    [claude, *cli_args], cwd=cwd, start_new_session=True,
+                    env=self._console_env(),
                 )
             return proc.pid
         except Exception as exc:  # noqa: BLE001
             self._log.error("failed to launch interactive session", session=session,
                             error=describe_exc(exc))
+            return None
+
+    def _console_env(self) -> dict[str, str]:
+        """The console's environment, with an upper bound on every MCP call.
+
+        Claude Code waits on an MCP tool call with no practical limit, so one server that
+        never answers freezes the whole session (30+ minutes on #11375). With a bound the
+        call fails, the agent sees the error and carries on from the brief. An operator's
+        own MCP_TOOL_TIMEOUT / MCP_TIMEOUT in the environment wins.
+        """
+        env = dict(os.environ)
+        seconds = int(getattr(self._config, "mcp_tool_timeout_seconds", 0) or 0)
+        if seconds > 0:
+            env.setdefault("MCP_TOOL_TIMEOUT", str(seconds * 1000))
+        # Server start-up: npx resolving a package on a cold cache needs more than the
+        # default, and a server that missed it is simply absent for the whole session.
+        env.setdefault("MCP_TIMEOUT", "60000")
+        return env
+
+    def _write_console_mcp_config(self, cwd: str, session: str) -> str | None:
+        """Write the MCP servers a console must override (ADO → PAT sign-in) to a
+        private file and return its path; ``None`` when nothing needs overriding.
+
+        Only the servers that CHANGED are written — the rest still come from .mcp.json
+        as before. The file holds a PAT, so it lives in the user's temp dir (never the
+        worktree, where it could be committed), is owner-only, and is removed when the
+        session is closed.
+        """
+        if not bool(getattr(self._config, "ado_mcp_pat_auth", True)):
+            return None
+        try:
+            from ai_autopilot.ado.mcp_auth import with_pat_auth
+
+            servers: dict = {}
+            for source in (_user_mcp_servers(cwd), _load_mcp_servers(
+                    self._config.workspace_directory or cwd), _load_mcp_servers(cwd)):
+                servers.update(source or {})
+            rewritten = with_pat_auth(servers, self._config) or {}
+            changed = {k: v for k, v in rewritten.items() if v is not servers.get(k)}
+            if not changed:
+                return None
+            path = _console_mcp_path(session)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump({"mcpServers": changed}, fh)
+            self._log.info("console MCP servers signed in with PAT", session=session,
+                           servers=sorted(changed))
+            return str(path)
+        except Exception as exc:  # noqa: BLE001 — a launch must never fail on this
+            self._log.warning("could not prepare console MCP config — ADO MCP may ask "
+                              "for an interactive sign-in", session=session,
+                              error=describe_exc(exc))
             return None
 
     @_scoped_sync
@@ -1439,6 +1501,9 @@ class ClaudeExecutor:
             self._log.info("closed interactive session", id=item_id, pid=pid, session=session)
         else:
             self._log.info("interactive session already gone", id=item_id, pid=pid)
+        if session:
+            with contextlib.suppress(OSError):
+                _console_mcp_path(session).unlink(missing_ok=True)
         # Drop the pid but KEEP the handle: it also marks the scratch as this item's
         # (kept for rework), which is what the PR-close sweep releases on. The file
         # goes away with the scratch itself.
@@ -2724,6 +2789,25 @@ def _user_mcp_names(workspace: str) -> set[str]:
         if isinstance(entry, dict) and Path(path) == Path(workspace):
             names |= set(entry.get("mcpServers") or {})
     return names
+
+
+def _user_mcp_servers(workspace: str) -> dict:
+    """MCP servers from ``~/.claude.json`` (user-wide, then this project's), by name."""
+    try:
+        data = json.loads((Path.home() / ".claude.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out = dict(data.get("mcpServers") or {})
+    for path, entry in (data.get("projects") or {}).items():
+        with contextlib.suppress(OSError, ValueError):
+            if isinstance(entry, dict) and Path(path).resolve() == Path(workspace).resolve():
+                out.update(entry.get("mcpServers") or {})
+    return out
+
+
+def _console_mcp_path(session: str) -> Path:
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session) or "session"
+    return Path(tempfile.gettempdir()) / "ai-autopilot-mcp" / f"{safe}.json"
 
 
 def _load_mcp_servers(workspace: str) -> dict | None:

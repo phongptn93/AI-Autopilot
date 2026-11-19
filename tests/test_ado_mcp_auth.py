@@ -196,3 +196,82 @@ def test_workspaces_page_status_per_workspace(tmp_path):
     modes = {m["name"]: m["mode"] for m in status[views[0].id]}
     assert modes == {"ado-newoceanis": "pat", "ado-industrial": "popup"}
     assert "ROOT-PAT" not in json.dumps(status)
+
+
+# ── Interactive console runs ─────────────────────────────────────────────────────────
+# The console CLI reads .mcp.json by itself, so the SDK-side rewrite above never reached
+# it: every console run's ADO MCP waited on a sign-in nobody saw, and each work-item
+# lookup hung until CONNECT_TIMEOUT (#11375, #11371, #11291).
+
+def _console(tmp_path, monkeypatch, mcp: dict, **over):
+    import tempfile
+
+    from ai_autopilot.execution import claude_executor
+    from ai_autopilot.execution.claude_executor import ClaudeExecutor
+
+    monkeypatch.setattr(claude_executor, "pretrust_claude_dir", lambda _p: True)
+    monkeypatch.setattr(claude_executor, "_user_mcp_servers", lambda _w: {})
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "tmp"))
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    (ws / ".mcp.json").write_text(json.dumps({"mcpServers": mcp}), encoding="utf-8")
+    seen: dict = {}
+
+    class _P:
+        pid = 1
+
+    def fake_popen(argv, **kw):
+        seen["argv"], seen["env"] = list(argv), kw.get("env") or {}
+        return _P()
+
+    monkeypatch.setattr(claude_executor.subprocess, "Popen", fake_popen)
+    ex = ClaudeExecutor(_settings(workspace_directory=str(ws), **over), None)
+    assert ex._launch_console(str(ws), "autopilot-11375", "do it") == 1
+    return ex, ws, seen
+
+
+def test_console_overrides_the_ado_server_with_pat_before_the_prompt(tmp_path, monkeypatch):
+    ex, ws, seen = _console(tmp_path, monkeypatch, {
+        "ado-newoceanis": _server("newoceanis"),
+        "playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]},
+    })
+    argv = seen["argv"]
+    at = argv.index("--mcp-config")
+    # the variadic flag must be closed by the next "--flag", never by the prompt
+    assert argv[at + 2].startswith("--") and argv.index("do it") > at + 2
+    from pathlib import Path
+
+    cfg = json.loads(Path(argv[at + 1]).read_text(encoding="utf-8"))["mcpServers"]
+    assert set(cfg) == {"ado-newoceanis"}          # only what changed; playwright untouched
+    ado = cfg["ado-newoceanis"]
+    assert ado["args"][-2:] == ["--authentication", "pat"]
+    assert base64.b64decode(ado["env"][PAT_ENV]).decode() == ":ROOT-PAT"
+    assert "ROOT-PAT" not in (ws / ".mcp.json").read_text(encoding="utf-8")
+    assert seen["env"]["MCP_TOOL_TIMEOUT"] == "180000"
+
+
+def test_console_closes_and_removes_its_pat_file(tmp_path, monkeypatch):
+    import asyncio
+    from pathlib import Path
+
+    ex, ws, seen = _console(tmp_path, monkeypatch, {"ado-newoceanis": _server("newoceanis")})
+    path = Path(seen["argv"][seen["argv"].index("--mcp-config") + 1])
+    assert path.is_file() and str(ws) not in str(path)     # never inside the worktree
+    ex._write_session_handle(str(ws), 11375, 999999, "autopilot-11375")
+
+    async def _gone(*_a):
+        return False
+
+    monkeypatch.setattr(ex, "_process_matches", _gone)
+    asyncio.run(ex.close_interactive(str(ws), 11375))
+    assert not path.exists()
+
+
+def test_console_without_ado_server_or_with_feature_off_adds_nothing(tmp_path, monkeypatch):
+    _, _, seen = _console(tmp_path, monkeypatch,
+                          {"playwright": {"command": "npx", "args": ["@playwright/mcp"]}})
+    assert "--mcp-config" not in seen["argv"]
+    _, _, seen = _console(tmp_path / "b", monkeypatch, {"ado": _server("newoceanis")},
+                          ado_mcp_pat_auth=False, mcp_tool_timeout_seconds=0)
+    assert "--mcp-config" not in seen["argv"]
+    assert seen["env"].get("MCP_TOOL_TIMEOUT") != "180000"

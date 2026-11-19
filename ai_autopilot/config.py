@@ -1023,6 +1023,11 @@ class Settings(BaseSettings):
     # Replaces ``@latest``/unpinned in that server's npx spec on agent runs. Blank = keep
     # whatever .mcp.json says. A pinned version starts faster and cannot change under you.
     ado_mcp_version: str = "2.11.0"
+    # Upper bound on ONE MCP tool call in an interactive (console) run, in seconds. Claude
+    # Code's own default is effectively unbounded, so a server that never answers (the
+    # ADO MCP waiting on a sign-in nobody sees, a dead connection) froze the run for 30+
+    # minutes. 0 = leave Claude Code's default.
+    mcp_tool_timeout_seconds: int = 180
 
     # ── Triggering ──
     # Default is host-specific (``<hostname>-autopilot``) so each machine claims a

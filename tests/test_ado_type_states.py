@@ -74,7 +74,9 @@ async def test_state_requests_go_out_concurrently():
     assert set(states) == set(TYPES) and http.calls == 1 + len(TYPES)
     assert http.peak == client_mod._TYPE_STATE_CONCURRENCY            # bounded, not 18
     # Serially this is 19 × 50 ms ≈ 0.95 s; concurrently ≈ 1 + ceil(18 / 8) = 4 trips.
-    assert elapsed < 0.5, elapsed
+    # `peak` above already proves the overlap; the clock only has to rule out serial.
+    # 0.5 s failed at 0.58 s under a loaded `pytest -n auto` — wall time is not ours.
+    assert elapsed < 0.9, elapsed
 
 
 async def test_pages_opened_together_share_one_walk():

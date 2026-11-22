@@ -129,6 +129,15 @@ The webhook endpoint filters bot-signed comments and plain chatter — only real
 | **Queue** | Work the autopilot is holding for a human, with the reason, and one‑click **Resume**. |
 | **Analytics** | Throughput, success / PR rate, runs‑per‑item, tokens‑per‑PR and duration over 7 / 14 / 30 / 90 days. |
 | **Audit** | Append‑only log of every consequential action: config change, secret export, ticket created, resume, review. |
+| **Sprint** *(BA / PM)* | The default team's current iteration: committed vs done (by story point when the process has them) against elapsed time — ahead / on track / behind — items created after the sprint started, remaining task hours per person, estimate accuracy, the AI share, and unstarted work once two thirds have passed. |
+| **Delivery → DORA** *(DevSecOps / PM)* | All four DORA metrics with their band: deploy frequency, lead time, change failure rate and time to restore, read from the deploy pipeline's build history (every result) so they reach back as far as the pipeline does. A pipeline still red shows as *broken since*, never averaged in. |
+| **Pipeline CI/CD** *(DevSecOps)* | Recent red builds of every pipeline, each sorted into one cause — build, test, dependency restore, agent infrastructure, auth/secret, timeout, security gate, docker, or *unknown* — from the failing task, its errors and its log tail, with the next step. A failure the same commit later built green is marked flaky. |
+| **Chất lượng lỗi (QC)** | Escape rate (found in UAT / production), reopen rate (done → active again, from recorded transitions), open-defect age and the oldest ones, time to close, the same by module — plus the **flaky-test ledger**. |
+| **Sức khỏe mã nguồn** *(Dev)* | Per repo, from git alone: hotspots (`commits × log2(lines)`), who owns which module (one author ≥ 80% → warning, worse when they have been away 30 days), and TODO / FIXME / HACK debt. The same map feeds an **ownership + hotspot hint** comment on every PR the autopilot opens (`pr_ownership_hints`). |
+
+All of these are deterministic reads (git, ADO, the local DB) — no model call, no tokens — and every one of them reads **"could not check"** rather than zero when its source cannot be reached.
+
+The test gate also **reruns a red suite once** (`test_gate_flaky_rerun`): failures that disappear are recorded as flaky in `<workspace>/.autopilot/flaky-tests.json` and do not block; a failure that repeats still does.
 
 ### Locking the dashboard
 

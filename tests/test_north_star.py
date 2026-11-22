@@ -118,3 +118,64 @@ def test_analytics_page_shows_the_north_star_section(tmp_path):
         assert page.status_code == 200
         assert "1/2 item" in page.text          # autonomy: #11 clean, #12 held
         assert "1/2 run" in page.text           # needs-human share
+
+
+# ── reliability: first try, cost, wasted spend, failure causes ─────────────────────────
+
+
+def _costed(item, usd, **kw):
+    r = _run(item, **kw)
+    r.cost_usd = usd
+    return r
+
+
+def test_cost_per_delivered_counts_failed_attempts_of_delivered_items():
+    runs = [
+        _costed(1, 1.0, ok=False),
+        _costed(1, 2.0, pr=_pr(1), start=T0 + timedelta(hours=1)),   # delivered: 3.0 total
+        _costed(2, 5.0, pr=_pr(2)),                                  # delivered: 5.0
+        _costed(3, 4.0, ok=False),                                   # never delivered: waste
+    ]
+    ns = compute_north_star(runs)
+    assert ns.delivered_items == 2
+    assert ns.cost_per_delivered == 4.0
+    assert ns.wasted_share == 33          # 4 / 12
+    by_key = {k.key: k for k in ns.kpis()}
+    assert by_key["cost_per_pr"].value == "$4.00"
+    assert by_key["wasted"].value == "33%"
+
+
+def test_unknown_cost_is_not_treated_as_free():
+    ns = compute_north_star([_run(1, pr=_pr(1))])        # cost_usd is None
+    assert ns.cost_per_delivered is None and ns.wasted_share is None
+    by_key = {k.key: k for k in ns.kpis()}
+    assert not by_key["cost_per_pr"].has_data and not by_key["wasted"].has_data
+
+
+def test_first_try_needs_pr_from_first_run_without_retry():
+    runs = [
+        _run(1, pr=_pr(1)),                                           # first try ✓
+        _run(2, ok=False), _run(2, pr=_pr(2), start=T0 + timedelta(hours=1)),  # ✗
+        _run(3, pr=_pr(3), retry=1),                                  # ✗
+    ]
+    ns = compute_north_star(runs)
+    assert (ns.first_try_items, ns.finished_items) == (1, 3)
+    assert ns.first_try_rate == 33
+
+
+def test_failure_reasons_are_classified_and_unknown_is_honest():
+    from ai_autopilot.north_star import classify_failure
+
+    assert classify_failure("Claude timed out after 3600s") == "hết thời gian"
+    assert classify_failure("HTTP 429 rate limit") == "hết quota / giới hạn"
+    assert classify_failure("401 Unauthorized") == "xác thực"
+    assert classify_failure("test gate: 3 tests failed") == "test gate"
+    assert classify_failure("merge conflict in a.py") == "merge conflict"
+    assert classify_failure("") == "không ghi lý do"
+    assert classify_failure("something odd") == "khác"
+    f1, f2, f3 = (_run(i, ok=False) for i in (1, 2, 3))
+    f1.error = f2.error = "timed out"
+    f3.error = "weird"
+    ns = compute_north_star([f1, f2, f3])
+    top = {k.key: k for k in ns.kpis()}["fail_reason"]
+    assert top.value == "hết thời gian" and "khác 1" in top.sub

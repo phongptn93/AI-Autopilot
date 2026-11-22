@@ -24,7 +24,9 @@ import subprocess
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from html import escape as esc
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 _GIT_TIMEOUT_SECONDS = 60
 _MAX_FILE_BYTES = 2_000_000
@@ -346,3 +348,119 @@ def cached_analyze(repo: str | Path, days: int = 90) -> CodeHealth:
             _CACHE.pop(next(iter(_CACHE)))
         _CACHE[key] = report
     return report
+
+
+# ── Where the agent's changes land on that map ─────────────────────────────
+
+
+@dataclass(frozen=True)
+class RepoChoice:
+    key: str     # what a query string carries
+    label: str
+    path: str
+
+
+def repo_choices(cfg: Any) -> list[RepoChoice]:
+    """Every git repo this machine is configured to work in, each once.
+
+    The ONLY way a repo reaches :func:`analyze` from outside: by name, from the
+    configured workspaces — never a path someone typed.
+    """
+    import contextlib
+
+    from ai_autopilot import workspaces as workspaces_mod
+    from ai_autopilot.workspace import discover_repos
+
+    roots: list[tuple[str, str]] = []   # (workspace label, directory)
+    with contextlib.suppress(Exception):
+        for ws in workspaces_mod.resolve(cfg):
+            if getattr(ws, "directory", ""):
+                roots.append((getattr(ws, "name", "") or ws.id, ws.directory))
+    if getattr(cfg, "workspace_directory", ""):
+        roots.append(("", cfg.workspace_directory))
+
+    found: dict[str, tuple[str, str]] = {}    # resolved path -> (name, workspace)
+    for ws_label, root in roots:
+        for name in discover_repos(root):
+            full = str(Path(root) / name)
+            found.setdefault(str(Path(full).resolve()), (name, ws_label))
+        if (Path(root) / ".git").exists():   # a workspace that is itself one repo
+            found.setdefault(str(Path(root).resolve()), (Path(root).name, ws_label))
+    single = getattr(cfg, "repo_working_directory", "") or ""
+    if single and (Path(single) / ".git").exists():
+        found.setdefault(str(Path(single).resolve()), (Path(single).name, ""))
+
+    names = [n for n, _ in found.values()]
+    out: list[RepoChoice] = []
+    for path, (name, ws_label) in found.items():
+        clash = names.count(name) > 1
+        key = f"{ws_label}/{name}" if clash and ws_label else name
+        label = f"{name} ({ws_label})" if clash and ws_label else name
+        out.append(RepoChoice(key, label, path))
+    out.sort(key=lambda r: r.label.lower())
+    return out
+
+
+def repo_path_for(cfg: Any, repo_name: str) -> str:
+    """Local checkout of an ADO repo, by name (case-insensitive); "" when not here."""
+    want = (repo_name or "").strip().lower()
+    for r in repo_choices(cfg):
+        if Path(r.path).name.lower() == want:
+            return r.path
+    return ""
+
+
+@dataclass
+class ReviewHints:
+    hotspots: list[Hotspot] = field(default_factory=list)
+    owners: list[ModuleKnowledge] = field(default_factory=list)   # modules touched
+
+    @property
+    def worth_saying(self) -> bool:
+        """Only speak when there is something a reviewer would act on."""
+        return bool(self.hotspots) or any(m.risk for m in self.owners)
+
+
+def _relative(path: str, repo_name: str) -> str:
+    p = path.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    p = p.lstrip("/")
+    prefix = repo_name.lower() + "/"
+    return p[len(prefix):] if p.lower().startswith(prefix) else p
+
+
+def review_hints(report: CodeHealth, files: list[str], repo_name: str = "") -> ReviewHints:
+    """What the changed ``files`` touch on the repo's health map."""
+    rel = {_relative(f, repo_name) for f in files if f}
+    hints = ReviewHints()
+    if report.status != "ok" or not rel:
+        return hints
+    hints.hotspots = [h for h in report.hotspots if h.path in rel]
+    touched = {module_of(f) for f in rel}
+    hints.owners = [m for m in report.modules if m.module in touched]
+    return hints
+
+
+def render_hints(hints: ReviewHints, days: int) -> str:
+    """The PR comment: who knows the code this PR changes, and which files are hot."""
+    rows = []
+    if hints.owners:
+        rows.append("<b>👥 Người nắm phần code bị sửa</b> (gợi ý reviewer):<ul>")
+        for m in hints.owners[:6]:
+            note = ""
+            if m.risk == "away":
+                note = f" — ⚠️ đã vắng ≥ {AWAY_DAYS} ngày, cần người thứ hai đọc kỹ"
+            elif m.risk == "concentrated":
+                note = " — ⚠️ chỉ một người nắm, nên có họ review"
+            rows.append(f"<li><code>{esc(m.module)}</code>: {esc(m.main_author)} "
+                        f"({round(m.main_share * 100)}% thay đổi){note}</li>")
+        rows.append("</ul>")
+    if hints.hotspots:
+        rows.append("<b>🔥 PR sửa điểm nóng</b> (hay sửa + dài — dễ sinh lỗi, nên có test):<ul>")
+        for h in hints.hotspots[:6]:
+            rows.append(f"<li><code>{esc(h.path)}</code>: {h.commits} lần sửa / {days} ngày, "
+                        f"{h.lines:,} dòng</li>")
+        rows.append("</ul>")
+    return ("<div><b>🩻 Sức khỏe mã nguồn</b> — đọc từ git, chỉ để tham khảo.<br>"
+            + "".join(rows) + "</div>")

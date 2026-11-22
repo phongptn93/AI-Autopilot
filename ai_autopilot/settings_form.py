@@ -398,6 +398,10 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "🔁 Review PR & phản hồi",
           "Thêm vào mọi PR, ngoài assignee. Là GUID định danh ADO, mỗi dòng một — API reviewer "
           "dùng id, không dùng email."),
+    Field("pr_ownership_hints", "🩻 Gợi ý reviewer theo người nắm code", "bool",
+          "🔁 Review PR & phản hồi",
+          "Comment lên PR autopilot mở: ai nắm các module bị sửa (theo lịch sử git) và file nào là "
+          "điểm nóng. Chỉ đăng khi có điều đáng chú ý, dạng thread đã đóng. Không tốn token."),
     Field("pr_reviewers_required", "↳ Đánh dấu là bắt buộc", "bool",
           "🔁 Review PR & phản hồi",
           "Reviewer bắt buộc chặn hoàn tất PR tới khi họ vote. Tắt = tuỳ chọn (chỉ được thông "

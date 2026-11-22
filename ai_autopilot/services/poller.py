@@ -13,7 +13,16 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 from html import escape as html_escape
 
-from ai_autopilot import claims, markdown_lite, metrics, risk, spec_readiness, traceability, trust
+from ai_autopilot import (
+    claims,
+    code_health,
+    markdown_lite,
+    metrics,
+    risk,
+    spec_readiness,
+    traceability,
+    trust,
+)
 from ai_autopilot.board import handoff_states
 from ai_autopilot.config import find_bot_mention, match_command, matches_any_user
 from ai_autopilot.container import Container
@@ -2218,6 +2227,7 @@ class AdoPollerService(QcReporting):
         swallowed rather than turning a good run into a failure.
         """
         cfg = self._config
+        await self._post_ownership_hints(item, result)
         ids: list[str] = []
         if cfg.pr_add_assignee_as_reviewer and item.assigned_to_id:
             ids.append(item.assigned_to_id)
@@ -2243,6 +2253,41 @@ class AdoPollerService(QcReporting):
                     "PR reviewer added" if ok else "PR reviewer add failed",
                     id=item.id, pr=pr_id, reviewer=reviewer_id,
                 )
+
+    async def _post_ownership_hints(self, item: WorkItemInfo, result: ExecutionResult) -> None:
+        """Tell the reviewers who knows the code this PR changes, and which files are hot.
+
+        A comment, not a reviewer add: git knows authors by email and the reviewers API
+        wants an ADO identity GUID, so mapping one to the other would sometimes add the
+        wrong person — worse than suggesting the right one by name. Said only when it
+        matters (a hotspot is touched, or a touched module has a single owner), as a
+        closed thread, and never allowed to fail the run.
+        """
+        cfg = self._config
+        if not getattr(cfg, "pr_ownership_hints", False) or not result.files_changed:
+            return
+        urls = list(dict.fromkeys([u for u in [result.pr_url, *result.pr_urls] if u]))
+        for url in urls:
+            target = parse_pr_url(url)
+            if target is None:
+                continue
+            repo, pr_id = target
+            try:
+                path = code_health.repo_path_for(cfg, repo)
+                if not path:
+                    continue
+                report = await asyncio.to_thread(code_health.cached_analyze, path, 180)
+                hints = code_health.review_hints(report, result.files_changed, repo)
+                if not hints.worth_saying:
+                    continue
+                if cfg.dry_run:
+                    self._log.info("[DRY-RUN] would post ownership hints", id=item.id, pr=pr_id)
+                    continue
+                await self._c.ado.add_pull_request_comment(
+                    repo, pr_id, code_health.render_hints(hints, report.days))
+            except Exception as exc:  # noqa: BLE001 — advisory, the PR is already open
+                self._log.warning("ownership hints failed", id=item.id, pr=pr_id,
+                                  error=describe_exc(exc))
 
     async def _record_failed_attempt(self, item: WorkItemInfo, result: ExecutionResult) -> int:
         """Register one failed attempt everywhere it needs to land, and return its number.

@@ -133,3 +133,102 @@ def test_page_refuses_a_repo_outside_the_workspace(client, tmp_path):
 def test_choices_come_only_from_configured_workspaces(repo):
     cfg = Settings(dry_run=True, workspace_directory=str(repo.parent))
     assert [r.key for r in repo_choices(cfg)] == ["orders-api"]
+
+
+# ── ownership hints on the PRs the autopilot opens ──────────────────────────
+
+
+def test_hints_name_the_owner_and_the_hotspot_the_pr_touches(repo):
+    report = code_health.analyze(repo, days=90)
+    hints = code_health.review_hints(report, ["orders-api/src/core/orders.py"], "orders-api")
+    assert hints.worth_saying
+    assert [h.path for h in hints.hotspots] == ["src/core/orders.py"]
+    assert [m.module for m in hints.owners] == ["src/core"]
+    text = code_health.render_hints(hints, report.days)
+    assert "Alice" in text and "chỉ một người nắm" in text and "src/core/orders.py" in text
+
+
+def test_a_quiet_change_says_nothing(repo):
+    report = code_health.analyze(repo, days=90)
+    hints = code_health.review_hints(report, ["docs/new.md"], "orders-api")
+    assert not hints.worth_saying
+
+
+def test_hint_text_is_escaped():
+    m = code_health.ModuleKnowledge("src/<x>", 9, 1, "<script>bad</script>", 1.0, None,
+                                    "concentrated")
+    text = code_health.render_hints(code_health.ReviewHints(owners=[m]), 90)
+    assert "<script>" not in text and "&lt;script&gt;" in text
+
+
+def test_repo_path_for_matches_the_pr_repo_name(repo):
+    cfg = Settings(dry_run=True, workspace_directory=str(repo.parent))
+    assert code_health.repo_path_for(cfg, "ORDERS-API") == str(repo.resolve())
+    assert code_health.repo_path_for(cfg, "elsewhere") == ""
+
+
+class _Log:
+    def __init__(self):
+        self.warned = []
+
+    def info(self, *a, **k):
+        pass
+
+    def warning(self, *a, **k):
+        self.warned.append(a)
+
+
+class _Ado:
+    def __init__(self, fail=False):
+        self.comments, self.fail = [], fail
+
+    async def add_pull_request_comment(self, repo, pr_id, text, **_):
+        if self.fail:
+            raise RuntimeError("ADO down")
+        self.comments.append((repo, pr_id, text))
+        return True
+
+
+_ITEM = __import__('types').SimpleNamespace(id=7)
+
+
+def _poller(cfg, ado):
+    from types import SimpleNamespace
+    return SimpleNamespace(_config=cfg, _c=SimpleNamespace(ado=ado), _log=_Log())
+
+
+def _result(files):
+    from ai_autopilot.models import ExecutionResult
+    return ExecutionResult(
+        work_item_id=1, success=True, files_changed=files,
+        pr_url="https://dev.azure.com/org/proj/_git/orders-api/pullrequest/42")
+
+
+@pytest.mark.asyncio
+async def test_poller_posts_hints_only_when_worth_saying(repo):
+    from ai_autopilot.services.poller import AdoPollerService
+    cfg = Settings(dry_run=False, workspace_directory=str(repo.parent))
+    ado = _Ado()
+    p = _poller(cfg, ado)
+    await AdoPollerService._post_ownership_hints(p, _ITEM, _result(["src/core/orders.py"]))
+    await AdoPollerService._post_ownership_hints(p, _ITEM, _result(["docs/x.md"]))
+    assert [(r, n) for r, n, _ in ado.comments] == [("orders-api", 42)]
+
+
+@pytest.mark.asyncio
+async def test_poller_hint_failure_never_fails_the_run(repo):
+    from ai_autopilot.services.poller import AdoPollerService
+    cfg = Settings(dry_run=False, workspace_directory=str(repo.parent))
+    p = _poller(cfg, _Ado(fail=True))
+    await AdoPollerService._post_ownership_hints(p, _ITEM, _result(["src/core/orders.py"]))
+    assert p._log.warned
+
+
+@pytest.mark.asyncio
+async def test_poller_hints_can_be_switched_off(repo):
+    from ai_autopilot.services.poller import AdoPollerService
+    cfg = Settings(dry_run=False, workspace_directory=str(repo.parent), pr_ownership_hints=False)
+    ado = _Ado()
+    await AdoPollerService._post_ownership_hints(_poller(cfg, ado), _ITEM,
+                                                 _result(["src/core/orders.py"]))
+    assert ado.comments == []

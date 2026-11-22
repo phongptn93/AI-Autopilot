@@ -229,6 +229,9 @@ security_scan:
 pr_add_assignee_as_reviewer: false
 pr_extra_reviewer_ids: []
 pr_reviewers_required: false
+# Comment on autopilot PRs: who owns the changed modules + which files are hotspots
+# (from git history, no tokens). Only when there is something to act on.
+pr_ownership_hints: true
 # Retrospective learning loop: remember what auto-review flagged, per repo, in
 # <workspace>/.autopilot/lessons/<repo>.md and inject the most recent lessons into the
 # next run's brief. Read/prune them on the dashboard's Learning page.

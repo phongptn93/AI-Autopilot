@@ -1641,6 +1641,12 @@ class Settings(BaseSettings):
     # Mark added reviewers REQUIRED — ADO then blocks completing the PR until they vote.
     # Off = optional reviewer (notified, not blocking), which is the safer default.
     pr_reviewers_required: bool = False
+    # Comment on each PR the autopilot opens: who owns the modules it changes (from git
+    # history) and which changed files are hotspots — see code_health. Only posted when
+    # there is something to act on, as a closed thread. Read from local checkouts; no
+    # model call. A comment rather than a reviewer add because git emails do not map
+    # reliably onto ADO identity GUIDs.
+    pr_ownership_hints: bool = True
 
     # ── PR reviewer tracking (all active PRs in the configured repos) ──
     # Watch every active PR's reviewer list: detect newly-added reviewers, track their

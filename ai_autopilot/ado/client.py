@@ -1556,6 +1556,27 @@ class AdoClient:
             return []
         return resp.json().get("value") or []
 
+    async def get_pull_request_iterations(
+        self, repo_id: str, pr_id: int, project: str = ""
+    ) -> list[dict[str, Any]] | None:
+        """Every push to the PR's source branch, oldest first (the first is the PR as
+        opened). ``None`` on any error — "could not read" must stay distinguishable
+        from "no pushes", which is a one-element list."""
+        url = self._git_url(
+            f"git/repositories/{repo_id}/pullRequests/{pr_id}/iterations?{_API}", project
+        )
+        try:
+            resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        except httpx.HTTPError as exc:
+            self._log.warning("get_pull_request_iterations error", pr=pr_id,
+                              error=describe_exc(exc))
+            return None
+        if resp.status_code >= 400:
+            self._log.warning("get_pull_request_iterations failed", pr=pr_id,
+                              status=resp.status_code)
+            return None
+        return list(resp.json().get("value") or [])
+
     async def get_pull_request_conflicts(self, repo_id: str, pr_id: int) -> list[dict[str, Any]]:
         """The files ADO's test merge could not combine, as ``[{"path", "type"}]``.
 

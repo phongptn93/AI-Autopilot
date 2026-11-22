@@ -363,3 +363,26 @@ def _kpis(ns: NorthStar) -> list[Kpi]:
         why.value = top[0][0]
         why.sub = " · ".join(f"{k} {v}" for k, v in top)
     return [auto, ttfpr, human, votes, minutes, first_try, cost, waste, why]
+
+
+def merge_clean_kpi(c) -> Kpi:
+    """The merge-clean card: merged PRs nobody pushed to by hand. ``c`` is a
+    :class:`ai_autopilot.pr_cleanliness.Cleanliness`."""
+    kpi = Kpi(
+        "merge_clean", "Merge không cần người sửa", "✅",
+        hint=(
+            "PR đã merge mà không có lần push nào của người sau khi mở: số lần push sau "
+            "khi mở trừ các vòng /ai revise của autopilot. Xấp xỉ, nghiêng về đánh giá "
+            "thấp: autopilot tự gỡ merge conflict cũng là một lần push nên bị tính là "
+            "người sửa. PR chưa merge và PR không đọc được thì không tính."
+        ),
+    )
+    if c.rate is not None:
+        kpi.value = f"{c.rate}%"
+        kpi.sub = f"{c.clean}/{len(c.assessed)} PR đã merge"
+        if c.unknown:
+            kpi.sub += f" · {c.unknown} PR chưa kiểm được"
+        kpi.tone = _tone(c.rate, 70, 40)
+    elif c.unknown:
+        kpi.sub = f"{c.unknown} PR đã merge nhưng chưa kiểm được"
+    return kpi

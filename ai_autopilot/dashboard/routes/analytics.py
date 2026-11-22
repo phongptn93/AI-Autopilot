@@ -192,6 +192,14 @@ async def _north_star(c: Container, records: list, *, days: int) -> list:
     if getattr(c.config, "auto_transition_enabled", False):
         with contextlib.suppress(Exception):
             merged = await c.sync_repo.seen_merged_prs()
-    return compute_north_star(
+    kpis = compute_north_star(
         records, quality, needs_human_items=held & items, merged_pr_ids=merged,
     ).kpis()
+    if merged:
+        # Best-effort like every read here: a failure leaves the card out, not the page.
+        with contextlib.suppress(Exception):
+            from ai_autopilot.north_star import merge_clean_kpi
+            from ai_autopilot.pr_cleanliness import gather
+
+            kpis.append(merge_clean_kpi(await gather(c.ado, records, quality, merged)))
+    return kpis

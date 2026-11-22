@@ -2174,6 +2174,10 @@ class Settings(BaseSettings):
     # "📋 BA/PO => Ready for UAT, In UAT". Each gets a block: counts per state, the oldest
     # items with their assignee. Blank = no role blocks.
     release_note_roles: dict[str, str] = Field(default_factory=dict)
+    # Add the team pulse — one line per role (BA, PM, Dev, QC, DevSecOps), worst first —
+    # to the MORNING brief, from the same numbers as /dashboard/team. Costs a handful of
+    # ADO reads once a day; the weekly note and the release-notes page are unaffected.
+    release_note_team_pulse: bool = True
     # Flag board columns over their WIP limit (read from the board settings in ADO, the
     # default team of each project). Board blank = the lowest-level board with limits.
     release_note_wip_enabled: bool = False

@@ -219,6 +219,16 @@ class ReleaseNoteService:
             note.wip += [release_notes.WipColumn(project, name, n, limit)
                          for name, n, limit in columns]
 
+    async def _pulse(self) -> list:
+        """The team pulse for the brief. Never raises: a brief without it beats none."""
+        from ai_autopilot.services import team_pulse_service
+
+        try:
+            return await team_pulse_service.gather(self._c)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("release note: team pulse failed", error=describe_exc(exc))
+            return []
+
     async def analyze(self, note: release_notes.ReleaseNote, *, kind: str = "") -> bool:
         """Ask Claude for the assessment block. True when ``note.analysis`` was set.
 
@@ -340,6 +350,8 @@ class ReleaseNoteService:
             _log.info("release note skipped — nothing delivered", schedule=schedule.name,
                       days=note.days)
             return "empty"
+        if schedule.daily and cfg.release_note_team_pulse:
+            note.pulse = await self._pulse()
         await self.analyze(note, kind="sáng" if schedule.daily else "tuần")
         title = morning_title(note) if schedule.daily else ""
         return "sent" if await self.post(note, title=title) else "dry-run"

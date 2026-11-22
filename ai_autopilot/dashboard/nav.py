@@ -40,6 +40,9 @@ GROUPS: tuple[NavGroup, ...] = (
         # decides what to do next; the overview answers "how is it going".
         NavItem("inbox", "/dashboard/inbox", "🎯", "Hộp quyết định",
                 "Mọi việc đang chờ bạn quyết — xử lý ngay tại chỗ."),
+        NavItem("team", "/dashboard/team", "🧭", "Theo vai",
+                "BA · PM · Dev · QC · DevSecOps: mỗi vai một thẻ, vai cần chú ý nhất đứng "
+                "trước — cùng số với bản tin sáng."),
         NavItem("overview", "/dashboard", "📊", "Tổng quan",
                 "Hôm nay autopilot làm được gì, cái gì cần chú ý."),
         NavItem("now", "/dashboard/now", "⏱", "Đang chạy",

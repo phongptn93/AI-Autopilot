@@ -155,6 +155,8 @@ class ReleaseNote:
     #: Released in the window just before this one — None when history does not reach.
     previous_total: int | None = None
     analysis: Analysis | None = None
+    #: Team pulse (``team_pulse.RoleSignal``), worst role first — morning brief only.
+    pulse: list = field(default_factory=list)
 
     def over_wip(self) -> list[WipColumn]:
         return [c for c in self.wip if c.over]
@@ -453,6 +455,10 @@ def render_teams(note: ReleaseNote, *, link_base: str = "", title: str = "") -> 
         lines += [f"**🧠 {HEALTH.get(a.health, HEALTH['watch'])[0]} — {a.headline}**",
                   *[f"- {i}" for i in a.insights],
                   *[f"- **{role}**: {text}" for role, text in a.actions], ""]
+    if note.pulse:
+        lines += ["**🧭 Theo vai**",
+                  *[f"- {_PULSE_TONE.get(s.tone, '⚪')} **{s.role}**: {s.summary}"
+                    for s in note.pulse], ""]
     if note.over_wip():
         lines += ["**🚦 Vượt WIP:** " + " · ".join(
             f"{c.column} {c.count}/{c.limit}" for c in note.over_wip()), ""]
@@ -531,6 +537,8 @@ def render_card(note: ReleaseNote, *, link_base: str = "") -> list[dict]:
     body: list[dict] = [_kpis(note)]
     if note.analysis:
         body.append(_analysis_block(note.analysis))
+    if note.pulse:
+        body.append(_pulse_block(note.pulse))
     if note.over_wip():
         wip = [_section_title("🚦 VƯỢT GIỚI HẠN WIP", "Attention")]
         multi = len({c.project for c in note.wip}) > 1
@@ -573,6 +581,19 @@ def render_card(note: ReleaseNote, *, link_base: str = "") -> list[dict]:
         body.append(_text(f"Lịch sử trạng thái mới được ghi từ {since} — danh sách có thể "
                           "chưa đủ cả khoảng.", subtle=True, size="Small", spacing="Medium"))
     return body
+
+
+_PULSE_TONE = {"good": "🟢", "warn": "🟠", "bad": "🔴", "unknown": "⚪"}
+
+
+def _pulse_block(signals: list) -> dict:
+    """One fact per role, worst first — the same numbers as /dashboard/team."""
+    return _container([
+        _section_title("🧭 THEO VAI", "Accent"),
+        {"type": "FactSet", "spacing": "Small", "facts": [
+            {"title": f"{_PULSE_TONE.get(s.tone, '⚪')} {s.role}", "value": s.summary}
+            for s in signals]},
+    ])
 
 
 def _analysis_block(a: Analysis) -> dict:

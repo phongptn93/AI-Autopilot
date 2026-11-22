@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .tp-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; }
+  .tp-card { border:1px solid var(--border); border-left-width:4px; border-radius:12px; padding:14px 16px;
+             background:var(--bg-card); display:grid; gap:10px; align-content:start; min-width:0; }
+  .tp-card.good { border-left-color:var(--green); }
+  .tp-card.warn { border-left-color:var(--amber); }
+  .tp-card.bad { border-left-color:var(--red); }
+  .tp-card.unknown { border-left-color:var(--text-dim); }
+  .tp-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .tp-role { font-size:16px; font-weight:700; }
+  .tp-tone { font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; }
+  .good .tp-tone { background:var(--green-bg); color:var(--green); }
+  .warn .tp-tone { background:var(--amber-bg); color:var(--amber); }
+  .bad .tp-tone { background:var(--red-bg); color:var(--red); }
+  .unknown .tp-tone { background:var(--bg); color:var(--text-muted); border:1px solid var(--border); }
+  .tp-facts { display:grid; gap:4px; font-size:13px; margin:0; }
+  .tp-facts div { display:flex; justify-content:space-between; gap:12px; }
+  .tp-facts dt { color:var(--text-muted); }
+  .tp-facts dd { margin:0; font-weight:600; font-variant-numeric:tabular-nums; text-align:right; }
+  .tp-action { font-size:13px; border-top:1px dashed var(--border); padding-top:8px; }
+  .tp-reason { font-size:13px; color:var(--text-muted); }
+  .tp-link { font-size:12.5px; }
+</style>
+
+<div class="page-header">
+  <h2 class="page-title">{{ page_title("team") }}</h2>
+  <p>Mỗi vai một thẻ, vai cần chú ý nhất đứng trước. Số liệu lấy đúng từ trang chi tiết của từng vai — cùng số với bản tin buổi sáng.
+    Nguồn không đọc được thì thẻ ghi "chưa đo được", không bao giờ tô xanh.</p>
+</div>
+
+{% set tone_label = {"good": "Ổn", "warn": "Cần chú ý", "bad": "Cần xử lý", "unknown": "Chưa đo được"} %}
+<div class="tp-grid">
+  {% for s in signals %}
+  <div class="tp-card {{ s.tone }}">
+    <div class="tp-head"><span class="tp-role">{{ s.icon }} {{ s.role }}</span><span class="tp-tone">{{ tone_label[s.tone] }}</span></div>
+    {% if s.tone == "unknown" %}
+      <div class="tp-reason">{{ s.reason or "Không đọc được nguồn dữ liệu." }}</div>
+    {% else %}
+      <dl class="tp-facts">{% for label, value in s.facts %}<div><dt>{{ label|replace(':', '') }}</dt><dd>{{ value }}</dd></div>{% endfor %}</dl>
+      {% if s.action %}<div class="tp-action">➡️ {{ s.action }}</div>{% endif %}
+    {% endif %}
+    <a class="table-link tp-link" href="{{ s.href }}">Mở trang chi tiết →</a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

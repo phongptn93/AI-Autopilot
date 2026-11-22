@@ -750,6 +750,10 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "giao. Để trống = không có khối vai trò.",
           placeholder="🛠️ Dev => Rework Required\n🧪 QC => Ready for Testing, In Testing\n"
                       "📋 BA/PO => Ready for UAT, In UAT"),
+    Field("release_note_team_pulse", "🧭 Khối 'Theo vai' trong bản tin sáng", "bool",
+          "📣 Release note",
+          "Thêm một dòng cho mỗi vai (BA, PM, Dev, QC, DevSecOps), vai cần chú ý nhất đứng "
+          "trước — cùng số với trang Theo vai. Chỉ bản tin sáng; tốn vài lượt đọc ADO mỗi ngày."),
     Field("release_note_wip_enabled", "Cảnh báo cột vượt giới hạn WIP", "bool",
           "📣 Release note",
           "Đọc giới hạn WIP trên board ADO (team mặc định của từng project) và đánh dấu cột "

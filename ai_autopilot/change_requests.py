@@ -120,7 +120,7 @@ def build(raw: list[dict], *, categories: dict[str, str], cr_tags, stale_specs: 
             refs={parent, *(int(m) for m in _REF.findall(title))} - {0},
             created=_dt(f.get("System.CreatedDate")),
             closed=_dt(f.get("Microsoft.VSTS.Common.ClosedDate")),
-            assigned_to=(who.get("displayName") if isinstance(who, dict) else str(who or "")),
+            assigned_to=str((who.get("displayName") if isinstance(who, dict) else who) or ""),
         )
         rep.crs.append(cr)
         if cr.created and cr.created >= start:

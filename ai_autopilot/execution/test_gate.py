@@ -45,6 +45,8 @@ class TestResult:
     # What failed, one normalised line each (see :func:`failure_signatures`) — what a
     # reader needs to act on, and what makes two runs comparable.
     failures: list[str] = field(default_factory=list)
+    # Failed on the first run, passed on the immediate rerun (see flaky_tests).
+    flaky: list[str] = field(default_factory=list)
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -303,9 +305,16 @@ class TestGate:
                               summary=f"skipped — test environment not ready: {why}",
                               output_tail=text[-_OUTPUT_TAIL_CHARS:])
         failures = [] if passed else failure_signatures(text, work_dir)
+        flaky: list[str] = []
+        if not passed and self._config.test_gate_flaky_rerun:
+            passed, code, text, failures, flaky = await self._rerun(
+                cmd, work_dir, timeout, env, repo, code, text, failures)
         self._log.info("test gate done", dir=work_dir, passed=passed, code=code,
-                       failures=len(failures))
-        if passed:
+                       failures=len(failures), flaky=len(flaky))
+        if passed and flaky:
+            summary = (f"tests passed on rerun — {len(flaky)} flaky test(s): "
+                       + ", ".join(flaky[:3]) + ("…" if len(flaky) > 3 else ""))
+        elif passed:
             summary = "tests passed"
         elif failures:
             # Say WHAT failed. "tests failed (exit 1)" sent a reader to re-run the whole
@@ -319,13 +328,51 @@ class TestGate:
             summary = f"tests failed (exit {code}): " + ", ".join(parts)
         else:
             summary = f"tests failed (exit {code})"
+        if flaky and not passed:
+            summary += f"; {len(flaky)} more failed only on the first run (flaky)"
         return TestResult(
             passed=passed,
             ran=True,
             summary=summary,
             output_tail=text[-_OUTPUT_TAIL_CHARS:],
             failures=failures,
+            flaky=flaky,
         )
+
+    async def _rerun(
+        self, cmd: str, work_dir: str, limit_s: float, env: dict[str, str] | None,
+        repo: str, code: int, text: str, failures: list[str],
+    ) -> tuple[bool, int, str, list[str], list[str]]:
+        """Run a red suite once more and split its failures into real and flaky.
+
+        Only a failure that does NOT repeat is flaky. A rerun that cannot finish (timeout,
+        launch error) proves nothing, so the first result stands. Without signatures the
+        two runs cannot be compared per test: a green rerun then marks the run flaky as a
+        whole (``"suite"``), a red one keeps the first verdict.
+        """
+        self._log.info("test gate: red — rerunning once to tell flaky from real",
+                       dir=work_dir, repo=repo, failures=len(failures))
+        try:
+            code2, text2 = await self._shell(cmd, work_dir, limit_s, env=env)
+        except Exception as exc:  # noqa: BLE001 — incl. timeout: the first verdict stands
+            self._log.warning("test gate rerun did not finish", error=describe_exc(exc))
+            return False, code, text, failures, []
+        if code2 == 0:
+            flaky = failures or ["suite (no per-test signature)"]
+            self._record_flaky(repo, flaky)
+            return True, code2, text2, [], flaky
+        second = failure_signatures(text2, work_dir)
+        if not failures or not second:
+            return False, code2, text2, second or failures, []
+        flaky = [f for f in failures if f not in second]
+        self._record_flaky(repo, flaky)
+        return False, code2, text2, second, flaky
+
+    def _record_flaky(self, repo: str, signatures: list[str]) -> None:
+        from ai_autopilot import flaky_tests
+
+        flaky_tests.record(getattr(self._config, "workspace_directory", "") or "",
+                           repo, signatures)
 
     async def _shell(
         self, cmd: str, cwd: str, limit_s: float, env: dict | None = None,

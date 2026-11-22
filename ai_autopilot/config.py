@@ -1986,6 +1986,11 @@ class Settings(BaseSettings):
     # gate has nothing to say about the change. False = let the PR through, marked
     # "tests not run"; True = block it like a red run.
     test_gate_block_when_not_run: bool = False
+    # A red suite is run ONCE more. Failures that disappear on the rerun are flaky:
+    # recorded in <workspace>/.autopilot/flaky-tests.json and named in the result. If
+    # every failure was flaky the gate passes, saying so; any failure that repeats still
+    # blocks. Costs one extra run, only on red. False = the first red run blocks.
+    test_gate_flaky_rerun: bool = True
     # Explicit test command; blank = auto-detect (pytest / dotnet test / npm test)
     # from the files in the worktree. No runner detected = skip (never blocks).
     test_command: str = ""

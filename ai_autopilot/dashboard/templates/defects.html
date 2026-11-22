@@ -132,4 +132,22 @@
   (hoặc Requirement tag BUG). Mở lại = đã sang Resolved / Completed rồi quay về đang làm. Lỗi đang mở được tìm trong
   các item có thay đổi {{ lookback }} ngày gần nhất.</p>
 {% endif %}
+
+<div class="df-section"><h3>🎲 Test chập chờn</h3>
+  <span class="hint">trượt ở lần chạy đầu, đạt khi cổng test chạy lại ngay — sửa hoặc cách ly, đừng để mọi người quen bấm "chạy lại"</span></div>
+<div class="card"><div class="card-body df-wrap" style="padding:4px 8px">
+  {% if flaky %}
+  <table class="df-tbl">
+    <thead><tr><th>Repo</th><th>Test</th><th class="num">Số lần</th><th class="num">Lần đầu</th><th class="num">Gần nhất</th></tr></thead>
+    <tbody>
+    {% for f in flaky %}
+      <tr><td>{{ f.repo }}</td><td style="font:12px/1.45 ui-monospace,Consolas,monospace;word-break:break-all">{{ f.signature }}</td>
+        <td class="num">{{ f.count }}</td><td class="num">{{ f.first_seen.strftime('%d/%m/%Y') }}</td><td class="num">{{ f.last_seen.strftime('%d/%m/%Y') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% elif flaky_on %}<div class="df-empty">Chưa ghi nhận test chập chờn nào.</div>
+  {% else %}<div class="df-empty">Chưa theo dõi: bật <b>Cổng test</b> và <b>Chạy lại 1 lần để bắt test chập chờn</b> ở
+    <a class="table-link" href="/dashboard/settings">Thiết lập → 🧪 Cổng chất lượng</a>.</div>{% endif %}
+</div></div>
 {% endblock %}

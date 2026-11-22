@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from ai_autopilot import defect_metrics
+from ai_autopilot import defect_metrics, flaky_tests
 from ai_autopilot.container import Container
 from ai_autopilot.dashboard.common import _TEMPLATES, work_item_link_base
 from ai_autopilot.dashboard.routes._shared import _ctx
@@ -61,7 +61,9 @@ def create_router() -> APIRouter:
             request, "defects.html",
             _ctx(request, "defects", projects=projects, project=chosen, days=days,
                  windows=WINDOWS, report=report, error=error,
-                 item_link=work_item_link_base(cfg), lookback=_OPEN_LOOKBACK_DAYS),
+                 item_link=work_item_link_base(cfg), lookback=_OPEN_LOOKBACK_DAYS,
+                 flaky=flaky_tests.load(cfg.workspace_directory or "")[:30],
+                 flaky_on=bool(cfg.test_gate_enabled and cfg.test_gate_flaky_rerun)),
         )
 
     return router

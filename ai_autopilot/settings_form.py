@@ -354,6 +354,10 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "Runner không khởi động được (thiếu tool, môi trường chưa sẵn sàng) thì không nói lên "
           "gì về thay đổi. Tắt = PR vẫn đi tiếp, gắn nhãn 'tests not run'. Bật = bị chặn như test "
           "đỏ."),
+    Field("test_gate_flaky_rerun", "↳ Chạy lại 1 lần để bắt test chập chờn", "bool",
+          "🧪 Cổng chất lượng",
+          "Test đỏ thì chạy lại một lần. Test trượt rồi đạt là chập chờn: ghi vào sổ ở bàn QC và "
+          "không chặn PR vì nó. Lỗi lặp lại ở lần 2 vẫn chặn như cũ. Chỉ tốn thêm khi test đỏ."),
     Field("test_commands", "↳ Lệnh test theo từng repo", "list", "🧪 Cổng chất lượng",
           "Mỗi dòng một repo, <code>Repo = command</code>. Project có nhiều stack không thể dùng "
           "chung một lệnh — đặt dotnet test thì mọi thay đổi frontend bị kiểm bằng sai runner, "
@@ -1155,6 +1159,7 @@ _DEPENDS_ON: dict[str, tuple[str, tuple[str, ...]]] = {
     "test_timeouts": ("test_gate_enabled", ("1",)),
     "test_command": ("test_gate_enabled", ("1",)),
     "test_gate_block_when_not_run": ("test_gate_enabled", ("1",)),
+    "test_gate_flaky_rerun": ("test_gate_enabled", ("1",)),
     "test_timeout_seconds": ("test_gate_enabled", ("1",)),
     "pr_score_auto_min": ("pr_scoring_enabled", ("1",)),
     "pr_score_review_min": ("pr_scoring_enabled", ("1",)),

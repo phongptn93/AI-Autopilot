@@ -1655,6 +1655,9 @@ class Settings(BaseSettings):
     # model call. A comment rather than a reviewer add because git emails do not map
     # reliably onto ADO identity GUIDs.
     pr_ownership_hints: bool = True
+    # Comment on each autopilot PR: earlier work items that changed the same files /
+    # modules (from the run history) and their ADO test cases — what QC should rerun.
+    pr_regression_hints: bool = True
 
     # ── PR reviewer tracking (all active PRs in the configured repos) ──
     # Watch every active PR's reviewer list: detect newly-added reviewers, track their

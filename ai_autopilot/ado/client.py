@@ -1312,6 +1312,37 @@ class AdoClient:
             return None
         return resp.json().get("value") or []
 
+    async def get_linked_ids(self, ids: list[int], rel_type: str) -> dict[int, set[int]] | None:
+        """``id → {targets}`` for one relation type (e.g. ``Microsoft.VSTS.Common.
+        TestedBy-Forward``: requirement → its test cases). ``None`` when ADO failed."""
+        if not ids:
+            return {}
+        out: dict[int, set[int]] = {}
+        for start in range(0, len(ids), 200):
+            chunk = ",".join(str(i) for i in ids[start:start + 200])
+            try:
+                resp = await self._http.get(
+                    self._org_url(f"wit/workitems?ids={chunk}&$expand=relations"
+                                  f"&errorPolicy=Omit&{_API}"),
+                    headers=await self._auth.get_auth_header(),
+                )
+            except httpx.HTTPError as exc:
+                self._log.warning("get_linked_ids request error", error=describe_exc(exc))
+                return None
+            if resp.status_code >= 400:
+                self._log.warning("get_linked_ids failed", status=resp.status_code)
+                return None
+            for wi in resp.json().get("value") or []:
+                if not wi or wi.get("id") is None:
+                    continue
+                targets = {
+                    t for rel in wi.get("relations") or []
+                    if rel.get("rel") == rel_type
+                    and (t := _rel_target_id(str(rel.get("url", "")))) is not None
+                }
+                out[int(wi["id"])] = targets
+        return out
+
     async def get_build_work_item_ids(self, build_id: int, top: int = 100) -> list[int] | None:
         """Ids of the work items ADO associates with one build (its changes' links)."""
         url = self._git_url(f"build/builds/{int(build_id)}/workitems?$top={int(top)}&{_API}")

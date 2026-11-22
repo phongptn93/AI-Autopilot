@@ -18,6 +18,7 @@ from ai_autopilot import (
     code_health,
     markdown_lite,
     metrics,
+    regression_scope,
     risk,
     spec_readiness,
     traceability,
@@ -2229,6 +2230,7 @@ class AdoPollerService(QcReporting):
         """
         cfg = self._config
         await self._post_ownership_hints(item, result)
+        await self._post_regression_scope(item, result)
         ids: list[str] = []
         if cfg.pr_add_assignee_as_reviewer and item.assigned_to_id:
             ids.append(item.assigned_to_id)
@@ -2254,6 +2256,45 @@ class AdoPollerService(QcReporting):
                     "PR reviewer added" if ok else "PR reviewer add failed",
                     id=item.id, pr=pr_id, reviewer=reviewer_id,
                 )
+
+    async def _post_regression_scope(self, item: WorkItemInfo, result: ExecutionResult) -> None:
+        """Tell QC which earlier work this change touches, and which of its cases to rerun.
+
+        Read from the autopilot's own run history (files each run changed) and the
+        ``Tested By`` links on ADO. Once per item, on the primary PR: the scope belongs to
+        the work item, not to one repo. Advisory — never fails the run.
+        """
+        cfg = self._config
+        if not getattr(cfg, "pr_regression_hints", False) or not result.files_changed:
+            return
+        target = parse_pr_url(result.pr_url or next(iter(result.pr_urls or []), ""))
+        if target is None:
+            return
+        repo, pr_id = target
+        try:
+            records = await self._c.execution_repo.get_recent(1000)
+            history = regression_scope.history_from_records(records)
+            found = regression_scope.related(result.files_changed, history, exclude=item.id)
+            if not found:
+                return
+            links = await self._c.ado.get_linked_ids(
+                [r.work_item_id for r in found], regression_scope.TESTED_BY) or {}
+            case_ids = sorted({c for ids in links.values() for c in ids})
+            titles = {}
+            if case_ids:
+                titles = {w.id: w.title or "" for w in
+                          await self._c.ado.get_work_items_by_ids(case_ids[:100])}
+            for r in found:
+                r.test_cases = [(cid, titles.get(cid, "")) for cid in sorted(
+                    links.get(r.work_item_id, set()))]
+            if cfg.dry_run:
+                self._log.info("[DRY-RUN] would post regression scope", id=item.id, pr=pr_id)
+                return
+            await self._c.ado.add_pull_request_comment(
+                repo, pr_id, regression_scope.render(found))
+        except Exception as exc:  # noqa: BLE001 — advisory, the PR is already open
+            self._log.warning("regression scope failed", id=item.id, pr=pr_id,
+                              error=describe_exc(exc))
 
     async def _post_ownership_hints(self, item: WorkItemInfo, result: ExecutionResult) -> None:
         """Tell the reviewers who knows the code this PR changes, and which files are hot.

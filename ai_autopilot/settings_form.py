@@ -413,6 +413,10 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "🔁 Review PR & phản hồi",
           "Comment lên PR autopilot mở: ai nắm các module bị sửa (theo lịch sử git) và file nào là "
           "điểm nóng. Chỉ đăng khi có điều đáng chú ý, dạng thread đã đóng. Không tốn token."),
+    Field("pr_regression_hints", "🧪 Gợi ý phạm vi regression cho QC", "bool",
+          "🔁 Review PR & phản hồi",
+          "Comment lên PR autopilot mở: các việc trước đây từng sửa cùng file / module và test "
+          "case gắn với chúng — những case QC nên chạy lại. Đọc từ lịch sử chạy, không tốn token."),
     Field("pr_reviewers_required", "↳ Đánh dấu là bắt buộc", "bool",
           "🔁 Review PR & phản hồi",
           "Reviewer bắt buộc chặn hoàn tất PR tới khi họ vote. Tắt = tuỳ chọn (chỉ được thông "

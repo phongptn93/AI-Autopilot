@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .ci-cats { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px; }
+  .ci-cat { border:1px solid var(--border); border-radius:10px; padding:8px 12px; min-width:130px; }
+  .ci-cat b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+  .ci-cat span { font-size:12px; color:var(--text-muted); }
+  .ci-list { display:grid; gap:10px; }
+  .ci-row { border:1px solid var(--border); border-radius:10px; padding:12px 14px; background:var(--bg-card); display:grid; gap:6px; min-width:0; }
+  .ci-head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .ci-chip { display:inline-block; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; white-space:nowrap; }
+  .ci-code { background:var(--red-bg); color:var(--red); }
+  .ci-infra { background:var(--blue-bg); color:var(--blue); }
+  .ci-unk { background:var(--amber-bg); color:var(--amber); }
+  .ci-flaky { background:var(--amber-bg); color:var(--amber); }
+  .ci-meta { font-size:12px; color:var(--text-muted); }
+  .ci-ev { font:12px/1.5 ui-monospace,Consolas,monospace; background:var(--bg); border:1px solid var(--border);
+           border-radius:6px; padding:6px 8px; white-space:pre-wrap; word-break:break-word; }
+  .ci-hint { font-size:13px; }
+  .ci-note { font-size:13px; border:1px solid var(--border); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
+  .ci-note.warn { border-color:var(--amber,#f5a524); background:rgba(245,165,36,.08); }
+  .ci-empty { color:var(--text-dim); font-size:13px; text-align:center; padding:20px 0; }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2 class="page-title">{{ page_title("ci") }}</h2>
+    <p>Build đỏ gần đây của mọi pipeline, phân loại theo nguyên nhân: code, test, hay máy / cấu hình — kèm việc nên làm tiếp.
+      Đọc bước lỗi, lỗi runner báo và cuối log. Không tốn token.</p>
+  </div>
+  <form method="get" action="/dashboard/ci" style="display:flex;gap:8px;align-items:center">
+    <select name="days" class="bf-input" style="min-width:110px" aria-label="Khoảng thời gian" onchange="this.form.submit()">
+      {% for d in windows %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
+    </select>
+    <noscript><button type="submit" class="btn-ghost">Xem</button></noscript>
+  </form>
+</div>
+
+{% set code_cats = ['build', 'test', 'security'] %}
+{% set infra_cats = ['agent', 'auth', 'restore', 'timeout', 'docker'] %}
+
+{% if not configured %}
+<div class="card"><div class="card-body ci-empty">Chưa kết nối Azure DevOps (tổ chức + PAT). Đặt ở <a class="table-link" href="/dashboard/settings">Thiết lập</a>.</div></div>
+{% elif report.status != 'ok' %}
+<div class="ci-note warn">⚠️ <b>Chưa kiểm được</b>: {{ report.reason }} Đây không phải "không có build lỗi".</div>
+{% else %}
+{% if report.reason %}<div class="ci-note">ℹ️ {{ report.reason }}</div>{% endif %}
+
+<div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Build {{ days }} ngày</span><div class="stat-card-icon">🏗️</div></div>
+    <div class="stat-card-value">{{ report.total_builds }}</div>
+    <div class="stat-sub">mọi pipeline của project mã nguồn</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Build lỗi</span><div class="stat-card-icon">🔴</div></div>
+    <div class="stat-card-value">{{ report.failed|length }}</div>
+    <div class="stat-sub">{% if report.failure_rate is not none %}{{ (report.failure_rate * 100)|round(1) }}% số build{% else %}—{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Lỗi do máy / cấu hình</span><div class="stat-card-icon">🛠️</div></div>
+    <div class="stat-card-value">{{ report.failed|selectattr('category', 'in', infra_cats)|list|length }}</div>
+    <div class="stat-sub">agent, secret, feed, timeout, docker</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Chập chờn</span><div class="stat-card-icon">🎲</div></div>
+    <div class="stat-card-value">{{ report.flaky_count }}</div>
+    <div class="stat-sub">cùng commit, chạy lại thì xanh</div>
+  </div>
+</div>
+
+{% if report.by_category %}
+<div class="ci-cats">
+  {% for cat, n in report.by_category %}<div class="ci-cat"><b>{{ n }}</b><span>{{ labels.get(cat, cat) }}</span></div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="ci-list">
+  {% for f in report.failed %}
+  {% set tone = 'ci-code' if f.category in code_cats else ('ci-infra' if f.category in infra_cats else 'ci-unk') %}
+  <div class="ci-row">
+    <div class="ci-head">
+      <span class="ci-chip {{ tone }}">{{ f.label }}</span>
+      {% if f.flaky %}<span class="ci-chip ci-flaky">chập chờn</span>{% endif %}
+      <b>{{ f.pipeline or 'pipeline' }}</b>
+      {% if f.url %}<a class="table-link" href="{{ f.url }}" target="_blank" rel="noopener">#{{ f.number or f.build_id }}</a>{% else %}#{{ f.number or f.build_id }}{% endif %}
+    </div>
+    <div class="ci-meta">{{ f.branch }}{% if f.commit %} · <code>{{ f.commit[:8] }}</code>{% endif %}{% if f.requested_for %} · {{ f.requested_for }}{% endif %}{% if f.finished %} · {{ f.finished.strftime('%d/%m %H:%M') }}{% endif %}{% if f.failed_step %} · bước lỗi: <b>{{ f.failed_step }}</b>{% endif %}</div>
+    {% if f.evidence %}<div class="ci-ev">{{ f.evidence }}</div>{% endif %}
+    <div class="ci-hint">➡️ {{ f.hint }}</div>
+  </div>
+  {% else %}
+  <div class="card"><div class="card-body ci-empty">Không có build lỗi nào trong {{ days }} ngày. 🎉</div></div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

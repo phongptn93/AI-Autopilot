@@ -90,6 +90,9 @@ GROUPS: tuple[NavGroup, ...] = (
     NavGroup("security", "🔐 Bảo mật & kiểm toán", (
         NavItem("security", "/dashboard/security", "🔐", "Bảo mật",
                 "Quét lỗ hổng mã nguồn & thư viện, CVE đang bị khai thác."),
+        NavItem("ci", "/dashboard/ci", "🚦", "Pipeline CI/CD",
+                "Build đỏ gần đây, phân loại: lỗi code, test, hay máy / cấu hình — kèm việc "
+                "nên làm."),
         NavItem("reports", "/dashboard/reports", "🛡️", "Báo cáo rà soát",
                 "Kết quả các agent rà soát định kỳ — tạo work item từ phát hiện."),
         NavItem("audit", "/dashboard/audit", "🧾", "Nhật ký thao tác",

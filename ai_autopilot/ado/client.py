@@ -1248,6 +1248,59 @@ class AdoClient:
             return None
         return resp.json().get("value") or []
 
+    async def get_builds_since(
+        self, since: datetime, *, result: str = "", top: int = 300
+    ) -> list[dict[str, Any]] | None:
+        """Completed builds of every pipeline in the code project since ``since``.
+
+        ``result`` filters (``failed``, ``succeeded``); blank = all results. ``None`` when
+        ADO could not be read, so "no builds" and "could not look" stay different.
+        """
+        min_time = quote(since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), safe="")
+        query = (f"build/builds?statusFilter=completed&minTime={min_time}&$top={int(top)}"
+                 f"&queryOrder=finishTimeDescending&{_API}")
+        if result:
+            query += f"&resultFilter={quote(result, safe='')}"
+        try:
+            resp = await self._http.get(self._git_url(query),
+                                        headers=await self._auth.get_auth_header())
+        except httpx.HTTPError as exc:
+            self._log.warning("get_builds_since request error", error=describe_exc(exc))
+            return None
+        if resp.status_code >= 400:
+            self._log.warning("get_builds_since failed", status=resp.status_code)
+            return None
+        return resp.json().get("value") or []
+
+    async def get_build_timeline(self, build_id: int) -> dict[str, Any] | None:
+        """A build's timeline (stages / jobs / tasks with results and issues)."""
+        url = self._git_url(f"build/builds/{int(build_id)}/timeline?{_API}")
+        try:
+            resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        except httpx.HTTPError as exc:
+            self._log.warning("get_build_timeline error", build=build_id,
+                              error=describe_exc(exc))
+            return None
+        if resp.status_code >= 400:
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+
+    async def get_build_log_tail(self, build_id: int, log_id: int, lines: int = 120) -> str:
+        """The last ``lines`` lines of one build log — "" on any failure."""
+        url = self._git_url(f"build/builds/{int(build_id)}/logs/{int(log_id)}?{_API}")
+        try:
+            resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        except httpx.HTTPError:
+            return ""
+        if resp.status_code >= 400:
+            return ""
+        text = resp.text
+        if text.lstrip().startswith("{"):   # JSON envelope: {"count":…, "value":[lines]}
+            with contextlib.suppress(ValueError):
+                text = "\n".join(str(v) for v in (resp.json().get("value") or []))
+        return "\n".join(text.splitlines()[-int(lines):])
+
     async def get_children(self, parent_id: int) -> list[WorkItemInfo]:
         """Child work items of a parent (via System.Parent)."""
         wiql = (

@@ -51,7 +51,7 @@
 {% endif %}
 
 <div class="ba-tabs">
-  {% set labels = {"specs": "📄 Spec", "questions": "❔ Câu hỏi mở", "production": "📣 Phản hồi production", "metrics": "📊 Chỉ số"} %}
+  {% set labels = {"specs": "📄 Spec", "questions": "❔ Câu hỏi mở", "changes": "📝 Change request", "production": "📣 Phản hồi production", "metrics": "📊 Chỉ số"} %}
   {% for t in tabs %}<a class="ba-tab {{ 'on' if t == tab else '' }}" href="/dashboard/ba?tab={{ t }}">{{ labels[t] }}</a>{% endfor %}
 </div>
 
@@ -153,6 +153,51 @@
 {% endif %}
 
 {# ───────────────────────── Chỉ số ───────────────────────── #}
+{# ───────────────────────── Change request ───────────────────────── #}
+{% if tab == "changes" %}
+{% set r = changes.report %}
+{% if changes.error %}<div class="ba-card" style="border-color:var(--amber)">⚠️ <b>Chưa đọc đủ</b>: {{ changes.error }} Sổ CR bên dưới có thể thiếu.</div>{% endif %}
+<div class="ba-tiles">
+  <div class="ba-tile {{ 'bad' if r.silent else 'good' }}" title="Spec khách đã xác nhận, sau đó bị sửa, mà không có change request nào gắn với work item của nó.">
+    <div class="n">{{ r.silent|length }}</div><div class="l">⚠️ Đổi sau khi khách xác nhận, chưa có CR</div></div>
+  <div class="ba-tile" title="Change request chưa được chốt (chưa Resolved / Completed / Removed)."><div class="n">{{ r.open|length }}</div><div class="l">📝 CR đang mở</div></div>
+  <div class="ba-tile" title="Change request được tạo trong {{ r.days }} ngày."><div class="n">{{ r.opened }}</div><div class="l">➕ CR mới {{ r.days }} ngày</div></div>
+  <div class="ba-tile" title="Từ lúc tạo tới lúc chốt, các CR chốt trong {{ r.days }} ngày."><div class="n">{{ '%g' % r.decide_p50_days if r.decide_p50_days is not none else '—' }}</div><div class="l">⏱️ Ngày để chốt CR (p50)</div></div>
+  <div class="ba-tile {{ 'warn' if r.volatile else '' }}" title="Requirement có từ 2 change request trở lên — phạm vi chưa ổn định."><div class="n">{{ r.volatile|length }}</div><div class="l">🌪️ Requirement biến động</div></div>
+</div>
+
+<div class="ba-card">
+  <h3 style="margin:0 0 8px">⚠️ Spec đổi sau khi khách xác nhận — chưa có change request</h3>
+  {% if r.silent %}
+  <p class="ba-hint" style="margin-top:0">Code và tài liệu khách đã ký đang lệch nhau mà chưa ai quyết. Tạo CR (tag {{ cr_tags|join(" / ") }}, đặt Parent = requirement) hoặc xin khách xác nhận lại bản mới.</p>
+  <ul style="margin:0;padding-left:18px">
+    {% for s in r.silent %}<li>{% if s.item_id %}<a class="table-link" href="{{ changes.item_url(s.item_id) }}" target="_blank" rel="noopener">#{{ s.item_id }}</a> {% endif %}{{ s.title }} <span class="ba-hint">· {{ s.rel }}</span></li>{% endfor %}
+  </ul>
+  {% else %}<p class="ba-hint" style="margin:0">Không có spec nào bị đổi sau khi khách xác nhận mà thiếu CR. 👍</p>{% endif %}
+</div>
+
+<div class="ba-card">
+  <h3 style="margin:0 0 8px">📝 Sổ change request</h3>
+  {% if r.crs %}
+  <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="text-align:left;color:var(--text-muted);font-size:11px;text-transform:uppercase"><th style="padding:6px 8px">CR</th><th style="padding:6px 8px">Cho requirement</th><th style="padding:6px 8px">Trạng thái</th><th style="padding:6px 8px">Người</th><th style="padding:6px 8px;text-align:right">Tuổi</th></tr></thead>
+    <tbody>
+    {% for cr in r.crs[:40] %}
+      <tr style="border-top:1px solid var(--border)">
+        <td style="padding:6px 8px"><a class="table-link" href="{{ changes.item_url(cr.id) }}" target="_blank" rel="noopener">#{{ cr.id }}</a> {{ cr.title }}</td>
+        <td style="padding:6px 8px">{% if cr.parent %}<a class="table-link" href="{{ changes.item_url(cr.parent) }}" target="_blank" rel="noopener">#{{ cr.parent }}</a>{% else %}<span class="ba-hint">chưa gắn</span>{% endif %}</td>
+        <td style="padding:6px 8px">{{ cr.state }}</td>
+        <td style="padding:6px 8px">{{ cr.assigned_to or "—" }}</td>
+        <td style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums">{% set a = cr.age_days(changes.now) %}{{ '%g' % a if a is not none else "—" }} ngày</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="ba-hint" style="margin:0">Chưa có change request nào (tag {{ cr_tags|join(" / ") }} hoặc loại Change Request) trong 365 ngày.</p>{% endif %}
+  {% if r.volatile %}<p class="ba-hint">🌪️ Biến động: {% for rid, n in r.volatile[:10] %}<a class="table-link" href="{{ changes.item_url(rid) }}" target="_blank" rel="noopener">#{{ rid }}</a> ({{ n }} CR){% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+</div>
+{% endif %}
+
 {% if tab == "metrics" %}
 <div class="ba-tiles">
   {% for k in metrics.kpis %}

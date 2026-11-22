@@ -406,6 +406,10 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "🔁 Review PR & phản hồi",
           "Thêm vào mọi PR, ngoài assignee. Là GUID định danh ADO, mỗi dòng một — API reviewer "
           "dùng id, không dùng email."),
+    Field("change_request_tags", "📝 Tag change request", "list", "🔁 Review PR & phản hồi",
+          "Item gắn tag này (hoặc thuộc loại Change Request) là một change request: hiện ở tab "
+          "Change request của Bàn BA, và làm hết cảnh báo 'spec đổi sau khi khách xác nhận' cho "
+          "requirement nó gắn vào (Parent hoặc #id trong tiêu đề)."),
     Field("hotfix_tags", "🚨 Tag sự cố production (hotfix)", "list", "🔁 Review PR & phản hồi",
           "Item gắn một trong các tag này là sự cố production: được xử lý trước mọi việc khác "
           "(+100 điểm ưu tiên) và hiện ở trang Môi trường & sự cố."),

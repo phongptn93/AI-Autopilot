@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from ai_autopilot import (
     assumptions,
     ba_metrics,
+    change_requests,
     customer_pack,
     spec_impact,
     spec_library,
@@ -49,9 +50,10 @@ from ai_autopilot.dashboard.common import (
 )
 from ai_autopilot.dashboard.routes._shared import _ctx
 from ai_autopilot.dashboard.routes.requirements import DRAFT_TAG
+from ai_autopilot.logging_config import describe_exc
 from ai_autopilot.services.process_health_service import to_health_item
 
-TABS = ("specs", "questions", "production", "metrics")
+TABS = ("specs", "questions", "changes", "production", "metrics")
 _MAX_SPECS = 150
 _CLOSED = frozenset({"closed", "done", "resolved", "removed", "completed"})
 #: A customer document is opened by someone outside the dashboard (printed, saved as PDF),
@@ -164,6 +166,28 @@ async def _production(c: Container) -> dict[str, Any]:
     return {"clusters": clusters, "error": error, "tags": sorted(tags)}
 
 
+async def _changes(c: Container, spec_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Change-request register + specs changed after the customer confirmed them."""
+    cfg = c.config
+    stale = [{"item_id": r["item_id"], "title": r["title"], "rel": r["rel"]}
+             for r in spec_rows if r["confirmation"]["state"] == ba_view.STALE]
+    raw: list[dict] = []
+    error = ""
+    categories: dict[str, str] = {}
+    try:
+        for project in cfg.effective_ado_projects:
+            raw += await c.ado.get_raw_work_items(project, 365)
+        categories = await c.ado.get_state_categories()
+    except Exception as exc:  # noqa: BLE001
+        error = f"Không đọc được work item từ ADO: {describe_exc(exc)}"
+    now = datetime.now(UTC)
+    report = change_requests.build(raw, categories=categories,
+                                   cr_tags=cfg.change_request_tags, stale_specs=stale,
+                                   days=90, now=now)
+    return {"report": report, "error": error, "now": now,
+            "item_url": lambda i: ba_view.item_url(cfg, i)}
+
+
 async def _metrics(c: Container, spec_rows: list[dict[str, Any]]) -> dict[str, Any]:
     cfg = c.config
     now = datetime.now(UTC)
@@ -197,8 +221,11 @@ def create_router() -> APIRouter:
         flash = _take_flash(request)
         data: dict[str, Any] = {"tab": tab, "tabs": TABS, "flash": flash,
                                 "dry_run": c.config.dry_run}
-        if tab in ("specs", "metrics"):
+        if tab in ("specs", "metrics", "changes"):
             data["specs"] = await _spec_rows(c)
+        if tab == "changes":
+            data["changes"] = await _changes(c, data["specs"])
+            data["cr_tags"] = c.config.change_request_tags
         if tab == "questions":
             data["groups"] = await _questions(c)
         if tab == "production":

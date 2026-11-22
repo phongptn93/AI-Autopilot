@@ -1223,6 +1223,10 @@ class Settings(BaseSettings):
     # Tags that mark a production incident. Such items jump the queue (priority +100)
     # and count as incidents on /dashboard/environments with their time to restore.
     hotfix_tags: list[str] = Field(default_factory=lambda: ["Hotfix", "Production Incident"])
+    # Tags that mark a change request (an item of type "Change Request" counts too).
+    # Read by the BA desk's Change request tab: register, volatility, and specs changed
+    # after the customer confirmed them with no CR against their item.
+    change_request_tags: list[str] = Field(default_factory=lambda: ["Change Request"])
     poll_interval_seconds: int = 30
     # ADO work-item states that are eligible for processing. The default suits the
     # Agile/Scrum/Basic templates; adjust to match your board (e.g. add "Doing",

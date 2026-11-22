@@ -16,7 +16,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
-from ai_autopilot import delivery
+from ai_autopilot import delivery, dora
 from ai_autopilot.data.entities import ExecutionStatus, PipelineState
 from ai_autopilot.logging_config import describe_exc, get_logger
 from ai_autopilot.pr_conflicts import is_conflicted
@@ -260,7 +260,62 @@ async def gather(
             max_age_days=config.delivery_max_age_days,
         ),
     )
+    lead = next((k.value for k in report.kpis if k.label == "Lead time p50"), None)
+    report.dora = await gather_dora(container, days=days, now=now,
+                                    lead_time_days=lead if report.delivered_items else None)
     return report, error
+
+
+def deploy_scopes(config) -> list[tuple[int, str]]:
+    """Distinct (pipeline id, branch) pairs this instance deploys from — the same
+    scopes the state-sync watches, so both pages count the same deploys."""
+    out: list[tuple[int, str]] = []
+    candidates = [config]
+    for ws in getattr(config, "workspaces", None) or []:
+        if not getattr(ws, "enabled", True):
+            continue
+        projects = getattr(ws, "ado_projects", None) or []
+        scoped = getattr(config, "scoped_for_project", None)
+        if projects and callable(scoped):
+            try:
+                candidates.append(scoped(projects[0]))
+            except Exception:  # noqa: BLE001
+                continue
+    for cfg in candidates:
+        branch = (getattr(cfg, "deploy_branch", "") or getattr(cfg, "base_branch", "")
+                  or "").strip()
+        pipeline = int(getattr(cfg, "deploy_pipeline_id", 0) or 0)
+        if branch and (pipeline, branch.lower()) not in {(p, b.lower()) for p, b in out}:
+            out.append((pipeline, branch))
+    return out
+
+
+async def gather_dora(container, *, days: int, now: datetime,
+                      lead_time_days: float | None = None) -> dora.DoraReport:
+    """Read every deploy scope's builds for the window. Any scope that cannot be read
+    makes the whole report ``unknown`` — a partial count would understate failures."""
+    scopes = deploy_scopes(container.config)
+    if not scopes:
+        return dora.unknown(days, "Chưa cấu hình nhánh deploy (deploy_branch / base_branch).",
+                            lead_time_days)
+    reader = getattr(container.ado, "get_deploy_builds", None)
+    if reader is None:
+        return dora.unknown(days, "Kết nối ADO không đọc được build.", lead_time_days)
+    # Start a window earlier so a failure just before the window can still be restored.
+    since = now - timedelta(days=days * 2)
+    deploys: list[dora.Deploy] = []
+    for pipeline, branch in scopes:
+        try:
+            builds = await reader(pipeline, branch, since)
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("delivery: deploy builds failed", error=describe_exc(exc))
+            builds = None
+        if builds is None:
+            return dora.unknown(
+                days, f"Không đọc được build của pipeline {pipeline or 'bất kỳ'} "
+                      f"trên nhánh {branch}.", lead_time_days)
+        deploys += dora.deploys_from_builds(builds, f"{pipeline}|{branch.lower()}")
+    return dora.compute(deploys, days=days, now=now, lead_time_days=lead_time_days)
 
 
 async def delivered_since(container, since: datetime, *, now: datetime | None = None) -> int:

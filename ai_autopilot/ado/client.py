@@ -13,7 +13,7 @@ import html
 import json
 import re
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, unquote
 
@@ -1219,6 +1219,33 @@ class AdoClient:
         if resp.status_code >= 400:
             self._log.warning("get_successful_builds failed", status=resp.status_code)
             return []
+        return resp.json().get("value") or []
+
+    async def get_deploy_builds(
+        self, definition_id: int, branch: str, since: datetime
+    ) -> list[dict[str, Any]] | None:
+        """Every completed build on ``branch`` since ``since``, whatever its result.
+
+        ``None`` (not ``[]``) when ADO could not be read: the caller must be able to
+        tell "no deploys" from "could not look" — see :mod:`ai_autopilot.dora`.
+        """
+        min_time = quote(since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), safe="")
+        query = (
+            f"build/builds?statusFilter=completed&minTime={min_time}"
+            f"&branchName=refs/heads/{quote(branch, safe='')}&$top=500"
+            f"&queryOrder=finishTimeDescending&{_API}"
+        )
+        if definition_id:
+            query += f"&definitions={definition_id}"
+        try:
+            resp = await self._http.get(self._git_url(query),
+                                        headers=await self._auth.get_auth_header())
+        except httpx.HTTPError as exc:
+            self._log.warning("get_deploy_builds request error", error=describe_exc(exc))
+            return None
+        if resp.status_code >= 400:
+            self._log.warning("get_deploy_builds failed", status=resp.status_code)
+            return None
         return resp.json().get("value") or []
 
     async def get_children(self, parent_id: int) -> list[WorkItemInfo]:

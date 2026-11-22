@@ -255,6 +255,8 @@ class DeliveryReport:
     history_since: datetime | None = None
     total_items: int = 0
     delivered_items: list[int] = field(default_factory=list)
+    # DORA metrics from the deploy pipeline; None = the gatherer did not ask.
+    dora: Any = None
 
     @property
     def flow_is_partial(self) -> bool:

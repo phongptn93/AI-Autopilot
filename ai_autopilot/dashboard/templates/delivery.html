@@ -113,6 +113,50 @@
   {% endfor %}
 </div>
 
+{% set d = report.dora %}
+{% if d %}
+{% set band = {'elite': ('Xuất sắc', 'green'), 'high': ('Cao', 'blue'), 'medium': ('Trung bình', 'amber'), 'low': ('Thấp', 'red')} %}
+{% set lv = d.levels %}
+<div class="card" id="dora">
+  <div class="card-header">
+    <h3>🚀 DORA — 4 chỉ số giao hàng</h3>
+    <span style="font-size:11px;color:var(--text-dim)">từ lịch sử build của pipeline deploy · {{ d.days }} ngày</span>
+  </div>
+  <div class="card-body">
+    {% if d.status != 'ok' %}
+    <div class="notice">⚠️ <b>Chưa đo được</b>: {{ d.reason }} Đây không phải "0 lần deploy".</div>
+    {% else %}
+    {% macro dora_badge(key) -%}
+      {%- if lv[key] -%}{% set b = band[lv[key]] %}<span class="dora-band" style="color:var(--{{ b[1] }});background:var(--{{ b[1] }}-bg)">{{ b[0] }}</span>{%- endif -%}
+    {%- endmacro %}
+    <div class="dora-grid">
+      <div><div class="dora-l">Tần suất deploy {{ dora_badge('frequency') }}</div>
+        <div class="dora-v">{{ '%g' % d.per_week }}<span class="kpi-unit">lần/tuần</span></div>
+        <div class="kpi-hint">{{ d.deploys_ok }} deploy thành công{% if d.last_deploy %} · gần nhất {{ d.last_deploy.strftime('%d/%m %H:%M') }}{% endif %}</div></div>
+      <div><div class="dora-l">Lead time p50 {{ dora_badge('lead') }}</div>
+        <div class="dora-v">{% if d.lead_time_days is not none %}{{ '%g' % d.lead_time_days }}<span class="kpi-unit">ngày</span>{% else %}—{% endif %}</div>
+        <div class="kpi-hint">từ lúc tạo tới lúc xong</div></div>
+      <div><div class="dora-l">Tỉ lệ deploy lỗi {{ dora_badge('cfr') }}</div>
+        <div class="dora-v">{% if d.change_failure_rate is not none %}{{ (d.change_failure_rate * 100) | round(1) }}<span class="kpi-unit">%</span>{% else %}—{% endif %}</div>
+        <div class="kpi-hint">{{ d.deploys_failed }} lỗi / {{ d.deploys_ok + d.deploys_failed }} lần (failed + partiallySucceeded; build bị huỷ không tính)</div></div>
+      <div><div class="dora-l">Thời gian khôi phục p50 {{ dora_badge('restore') }}</div>
+        <div class="dora-v">{% if d.restore_p50_hours is not none %}{{ '%g' % (d.restore_p50_hours | round(1)) }}<span class="kpi-unit">giờ</span>{% else %}—{% endif %}</div>
+        <div class="kpi-hint">từ deploy lỗi tới deploy xanh kế tiếp · {{ d.restore_hours | length }} lần khôi phục</div></div>
+    </div>
+    {% if d.broken_since %}
+    <div class="notice" style="border-color:var(--red);margin-top:12px">🔴 Pipeline deploy <b>đang hỏng</b> từ {{ d.broken_since.strftime('%d/%m/%Y %H:%M') }} — chưa có build xanh nào sau lần lỗi đó.</div>
+    {% endif %}
+    {% endif %}
+  </div>
+</div>
+<style>
+  .dora-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; }
+  .dora-l { font-size:12px; color:var(--text-muted); display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .dora-v { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; margin:4px 0; }
+  .dora-band { font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:999px; }
+</style>
+{% endif %}
+
 <div class="card">
   <div class="card-header">
     <h3>⚠️ Cần xử lý ({{ report.actions | length }})</h3>

@@ -135,6 +135,13 @@ The webhook endpoint filters bot-signed comments and plain chatter — only real
 | **Chất lượng lỗi (QC)** | Escape rate (found in UAT / production), reopen rate (done → active again, from recorded transitions), open-defect age and the oldest ones, time to close, the same by module — plus the **flaky-test ledger**. |
 | **Sức khỏe mã nguồn** *(Dev)* | Per repo, from git alone: hotspots (`commits × log2(lines)`), who owns which module (one author ≥ 80% → warning, worse when they have been away 30 days), and TODO / FIXME / HACK debt. The same map feeds an **ownership + hotspot hint** comment on every PR the autopilot opens (`pr_ownership_hints`). |
 
+| **Theo vai** *(team)* | One card per role — BA, PM, Dev, QC, DevSecOps — worst first: tone, the numbers that decide it, the next action and a link to that role's desk. The same lines go into the morning brief as a **🧭 Theo vai** block (`release_note_team_pulse`). |
+| **Môi trường & sự cố** *(DevSecOps)* | What each environment in `deploy_environments` (`UAT = 45 \| release`) is running — build, commit, when, the work items in it, previous deploys — plus open production incidents with age and p50 time to restore. Items tagged `hotfix_tags` jump the queue (+100 priority). |
+| **Bằng chứng tuân thủ** *(DevSecOps)* | One Markdown document per period for ISO 27001 / SOC 2 / customer security reviews: changes with PR and test results, flaky tests, every security scan with its gate verdict, open findings, accepted risk (reason, approver, expiry), SBOM files, configuration changes. Preview + download. |
+| **Bàn BA → Change request** *(BA)* | The CR register (`change_request_tags` or the *Change Request* type), p50 time to decide, requirements with ≥ 2 CRs, and specs the customer confirmed that changed afterwards with **no CR** against their item. |
+
+On each PR the autopilot opens it also comments the **regression scope** for QC (`pr_regression_hints`): earlier work items that changed the same files or modules, from the run history, with the test cases ADO links to them.
+
 All of these are deterministic reads (git, ADO, the local DB) — no model call, no tokens — and every one of them reads **"could not check"** rather than zero when its source cannot be reached.
 
 The test gate also **reruns a red suite once** (`test_gate_flaky_rerun`): failures that disappear are recorded as flaky in `<workspace>/.autopilot/flaky-tests.json` and do not block; a failure that repeats still does.

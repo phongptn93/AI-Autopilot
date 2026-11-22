@@ -26,6 +26,7 @@ from ai_autopilot.data import (
     FleetCommandRepository,
     FleetKnowledgeRepository,
     FleetWorkerRepository,
+    LiveSessionRepository,
     LoopReportRepository,
     NotificationHoldRepository,
     NotificationLogRepository,
@@ -100,6 +101,7 @@ class Container:
         self.deferred_repo = DeferredVerificationRepository(self.database)
         self.pr_reviewer_repo = PrReviewerRepository(self.database)
         self.claude_session_repo = ClaudeSessionRepository(self.database)
+        self.live_session_repo = LiveSessionRepository(self.database)
         self.audit_repo = AuditRepository(self.database)
         # Fleet: populated on a central by worker heartbeats; unused elsewhere.
         self.fleet_repo = FleetWorkerRepository(self.database)

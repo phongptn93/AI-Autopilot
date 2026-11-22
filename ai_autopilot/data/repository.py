@@ -28,6 +28,7 @@ from ai_autopilot.data.entities import (
     FleetWorker,
     HandledPrComment,
     HeldNotification,
+    LiveSession,
     LoopReport,
     MergedPr,
     NotificationLog,
@@ -206,8 +207,13 @@ class ExecutionRepository:
             record.cost_tokens = tokens
             await session.commit()
 
-    async def fail_running(self) -> int:
-        """Mark orphaned RUNNING executions (left by a crashed process) as failed."""
+    async def fail_running(self, keep: set[int] | None = None) -> int:
+        """Mark orphaned RUNNING executions (left by a crashed process) as failed.
+
+        ``keep``: record ids still owned by a live interactive session that survived the
+        restart (``LiveSession``) — those runs are not over, and failing them would put a
+        false "Interrupted" in History and a duplicate row when the session finishes.
+        """
         async with self._db.session() as session:
             rows = (
                 await session.execute(
@@ -216,6 +222,7 @@ class ExecutionRepository:
                     )
                 )
             ).scalars().all()
+            rows = [r for r in rows if r.id not in (keep or set())]
             for row in rows:
                 row.status = ExecutionStatus.FAILED
                 row.error = "Interrupted (process restarted)"
@@ -2252,6 +2259,35 @@ class PrReviewerRepository:
         async with self._db.session() as session:
             await session.execute(delete(PrReviewerState).where(PrReviewerState.pr_id == pr_id))
             await session.commit()
+
+
+class LiveSessionRepository:
+    """Durable copy of the poller's live interactive sessions (see ``LiveSession``)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def put(self, work_item_id: int, record_id: int, run_dir: str = "",
+                  profile: str = "") -> None:
+        async with self._db.session() as session:
+            row = await session.get(LiveSession, work_item_id)
+            if row is None:
+                row = LiveSession(work_item_id=work_item_id, started_at=datetime.now(UTC))
+                session.add(row)
+            row.record_id = int(record_id or 0)
+            row.run_dir = run_dir or ""
+            row.profile = profile or ""
+            await session.commit()
+
+    async def delete(self, work_item_id: int) -> None:
+        async with self._db.session() as session:
+            await session.execute(delete(LiveSession).where(
+                LiveSession.work_item_id == work_item_id))
+            await session.commit()
+
+    async def all(self) -> list[LiveSession]:
+        async with self._db.session() as session:
+            return list((await session.execute(select(LiveSession))).scalars().all())
 
 
 class ClaudeSessionRepository:

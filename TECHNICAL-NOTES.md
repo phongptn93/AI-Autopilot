@@ -321,9 +321,13 @@ Without this, merge/deploy detection silently queries the wrong project and neve
   - An in-memory `_processed` set (1-hour TTL) prevents same-cycle re-pick.
   - On startup, `requeue_in_progress` + `fail_running` recover runs left mid-flight by a
     crash; `prune_orphans` cleans scratch a crash left behind.
-- **Known gap**: the live interactive-session map (`_live`) is in-memory. It is now
-  backstopped by the `autopilot-live` tag + deterministic scratch + orphan-finalise, but
-  the DB is not yet the single source of truth for in-flight work.
+- **Live interactive sessions are durable** (v2.96.0): every write to `_live` goes
+  through `_track_live` / `_untrack_live`, which mirror it into the `live_sessions` table
+  (item, run record, scratch dir, SDLC role). On startup `_restore_live_sessions` reloads
+  them BEFORE `fail_running(keep=…)`, so a console that outlived the process keeps its
+  original run open and is finalised with the role it started with (the hand-off to the
+  next role still happens). The live tag + deterministic scratch + orphan-finalise remain
+  as the fallback for sessions with no row (e.g. started before the table existed).
 
 ### Quality log — measuring rework, and learning from it (`quality_events`, `learning.py`)
 
@@ -442,9 +446,9 @@ Server-rendered Jinja2 (no SPA). Pages: **Overview**, **Board**, **History**, **
 
 ## 14. Known gaps / roadmap (honest)
 
-- **In-flight state not fully durable** — `_live` and several dedup sets are in-memory;
-  mitigated by tags + deterministic scratch, but the DB should become the single source
-  of truth for in-flight interactive work.
+- **Dedup sets are in-memory** — `_live` is now durable (`live_sessions`, §8), but the
+  short-TTL dedup sets (`_processed`, `_quiet_warned`, `_stranded`) still reset on restart;
+  harmless (they only suppress repeats within an hour) and mitigated by the skip tags.
 - **Deploy monitor precision** — with `deploy_pipeline_id: 0` it treats *any* successful
   build on the base branch as "deployed"; exact per-item association would need ADO
   build→work-item links.
@@ -503,7 +507,8 @@ L1/L2/L3 của repo ↔ `report` / `assisted` (draft PR) / `unattended` — **kh
 - **"Get a score"** — ✅ đã có v1 (§17): rubric 0–100 + grade + gate. *Còn lại:* chưa cắm
   tín hiệu CI build + unresolved PR thread thật vào điểm (hiện dùng completion/PR/files).
 - **Circuit breaker chi phí** toàn cục (chưa tự cắt khi token nổ).
-- **Durable spine** — `_live` (session interactive) vẫn in-memory, chưa 100% xuống DB.
+- **Durable spine** — ✅ `_live` (session interactive) đã xuống DB (`live_sessions`, v2.96.0);
+  còn các tập chống lặp TTL ngắn ở in-memory (vô hại).
 
 ---
 

@@ -490,6 +490,26 @@ class ClaudeSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class LiveSession(Base):
+    """An interactive (Remote-Control) session the poller is waiting on.
+
+    The poller's ``_live`` map used to exist only in memory. A restart while a console was
+    still working then (1) marked that run FAILED "Interrupted" although the console was
+    fine, (2) recorded the finished session again as a second "(recovered)" run, and (3)
+    lost the SDLC role it was running, so the hand-off to the next role never happened.
+    One row per live item makes the DB the source of truth: a restart reloads it, keeps
+    the original run open, and finalises it with the role it started with.
+    """
+
+    __tablename__ = "live_sessions"
+
+    work_item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    record_id: Mapped[int] = mapped_column(Integer, default=0)
+    run_dir: Mapped[str] = mapped_column(String(1000), default="")
+    profile: Mapped[str] = mapped_column(String(100), default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class TeamsConversation(Base):
     """A Teams conversation (channel/chat) the bot has been added to, serialized as
     the Agents SDK's own ``Conversation`` JSON — persisted so the bot can proactively

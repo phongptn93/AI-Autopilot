@@ -301,9 +301,12 @@ class AdoPollerService(QcReporting):
 
         await self._await_credentials()
 
+        # Live interactive sessions first: they outlive the process, and their runs are
+        # NOT interrupted — reload them so fail_running leaves those rows open.
+        kept = await self._restore_live_sessions()
         # Resume: re-queue any runs left mid-flight by a previous (crashed) process.
         requeued = await self._c.state_repo.requeue_in_progress()
-        orphaned = await self._c.execution_repo.fail_running()
+        orphaned = await self._c.execution_repo.fail_running(keep=kept)
         if requeued or orphaned:
             self._log.info("resumed interrupted runs", requeued=requeued, orphaned=orphaned)
         # Best-effort: clean worktree scratch dirs orphaned by a crash.
@@ -1837,9 +1840,7 @@ class AdoPollerService(QcReporting):
             item, f"interactive:{session}", trigger_tag=self._matched_tag(item),
             profile=profile,
         )
-        self._live[item.id] = record_id
-        if profile:
-            self._live_profiles[item.id] = profile
+        await self._track_live(item.id, record_id, run_dir, profile or "")
         # Say WHAT this session was sent to do. The relay means a run is no longer
         # "the whole item" — it is one role's steps — and a reader of the work item
         # cannot see that anywhere else. Without it the same sentence appears whether
@@ -1937,8 +1938,7 @@ class AdoPollerService(QcReporting):
             run_dir = self._live_dirs.get(item_id, cfg.workspace_directory)
             item = await self._provider_for_id(item_id).get_work_item(item_id)
             if item is None:
-                self._live.pop(item_id, None)
-                self._live_profiles.pop(item_id, None)
+                await self._untrack_live(item_id)
                 # The work item is gone — nothing can reuse this session any more.
                 await c.executor.close_interactive(run_dir, item_id)
                 await c.executor.release_scratch(self._live_dirs.pop(item_id, None))
@@ -1964,7 +1964,7 @@ class AdoPollerService(QcReporting):
             # role's state, where the next role's board never looks.
             await self._apply_sdlc_handoff(item, result, self._live_profiles.pop(item_id, ""))
             self._processed[item_id] = datetime.now(UTC)
-            self._live.pop(item_id, None)
+            await self._untrack_live(item_id)
             closed = await self._close_live_session(item_id, run_dir)
             scratch = self._live_dirs.pop(item_id, None)
             if closed:
@@ -2044,8 +2044,7 @@ class AdoPollerService(QcReporting):
         result = ExecutionResult.fail(item.id, "interactive", reason)
         await c.execution_repo.complete_execution(record_id, result)
         await self._remove_live_tag(item.id)
-        self._live.pop(item.id, None)
-        self._live_profiles.pop(item.id, None)
+        await self._untrack_live(item.id)
         self._live_dirs.pop(item.id, None)
         self._quiet_warned.discard(item.id)
         # Routed through the normal failure path so this reaches a person the same way
@@ -2055,6 +2054,52 @@ class AdoPollerService(QcReporting):
         self._processed[item.id] = datetime.now(UTC)
         self._log.warning("live session gave up - closed and released", id=item.id,
                           quiet_s=int(quiet), last=last[:160])
+
+    async def _track_live(self, item_id: int, record_id: int, run_dir: str,
+                          profile: str) -> None:
+        """Register a live session in memory AND in the DB (see ``LiveSession``)."""
+        self._live[item_id] = record_id
+        if profile:
+            self._live_profiles[item_id] = profile
+        repo = getattr(self._c, "live_session_repo", None)
+        if repo is not None:
+            try:
+                await repo.put(item_id, record_id, run_dir, profile)
+            except Exception as exc:  # noqa: BLE001 — memory still holds it, as before
+                self._log.warning("live session not persisted", id=item_id,
+                                  error=describe_exc(exc))
+
+    async def _untrack_live(self, item_id: int) -> None:
+        self._live.pop(item_id, None)
+        self._live_profiles.pop(item_id, None)
+        repo = getattr(self._c, "live_session_repo", None)
+        if repo is not None:
+            try:
+                await repo.delete(item_id)
+            except Exception as exc:  # noqa: BLE001
+                self._log.warning("live session row not removed", id=item_id,
+                                  error=describe_exc(exc))
+
+    async def _restore_live_sessions(self) -> set[int]:
+        """Reload the live sessions a previous process left; their record ids."""
+        repo = getattr(self._c, "live_session_repo", None)
+        if repo is None:
+            return set()
+        try:
+            rows = await repo.all()
+        except Exception as exc:  # noqa: BLE001
+            self._log.warning("live sessions not restored", error=describe_exc(exc))
+            return set()
+        for row in rows:
+            self._live[row.work_item_id] = row.record_id
+            if row.run_dir:
+                self._live_dirs[row.work_item_id] = row.run_dir
+            if row.profile:
+                self._live_profiles[row.work_item_id] = row.profile
+        if rows:
+            self._log.info("restored live interactive sessions", count=len(rows),
+                           ids=sorted(r.work_item_id for r in rows))
+        return {r.record_id for r in rows if r.record_id}
 
     async def _close_live_session(self, item_id: int, run_dir: str) -> bool:
         """Shut the item's Remote-Control console now that it is finalised.

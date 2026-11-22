@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Autopilot Team Gap Review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: báo cáo một cột 1060px — kết luận, ma trận theo vai, việc đã làm (thẻ theo vai), lộ trình còn lại */
+:root{
+  --bg:#f5f7fa; --surface:#fff; --sunk:#eef1f6; --line:#d6dde7; --fg:#18212f; --muted:#56637a;
+  --accent:#2457c5; --accent-soft:#e4ebfa;
+  --ok:#15784a; --ok-soft:#e1f3e9; --warn:#9a5a00; --warn-soft:#fff0d9; --bad:#b0263a; --bad-soft:#fbe4e7;
+  --ba:#7a4bc4; --dev:#2457c5; --qc:#0f7a6c; --ops:#b4530a;
+  --f-body:"Be Vietnam Pro",system-ui,"Segoe UI",sans-serif; --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f141d; --surface:#161d29; --sunk:#1c2534; --line:#2b3649; --fg:#e5ebf4; --muted:#9ba8bd;
+  --accent:#7ea6f4; --accent-soft:#1c2c4a; --ok:#62cf95; --ok-soft:#133022; --warn:#f0b35a; --warn-soft:#3a2a11; --bad:#ef8a99; --bad-soft:#3c1921;
+  --ba:#b694f0; --dev:#7ea6f4; --qc:#5fd0bf; --ops:#f0a560; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141d; --surface:#161d29; --sunk:#1c2534; --line:#2b3649; --fg:#e5ebf4; --muted:#9ba8bd;
+  --accent:#7ea6f4; --accent-soft:#1c2c4a; --ok:#62cf95; --ok-soft:#133022; --warn:#f0b35a; --warn-soft:#3a2a11; --bad:#ef8a99; --bad-soft:#3c1921;
+  --ba:#b694f0; --dev:#7ea6f4; --qc:#5fd0bf; --ops:#f0a560; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.65;margin:0}
+.wrap{max-width:1060px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:36px 64px;display:grid;gap:40px}
+h1,h2,h3{margin:0;line-height:1.25;text-wrap:balance}
+h1{font-size:clamp(26px,4vw,38px);font-weight:800;letter-spacing:-.02em}
+h2{font-size:22px;font-weight:700}
+h3{font-size:16px;font-weight:700}
+p{margin:0;max-width:74ch}
+code{font-family:var(--f-mono);font-size:.85em;background:var(--sunk);padding:1px 5px;border-radius:4px}
+.eyebrow{font-family:var(--f-mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:600}
+.muted{color:var(--muted)}
+header{display:grid;gap:12px}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:13px;color:var(--muted)}
+.meta b{color:var(--fg)}
+section{display:grid;gap:14px}
+.sh{display:flex;align-items:baseline;gap:12px;border-bottom:2px solid var(--fg);padding-bottom:6px}
+.sh span{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cols4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:860px){.cols4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:760px){.cols{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:460px){.cols4{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:grid;gap:8px;min-width:0;align-content:start}
+.panel.hl{border-color:var(--accent);background:var(--accent-soft)}
+.panel ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.big{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+.role{display:inline-block;font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:4px;border:1px solid currentColor}
+.r-ba{color:var(--ba)} .r-dev{color:var(--dev)} .r-qc{color:var(--qc)} .r-ops{color:var(--ops)} .r-pm{color:var(--muted)}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:780px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+th{font-family:var(--f-mono);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--sunk);font-weight:600}
+tr:last-child td{border-bottom:0}
+tr.grp td{background:var(--sunk);font-weight:700;padding-block:7px}
+.chip{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.c-ok{background:var(--ok-soft);color:var(--ok)} .c-warn{background:var(--warn-soft);color:var(--warn)} .c-bad{background:var(--bad-soft);color:var(--bad)} .c-acc{background:var(--accent-soft);color:var(--accent)}
+.feat{display:grid;gap:10px}
+.fcard{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+@media (max-width:700px){.fcard{grid-template-columns:minmax(0,1fr)}}
+.fcard .who{display:grid;gap:6px;align-content:start}
+.fcard .who b{font-size:15px}
+.fcard .what{display:grid;gap:6px;min-width:0}
+.fcard .files{font-family:var(--f-mono);font-size:12px;color:var(--muted);word-break:break-word}
+.wave{display:grid;grid-template-columns:130px minmax(0,1fr) minmax(0,.9fr);gap:16px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+@media (max-width:760px){.wave{grid-template-columns:minmax(0,1fr)}}
+.wave .when{font-family:var(--f-mono);font-size:12px;color:var(--muted);display:grid;gap:4px;align-content:start} .wave .when b{font-family:var(--f-body);font-size:15px;color:var(--fg)}
+.wave ul{margin:0;padding-left:18px}
+.exit{font-size:13.5px;border-left:3px solid var(--accent);padding-left:10px}
+.verify{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.verify div{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--surface)}
+.verify b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.verify span{font-size:12.5px;color:var(--muted)}
+footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header>
+  <div class="eyebrow">Đánh giá gap &amp; nâng cấp · AI-Autopilot</div>
+  <h1>AI-Autopilot cho cả quy trình BA → Dev → QC → DevSecOps</h1>
+  <p class="muted">Đối chiếu AI-Autopilot với những gì một team phát triển phần mềm đầy đủ vai trò cần hằng ngày, và 12 năng lực đã code để lấp gap (bản v2.95.0 và v2.96.0). Mọi đánh giá dựa trên code thật trong repo; mỗi năng lực mới đều có test.</p>
+  <div class="meta"><span>Ngày <b>22/11/2026</b></span><span>Phạm vi <b>5 vai</b></span><span>Đã làm <b>12 năng lực</b> · 12/12 đợt</span><span>Phát hành <b>v2.95.0 + v2.96.0</b></span></div>
+</header>
+
+<section>
+  <div class="sh"><h2>Kết luận</h2><span>01</span></div>
+  <div class="cols">
+    <div class="panel"><b>Trước đợt này</b><p class="muted">Lõi rất mạnh ở <b>Dev</b> (giao việc cho AI, review, chấm điểm, học), <b>BA</b> (spec readiness, lệch spec, xác nhận khách, truy vết AC→test) và <b>bảo mật</b>. Hụt rõ nhất ở chỗ <b>đo lường</b>: QC không có chỉ số lỗi, DevSecOps không có DORA và không phân loại được lỗi CI, PM không có góc nhìn sprint.</p></div>
+    <div class="panel"><b>Đã làm (12 đợt)</b><p class="muted"><b>BA</b>: Change request · <b>PM</b>: Sprint, bàn Theo vai + bản tin sáng · <b>Dev</b>: Sức khỏe mã nguồn, gợi ý reviewer, phiên tương tác bền qua restart · <b>QC</b>: Chất lượng lỗi, test chập chờn, phạm vi regression · <b>DevSecOps</b>: DORA, phân loại lỗi CI/CD, Môi trường &amp; sự cố + hotfix đi trước, Bằng chứng tuân thủ.</p></div>
+    <div class="panel hl"><b>Nguyên tắc thiết kế</b><ul><li>Tất định, <b>không tốn token</b>: đọc từ git, ADO, DB nội bộ.</li><li>Nguồn không đọc được thì hiện <b>"chưa kiểm được"</b>, không bao giờ hiện 0.</li><li>Field ADO tuỳ process (point, giờ, severity) mà không có thì để "—".</li><li>Không thêm bước cấu hình bắt buộc.</li></ul></div>
+  </div>
+</section>
+
+<section>
+  <div class="sh"><h2>Ma trận năng lực theo vai</h2><span>02</span></div>
+  <p class="muted">Rút gọn từ bản kiểm kê đầy đủ. Chỉ ghi "Có" khi tìm thấy code thực hiện, không tính skill hoặc config đứng một mình.</p>
+  <div class="tbl"><table>
+    <thead><tr><th style="width:24%">Năng lực</th><th style="width:16%">Trạng thái</th><th>Bằng chứng / ghi chú</th></tr></thead>
+    <tbody>
+      <tr class="grp"><td colspan="3"><span class="role r-ba">BA</span></td></tr>
+      <tr><td>Nhận yêu cầu, viết / duyệt spec</td><td><span class="chip c-ok">Có</span></td><td><code>dashboard/routes/requirements.py</code>, <code>routing/decomposer.py</code></td></tr>
+      <tr><td>Độ sẵn sàng spec, AC kiểm được</td><td><span class="chip c-ok">Có</span></td><td><code>spec_readiness.py</code>, <code>ba_metrics.py</code></td></tr>
+      <tr><td>Lệch spec, câu hỏi mở, xác nhận khách</td><td><span class="chip c-ok">Có</span></td><td><code>spec_drift.py</code>, <code>assumptions.py</code>, <code>customer_pack.py</code></td></tr>
+      <tr><td>Truy vết AC → test / AC → code</td><td><span class="chip c-warn">Một phần</span></td><td>AC→test có (<code>traceability.py</code>); AC→file/commit chưa có</td></tr>
+      <tr><td>Sổ change request, spec đổi sau khi khách xác nhận</td><td><span class="chip c-acc">Mới</span></td><td><code>change_requests.py</code>, tab Change request ở Bàn BA</td></tr>
+      <tr class="grp"><td colspan="3"><span class="role r-dev">Dev</span></td></tr>
+      <tr><td>Ticket → PR, tự review, chấm điểm, xung đột</td><td><span class="chip c-ok">Có</span></td><td><code>poller.py</code>, <code>auto_reviewer.py</code>, <code>pr_scorer.py</code>, <code>conflict_resolver.py</code></td></tr>
+      <tr><td>Sức khỏe mã nguồn</td><td><span class="chip c-acc">Mới</span></td><td><code>code_health.py</code>: điểm nóng, ai nắm module nào, nợ kỹ thuật</td></tr>
+      <tr><td>Gợi ý reviewer theo người nắm code</td><td><span class="chip c-acc">Mới</span></td><td>Comment trên PR do autopilot mở (<code>pr_ownership_hints</code>)</td></tr>
+      <tr class="grp"><td colspan="3"><span class="role r-qc">QC</span></td></tr>
+      <tr><td>Sinh test case, báo kết quả, kiểm sau deploy</td><td><span class="chip c-ok">Có</span></td><td><code>poller_qc.py</code>, <code>test_report.py</code>, <code>deferred_verification.py</code></td></tr>
+      <tr><td>Chỉ số lỗi: lọt, mở lại, tuổi lỗi, thời gian đóng</td><td><span class="chip c-acc">Mới</span></td><td><code>defect_metrics.py</code>; trước chỉ có đếm lỗi lọt theo module</td></tr>
+      <tr><td>Theo dõi test chập chờn</td><td><span class="chip c-acc">Mới</span></td><td><code>flaky_tests.py</code> + test gate chạy lại một lần</td></tr>
+      <tr><td>Phạm vi regression theo file thay đổi</td><td><span class="chip c-acc">Mới</span></td><td><code>regression_scope.py</code>: comment trên PR, test case nên chạy lại</td></tr>
+      <tr class="grp"><td colspan="3"><span class="role r-ops">DevSecOps</span></td></tr>
+      <tr><td>SAST / SCA / secret / pkgguard / SBOM</td><td><span class="chip c-ok">Có</span></td><td><code>security_scan/</code>; SBOM và DAST mới chạy qua CLI</td></tr>
+      <tr><td>DORA đủ 4 chỉ số</td><td><span class="chip c-acc">Mới</span></td><td><code>dora.py</code>; trước chỉ có lead time</td></tr>
+      <tr><td>Phân loại lỗi CI/CD</td><td><span class="chip c-acc">Mới</span></td><td><code>ci_triage.py</code>; trước chỉ có skill (agent tự đọc log)</td></tr>
+      <tr><td>Môi trường dev → UAT → prod, sự cố, hotfix đi trước</td><td><span class="chip c-acc">Mới</span></td><td><code>environments.py</code>; rollback vẫn qua skill</td></tr>
+      <tr><td>Bộ bằng chứng tuân thủ (audit pack)</td><td><span class="chip c-acc">Mới</span></td><td><code>evidence_pack.py</code>, tải về .md</td></tr>
+      <tr class="grp"><td colspan="3"><span class="role r-pm">PM / Lead</span></td></tr>
+      <tr><td>Bàn giao, WIP, tải theo người, release note, ROI</td><td><span class="chip c-ok">Có</span></td><td><code>delivery.py</code>, <code>inbox.py</code>, <code>release_notes.py</code>, <code>north_star.py</code></td></tr>
+      <tr><td>Sprint: cam kết so với xong, dự báo</td><td><span class="chip c-acc">Mới</span></td><td><code>sprint.py</code></td></tr>
+      <tr><td>Bàn theo vai + bản tin sáng theo vai</td><td><span class="chip c-acc">Mới</span></td><td><code>team_pulse.py</code>, <code>/dashboard/team</code></td></tr>
+      <tr><td>Sổ rủi ro cấp dự án</td><td><span class="chip c-bad">Chưa có</span></td><td><code>risk.py</code> chỉ đánh giá phạm vi ảnh hưởng của một lần chạy</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <div class="sh"><h2>Đã làm trong đợt này</h2><span>03</span></div>
+  <div class="feat">
+    <div class="fcard"><div class="who"><span class="role r-ba">BA</span> <span class="role r-pm">PM</span><b>🏃 Sprint</b><span class="muted">/dashboard/sprint</span></div>
+      <div class="what"><p>Sprint hiện tại của team mặc định: số đã cam kết, đã xong / đang làm / chưa bắt đầu (tính theo story point nếu process có), so phần đã xong với phần thời gian đã trôi để ra <b>nhanh / đúng / chậm hơn lịch</b>. Kèm việc phát sinh sau ngày bắt đầu, giờ còn lại theo người, độ chính xác ước lượng (giờ thực tế / giờ ước lượng), phần AI làm, và việc chưa bắt đầu khi sprint đã qua 2/3.</p>
+      <p class="files">sprint.py · routes/sprint.py · ado.get_current_iteration / get_iteration_items · tests/test_sprint.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-dev">Dev</span><b>🩻 Sức khỏe mã nguồn</b><span class="muted">/dashboard/code-health</span></div>
+      <div class="what"><p>Mỗi repo, chỉ đọc từ git: <b>điểm nóng</b> (<code>số lần sửa × log₂(số dòng)</code>), <b>ai nắm module nào</b> (cảnh báo khi một người viết ≥ 80% thay đổi; nặng hơn khi người đó vắng ≥ 30 ngày), và <b>nợ kỹ thuật</b> TODO / FIXME / HACK. Repo chỉ chọn theo tên trong workspace, không nhận đường dẫn tuỳ ý.</p>
+      <p class="files">code_health.py · routes/code_health.py · tests/test_code_health.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-dev">Dev</span><b>👥 Gợi ý reviewer trên PR</b><span class="muted">pr_ownership_hints</span></div>
+      <div class="what"><p>Mỗi PR autopilot mở có một comment (thread đã đóng): ai nắm các module bị sửa, file nào là điểm nóng. Chỉ đăng khi có điều đáng chú ý. Không tự thêm reviewer vì email trong git không map chắc chắn sang ID người dùng ADO; thêm nhầm người còn tệ hơn là gợi ý đúng người.</p>
+      <p class="files">poller._post_ownership_hints · code_health.review_hints / render_hints</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-qc">QC</span><b>🐞 Chất lượng lỗi</b><span class="muted">/dashboard/defects</span></div>
+      <div class="what"><p>Tỉ lệ lỗi <b>lọt</b> (do UAT / production phát hiện), tỉ lệ <b>mở lại</b> (đã xong rồi quay lại, đếm từ lịch sử trạng thái), tuổi lỗi đang mở và danh sách lỗi mở lâu nhất, thời gian đóng lỗi, cùng các số này theo module. Chưa đủ lịch sử thì ghi rõ, không hiện 0.</p>
+      <p class="files">defect_metrics.py · routes/defects.py · HealthItem + ClosedDate, Severity · tests/test_defect_metrics.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-qc">QC</span> <span class="role r-dev">Dev</span><b>🎲 Test chập chờn</b><span class="muted">test_gate_flaky_rerun</span></div>
+      <div class="what"><p>Test gate đỏ thì chạy lại một lần. Lỗi biến mất ở lần hai là chập chờn: ghi vào <code>&lt;workspace&gt;/.autopilot/flaky-tests.json</code>, hiện trên bàn QC và không chặn PR. Lỗi lặp lại vẫn chặn. Lần chạy lại không xong thì giữ kết quả lần đầu.</p>
+      <p class="files">flaky_tests.py · execution/test_gate._rerun · tests/test_flaky_tests.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-ops">DevSecOps</span> <span class="role r-pm">PM</span><b>🚀 DORA</b><span class="muted">/dashboard/delivery</span></div>
+      <div class="what"><p>Đủ 4 chỉ số kèm mức đánh giá của DORA: tần suất deploy, lead time, tỉ lệ deploy lỗi, thời gian khôi phục. Tất cả lấy từ lịch sử build của pipeline deploy (mọi kết quả, không chỉ build xanh) nên có ngay số liệu các tháng trước, không cần migration. Pipeline đang đỏ hiện "đang hỏng từ…", không bị tính vào trung bình.</p>
+      <p class="files">dora.py · delivery_report.gather_dora · ado.get_deploy_builds · tests/test_dora.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-ops">DevSecOps</span><b>🚦 Pipeline CI/CD</b><span class="muted">/dashboard/ci</span></div>
+      <div class="what"><p>Build đỏ gần đây của mọi pipeline, mỗi build được xếp vào một nguyên nhân: biên dịch · test · tải gói · hạ tầng agent · xác thực/secret · timeout · cổng bảo mật · docker · <i>chưa rõ</i>. Phân loại dựa trên bước lỗi, lỗi runner báo và cuối log, kèm việc nên làm. Build lỗi mà cùng commit sau đó xanh thì đánh dấu chập chờn. Giới hạn 25 build, đọc tối đa 6 build cùng lúc.</p>
+      <p class="files">ci_triage.py · routes/ci.py · ado.get_builds_since / get_build_timeline / get_build_log_tail · tests/test_ci_triage.py</p></div></div>
+  </div>
+
+  <h3>Bản v2.96.0 — 6 năng lực tiếp theo</h3>
+  <div class="feat">
+    <div class="fcard"><div class="who"><span class="role r-ops">DevSecOps</span><b>🌐 Môi trường &amp; sự cố</b><span class="muted">/dashboard/environments</span></div>
+      <div class="what"><p>Mỗi môi trường khai trong <code>deploy_environments</code> (<code>UAT = 45 | release</code>) hiện <b>bản đang chạy</b>: build, commit, giờ deploy, người deploy, các work item trong bản, và các lần deploy trước. Kèm sự cố production đang mở, tuổi sự cố, thời gian khôi phục p50. Item gắn tag hotfix được <b>xử lý trước mọi việc khác</b> (+100 điểm ưu tiên).</p>
+      <p class="files">environments.py · routing/priority.py (HOTFIX_BOOST) · ado.get_build_work_item_ids · tests/test_environments.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-qc">QC</span><b>🧪 Phạm vi regression</b><span class="muted">pr_regression_hints</span></div>
+      <div class="what"><p>Mỗi PR autopilot mở có comment cho QC: những việc trước đây từng sửa <b>cùng file</b> (mạnh) hoặc <b>cùng module</b> (yếu hơn), lấy từ lịch sử chạy, và <b>test case nên chạy lại</b> gắn với chúng (link <i>Tested By</i> trên ADO). Hai repo khác nhau cùng có <code>src/app</code> không bị nhầm là một.</p>
+      <p class="files">regression_scope.py · poller._post_regression_scope · ado.get_linked_ids · tests/test_regression_scope.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-ba">BA</span><b>📝 Change request</b><span class="muted">/dashboard/ba?tab=changes</span></div>
+      <div class="what"><p>Sổ CR (tag hoặc loại Change Request) với requirement, trạng thái, tuổi, thời gian chốt p50; requirement có từ 2 CR trở lên (phạm vi chưa ổn định); và quan trọng nhất là <b>spec khách đã xác nhận nhưng đã bị sửa mà chưa có CR</b>, tức chỗ code và tài liệu đã ký lệch nhau âm thầm.</p>
+      <p class="files">change_requests.py · routes/ba._changes · tests/test_change_requests.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-ops">DevSecOps</span><b>📦 Bằng chứng tuân thủ</b><span class="muted">/dashboard/evidence</span></div>
+      <div class="what"><p>Một tài liệu Markdown cho mỗi kỳ (7–90 ngày), xem trước và tải về được: thay đổi + PR + kết quả test, test chập chờn, mọi lần quét bảo mật và kết quả cổng chặn, lỗ hổng đang mở, <b>rủi ro đã chấp nhận</b> (lý do, người duyệt, hạn; ngoại lệ không ghi lý do bị đánh dấu), SBOM, thay đổi cấu hình. Mục không có dữ liệu được ghi rõ bằng chữ.</p>
+      <p class="files">evidence_pack.py · routes/evidence.py · tests/test_evidence_pack.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-pm">PM</span> <span class="role r-ba">Mọi vai</span><b>🧭 Theo vai + bản tin sáng</b><span class="muted">/dashboard/team</span></div>
+      <div class="what"><p>Mỗi vai một thẻ (BA · PM · Dev · QC · DevSecOps), vai cần chú ý nhất đứng trước: màu trạng thái, các con số quyết định, việc cần làm, link sang trang chi tiết. Bản tin sáng trên Teams có khối <b>"🧭 Theo vai"</b> với cùng số liệu. Nguồn của vai nào lỗi thì chỉ vai đó hiện "chưa đo được".</p>
+      <p class="files">team_pulse.py · services/team_pulse_service.py · release_notes._pulse_block · tests/test_team_pulse.py</p></div></div>
+    <div class="fcard"><div class="who"><span class="role r-dev">Dev</span><b>🛟 Phiên tương tác bền qua restart</b><span class="muted">live_sessions</span></div>
+      <div class="what"><p>Trước đây restart lúc console còn chạy sẽ gây 3 lỗi: lượt chạy bị đánh <b>"Interrupted" giả</b>, có thêm <b>dòng lịch sử trùng</b>, và <b>mất bước chuyển sang vai kế tiếp</b>. Giờ phiên được lưu xuống DB, khi khởi động thì nạp lại trước khi dọn các lượt chạy dở. Đã gỡ khỏi danh sách "known gap" trong TECHNICAL-NOTES.</p>
+      <p class="files">data/entities.LiveSession · poller._track_live / _untrack_live / _restore_live_sessions · tests/test_live_sessions.py</p></div></div>
+  </div>
+
+  <h3>Kiểm chứng</h3>
+  <div class="verify">
+    <div><b>98</b><span>test mới cho 12 năng lực (logic, trang, poller, DB)</span></div>
+    <div><b>2991 / 2992</b><span>full suite đạt; 1 test mở và kill console thật trượt khi máy tải nặng, chạy riêng đạt, không thuộc phạm vi thay đổi</span></div>
+    <div><b>0</b><span>lỗi ruff · mypy giữ đúng baseline 117</span></div>
+    <div><b>v2.96.0</b><span>đã phát hành cùng v2.95.0, kèm file cài đặt</span></div>
+  </div>
+  <p class="muted">Lỗi phát hiện và sửa trong lúc làm: test pkgguard bị "bom hẹn giờ" theo ngày (có sẵn từ trước); một test đo đồng hồ trượt khi máy tải nặng; một mẫu regex bị công cụ dòng lệnh chèn ký tự điều khiển (bắt được khi rà lại); một commit lọt cổng mypy vì pipe che exit code (đã sửa ngay ở commit sau, chưa từng được push). <b>Chưa kiểm trên ADO thật</b> của dự án: các trang mới được test bằng dữ liệu mô phỏng đúng định dạng API, nên cần chạy thử trên máy có kết nối ADO. PAT cần quyền <i>Build: Read</i> và <i>Work Items: Read</i>.</p>
+</section>
+
+<section>
+  <div class="sh"><h2>Bước tiếp theo</h2><span>04</span></div>
+  <p class="muted">Cả 12 đợt trong kế hoạch đã xong. Những việc dưới đây là phần còn lại thật sự, xếp theo giá trị.</p>
+  <div class="wave"><div class="when">Ngay · ~1 ngày<b>Chạy thử trên ADO thật</b><span class="role r-ops">DevSecOps</span></div><ul><li>Bật trên một máy có kết nối DxFactory, khai <code>deploy_environments</code>, mở lần lượt 7 trang mới</li><li>So số liệu Sprint / DORA với board và pipeline thật</li></ul><div class="exit"><b>Ra khi:</b> mỗi trang ra số khớp với ADO trên 1 project thật.</div></div>
+  <div class="wave"><div class="when">~1 tuần<b>Truy vết AC → code</b><span class="role r-ba">BA</span> <span class="role r-qc">QC</span></div><ul><li>Gắn từng AC với file / commit đã thực hiện nó (hiện mới có AC → test)</li></ul><div class="exit"><b>Ra khi:</b> spec hiện được mỗi AC nằm ở file nào.</div></div>
+  <div class="wave"><div class="when">~3 ngày<b>SBOM / DAST trên dashboard</b><span class="role r-ops">DevSecOps</span></div><ul><li>Hiện mới chạy qua CLI; đưa nút tạo SBOM và kết quả DAST lên trang Bảo mật</li></ul><div class="exit"><b>Ra khi:</b> tạo SBOM từ dashboard và nó xuất hiện trong gói bằng chứng.</div></div>
+  <div class="wave"><div class="when">~1 tuần<b>Sổ rủi ro dự án</b><span class="role r-pm">PM</span></div><ul><li>Rủi ro cấp dự án có người chịu trách nhiệm, mức độ và hạn xử lý, nối với Theo vai</li></ul><div class="exit"><b>Ra khi:</b> bản tin sáng nêu được rủi ro quá hạn.</div></div>
+  <div class="wave"><div class="when">Không phải code<b>Mở lại CI GitHub Actions</b><span class="role r-dev">Dev</span></div><ul><li>Đang khoá billing từ 21/10/2026; mọi cổng kiểm hiện chạy ở máy</li></ul><div class="exit"><b>Ra khi:</b> CI chạy xanh trên main.</div></div>
+</section>
+
+<section>
+  <div class="sh"><h2>Cần chốt</h2><span>05</span></div>
+  <div class="cols">
+    <div class="panel"><b>Định nghĩa "deploy lỗi"</b><p class="muted">Hiện tính theo build deploy thất bại. Nếu muốn tính cả Bug production phát sinh trong N ngày sau deploy thì PM / BA cần chốt N và cách nhận diện Bug production.</p></div>
+    <div class="panel"><b>3 comment trên PR</b><p class="muted">Gợi ý reviewer và phạm vi regression đang bật mặc định cho PR do autopilot mở. Team thấy nhiễu thì tắt ở Thiết lập → Review PR (<code>pr_ownership_hints</code>, <code>pr_regression_hints</code>).</p></div>
+    <div class="panel"><b>Tag hotfix và change request</b><p class="muted">Mặc định <code>Hotfix</code> / <code>Production Incident</code> và <code>Change Request</code>. Nếu team đang dùng tên tag khác thì đổi ở Thiết lập, nếu không các trang sẽ không thấy item.</p></div>
+  </div>
+</section>
+
+<footer>Đánh giá trên nhánh <code>main</code> của AI-Autopilot, 22/11/2026. Kiểm kê năng lực có bằng chứng file; thời lượng là ước tính sơ bộ.</footer>
+</main>
+
+</body>
+</html>

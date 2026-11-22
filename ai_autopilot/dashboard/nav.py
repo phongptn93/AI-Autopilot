@@ -59,6 +59,9 @@ GROUPS: tuple[NavGroup, ...] = (
         NavItem("ba", "/dashboard/ba", "🗒️", "Bàn BA",
                 "Spec nào đủ chính xác để giao agent, câu hỏi nào còn mở, khách đã xác nhận "
                 "chưa, ticket production nào cứ lặp lại."),
+        NavItem("sprint", "/dashboard/sprint", "🏃", "Sprint",
+                "Sprint hiện tại: cam kết so với xong, nhanh hay chậm so với lịch, việc phát "
+                "sinh, ai còn nhiều giờ."),
         NavItem("planning", "/dashboard/planning", "🧭", "Lập kế hoạch",
                 "Chấm điểm, xếp thứ tự và hẹn giờ chạy backlog."),
         NavItem("reviews", "/dashboard/reviews", "👀", "PR Reviews",

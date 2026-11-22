@@ -672,6 +672,11 @@ class AdoClient:
             f"AND [System.ChangedDate] >= @today-{int(since_days)} "
             "ORDER BY [System.ChangedDate] DESC"
         )
+        return await self._raw_by_wiql(wiql, project, top) or []
+
+    async def _raw_by_wiql(self, wiql: str, project: str, top: int) -> list[dict] | None:
+        """Raw ``fields`` dicts (plus ``System.Id``) for a WIQL query; ``None`` when the
+        query itself failed, so a caller can tell "nothing matched" from "could not ask"."""
         try:
             resp = await self._http.post(
                 self._org_url(f"wit/wiql?{_API}"), json={"query": wiql},
@@ -679,10 +684,10 @@ class AdoClient:
             )
         except httpx.HTTPError as exc:
             self._log.warning("health WIQL request error", project=project, error=describe_exc(exc))
-            return []
+            return None
         if resp.status_code >= 400 or not resp.text.lstrip().startswith("{"):
             self._log.warning("health WIQL failed", project=project, status=resp.status_code)
-            return []
+            return None
         ids = [r["id"] for r in (resp.json().get("workItems") or [])][:top]
         out: list[dict] = []
         for start in range(0, len(ids), _MAX_IDS_PER_BATCH):
@@ -709,6 +714,41 @@ class AdoClient:
                 for wi in (batch.json().get("value") or []) if wi
             ]
         return out
+
+    async def get_current_iteration(self, project: str) -> dict[str, Any] | None:
+        """The default team's current sprint: ``{name, path, start, finish}``.
+
+        ``None`` when ADO could not be read; ``{}`` when the team has no current
+        iteration (no sprint scheduled today) — a different message for the reader.
+        """
+        url = self._url(f"work/teamsettings/iterations?$timeframe=current&{_API}", project)
+        try:
+            resp = await self._http.get(url, headers=await self._headers())
+        except httpx.HTTPError as exc:
+            self._log.warning("current iteration error", project=project, error=describe_exc(exc))
+            return None
+        if resp.status_code >= 400 or not resp.text.lstrip().startswith("{"):
+            self._log.warning("current iteration failed", project=project,
+                              status=resp.status_code)
+            return None
+        values = resp.json().get("value") or []
+        if not values:
+            return {}
+        it = values[0]
+        attrs = it.get("attributes") or {}
+        return {"name": it.get("name") or "", "path": it.get("path") or "",
+                "start": attrs.get("startDate"), "finish": attrs.get("finishDate")}
+
+    async def get_iteration_items(
+        self, project: str, path: str, top: int = 1000
+    ) -> list[dict] | None:
+        """Raw fields of every item in one iteration (the sprint backlog and its tasks)."""
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems "
+            f"WHERE [System.TeamProject] = '{_wiql_lit(project)}' "
+            f"AND [System.IterationPath] = '{_wiql_lit(path)}'"
+        )
+        return await self._raw_by_wiql(wiql, project, top)
 
     async def get_work_item(self, work_item_id: int) -> WorkItemInfo | None:
         items = await self.get_work_items_by_ids([work_item_id])

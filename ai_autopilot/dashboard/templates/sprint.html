@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .sp-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .sp-tbl th { text-align:left; padding:7px 10px; font-size:11px; text-transform:uppercase;
+               letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border); }
+  .sp-tbl td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .sp-tbl tr:last-child td { border-bottom:none; }
+  .sp-tbl .num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .sp-wrap { overflow-x:auto; }
+  .sp-section { display:flex; align-items:baseline; gap:10px; margin:24px 0 10px; flex-wrap:wrap; }
+  .sp-section h3 { margin:0; font-size:15px; }
+  .sp-section .hint { font-size:12px; color:var(--text-muted); }
+  .sp-note { font-size:13px; border:1px solid var(--border); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
+  .sp-note.warn { border-color:var(--amber,#f5a524); background:rgba(245,165,36,.08); }
+  .sp-empty { color:var(--text-dim); font-size:13px; text-align:center; padding:20px 0; }
+  .sp-dim { color:var(--text-dim); font-size:12px; }
+  .sp-bars { display:grid; gap:8px; margin:4px 0 14px; }
+  .sp-bar { display:grid; grid-template-columns:120px minmax(0,1fr) 60px; gap:10px; align-items:center; font-size:12.5px; }
+  .sp-track { height:10px; border-radius:5px; background:var(--border); overflow:hidden; }
+  .sp-fill { height:100%; border-radius:5px; background:var(--accent,#6366f1); }
+  .sp-fill.time { background:var(--text-dim); }
+  .sp-verdict { font-size:12px; font-weight:700; padding:2px 10px; border-radius:999px; }
+  .v-ahead, .v-on_track { background:var(--green-bg); color:var(--green); }
+  .v-behind { background:var(--red-bg); color:var(--red); }
+  .sp-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:16px; }
+  @media (max-width:520px) { .sp-grid { grid-template-columns:1fr; } .sp-bar { grid-template-columns:90px minmax(0,1fr) 50px; } }
+</style>
+
+{% macro wi(id) -%}
+  {%- if item_link %}<a class="table-link" href="{{ item_link }}/{{ id }}" target="_blank" rel="noopener">#{{ id }}</a>{% else %}#{{ id }}{% endif -%}
+{%- endmacro %}
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2 class="page-title">{{ page_title("sprint") }}</h2>
+    <p>Sprint hiện tại của team mặc định: đã cam kết bao nhiêu, xong bao nhiêu, nhanh hay chậm so với lịch,
+      việc phát sinh, ai còn nhiều giờ. Đọc từ ADO — không tốn token.</p>
+  </div>
+  {% if projects|length > 1 %}
+  <form method="get" action="/dashboard/sprint" style="display:flex;gap:8px;align-items:center">
+    <select name="project" class="bf-input" style="min-width:170px" aria-label="Project" onchange="this.form.submit()">
+      {% for p in projects %}<option value="{{ p }}" {% if p == project %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+    <noscript><button type="submit" class="btn-ghost">Xem</button></noscript>
+  </form>
+  {% endif %}
+</div>
+
+{% if not projects %}
+<div class="card"><div class="card-body sp-empty">Chưa cấu hình project ADO nào. Đặt ở <a class="table-link" href="/dashboard/settings">Thiết lập</a>.</div></div>
+{% elif report.status == 'unknown' %}
+<div class="sp-note warn">⚠️ <b>Chưa đo được</b>: {{ report.reason }}</div>
+{% elif report.status == 'none' %}
+<div class="sp-note">ℹ️ {{ report.reason }} Đặt ngày bắt đầu / kết thúc cho sprint ở <i>Project Settings → Team configuration → Iterations</i>.</div>
+{% else %}
+
+<div class="sp-note" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  <b style="font-size:15px">🏃 {{ report.name }}</b>
+  {% if report.start and report.finish %}<span class="sp-dim">{{ report.start.strftime('%d/%m') }} – {{ report.finish.strftime('%d/%m/%Y') }}{% if report.days_left is not none %} · còn {{ report.days_left }} ngày{% endif %}</span>{% endif %}
+  {% if report.verdict %}
+    <span class="sp-verdict v-{{ report.verdict }}">{% if report.verdict == 'ahead' %}Nhanh hơn lịch{% elif report.verdict == 'on_track' %}Đúng tiến độ{% else %}Chậm hơn lịch{% endif %}</span>
+  {% endif %}
+</div>
+
+<div class="sp-bars">
+  <div class="sp-bar"><span>Đã xong</span><div class="sp-track"><div class="sp-fill" style="width:{{ report.done_pct or 0 }}%"></div></div><b class="num">{{ report.done_pct if report.done_pct is not none else '—' }}%</b></div>
+  <div class="sp-bar"><span>Thời gian đã qua</span><div class="sp-track"><div class="sp-fill time" style="width:{{ report.elapsed_pct or 0 }}%"></div></div><b class="num">{{ report.elapsed_pct if report.elapsed_pct is not none else '—' }}%</b></div>
+</div>
+<p class="sp-dim" style="margin:-6px 0 14px">"Chậm hơn lịch" khi phần đã xong thấp hơn phần thời gian đã qua quá {{ margin }} điểm %. Tính theo {% if report.points_committed %}story point{% else %}số item{% endif %}.</p>
+
+<div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Đã cam kết</span><div class="stat-card-icon">📦</div></div>
+    <div class="stat-card-value">{{ report.committed }}</div>
+    <div class="stat-sub">{% if report.points_committed is not none %}{{ '%g' % report.points_committed }} point{% else %}item backlog (không tính task){% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Xong / đang làm / chưa bắt đầu</span><div class="stat-card-icon">✅</div></div>
+    <div class="stat-card-value">{{ report.done }}<span class="kpi-unit">/ {{ report.in_progress }} / {{ report.not_started }}</span></div>
+    <div class="stat-sub">{% if report.points_done is not none %}{{ '%g' % report.points_done }} point đã xong{% endif %}{% if report.ai_done %} · {{ report.ai_done }} có AI-Autopilot{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Phát sinh sau ngày bắt đầu</span><div class="stat-card-icon">➕</div></div>
+    <div class="stat-card-value">{{ report.added_after_start|length }}</div>
+    <div class="stat-sub">item tạo sau {{ report.start.strftime('%d/%m') if report.start else 'ngày bắt đầu' }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Giờ còn lại</span><div class="stat-card-icon">⏱️</div></div>
+    <div class="stat-card-value">{% if report.remaining_hours is not none %}{{ '%g' % report.remaining_hours }}<span class="kpi-unit">giờ</span>{% else %}—{% endif %}</div>
+    <div class="stat-sub">{% if report.estimate_accuracy is not none %}thực tế / ước lượng = {{ '%g' % report.estimate_accuracy }}×{% elif report.remaining_hours is none %}team chưa ghi giờ trên task{% else %}chưa có task xong có ước lượng{% endif %}</div>
+  </div>
+</div>
+
+<div class="sp-grid">
+<div>
+  <div class="sp-section"><h3>👥 Theo người</h3><span class="hint">nhiều giờ còn lại xếp trước</span></div>
+  <div class="card"><div class="card-body sp-wrap" style="padding:4px 8px">
+    {% if report.people %}
+    <table class="sp-tbl">
+      <thead><tr><th>Người</th><th class="num">Item</th><th class="num">Xong</th><th class="num">Giờ còn lại</th></tr></thead>
+      <tbody>
+      {% for p in report.people %}
+        <tr><td>{{ p.name }}</td><td class="num">{{ p.items }}</td><td class="num">{{ p.done }}</td>
+          <td class="num">{% if report.remaining_hours is not none %}{{ '%g' % p.remaining_hours }}{% else %}—{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="sp-empty">Sprint chưa có item nào.</div>{% endif %}
+  </div></div>
+</div>
+<div>
+  <div class="sp-section"><h3>⚠️ Có nguy cơ trễ</h3><span class="hint">chưa bắt đầu khi sprint đã qua ≥ 2/3</span></div>
+  <div class="card"><div class="card-body sp-wrap" style="padding:4px 8px">
+    {% if report.at_risk %}
+    <table class="sp-tbl">
+      <thead><tr><th>Việc</th><th>Người</th><th>Trạng thái</th></tr></thead>
+      <tbody>
+      {% for i in report.at_risk %}<tr><td>{{ wi(i.id) }} {{ i.title }}</td><td>{{ i.assigned_to or '—' }}</td><td>{{ i.state }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    {% elif report.elapsed_pct is not none and report.elapsed_pct < 66 %}<div class="sp-empty">Sprint mới qua {{ report.elapsed_pct }}% — chưa đánh giá.</div>
+    {% else %}<div class="sp-empty">Không có việc nào chưa bắt đầu. 👍</div>{% endif %}
+  </div></div>
+  {% if report.added_after_start %}
+  <div class="sp-section"><h3>➕ Phát sinh trong sprint</h3><span class="hint">tạo sau ngày bắt đầu — việc kéo vào giữa chừng từ backlog cũ không đếm được</span></div>
+  <div class="card"><div class="card-body sp-wrap" style="padding:4px 8px">
+    <table class="sp-tbl"><tbody>
+      {% for i in report.added_after_start[:15] %}<tr><td>{{ wi(i.id) }} {{ i.title }}</td><td>{{ i.type }}</td><td>{{ i.created.strftime('%d/%m') }}</td></tr>{% endfor %}
+    </tbody></table>
+  </div></div>
+  {% endif %}
+</div>
+</div>
+{% endif %}
+{% endblock %}

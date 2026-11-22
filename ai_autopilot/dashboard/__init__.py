@@ -32,6 +32,7 @@ from ai_autopilot.dashboard.routes import (
     ba,
     board,
     code_health,
+    defects,
     feedback,
     fleet,
     flow,
@@ -77,7 +78,7 @@ __all__ = [
 _AREAS = (
     auth, board, settings, loops, security, reports, reviews, planning, runs, task,
     analytics, fleet, workspaces, learning, flow, setup, requirements, inbox,
-    feedback, review, users, search, ba, code_health,
+    feedback, review, users, search, ba, code_health, defects,
 )
 
 

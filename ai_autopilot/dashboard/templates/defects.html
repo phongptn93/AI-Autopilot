@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .df-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .df-tbl th { text-align:left; padding:7px 10px; font-size:11px; text-transform:uppercase;
+               letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border); }
+  .df-tbl td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .df-tbl tr:last-child td { border-bottom:none; }
+  .df-tbl .num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .df-wrap { overflow-x:auto; }
+  .df-section { display:flex; align-items:baseline; gap:10px; margin:24px 0 10px; flex-wrap:wrap; }
+  .df-section h3 { margin:0; font-size:15px; }
+  .df-section .hint { font-size:12px; color:var(--text-muted); }
+  .df-note { font-size:13px; border:1px solid var(--border); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
+  .df-note.warn { border-color:var(--amber,#f5a524); background:rgba(245,165,36,.08); }
+  .df-chip { display:inline-block; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; white-space:nowrap; }
+  .df-esc { background:var(--red-bg); color:var(--red); }
+  .df-sev { background:var(--amber-bg); color:var(--amber); }
+  .df-dim { color:var(--text-dim); font-size:12px; }
+  .df-empty { color:var(--text-dim); font-size:13px; text-align:center; padding:20px 0; }
+  .df-old { color:var(--red); font-weight:600; }
+  .df-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:16px; }
+  @media (max-width:520px) { .df-grid { grid-template-columns:1fr; } }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2 class="page-title">{{ page_title("defects") }}</h2>
+    <p>Bàn của QC: lỗi lọt qua kiểm thử, lỗi bị mở lại, lỗi tồn lâu, module nào sinh nhiều lỗi.
+      Đọc từ ADO và lịch sử trạng thái — không tốn token.</p>
+  </div>
+  {% if projects %}
+  <form method="get" action="/dashboard/defects" style="display:flex;gap:8px;align-items:center">
+    {% if projects|length > 1 %}
+    <select name="project" class="bf-input" style="min-width:170px" aria-label="Project" onchange="this.form.submit()">
+      {% for p in projects %}<option value="{{ p }}" {% if p == project %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <select name="days" class="bf-input" style="min-width:110px" aria-label="Khoảng thời gian" onchange="this.form.submit()">
+      {% for d in windows %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
+    </select>
+    <noscript><button type="submit" class="btn-ghost">Xem</button></noscript>
+  </form>
+  {% endif %}
+</div>
+
+{% macro wi(id) -%}
+  {%- if item_link %}<a class="table-link" href="{{ item_link }}/{{ id }}" target="_blank" rel="noopener">#{{ id }}</a>{% else %}#{{ id }}{% endif -%}
+{%- endmacro %}
+{% macro pct(v) -%}{% if v is none %}—{% else %}{{ (v * 100)|round(1) }}<span class="kpi-unit">%</span>{% endif %}{%- endmacro %}
+
+{% if not projects %}
+<div class="card"><div class="card-body df-empty">Chưa cấu hình project ADO nào. Đặt ở <a class="table-link" href="/dashboard/settings">Thiết lập</a>.</div></div>
+{% elif error %}
+<div class="df-note warn">⚠️ <b>Chưa đo được</b>: {{ error }} Đây không phải "0 lỗi".</div>
+{% elif report %}
+
+<div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Lỗi mới {{ days }} ngày</span><div class="stat-card-icon">🐞</div></div>
+    <div class="stat-card-value">{{ report.raised }}</div>
+    <div class="stat-sub">{{ report.open_count }} lỗi đang mở · {{ report.closed }} đã đóng trong kỳ</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Tỉ lệ lọt (UAT / Prod)</span><div class="stat-card-icon">🚨</div></div>
+    <div class="stat-card-value">{{ pct(report.escape_rate) }}</div>
+    <div class="stat-sub">{{ report.escaped }} / {{ report.raised }} lỗi do khách hoặc UAT phát hiện</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Tỉ lệ mở lại</span><div class="stat-card-icon">🔁</div></div>
+    <div class="stat-card-value">{{ pct(report.reopen_rate) }}</div>
+    <div class="stat-sub">{% if report.reopen_measured %}{{ report.reopened }} / {{ report.closed }} lỗi đã đóng rồi quay lại{% else %}chưa đủ lịch sử trạng thái để đếm{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Tuổi lỗi đang mở p50</span><div class="stat-card-icon">⏳</div></div>
+    <div class="stat-card-value">{% if report.open_age_p50_days is not none %}{{ '%g' % report.open_age_p50_days }}<span class="kpi-unit">ngày</span>{% else %}—{% endif %}</div>
+    <div class="stat-sub">{% if report.oldest_open %}lâu nhất {{ '%g' % report.oldest_open[0].age_days }} ngày{% else %}không còn lỗi mở{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Thời gian đóng lỗi p50</span><div class="stat-card-icon">✅</div></div>
+    <div class="stat-card-value">{% if report.close_p50_days is not none %}{{ '%g' % report.close_p50_days }}<span class="kpi-unit">ngày</span>{% else %}—{% endif %}</div>
+    <div class="stat-sub">từ lúc tạo tới lúc đóng</div>
+  </div>
+</div>
+
+{% if report.severity_known and report.by_severity %}
+<p class="df-dim" style="margin:-4px 0 6px">Lỗi đang mở theo mức độ: {% for s, n in report.by_severity|dictsort %}<span class="df-chip df-sev">{{ s }}: {{ n }}</span> {% endfor %}</p>
+{% endif %}
+
+<div class="df-grid">
+<div>
+  <div class="df-section"><h3>🧩 Theo module</h3><span class="hint">Area Path · module có lỗi lọt xếp trước</span></div>
+  <div class="card"><div class="card-body df-wrap" style="padding:4px 8px">
+    {% if report.modules %}
+    <table class="df-tbl">
+      <thead><tr><th>Module</th><th class="num">Lỗi mới</th><th class="num">Lọt</th><th class="num">Đang mở</th></tr></thead>
+      <tbody>
+      {% for m in report.modules[:20] %}
+        <tr><td>{{ m.module }}</td><td class="num">{{ m.raised }}</td>
+          <td class="num">{% if m.escaped %}<span class="df-chip df-esc">{{ m.escaped }}</span>{% else %}0{% endif %}</td>
+          <td class="num">{{ m.open }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="df-empty">Không có lỗi nào trong {{ days }} ngày.</div>{% endif %}
+  </div></div>
+</div>
+<div>
+  <div class="df-section"><h3>⏳ Lỗi mở lâu nhất</h3><span class="hint">cần quyết: sửa, hạ ưu tiên hay đóng</span></div>
+  <div class="card"><div class="card-body df-wrap" style="padding:4px 8px">
+    {% if report.oldest_open %}
+    <table class="df-tbl">
+      <thead><tr><th>Lỗi</th><th>Trạng thái</th><th>Người</th><th class="num">Tuổi</th></tr></thead>
+      <tbody>
+      {% for o in report.oldest_open %}
+        <tr>
+          <td>{{ wi(o.id) }} {{ o.title }}<br><span class="df-dim">{{ o.module }}{% if o.severity %} · {{ o.severity }}{% endif %}</span>{% if o.escaped %} <span class="df-chip df-esc">lọt</span>{% endif %}</td>
+          <td>{{ o.state }}</td>
+          <td>{{ o.assigned_to or "—" }}</td>
+          <td class="num {% if o.age_days >= 30 %}df-old{% endif %}">{{ '%g' % o.age_days }} ngày</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="df-empty">Không còn lỗi nào đang mở.</div>{% endif %}
+  </div></div>
+</div>
+</div>
+
+<p class="df-dim" style="margin-top:14px">Lỗi = work item loại Bug, hoặc Requirement gắn tag BUG. "Lọt" = Found In Environment là UAT / Production
+  (hoặc Requirement tag BUG). Mở lại = đã sang Resolved / Completed rồi quay về đang làm. Lỗi đang mở được tìm trong
+  các item có thay đổi {{ lookback }} ngày gần nhất.</p>
+{% endif %}
+{% endblock %}

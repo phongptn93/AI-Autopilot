@@ -31,6 +31,8 @@ from ai_autopilot.process_health import (
 # metric that reads them simply reports nothing, rather than a misleading zero.
 _F_BLOCKED = "Microsoft.VSTS.CMMI.Blocked"
 _F_FOUND_IN_ENV = "Microsoft.VSTS.CMMI.FoundInEnvironment"
+_F_CLOSED = "Microsoft.VSTS.Common.ClosedDate"
+_F_SEVERITY = "Microsoft.VSTS.Common.Severity"
 
 
 def _parse_dt(value) -> datetime | None:
@@ -71,6 +73,8 @@ def to_health_item(fields: dict) -> HealthItem | None:
         blocked=_as_bool(fields.get(_F_BLOCKED)),
         found_in_environment=str(fields.get(_F_FOUND_IN_ENV) or ""),
         assigned_to=(assigned or {}).get("displayName", "") if isinstance(assigned, dict) else "",
+        closed=_parse_dt(fields.get(_F_CLOSED)),
+        severity=str(fields.get(_F_SEVERITY) or ""),
     )
 
 

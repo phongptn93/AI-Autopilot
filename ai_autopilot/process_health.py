@@ -64,6 +64,8 @@ class HealthItem:
     blocked: bool | None = None          # None = the project has no Blocked field
     found_in_environment: str = ""       # "" = not set / field absent
     assigned_to: str = ""
+    closed: datetime | None = None       # Microsoft.VSTS.Common.ClosedDate, when set
+    severity: str = ""                   # "" = the process has no Severity field
 
     def has_tag(self, tag: str) -> bool:
         return tag.strip().lower() in {t.strip().lower() for t in self.tags}

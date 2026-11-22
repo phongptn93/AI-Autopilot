@@ -78,6 +78,9 @@ GROUPS: tuple[NavGroup, ...] = (
         NavItem("review", "/dashboard/review", "🧭", "Phòng rà soát",
                 "Rà tài liệu BA (PRD/BRD/Spec) và báo cáo với code thật — an toàn, "
                 "không lộ mã nguồn."),
+        NavItem("code_health", "/dashboard/code-health", "🩻", "Sức khỏe mã nguồn",
+                "Điểm nóng hay sửa, ai đang nắm phần nào, TODO/FIXME tồn đọng — đọc từ "
+                "git, không tốn token."),
         NavItem("learning", "/dashboard/learning", "🧠", "Tri thức",
                 "Bài học autopilot rút ra và chia sẻ cho cả đội."),
     )),

@@ -17,7 +17,10 @@ import pytest
 from ai_autopilot.security_scan.tools import pkgguard as pg
 from ai_autopilot.security_scan.tools import registry
 
-NOW = datetime(2026, 11, 9, tzinfo=UTC)
+# Relative to the real clock: the scanner tests run PkgGuardScanner, which judges age
+# against datetime.now(). A fixed date made "2 days old" fixtures 15 days old two weeks
+# after this file was written, and the age rule changed under the test.
+NOW = datetime.now(UTC)
 
 
 class _Resp:

@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .ch-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .ch-tbl th { text-align:left; padding:7px 10px; font-size:11px; text-transform:uppercase;
+               letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border); }
+  .ch-tbl td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .ch-tbl tr:last-child td { border-bottom:none; }
+  .ch-tbl .num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .ch-path { font:12px/1.45 ui-monospace,Consolas,monospace; word-break:break-all; }
+  .ch-wrap { overflow-x:auto; }
+  .ch-bar { display:inline-block; height:6px; border-radius:3px; background:var(--accent,#6366f1);
+            vertical-align:middle; margin-right:6px; }
+  .ch-section { display:flex; align-items:baseline; gap:10px; margin:24px 0 10px; flex-wrap:wrap; }
+  .ch-section h3 { margin:0; font-size:15px; }
+  .ch-section .hint { font-size:12px; color:var(--text-muted); }
+  .ch-note { font-size:13px; border:1px solid var(--border); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
+  .ch-note.warn { border-color:var(--amber,#f5a524); background:rgba(245,165,36,.08); }
+  .ch-chip { display:inline-block; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; white-space:nowrap; }
+  .ch-away { background:var(--red-bg); color:var(--red); }
+  .ch-conc { background:var(--amber-bg); color:var(--amber); }
+  .ch-ok { color:var(--text-dim); font-size:12px; }
+  .ch-kind-FIXME, .ch-kind-HACK { background:var(--red-bg); color:var(--red); }
+  .ch-kind-XXX { background:var(--amber-bg); color:var(--amber); }
+  .ch-kind-TODO { background:var(--blue-bg); color:var(--blue); }
+  .ch-empty { color:var(--text-dim); font-size:13px; text-align:center; padding:20px 0; }
+  .ch-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:16px; }
+  @media (max-width:520px) { .ch-grid { grid-template-columns:1fr; } }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2 class="page-title">{{ page_title("code_health") }}</h2>
+    <p>Đọc thẳng từ lịch sử git — không chạy model, không tốn token. Chỗ hay sửa và dài là nơi
+      sinh lỗi, conflict và review chậm; phần chỉ một người nắm là rủi ro khi người đó vắng.</p>
+  </div>
+  {% if choices %}
+  <form method="get" action="/dashboard/code-health" style="display:flex;gap:8px;align-items:center">
+    <select name="repo" class="bf-input" style="min-width:190px" aria-label="Repo" onchange="this.form.submit()">
+      {% for r in choices %}<option value="{{ r.key }}" {% if chosen and chosen.key == r.key %}selected{% endif %}>{{ r.label }}</option>{% endfor %}
+    </select>
+    <select name="days" class="bf-input" style="min-width:110px" aria-label="Khoảng thời gian" onchange="this.form.submit()">
+      {% for d in windows %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
+    </select>
+    <noscript><button type="submit" class="btn-ghost">Xem</button></noscript>
+  </form>
+  {% endif %}
+</div>
+
+{% if unknown_repo %}
+<div class="ch-note warn">⚠️ Không có repo tên <b>{{ requested }}</b> trong các workspace đã cấu hình. Chọn một repo trong danh sách.</div>
+{% endif %}
+
+{% if not choices %}
+<div class="card"><div class="card-body ch-empty">
+  Chưa tìm thấy git repo nào. Đặt <code>workspace_directory</code> (thư mục chứa các repo) ở
+  <a class="table-link" href="/dashboard/settings">Thiết lập</a> hoặc thêm workspace ở
+  <a class="table-link" href="/dashboard/workspaces">Workspaces</a>.
+</div></div>
+{% elif report and report.status != "ok" %}
+<div class="ch-note warn">⚠️ <b>Chưa kiểm được</b> repo {{ chosen.label }}: {{ report.reason }}<br>
+  Đây không phải "repo sạch" — số liệu bên dưới không có vì git không trả lời.</div>
+{% elif report %}
+
+{% if report.reason %}<div class="ch-note warn">⚠️ {{ report.reason }}</div>{% endif %}
+
+<div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Commit {{ report.days }} ngày</span><div class="stat-card-icon">🧾</div></div>
+    <div class="stat-card-value">{{ report.commits }}</div>
+    <div class="stat-sub">{{ report.contributors }} người · {{ report.files_changed }} file đã sửa</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Điểm nóng</span><div class="stat-card-icon">🔥</div></div>
+    <div class="stat-card-value">{{ report.hotspots|length }}</div>
+    <div class="stat-sub">{% if report.hotspots %}nóng nhất: {{ report.hotspots[0].path.split('/')[-1] }}{% else %}chưa có file nào đáng chú ý{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Module rủi ro tri thức</span><div class="stat-card-icon">🧑‍🔧</div></div>
+    <div class="stat-card-value">{{ report.risky_modules|length }}</div>
+    <div class="stat-sub">{{ report.modules|selectattr("risk", "equalto", "away")|list|length }} trong đó người nắm đã vắng ≥ {{ away_days }} ngày</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Ghi chú nợ kỹ thuật</span><div class="stat-card-icon">📌</div></div>
+    <div class="stat-card-value">{{ report.marker_total }}</div>
+    <div class="stat-sub">{% for k, n in report.marker_counts.items() %}{{ k }} {{ n }}{% if not loop.last %} · {% endif %}{% else %}không có TODO / FIXME{% endfor %}</div>
+  </div>
+</div>
+
+<div class="ch-section"><h3>🔥 Điểm nóng</h3>
+  <span class="hint">điểm = số lần sửa × log₂(số dòng) — sửa nhiều và dài thì đáng tách nhỏ hoặc thêm test trước</span></div>
+<div class="card"><div class="card-body ch-wrap" style="padding:4px 8px">
+  {% if report.hotspots %}
+  {% set top = report.hotspots[0].score %}
+  <table class="ch-tbl">
+    <thead><tr><th>File</th><th class="num">Điểm</th><th class="num">Lần sửa</th><th class="num">Dòng</th><th class="num">Dòng thay đổi</th><th class="num">Người sửa</th><th class="num">Sửa gần nhất</th></tr></thead>
+    <tbody>
+    {% for h in report.hotspots %}
+      <tr>
+        <td class="ch-path">{{ h.path }}</td>
+        <td class="num"><span class="ch-bar" style="width:{{ (60 * h.score / top)|round|int if top else 0 }}px"></span>{{ h.score }}</td>
+        <td class="num">{{ h.commits }}</td>
+        <td class="num">{{ "{:,}".format(h.lines) }}</td>
+        <td class="num">{{ "{:,}".format(h.churn) }}</td>
+        <td class="num">{{ h.authors }}</td>
+        <td class="num">{{ h.last_changed.strftime('%d/%m/%Y') }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="ch-empty">Không có file nào được sửa trong {{ report.days }} ngày.</div>{% endif %}
+</div></div>
+
+<div class="ch-grid">
+<div>
+  <div class="ch-section"><h3>🧑‍🔧 Ai nắm phần nào</h3>
+    <span class="hint">cảnh báo khi một người viết ≥ {{ share_limit }}% thay đổi của module có ≥ {{ min_commits }} commit</span></div>
+  <div class="card"><div class="card-body ch-wrap" style="padding:4px 8px">
+    {% if report.modules %}
+    <table class="ch-tbl">
+      <thead><tr><th>Module</th><th>Người nắm chính</th><th class="num">Tỉ lệ</th><th class="num">Người</th><th class="num">Commit</th><th>Rủi ro</th></tr></thead>
+      <tbody>
+      {% for m in report.modules[:20] %}
+        <tr>
+          <td class="ch-path">{{ m.module }}</td>
+          <td>{{ m.main_author }}{% if m.main_last_seen %}<br><span class="ch-ok">commit cuối {{ m.main_last_seen.strftime('%d/%m/%Y') }}</span>{% endif %}</td>
+          <td class="num">{{ (m.main_share * 100)|round|int }}%</td>
+          <td class="num">{{ m.authors }}</td>
+          <td class="num">{{ m.commits }}</td>
+          <td>{% if m.risk == "away" %}<span class="ch-chip ch-away">Người nắm đã vắng</span>
+              {% elif m.risk == "concentrated" %}<span class="ch-chip ch-conc">Chỉ một người nắm</span>
+              {% else %}<span class="ch-ok">ổn</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if report.modules|length > 20 %}<div class="ch-ok" style="padding:6px 10px">… và {{ report.modules|length - 20 }} module khác, không có rủi ro được xếp sau.</div>{% endif %}
+    {% else %}<div class="ch-empty">Chưa có thay đổi nào trong {{ report.days }} ngày.</div>{% endif %}
+  </div></div>
+</div>
+
+<div>
+  <div class="ch-section"><h3>📌 Nợ kỹ thuật đã ghi</h3>
+    <span class="hint">TODO / FIXME / HACK / XXX trong code hiện tại, việc gấp xếp trước</span></div>
+  <div class="card"><div class="card-body ch-wrap" style="padding:4px 8px">
+    {% if report.markers %}
+    <table class="ch-tbl">
+      <thead><tr><th>Loại</th><th>Vị trí</th><th>Nội dung</th></tr></thead>
+      <tbody>
+      {% for mk in report.markers[:25] %}
+        <tr>
+          <td><span class="ch-chip ch-kind-{{ mk.kind }}">{{ mk.kind }}</span></td>
+          <td class="ch-path">{{ mk.path }}:{{ mk.line }}</td>
+          <td style="font-size:12.5px">{{ mk.text }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if report.marker_files %}
+    <div class="ch-ok" style="padding:8px 10px">Nhiều nhất: {% for path, n in report.marker_files[:5] %}<span class="ch-path">{{ path }}</span> ({{ n }}){% if not loop.last %} · {% endif %}{% endfor %}</div>
+    {% endif %}
+    {% else %}<div class="ch-empty">Không có TODO / FIXME nào.</div>{% endif %}
+  </div></div>
+</div>
+</div>
+
+<p class="ch-ok" style="margin-top:14px">Repo {{ chosen.label }} @ <code>{{ report.head }}</code> · quét lúc
+  {{ report.generated_at.strftime('%H:%M %d/%m/%Y') }} UTC · bỏ qua lockfile, file sinh tự động, migration, thư mục build / vendor.
+  Kết quả được giữ cho tới khi repo có commit mới.</p>
+{% endif %}
+{% endblock %}

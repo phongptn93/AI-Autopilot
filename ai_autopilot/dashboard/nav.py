@@ -101,6 +101,9 @@ GROUPS: tuple[NavGroup, ...] = (
                 "nên làm."),
         NavItem("reports", "/dashboard/reports", "🛡️", "Báo cáo rà soát",
                 "Kết quả các agent rà soát định kỳ — tạo work item từ phát hiện."),
+        NavItem("evidence", "/dashboard/evidence", "📦", "Bằng chứng tuân thủ",
+                "Một tài liệu cho mỗi kỳ: thay đổi + PR + test, quét bảo mật, rủi ro đã chấp "
+                "nhận, SBOM, thay đổi cấu hình — tải về được."),
         NavItem("audit", "/dashboard/audit", "🧾", "Nhật ký thao tác",
                 "Ai đổi gì, khi nào: cấu hình, lệnh, nút bấm trên dashboard."),
     )),

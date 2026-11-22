@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .ev-doc { border:1px solid var(--border); border-radius:12px; padding:18px 22px; background:var(--bg-card); overflow-x:auto; }
+  .ev-doc table { border-collapse:collapse; font-size:12.5px; margin:8px 0 14px; min-width:640px; }
+  .ev-doc th, .ev-doc td { border:1px solid var(--border); padding:5px 8px; text-align:left; vertical-align:top; }
+  .ev-doc th { background:var(--bg); font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); }
+  .ev-doc h1 { font-size:19px; margin:0 0 10px; }
+  .ev-doc h2 { font-size:15px; margin:20px 0 6px; padding-top:10px; border-top:1px solid var(--border); }
+  .ev-doc p, .ev-doc li { font-size:13.5px; line-height:1.6; }
+</style>
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2 class="page-title">{{ page_title("evidence") }}</h2>
+    <p>Một tài liệu cho mỗi kỳ, đọc được mà không cần mở dashboard: thay đổi đã giao kèm PR và test, các lần quét bảo mật
+      và kết quả cổng chặn, rủi ro đã chấp nhận (ai duyệt, vì sao, tới khi nào), SBOM, thay đổi cấu hình. Dùng cho
+      ISO 27001 / SOC 2 / rà soát bảo mật của khách.</p>
+  </div>
+  <form method="get" action="/dashboard/evidence" style="display:flex;gap:8px;align-items:center">
+    <select name="days" class="bf-input" style="min-width:110px" aria-label="Khoảng thời gian" onchange="this.form.submit()">
+      {% for d in windows %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
+    </select>
+    <a class="btn-primary" href="/dashboard/evidence/download?days={{ days }}">⬇️ Tải về (.md)</a>
+  </form>
+</div>
+
+<div class="ev-doc">{{ preview|safe }}</div>
+{% endblock %}

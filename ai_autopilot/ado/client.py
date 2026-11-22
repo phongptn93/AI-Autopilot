@@ -1312,6 +1312,22 @@ class AdoClient:
             return None
         return resp.json().get("value") or []
 
+    async def get_build_work_item_ids(self, build_id: int, top: int = 100) -> list[int] | None:
+        """Ids of the work items ADO associates with one build (its changes' links)."""
+        url = self._git_url(f"build/builds/{int(build_id)}/workitems?$top={int(top)}&{_API}")
+        try:
+            resp = await self._http.get(url, headers=await self._auth.get_auth_header())
+        except httpx.HTTPError as exc:
+            self._log.warning("build work items error", build=build_id, error=describe_exc(exc))
+            return None
+        if resp.status_code >= 400:
+            return None
+        out: list[int] = []
+        for ref in resp.json().get("value") or []:
+            with contextlib.suppress(TypeError, ValueError):
+                out.append(int(ref.get("id")))
+        return out
+
     async def get_build_timeline(self, build_id: int) -> dict[str, Any] | None:
         """A build's timeline (stages / jobs / tasks with results and issues)."""
         url = self._git_url(f"build/builds/{int(build_id)}/timeline?{_API}")

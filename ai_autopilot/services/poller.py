@@ -471,7 +471,7 @@ class AdoPollerService(QcReporting):
         """
         c, cfg = self._c, self._config
         if not cfg.dependency_scheduling_enabled or not new_items:
-            return sort_by_priority(new_items)
+            return sort_by_priority(new_items, cfg.hotfix_tags)
 
         candidate_ids = {i.id for i in new_items}
         try:
@@ -479,7 +479,7 @@ class AdoPollerService(QcReporting):
         except Exception as exc:  # noqa: BLE001 — never let scheduling break the poll
             self._log.warning("link-graph fetch failed — plain priority order",
                               error=describe_exc(exc))
-            return sort_by_priority(new_items)
+            return sort_by_priority(new_items, cfg.hotfix_tags)
 
         related = _symmetrize(related)
         if cfg.sibling_conflict_scheduling:
@@ -528,6 +528,7 @@ class AdoPollerService(QcReporting):
             active_ids=active_ids,
             busy_ids=live_ids,
             max_dispatch=cfg.scheduler_max_dispatch or None,
+            hotfix_tags=cfg.hotfix_tags,
         )
 
         # Publish the decision for the Planning dashboard (ready order + why deferred).

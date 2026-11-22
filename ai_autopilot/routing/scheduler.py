@@ -49,6 +49,7 @@ def plan_schedule(
     active_ids: Set[int] | None = None,
     busy_ids: Set[int] | None = None,
     max_dispatch: int | None = None,
+    hotfix_tags: tuple[str, ...] | list[str] | None = None,
 ) -> SchedulePlan:
     """Split ``items`` into (ready, deferred) using the link graph.
 
@@ -85,7 +86,8 @@ def plan_schedule(
     claimed: set[int] = set(busy_ids or set())
 
     plan = SchedulePlan()
-    for item in sort_by_priority(items):
+    for item in (sort_by_priority(items, hotfix_tags) if hotfix_tags is not None
+                 else sort_by_priority(items)):
         # 1) Hard order: every predecessor must be done.
         unmet = {p for p in predecessors.get(item.id, set()) if p in active}
         if unmet:

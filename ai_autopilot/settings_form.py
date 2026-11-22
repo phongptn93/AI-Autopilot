@@ -254,6 +254,10 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "branch."),
     Field("deploy_branch", "Branch deploy", "text", "🔀 Tự chuyển state",
           "Branch mà build deploy chạy trên đó (trống = branch gốc)."),
+    Field("deploy_environments", "🌐 Các môi trường", "list", "🔀 Tự chuyển state",
+          "Mỗi dòng một môi trường: <code>Tên = ID pipeline | branch</code>, ví dụ "
+          "<code>UAT = 45 | release</code>. Chỉ để hiển thị bản đang chạy ở trang Môi trường & sự "
+          "cố — không đổi state. Trống = dùng pipeline deploy ở trên."),
     # ── Execution & Autonomy ──
     Field("execution_mode", "Chế độ chạy", "select", "⚙️ Thực thi & mức tự chủ",
           "interactive = mở một phiên Claude Remote-Control cho mỗi task, bạn có thể /rc vào để "
@@ -402,6 +406,9 @@ _BASE_FIELDS: tuple[Field, ...] = (
           "🔁 Review PR & phản hồi",
           "Thêm vào mọi PR, ngoài assignee. Là GUID định danh ADO, mỗi dòng một — API reviewer "
           "dùng id, không dùng email."),
+    Field("hotfix_tags", "🚨 Tag sự cố production (hotfix)", "list", "🔁 Review PR & phản hồi",
+          "Item gắn một trong các tag này là sự cố production: được xử lý trước mọi việc khác "
+          "(+100 điểm ưu tiên) và hiện ở trang Môi trường & sự cố."),
     Field("pr_ownership_hints", "🩻 Gợi ý reviewer theo người nắm code", "bool",
           "🔁 Review PR & phản hồi",
           "Comment lên PR autopilot mở: ai nắm các module bị sửa (theo lịch sử git) và file nào là "

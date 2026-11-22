@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .main { max-width: none; }
+  .en-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; }
+  .en-card { border:1px solid var(--border); border-radius:12px; padding:14px 16px; background:var(--bg-card); display:grid; gap:8px; min-width:0; align-content:start; }
+  .en-name { display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+  .en-name b { font-size:16px; }
+  .en-dim { color:var(--text-dim); font-size:12px; }
+  .en-build { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; word-break:break-all; }
+  .en-list { margin:0; padding-left:18px; font-size:13px; display:grid; gap:2px; }
+  .en-hist { font-size:12px; color:var(--text-muted); display:grid; gap:2px; }
+  .en-note { font-size:13px; border:1px solid var(--border); border-radius:9px; padding:10px 14px; margin-bottom:14px; }
+  .en-note.warn { border-color:var(--amber,#f5a524); background:rgba(245,165,36,.08); }
+  .en-section { display:flex; align-items:baseline; gap:10px; margin:26px 0 10px; flex-wrap:wrap; }
+  .en-section h3 { margin:0; font-size:15px; }
+  .en-section .hint { font-size:12px; color:var(--text-muted); }
+  .en-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .en-tbl th { text-align:left; padding:7px 10px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); border-bottom:1px solid var(--border); }
+  .en-tbl td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .en-tbl tr:last-child td { border-bottom:none; }
+  .en-tbl .num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .en-old { color:var(--red); font-weight:600; }
+  .en-empty { color:var(--text-dim); font-size:13px; text-align:center; padding:18px 0; }
+</style>
+
+{% macro wi(id) -%}
+  {%- if item_link %}<a class="table-link" href="{{ item_link }}/{{ id }}" target="_blank" rel="noopener">#{{ id }}</a>{% else %}#{{ id }}{% endif -%}
+{%- endmacro %}
+
+<div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap">
+  <div>
+    <h2 class="page-title">{{ page_title("environments") }}</h2>
+    <p>Mỗi môi trường đang chạy bản nào, gồm những việc gì — và sự cố production đang mở, khôi phục mất bao lâu.
+      Đọc từ build deploy và work item trên ADO.</p>
+  </div>
+  {% if connected %}
+  <form method="get" action="/dashboard/environments" style="display:flex;gap:8px;align-items:center">
+    {% if projects|length > 1 %}
+    <select name="project" class="bf-input" style="min-width:170px" aria-label="Project" onchange="this.form.submit()">
+      {% for p in projects %}<option value="{{ p }}" {% if p == project %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <select name="days" class="bf-input" style="min-width:110px" aria-label="Khoảng thời gian" onchange="this.form.submit()">
+      {% for d in windows %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} ngày</option>{% endfor %}
+    </select>
+    <noscript><button type="submit" class="btn-ghost">Xem</button></noscript>
+  </form>
+  {% endif %}
+</div>
+
+{% if not connected %}
+<div class="card"><div class="card-body en-empty">Chưa kết nối Azure DevOps (tổ chức + PAT). Đặt ở <a class="table-link" href="/dashboard/settings">Thiết lập</a>.</div></div>
+{% else %}
+
+<div class="en-section"><h3>🌐 Môi trường</h3>
+  <span class="hint">{% if configured_envs %}khai ở <code>deploy_environments</code>{% else %}chưa khai môi trường — đang dùng pipeline deploy chung. Khai từng môi trường (<code>UAT = 45 | release</code>) ở Thiết lập{% endif %}</span></div>
+{% if envs %}
+<div class="en-grid">
+  {% for e in envs %}
+  <div class="en-card">
+    <div class="en-name"><b>{{ e.spec.name }}</b><span class="en-dim">{{ e.spec.branch }}{% if e.spec.pipeline %} · pipeline {{ e.spec.pipeline }}{% endif %}</span></div>
+    {% if e.status == 'unknown' %}
+      <div class="en-note warn" style="margin:0">⚠️ Chưa đọc được build của môi trường này.</div>
+    {% elif e.status == 'empty' %}
+      <div class="en-dim">Chưa có lần deploy thành công nào trong 180 ngày.</div>
+    {% else %}
+      <div class="en-build">{% if e.current.url %}<a class="table-link" href="{{ e.current.url }}" target="_blank" rel="noopener">{{ e.current.number or e.current.build_id }}</a>{% else %}{{ e.current.number or e.current.build_id }}{% endif %}</div>
+      <div class="en-dim">{% if e.current.finished %}deploy {{ e.current.finished.strftime('%d/%m/%Y %H:%M') }} · {{ e.age_days }} ngày trước{% endif %}{% if e.current.commit %} · <code>{{ e.current.commit[:8] }}</code>{% endif %}{% if e.current.requested_for %} · {{ e.current.requested_for }}{% endif %}</div>
+      {% if e.items %}
+      <div class="en-dim" style="margin-top:4px">Việc trong bản này ({{ e.items|length }}):</div>
+      <ul class="en-list">{% for id, title in e.items[:8] %}<li>{{ wi(id) }} {{ title }}</li>{% endfor %}</ul>
+      {% if e.items|length > 8 %}<div class="en-dim">… và {{ e.items|length - 8 }} việc khác</div>{% endif %}
+      {% else %}<div class="en-dim">ADO không liên kết work item nào với build này.</div>{% endif %}
+      {% if e.history|length > 1 %}
+      <div class="en-hist"><span>Các lần deploy trước:</span>
+        {% for d in e.history[1:] %}<span>{{ d.number or d.build_id }}{% if d.finished %} · {{ d.finished.strftime('%d/%m %H:%M') }}{% endif %}</span>{% endfor %}</div>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}<div class="card"><div class="card-body en-empty">Chưa có môi trường: đặt <code>deploy_branch</code> hoặc <code>deploy_environments</code>.</div></div>{% endif %}
+
+<div class="en-section"><h3>🚨 Sự cố production</h3>
+  <span class="hint">lỗi có Found In Environment = Production, hoặc gắn tag {{ hotfix_tags|join(' / ') }} — các item này được autopilot xử lý trước mọi việc khác</span></div>
+{% if error %}
+<div class="en-note warn">⚠️ <b>Chưa đo được</b>: {{ error }}</div>
+{% elif incidents %}
+<div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Đang mở</span><div class="stat-card-icon">🚨</div></div>
+    <div class="stat-card-value">{{ incidents.open|length }}</div>
+    <div class="stat-sub">{% if incidents.open %}lâu nhất {{ '%g' % incidents.open[0].age_days }} ngày{% else %}không có sự cố mở{% endif %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Phát sinh {{ days }} ngày</span><div class="stat-card-icon">📈</div></div>
+    <div class="stat-card-value">{{ incidents.opened }}</div>
+    <div class="stat-sub">sự cố mới được tạo</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-card-header"><span class="stat-card-label">Khôi phục p50</span><div class="stat-card-icon">⏱️</div></div>
+    <div class="stat-card-value">{% if incidents.restore_p50_days is not none %}{{ '%g' % incidents.restore_p50_days }}<span class="kpi-unit">ngày</span>{% else %}—{% endif %}</div>
+    <div class="stat-sub">từ lúc tạo tới lúc đóng · {{ incidents.restore_days|length }} sự cố</div>
+  </div>
+</div>
+<div class="card"><div class="card-body" style="padding:4px 8px;overflow-x:auto">
+  {% if incidents.open %}
+  <table class="en-tbl">
+    <thead><tr><th>Sự cố</th><th>Trạng thái</th><th>Người</th><th class="num">Tuổi</th></tr></thead>
+    <tbody>
+    {% for i in incidents.open %}
+      <tr><td>{{ wi(i.id) }} {{ i.title }}{% if i.severity %}<br><span class="en-dim">{{ i.severity }}</span>{% endif %}</td><td>{{ i.state }}</td><td>{{ i.assigned_to or '—' }}</td>
+        <td class="num {% if i.age_days >= 2 %}en-old{% endif %}">{{ '%g' % i.age_days }} ngày</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="en-empty">Không có sự cố production nào đang mở. 👍</div>{% endif %}
+</div></div>
+{% endif %}
+{% endif %}
+{% endblock %}

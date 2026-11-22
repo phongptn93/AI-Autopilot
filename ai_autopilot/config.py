@@ -1215,6 +1215,14 @@ class Settings(BaseSettings):
     on_deploy_state: str = ""
     deploy_pipeline_id: int = 0     # ADO build definition id (0 = any build on the branch)
     deploy_branch: str = ""         # branch the deploy builds run on (blank = base_branch)
+    # Named environments, one per line: "<Name> = <pipeline id> | <branch>" (pipeline 0 =
+    # any build on the branch), e.g. "UAT = 45 | release", "Production = 46 | main".
+    # Read-only: shows what each environment is running on /dashboard/environments.
+    # Blank = one environment derived from deploy_pipeline_id / deploy_branch.
+    deploy_environments: list[str] = Field(default_factory=list)
+    # Tags that mark a production incident. Such items jump the queue (priority +100)
+    # and count as incidents on /dashboard/environments with their time to restore.
+    hotfix_tags: list[str] = Field(default_factory=lambda: ["Hotfix", "Production Incident"])
     poll_interval_seconds: int = 30
     # ADO work-item states that are eligible for processing. The default suits the
     # Agile/Scrum/Basic templates; adjust to match your board (e.g. add "Doing",

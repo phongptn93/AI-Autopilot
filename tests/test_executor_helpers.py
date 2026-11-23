@@ -91,8 +91,13 @@ async def test_close_interactive_kills_the_launched_console(tmp_path):
     import sys
 
     session = "autopilot-91234"
+    # Launched the way production launches a console (proc.py: its own session on POSIX).
+    # close_interactive kills the process GROUP; a sleeper left in the test runner's group
+    # is not a group leader, killpg(pid) finds nothing, and the test then waits out its
+    # timeout — which looked like a flaky test under load and was a wrong fixture.
     proc = subprocess.Popen(  # noqa: ASYNC220 — a real OS process is the point here
-        [sys.executable, "-c", f"import time; time.sleep(120)  # {session}"]
+        [sys.executable, "-c", f"import time; time.sleep(120)  # {session}"],
+        start_new_session=sys.platform != "win32",
     )
     try:
         cfg = Settings(workspace_directory=str(tmp_path / "ws"))

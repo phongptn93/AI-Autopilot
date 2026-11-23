@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -56,6 +57,10 @@ def _run_helper(tmp_path: Path, *, pip_script: str, version: str, target: str,
 
 def test_helper_waits_for_the_parent_then_installs_and_relaunches(tmp_path):
     parent = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
+    # On POSIX an exited child stays a zombie until reaped, and a zombie still
+    # answers kill(pid, 0) — the helper would wait for a "parent" that is gone.
+    # A real parent is reaped by init; reap this one the same way.
+    threading.Thread(target=parent.wait, daemon=True).start()
     started = time.monotonic()
     status, marker = _run_helper(tmp_path, pip_script="print('Successfully installed')",
                                  version="9.9.9", target="9.9.9", parent=parent.pid)

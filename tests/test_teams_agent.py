@@ -9,12 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import importlib.util
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+
+import pytest
 
 import ai_autopilot.execution.claude_client as claude_client
 from ai_autopilot import delivery, teams_agent
 from ai_autopilot.config import Settings
+
+# The Teams SDK is pinned for Python >= 3.12 only (requirements-lock.txt), so a
+# 3.11 environment legitimately lacks it; these tests cannot run there.
+needs_teams_sdk = pytest.mark.skipif(
+    importlib.util.find_spec("microsoft_agents") is None,
+    reason="microsoft_agents (teams-bot extra) is not installed on this Python",
+)
 
 
 class _FakeContext:
@@ -459,6 +469,7 @@ class _FakeDeferral:
         )
 
 
+@needs_teams_sdk
 async def test_deferred_turn_acks_instantly_and_answers_in_background(monkeypatch):
     """The regression that made the bot feel frozen: the messaging endpoint only returns
     HTTP 200 once the turn handler finishes, so an inline 120s Claude call blew past the
@@ -496,6 +507,7 @@ async def test_deferred_turn_acks_instantly_and_answers_in_background(monkeypatc
     assert [a.text for a in defer.app.proactive.sent] == ["Dạ PR !2470 đang chờ review ạ."]
 
 
+@needs_teams_sdk
 async def test_deferred_failure_is_reported_not_swallowed(monkeypatch):
     """A detached task that raises must still tell the user something — otherwise the
     turn "succeeded" and the reply simply never arrives."""
@@ -668,6 +680,7 @@ async def test_redelivered_activity_is_ignored():
     assert len(sent) == 1  # second delivery skipped
 
 
+@needs_teams_sdk
 async def test_digest_sends_to_every_stored_conversation():
     """Guards the double-prefix bug: ``all_keys`` yields already-prefixed storage keys,
     so passing one to ``get_conversation`` (which prefixes again) missed every time and
@@ -1258,6 +1271,7 @@ def test_digest_warns_when_history_does_not_cover_the_window():
     assert "chuẩn dần" not in teams_agent.build_digest(_delivery_report(), _LINK_CFG)
 
 
+@needs_teams_sdk
 async def test_digest_still_sends_when_the_report_cannot_be_built(monkeypatch):
     """A silent digest is indistinguishable from a quiet week — the absence of a
     scheduled message must never be the message."""
@@ -1286,6 +1300,7 @@ async def test_digest_still_sends_when_the_report_cannot_be_built(monkeypatch):
     assert "ADO unreachable" in sent[0]
 
 
+@needs_teams_sdk
 async def test_digest_reads_the_same_report_the_dashboard_renders(monkeypatch):
     """One gatherer, so a number cannot change depending on where it is read."""
     report = _delivery_report(actions=[_action(delivery.KIND_MERGE_READY)])

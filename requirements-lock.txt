@@ -51,9 +51,9 @@ msal==1.39.0 ; python_full_version >= '3.12'  # via microsoft-agents-authenticat
 multidict==7.2.1 ; python_full_version >= '3.12'  # via aiohttp, yarl
 mypy==2.4.0               # via ai-autopilot (pyproject.toml)
 mypy-extensions==1.1.0    # via mypy
-opentelemetry-api==1.45.1  # via fastapi, mcp, microsoft-agents-hosting-core, microsoft-teams-api, opentelemetry-sdk, opentelemetry-semantic-conventions
-opentelemetry-sdk==1.45.1 ; python_full_version >= '3.12'  # via microsoft-agents-hosting-core
-opentelemetry-semantic-conventions==0.66b1 ; python_full_version >= '3.12'  # via opentelemetry-sdk
+opentelemetry-api==1.45.2  # via fastapi, mcp, microsoft-agents-hosting-core, microsoft-teams-api, opentelemetry-sdk, opentelemetry-semantic-conventions
+opentelemetry-sdk==1.45.2 ; python_full_version >= '3.12'  # via microsoft-agents-hosting-core
+opentelemetry-semantic-conventions==0.66b2 ; python_full_version >= '3.12'  # via opentelemetry-sdk
 packaging==26.3           # via pytest
 pathspec==1.1.1           # via mypy
 pluggy==1.7.0             # via pytest, pytest-cov
@@ -65,7 +65,7 @@ pydantic-core==2.50.1     # via pydantic
 pydantic-settings==2.16.1  # via ai-autopilot (pyproject.toml)
 pygments==2.21.0          # via pytest
 pyjwt==2.15.1             # via mcp, microsoft-agents-hosting-core, microsoft-teams-api, msal
-pypdf==6.21.2             # via ai-autopilot (pyproject.toml)
+pypdf==6.21.4             # via ai-autopilot (pyproject.toml)
 pytest==9.1.1             # via pytest-asyncio, pytest-cov, pytest-xdist, ai-autopilot (pyproject.toml)
 pytest-asyncio==1.4.0     # via ai-autopilot (pyproject.toml)
 pytest-cov==7.1.0         # via ai-autopilot (pyproject.toml)

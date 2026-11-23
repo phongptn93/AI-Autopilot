@@ -7,9 +7,17 @@ resolver hands the SDK a native claude.exe instead, when one is on the machine.
 
 from __future__ import annotations
 
+import sys
+
+import pytest
+
 from ai_autopilot.config import Settings
 from ai_autopilot.doctor import ERROR, OK, check_claude_cli
 from ai_autopilot.execution import claude_client as cc
+
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32", reason="fakes os.name == 'nt'; pathlib cannot follow on POSIX"
+)
 
 
 def _windows(monkeypatch, tmp_path, on_path: str):

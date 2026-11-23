@@ -1162,6 +1162,25 @@ async def test_scan_cache_invalidate_forces_a_rescan():
     assert await cache.blocking(lambda: _async_value(2)) == 2
 
 
+async def test_scan_cache_invalidate_holds_even_just_after_boot(monkeypatch):
+    """monotonic() counts from boot (Windows: uptime). With the clock under one TTL —
+    a fresh CI runner, a host that just restarted — "last scanned at 0.0" still read as
+    fresh, so an invalidated board kept serving the card where it used to be."""
+    from types import SimpleNamespace
+
+    from ai_autopilot.dashboard import common
+
+    # Patch the module's own clock only — the event loop reads time.monotonic too.
+    monkeypatch.setattr(common, "time", SimpleNamespace(monotonic=lambda: 120.0))
+    cache = dashboard._ScanCache("test", ttl=600.0)
+    assert await cache.blocking(lambda: _async_value(1)) == 1
+    cache.invalidate()
+    assert not cache.fresh
+    assert await cache.blocking(lambda: _async_value(2)) == 2
+    cache.reset()
+    assert not cache.fresh
+
+
 async def _no_reviewers():
     return []
 

@@ -730,6 +730,12 @@ def _fmt_ago(seconds: float) -> str:
 _PR_SCAN_CONCURRENCY = 8
 
 
+# ``time.monotonic()`` counts from boot (on Windows, machine uptime), so a timestamp of
+# 0.0 is not "long ago": within one TTL of boot it still reads as fresh. -inf is
+# unambiguous.
+_NEVER = float("-inf")
+
+
 class _ScanCache:
     """A page's expensive scan, held so the page does not pay for it.
 
@@ -757,7 +763,7 @@ class _ScanCache:
     def __init__(self, name: str, ttl: float) -> None:
         self._name = name
         self._ttl = ttl
-        self._at = 0.0
+        self._at = _NEVER
         self._value = None
         # Single-flight. Without it, N concurrent loads on a cold cache each started a
         # scan of their own — the load that made a page hang also throttled ADO into
@@ -781,11 +787,11 @@ class _ScanCache:
     def invalidate(self) -> None:
         """Drop freshness — the next read re-scans. For after a MUTATION: the Board
         showing the card where it used to be is not a stale figure, it is a wrong one."""
-        self._at = 0.0
+        self._at = _NEVER
 
     def reset(self) -> None:
         """Forget everything, including the failure flag. Tests and config reloads."""
-        self._at, self._value, self.failed = 0.0, None, False
+        self._at, self._value, self.failed = _NEVER, None, False
         self._inflight = None
 
     async def _run(self, loader) -> None:

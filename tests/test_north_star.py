@@ -179,3 +179,15 @@ def test_failure_reasons_are_classified_and_unknown_is_honest():
     ns = compute_north_star([f1, f2, f3])
     top = {k.key: k for k in ns.kpis()}["fail_reason"]
     assert top.value == "hết thời gian" and "khác 1" in top.sub
+    assert "Tách item" in top.sub and "Tách item" in top.hint      # the lever, on the card
+
+
+def test_every_classifiable_cause_has_a_remedy_and_unknowns_have_none():
+    from ai_autopilot.north_star import _FAIL_RULES, failure_remedy
+
+    assert all(failure_remedy(label) for label, _ in _FAIL_RULES)   # no rule without a lever
+    assert failure_remedy("khác") == "" and failure_remedy("không ghi lý do") == ""
+    f = _run(1, ok=False)
+    f.error = "weird"
+    top = {k.key: k for k in compute_north_star([f]).kpis()}["fail_reason"]
+    assert top.value == "khác" and "Gợi ý" not in top.sub          # honest: no tip invented

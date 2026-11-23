@@ -51,6 +51,36 @@ _FAIL_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+# What to try for each cause. Deterministic and deliberately concrete: a number on a
+# dashboard that says "timeouts" and not what to do about them is a number nobody acts on.
+# Only causes with a known lever are listed; "khác" and "không ghi lý do" have none, and
+# saying so is more honest than a generic tip.
+FAILURE_REMEDY: dict[str, str] = {
+    "hết thời gian": (
+        "Tách item thành các việc nhỏ hơn, hoặc nâng giới hạn thời gian cho loại việc này."
+    ),
+    "hết quota / giới hạn": (
+        "Giãn lịch chạy / giảm số run song song; kiểm tra hạn mức tài khoản model."
+    ),
+    "xác thực": "Kiểm tra PAT / token đã hết hạn hoặc thiếu quyền; máy nên tạm dừng tới khi sửa.",
+    "test gate": (
+        "Xem test nào trượt lặp lại: có thể test flaky (xem trang Chất lượng lỗi) hoặc "
+        "yêu cầu của item chưa rõ."
+    ),
+    "security gate": "Mở kết quả quét: sửa phát hiện thật, hoặc ghi chấp nhận rủi ro có lý do.",
+    "merge conflict": "Nhánh đích đổi nhanh: chạy item ngay sau khi merge, hoặc dùng /resolve.",
+    "git / worktree": "Kiểm tra dung lượng đĩa, worktree treo và quyền ghi của workspace.",
+    "không có thay đổi": (
+        "Agent không tạo ra thay đổi nào: mô tả item có thể quá mơ hồ hoặc việc đã làm rồi."
+    ),
+}
+
+
+def failure_remedy(reason: str) -> str:
+    """The suggested action for ``reason``, or "" when there is no known lever."""
+    return FAILURE_REMEDY.get(reason, "")
+
+
 def classify_failure(error: str | None) -> str:
     text = (error or "").strip()
     if not text:
@@ -362,6 +392,10 @@ def _kpis(ns: NorthStar) -> list[Kpi]:
         top = ns.fail_reasons.most_common(3)
         why.value = top[0][0]
         why.sub = " · ".join(f"{k} {v}" for k, v in top)
+        remedy = failure_remedy(top[0][0])
+        if remedy:
+            why.hint += f" Gợi ý cho '{top[0][0]}': {remedy}"
+            why.sub += f" — Gợi ý: {remedy}"
     return [auto, ttfpr, human, votes, minutes, first_try, cost, waste, why]
 
 
